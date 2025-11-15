@@ -100,8 +100,12 @@ export default function Home() {
     }
 
     const timestamp = new Date();
-    const allJobs = allTracks.map((track, index) => recordTrack([track], `track_${index}_${timestamp.toISOString()}`));
 
+    const videoJobs = videoTracks.map((track, index) => recordTrack([track], `video-${index}`));
+    const audioJobs = audioTracks.map((track, index) => recordTrack([track], `audio-${index}`));
+    const displayJobs = displayTracks.map((track, index) => recordTrack([track], `display-${index}`));
+
+    const allJobs = displayJobs.concat(videoJobs).concat(audioJobs);
     const allRecorders = allJobs.map(job => job.recorder);
     const allBlobPromises = allJobs.map(job => job.promise);
 
@@ -110,7 +114,7 @@ export default function Home() {
     const allBlobs = await Promise.all(allBlobPromises);
     const newRecording: SavedRecording = {
       tracks: allBlobs,
-      timestamp: timestamp.toISOString()
+      timestamp: timestamp.toISOString().replace(".", "_")
     };
 
     setSavedRecordings(savedRecordings.concat([newRecording]));
@@ -225,13 +229,13 @@ export default function Home() {
                 <Flex direction="column" justifyContent="center" gap="size-100">
                   <Text>{recording.timestamp}</Text>
                   {
-                    recording.tracks.map((track, track_index) =>
+                    recording.tracks.map(track =>
                       <Link
-                        key={`recording-${recording_index}-track-${track_index}`}
-                        download={`recording-${recording.timestamp}-track-${track_index}.webm`}
+                        key={`recording-${recording_index}-${track.title}`}
+                        download={`recording-${recording.timestamp}-${track.title}`}
                         href={URL.createObjectURL(track.blob)}
                       >
-                        Download
+                        Download {track.title}
                       </Link>
                     )
                   }
