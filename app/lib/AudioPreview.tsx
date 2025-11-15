@@ -1,8 +1,6 @@
 'use client';
 
-import { Key } from "@adobe/react-spectrum";
 import { useRef, ReactNode, useEffect } from "react";
-
 
 export interface AudioPreviewProps {
     track: MediaStreamTrack | undefined
