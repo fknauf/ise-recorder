@@ -85,7 +85,7 @@ export default function Home() {
           }
         </ActionButton>
       </Flex>
-      <Flex direction="row" gap="size-100" justifyContent="center">
+      <Flex direction="row" gap="size-100" justifyContent="center" wrap={true}>
         {
           selectedDisplayStreams.map((stream, ix) =>
             <PreviewCard
