@@ -5,9 +5,10 @@ import { ReactNode } from "react";
 import { Flex, Text, View } from '@adobe/react-spectrum';
 
 export interface PreviewCardProps {
-    deviceLabel: string | undefined,
+    label: string | undefined,
     onRemove: () => void,
-    children: Readonly<ReactNode>
+    children: Readonly<ReactNode>,
+    buttonDisabled: boolean
 }
 
 export function PreviewCard(
@@ -17,8 +18,8 @@ export function PreviewCard(
         <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
             <Flex direction="column" justifyContent="center" gap="size-100">
                 {props.children}
-                <Text>{props.deviceLabel}</Text>
-                <ActionButton onPress={props.onRemove}>Remove</ActionButton>
+                <Text>{props.label}</Text>
+                <ActionButton onPress={props.onRemove} isDisabled={props.buttonDisabled}>Remove</ActionButton>
             </Flex>
         </View>
     );
