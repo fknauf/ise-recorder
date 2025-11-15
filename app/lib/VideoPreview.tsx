@@ -2,7 +2,6 @@
 
 import { Key } from "@adobe/react-spectrum";
 import { useRef, ReactNode, useEffect } from "react";
-import { Flex, Text } from '@adobe/react-spectrum';
 
 export interface VideoPreviewProps {
     deviceId: Key,

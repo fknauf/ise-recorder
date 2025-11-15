@@ -1,6 +1,6 @@
 'use client';
 
-import { ActionButton, Divider, Flex, Item, Text, View, MenuTrigger, Menu, Key } from "@adobe/react-spectrum";
+import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, Key } from "@adobe/react-spectrum";
 import CallCenter from '@spectrum-icons/workflow/CallCenter';
 import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';

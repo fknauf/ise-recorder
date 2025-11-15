@@ -1,6 +1,6 @@
 'use client';
 
-import { Flex, Key, Text } from "@adobe/react-spectrum";
+import { Key } from "@adobe/react-spectrum";
 import { useRef, ReactNode, useEffect } from "react";
 
 
