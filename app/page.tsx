@@ -12,16 +12,21 @@ import VideoPreview from "./lib/VideoPreview";
 import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
 
+type SavedTrack = {
+  blob: Blob,
+  title: string
+};
+
 type SavedRecording = {
-  blob: Blob;
-  title: string;
+  timestamp: string;
+  tracks: SavedTrack[]
 };
 
 export default function Home() {
   const [ selectedVideoSources, setSelectedVideoSources ] = useState<Key[]>([]);
   const [ selectedAudioSources, setSelectedAudioSources ] = useState<Key[]>([]);
   const [ selectedDisplayStreams, setSelectedDisplayStreams ]= useState<MediaStream[]>([]);
-  const [ recorder, setRecorder ] = useState<MediaRecorder | null>(null);
+  const [ recorders, setRecorders ] = useState<MediaRecorder[]>([]);
   const [ savedRecordings, setSavedRecordings ] = useState<SavedRecording[]>([]);
 
   const {
@@ -56,9 +61,30 @@ export default function Home() {
   const findVideoTrack = (deviceId: Key) => findTrack(stream?.getVideoTracks() ?? [], deviceId);
   const findAudioTrack = (deviceId: Key) => findTrack(stream?.getAudioTracks() ?? [], deviceId);
 
-  const isRecording = recorder != null;
+  const isRecording = recorders.length != 0;
 
-  const startRecording = () => {
+  const recordTrack = (tracks: MediaStreamTrack[], title: string) => {
+    const recordedStream = new MediaStream(tracks);
+    const newRecorder = new MediaRecorder(recordedStream);
+    const blobPromise = new Promise<SavedTrack>((resolve, reject) => {
+
+      newRecorder.ondataavailable = event => {
+        resolve({
+          blob: event.data,
+          title: title
+        })
+      };
+      newRecorder.onerror = event => reject(event.error);
+      newRecorder.start();
+    });
+
+    return {
+      recorder: newRecorder,
+      promise: blobPromise
+    };
+  };
+
+  const startRecording = async () => {
     if(isRecording) {
       return;
     }
@@ -66,29 +92,28 @@ export default function Home() {
     const videoTracks = selectedVideoSources.map(findVideoTrack).filter(track => track !== undefined);
     const audioTracks = selectedAudioSources.map(findAudioTrack).filter(track => track !== undefined);
     const displayTracks = selectedDisplayStreams.flatMap(stream => stream.getTracks());
+
     const allTracks = displayTracks.concat(videoTracks).concat(audioTracks);
 
     if(allTracks.length == 0) {
       return;
     }
 
-    const recordedStream = new MediaStream(allTracks);
-    const newRecorder = new MediaRecorder(recordedStream);
-
     const timestamp = new Date();
+    const allJobs = allTracks.map((track, index) => recordTrack([track], `track_${index}_${timestamp.toISOString()}`));
 
-    newRecorder.ondataavailable = ev => {
-      const newSavedRecording: SavedRecording = {
-        blob: ev.data,
-        title: timestamp.toISOString()
-      };
+    const allRecorders = allJobs.map(job => job.recorder);
+    const allBlobPromises = allJobs.map(job => job.promise);
 
-      setSavedRecordings(savedRecordings.concat([newSavedRecording]));
+    setRecorders(allRecorders);
+
+    const allBlobs = await Promise.all(allBlobPromises);
+    const newRecording: SavedRecording = {
+      tracks: allBlobs,
+      timestamp: timestamp.toISOString()
     };
 
-    newRecorder.start();
-
-    setRecorder(newRecorder);
+    setSavedRecordings(savedRecordings.concat([newRecording]));
   };
 
   const stopRecording = () => {
@@ -96,8 +121,8 @@ export default function Home() {
       return;
     }
 
-    recorder.stop();
-    setRecorder(null);
+    recorders.forEach(rec => rec.stop());
+    setRecorders([]);
   };
 
   return (
@@ -189,18 +214,28 @@ export default function Home() {
       </Flex>
       <Flex direction="row" gap="size-100">
         { savedRecordings.map(
-            (recording, ix) =>
+            (recording, recording_index) =>
               <View
-                key={`saved-recording-${ix}`}
+                key={`saved-recording-${recording_index}`}
                 borderWidth="thin"
                 borderColor="light"
                 borderRadius="medium"
                 padding="size-100"
               >
                 <Flex direction="column" justifyContent="center" gap="size-100">
-                  <Text>{recording.title}</Text>
-                  <Link download={`recording-${savedRecordings[ix].title}.webm`} href={URL.createObjectURL(savedRecordings[ix].blob)}>Download</Link>
-                  <ActionButton onPress={() => setSavedRecordings(savedRecordings.filter((r, i) => i != ix))}>Remove</ActionButton>
+                  <Text>{recording.timestamp}</Text>
+                  {
+                    recording.tracks.map((track, track_index) =>
+                      <Link
+                        key={`recording-${recording_index}-track-${track_index}`}
+                        download={`recording-${recording.timestamp}-track-${track_index}.webm`}
+                        href={URL.createObjectURL(track.blob)}
+                      >
+                        Download
+                      </Link>
+                    )
+                  }
+                  <ActionButton onPress={() => setSavedRecordings(savedRecordings.filter((r, i) => i != recording_index))}>Remove</ActionButton>
                 </Flex>
               </View>
           )
