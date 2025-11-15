@@ -11,16 +11,13 @@ export interface PreviewCardProps {
     buttonDisabled: boolean
 }
 
-export function PreviewCard(
-    props: Readonly<PreviewCardProps>
-) {
-    return (
-        <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
-            <Flex direction="column" justifyContent="center" gap="size-100">
-                {props.children}
-                <Text>{props.label}</Text>
-                <ActionButton onPress={props.onRemove} isDisabled={props.buttonDisabled}>Remove</ActionButton>
-            </Flex>
-        </View>
-    );
-}
+export const PreviewCard = (props: Readonly<PreviewCardProps>) =>
+    <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
+        <Flex direction="column" justifyContent="center" gap="size-100">
+            {props.children}
+            <Text>{props.label}</Text>
+            <ActionButton onPress={props.onRemove} isDisabled={props.buttonDisabled}>Remove</ActionButton>
+        </Flex>
+    </View>;
+
+export default PreviewCard;

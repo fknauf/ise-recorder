@@ -5,7 +5,6 @@ import { useRef, ReactNode, useEffect } from "react";
 
 
 export interface AudioPreviewProps {
-    deviceId: Key,
     track: MediaStreamTrack | undefined
 }
 
@@ -59,7 +58,7 @@ export default function AudioPreview(
 
         timerId = requestAnimationFrame(renderFunction);
         return () => cancelAnimationFrame(timerId);
-    }, [props.deviceId, props.track]);
+    }, [props.track]);
 
     return (
         <div>

@@ -11,16 +11,8 @@ import useMediaStream from "use-media-stream";
 import VideoPreview from "./lib/VideoPreview";
 import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
-
-type SavedTrack = {
-  blob: Blob,
-  title: string
-};
-
-type SavedRecording = {
-  timestamp: string;
-  tracks: SavedTrack[]
-};
+import { SavedTrack, SavedRecording } from "./lib/types";
+import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 
 export default function Home() {
   const [ selectedVideoSources, setSelectedVideoSources ] = useState<Key[]>([]);
@@ -35,6 +27,8 @@ export default function Home() {
     audioInputDevices,
     videoInputDevices,
   } = useMediaStream();
+
+  const isRecording = recorders.length != 0;
 
   const openDisplayStream = async () => {
     const screenStream = await navigator.mediaDevices.getDisplayMedia();
@@ -56,12 +50,18 @@ export default function Home() {
       (key: Key) => setter(currentData.filter(src => src != key));
   const removeVideoSource = removeSourceFn(setSelectedVideoSources, selectedVideoSources);
   const removeAudioSource = removeSourceFn(setSelectedAudioSources, selectedAudioSources);
+  const removeDisplayStream = (stream: MediaStream) => {
+    stream.getTracks().forEach(track => track.stop())
+    setSelectedDisplayStreams(selectedDisplayStreams.filter(s => s !== stream));
+  }
 
   const findTrack = (tracks: MediaStreamTrack[], deviceId: Key) => tracks.find(track => track.getSettings().deviceId == deviceId);
   const findVideoTrack = (deviceId: Key) => findTrack(stream?.getVideoTracks() ?? [], deviceId);
   const findAudioTrack = (deviceId: Key) => findTrack(stream?.getAudioTracks() ?? [], deviceId);
 
-  const isRecording = recorders.length != 0;
+  const findLabel = (devs: MediaDeviceInfo[], id: Key) => devs.find(dev => dev.deviceId == id)?.label;
+
+  const removeSavedRecording = (recording_index: number) => setSavedRecordings(savedRecordings.filter((r, i) => i != recording_index))
 
   const recordTrack = (tracks: MediaStreamTrack[], title: string) => {
     const recordedStream = new MediaStream(tracks);
@@ -136,35 +136,36 @@ export default function Home() {
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
+
         <MenuTrigger onOpenChange={getMediaDevices}>
           <ActionButton isDisabled={isRecording}>
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
           <Menu onAction={addVideoSource}>
-            {videoInputDevices.map(
-              (dev) => <Item key={dev.deviceId}>{dev.label}</Item>
-            )}
+            { videoInputDevices.map(dev => <Item key={dev.deviceId}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
+
         <MenuTrigger onOpenChange={getMediaDevices}>
           <ActionButton isDisabled={isRecording}>
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
           <Menu onAction={addAudioSource}>
-            {audioInputDevices.map(
-              (dev) => <Item key={dev.deviceId}>{dev.label}</Item>
-            )}
+            { audioInputDevices.map(dev => <Item key={dev.deviceId}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
+
         <Divider orientation="vertical" size="M"/>
+
         {
             isRecording
             ? <ActionButton onPress={stopRecording}><Stop/> <Text>Stop Recording</Text></ActionButton>
             : <ActionButton onPress={startRecording}><Circle/> <Text>Start Recording</Text></ActionButton>
         }
       </Flex>
+
       <Flex direction="row" gap="size-100" justifyContent="center" wrap={true}>
         {
           selectedDisplayStreams.map((stream, ix) =>
@@ -172,30 +173,23 @@ export default function Home() {
               key={`preview-card-display-${ix}`}
               label={`Screen capture ${ix}`}
               buttonDisabled={isRecording}
-              onRemove={() => {
-                selectedDisplayStreams[ix].getTracks().forEach(track => track.stop())
-                setSelectedDisplayStreams(selectedDisplayStreams.filter((stream, i) => i != ix));
-              }}
+              onRemove={() => removeDisplayStream(stream)}
             >
               <VideoPreview
-                key={`video-preview-display-${ix}`}
                 track={stream.getTracks()[0]}
               />
             </PreviewCard>
           )
         }
         {
-          selectedVideoSources.map((deviceId) =>
+          selectedVideoSources.map(deviceId =>
             <PreviewCard
               key={`preview-card-${deviceId}`}
-              label={videoInputDevices.find(dev => dev.deviceId == deviceId)?.label}
+              label={findLabel(videoInputDevices, deviceId)}
               buttonDisabled={isRecording}
               onRemove={() => removeVideoSource(deviceId)}
             >
-              <VideoPreview
-                key={`video-preview-${deviceId}`}
-                track={stream?.getVideoTracks().find(track => track.getSettings().deviceId == deviceId)}
-              />
+              <VideoPreview track={findVideoTrack(deviceId)}/>
             </PreviewCard>
           )
         }
@@ -203,45 +197,24 @@ export default function Home() {
           selectedAudioSources.map(deviceId =>
             <PreviewCard
               key={`preview-card-${deviceId}`}
-              label={audioInputDevices.find(dev => dev.deviceId == deviceId)?.label}
+              label={findLabel(audioInputDevices, deviceId)}
               buttonDisabled={isRecording}
               onRemove={() => removeAudioSource(deviceId)}
             >
-              <AudioPreview
-                key={`audio-preview-${deviceId}`}
-                deviceId={deviceId}
-                track={stream?.getAudioTracks().find(track => track.getSettings().deviceId == deviceId)}
-              />
+              <AudioPreview track={findAudioTrack(deviceId)}/>
             </PreviewCard>
           )
         }
       </Flex>
+
       <Flex direction="row" gap="size-100">
-        { savedRecordings.map(
-            (recording, recording_index) =>
-              <View
-                key={`saved-recording-${recording_index}`}
-                borderWidth="thin"
-                borderColor="light"
-                borderRadius="medium"
-                padding="size-100"
-              >
-                <Flex direction="column" justifyContent="center" gap="size-100">
-                  <Text>{recording.timestamp}</Text>
-                  {
-                    recording.tracks.map(track =>
-                      <Link
-                        key={`recording-${recording_index}-${track.title}`}
-                        download={`recording-${recording.timestamp}-${track.title}`}
-                        href={URL.createObjectURL(track.blob)}
-                      >
-                        Download {track.title}
-                      </Link>
-                    )
-                  }
-                  <ActionButton onPress={() => setSavedRecordings(savedRecordings.filter((r, i) => i != recording_index))}>Remove</ActionButton>
-                </Flex>
-              </View>
+        {
+          savedRecordings.map((recording, recording_index) =>
+            <SavedRecordingsCard
+              key={`saved-recording-${recording_index}`}
+              recording={recording}
+              onRemove={() => removeSavedRecording(recording_index)}
+            />
           )
         }
       </Flex>
