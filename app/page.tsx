@@ -1,6 +1,6 @@
 'use client';
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, Key, View } from "@adobe/react-spectrum";
+import { ActionButton, Divider, Flex, Item, Text, Link, MenuTrigger, Menu, Key, View } from "@adobe/react-spectrum";
 import CallCenter from '@spectrum-icons/workflow/CallCenter';
 import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';
@@ -13,7 +13,7 @@ import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
 
 type SavedRecording = {
-  chunks: Blob[];
+  blob: Blob;
   title: string;
 };
 
@@ -22,7 +22,6 @@ export default function Home() {
   const [ selectedAudioSources, setSelectedAudioSources ] = useState<Key[]>([]);
   const [ selectedDisplayStreams, setSelectedDisplayStreams ]= useState<MediaStream[]>([]);
   const [ recorder, setRecorder ] = useState<MediaRecorder | null>(null);
-  const [ recordedChunks, setRecordedChunks ] = useState<Blob[]>([]);
   const [ savedRecordings, setSavedRecordings ] = useState<SavedRecording[]>([]);
 
   const openDisplayStream = async () => {
@@ -75,20 +74,20 @@ export default function Home() {
     }
 
     const recordedStream = new MediaStream(allTracks);
-    const newRecorder = new MediaRecorder(recordedStream);
-    newRecorder.start();
+    const newRecorder = new MediaRecorder(recordedStream, { mimeType: "video/mp4" } );
+
+    const timestamp = new Date();
+
     newRecorder.ondataavailable = ev => {
-      setRecordedChunks(recordedChunks.concat([ev.data]))
-      console.log(ev);
-    };
-    newRecorder.onstop = () => {
       const newSavedRecording: SavedRecording = {
-        chunks: recordedChunks,
-        title: "foobar"
+        blob: ev.data,
+        title: timestamp.toISOString()
       };
 
       setSavedRecordings(savedRecordings.concat([newSavedRecording]));
     };
+
+    newRecorder.start();
 
     setRecorder(newRecorder);
   };
@@ -199,10 +198,10 @@ export default function Home() {
                 borderRadius="medium"
                 padding="size-100"
               >
-                <Flex direction="column">
+                <Flex direction="column" justifyContent="center" gap="size-100">
                   <Text>{recording.title}</Text>
+                  <Link download={`recording-${savedRecordings[ix].title}.webm`} href={URL.createObjectURL(savedRecordings[ix].blob)}>Download</Link>
                   <ActionButton onPress={() => setSavedRecordings(savedRecordings.filter((r, i) => i != ix))}>Remove</ActionButton>
-                  <ActionButton onPress={() => {}}>Download</ActionButton>
                 </Flex>
               </View>
           )
