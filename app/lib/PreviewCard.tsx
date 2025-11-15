@@ -18,7 +18,7 @@ export function PreviewCard(
             <Flex direction="column" justifyContent="center" gap="size-100">
                 {props.children}
                 <Text>{props.deviceLabel}</Text>
-                <ActionButton onPress={props.onRemove}>Entfernen</ActionButton>
+                <ActionButton onPress={props.onRemove}>Remove</ActionButton>
             </Flex>
         </View>
     );

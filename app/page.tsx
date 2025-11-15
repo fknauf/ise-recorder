@@ -49,7 +49,7 @@ export default function Home() {
 
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
-      <Flex direction="row" justifyContent="center" gap="size-100">
+      <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100">
         <ActionButton onPress={openDisplayStream}>
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
