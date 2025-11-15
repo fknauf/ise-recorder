@@ -9,9 +9,13 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@adobe/react-spectrum": "^3.45.0",
+    "glob": "^11.0.3",
     "next": "16.0.3",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-audio-visualize": "^1.2.0",
+    "react-dom": "19.2.0",
+    "use-media-stream": "^1.0.3"
   },
   "devDependencies": {
     "@types/node": "^20",
