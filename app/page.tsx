@@ -9,7 +9,6 @@ import Stop from '@spectrum-icons/workflow/Stop';
 import { useState } from "react";
 import useMediaStream from "use-media-stream";
 import VideoPreview from "./lib/VideoPreview";
-import { appendKey } from "./lib/util";
 import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
 
@@ -17,39 +16,61 @@ export default function Home() {
   const [ isRecording, setIsRecording ] = useState(false);
   const [ selectedVideoSources, setSelectedVideoSources ] = useState<Key[]>([]);
   const [ selectedAudioSources, setSelectedAudioSources ] = useState<Key[]>([]);
+  const [ selectedDisplayStreams, setSelectedDisplayStreams ]= useState<MediaStream[]>([]);
+
+  const openDisplayStream = async () => {
+    const screenStream = await navigator.mediaDevices.getDisplayMedia();
+    setSelectedDisplayStreams(selectedDisplayStreams.concat([screenStream]));
+  }
 
   const {
-    start,
     stream,
     getMediaDevices,
     audioInputDevices,
     videoInputDevices,
   } = useMediaStream();
 
+  const addSourceFn =
+    <T,>(setter: (newData: T[]) => void, currentData: T[]) =>
+      (key: T) => {
+        if(!currentData.includes(key)) {
+          setter(currentData.concat([key]));
+        }
+      };
+  const removeSourceFn =
+    <T,>(setter: (newData: T[]) => void, currentData: T[]) =>
+      (key: T) => setter(currentData.filter(src => src != key));
+
+  const addVideoSource = addSourceFn(setSelectedVideoSources, selectedVideoSources);
+  const addAudioSource = addSourceFn(setSelectedAudioSources, selectedAudioSources);
+
+  const removeVideoSource = removeSourceFn(setSelectedVideoSources, selectedVideoSources);
+  const removeAudioSource = removeSourceFn(setSelectedAudioSources, selectedAudioSources);
+
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
       <Flex direction="row" justifyContent="center" gap="size-100">
-        <ActionButton>
+        <ActionButton onPress={openDisplayStream}>
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
-        <MenuTrigger onOpenChange={() => { start(); getMediaDevices(); }}>
+        <MenuTrigger onOpenChange={getMediaDevices}>
           <ActionButton>
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
-          <Menu onAction={(key) => setSelectedVideoSources(appendKey(selectedVideoSources, key))}>
+          <Menu onAction={addVideoSource}>
             {videoInputDevices.map(
               (dev) => <Item key={dev.deviceId}>{dev.label}</Item>
             )}
           </Menu>
         </MenuTrigger>
-        <MenuTrigger onOpenChange={() => { start(); getMediaDevices(); }}>
+        <MenuTrigger onOpenChange={getMediaDevices}>
           <ActionButton>
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
-          <Menu onAction={(key) => setSelectedAudioSources(appendKey(selectedAudioSources, key))}>
+          <Menu onAction={addAudioSource}>
             {audioInputDevices.map(
               (dev) => <Item key={dev.deviceId}>{dev.label}</Item>
             )}
@@ -66,15 +87,31 @@ export default function Home() {
       </Flex>
       <Flex direction="row" gap="size-100" justifyContent="center">
         {
+          selectedDisplayStreams.map((stream, ix) =>
+            <PreviewCard
+              key={`preview-card-display-${ix}`}
+              deviceLabel={`Screen capture ${ix}`}
+              onRemove={() => {
+                selectedDisplayStreams[ix].getTracks().forEach(track => track.stop())
+                setSelectedDisplayStreams(selectedDisplayStreams.filter((stream, i) => i != ix));
+              }}
+            >
+              <VideoPreview
+                key={`video-preview-display-${ix}`}
+                track={stream.getTracks()[0]}
+              />
+            </PreviewCard>
+          )
+        }
+        {
           selectedVideoSources.map((deviceId) =>
             <PreviewCard
                 key={`preview-card-${deviceId}`}
                 deviceLabel={videoInputDevices.find(dev => dev.deviceId == deviceId)?.label}
-                onRemove={() => { setSelectedVideoSources(selectedVideoSources.filter(src => src != deviceId)); }}
+                onRemove={() => removeVideoSource(deviceId)}
             >
               <VideoPreview
                 key={`video-preview-${deviceId}`}
-                deviceId={deviceId}
                 track={stream?.getVideoTracks().find(track => track.getSettings().deviceId == deviceId)}
               />
             </PreviewCard>
@@ -85,10 +122,10 @@ export default function Home() {
             <PreviewCard
               key={`preview-card-${deviceId}`}
               deviceLabel={audioInputDevices.find(dev => dev.deviceId == deviceId)?.label}
-                onRemove={() => { setSelectedAudioSources(selectedAudioSources.filter(src => src != deviceId)); }}
+                onRemove={() => removeAudioSource(deviceId)}
             >
               <AudioPreview
-                key={deviceId}
+                key={`audio-preview-${deviceId}`}
                 deviceId={deviceId}
                 track={stream?.getAudioTracks().find(track => track.getSettings().deviceId == deviceId)}
               />

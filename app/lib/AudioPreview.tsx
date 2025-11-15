@@ -21,7 +21,7 @@ export default function AudioPreview(
 
         const audioContext = new AudioContext();
         const audioAnalyzer = audioContext.createAnalyser();
-        audioAnalyzer.fftSize = 2048;
+        audioAnalyzer.fftSize = 512;
 
         const audioSource = audioContext.createMediaStreamSource(new MediaStream([props.track]))
         audioSource.connect(audioAnalyzer);

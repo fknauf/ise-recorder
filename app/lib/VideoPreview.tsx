@@ -1,10 +1,8 @@
 'use client';
 
-import { Key } from "@adobe/react-spectrum";
 import { useRef, ReactNode, useEffect } from "react";
 
 export interface VideoPreviewProps {
-    deviceId: Key,
     track: MediaStreamTrack | undefined
 }
 
@@ -27,7 +25,6 @@ export default function VideoPreview(
             ref={videoRef}
             autoPlay={true}
             muted={true}
-            id={`video-preview-${props.deviceId}`}
             width={384}
             height={216}
             style={{backgroundColor: "blue"}}
