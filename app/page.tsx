@@ -85,7 +85,7 @@ export default function Home() {
             <PreviewCard
               key={`preview-card-${deviceId}`}
               deviceLabel={audioInputDevices.find(dev => dev.deviceId == deviceId)?.label}
-                onRemove={() => { setSelectedAudioSources(selectedVideoSources.filter(src => src != deviceId)); }}
+                onRemove={() => { setSelectedAudioSources(selectedAudioSources.filter(src => src != deviceId)); }}
             >
               <AudioPreview
                 key={deviceId}
