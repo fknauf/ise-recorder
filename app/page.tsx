@@ -24,11 +24,6 @@ export default function Home() {
   const [ recorder, setRecorder ] = useState<MediaRecorder | null>(null);
   const [ savedRecordings, setSavedRecordings ] = useState<SavedRecording[]>([]);
 
-  const openDisplayStream = async () => {
-    const screenStream = await navigator.mediaDevices.getDisplayMedia();
-    setSelectedDisplayStreams(selectedDisplayStreams.concat([screenStream]));
-  }
-
   const {
     stream,
     getMediaDevices,
@@ -36,26 +31,30 @@ export default function Home() {
     videoInputDevices,
   } = useMediaStream();
 
+  const openDisplayStream = async () => {
+    const screenStream = await navigator.mediaDevices.getDisplayMedia();
+    setSelectedDisplayStreams(selectedDisplayStreams.concat([screenStream]));
+  }
+
   const addSourceFn =
-    <T,>(setter: (newData: T[]) => void, currentData: T[]) =>
-      (key: T) => {
+    (setter: (newData: Key[]) => void, currentData: Key[]) =>
+      (key: Key) => {
         if(!currentData.includes(key)) {
           setter(currentData.concat([key]));
         }
       };
-  const removeSourceFn =
-    <T,>(setter: (newData: T[]) => void, currentData: T[]) =>
-      (key: T) => setter(currentData.filter(src => src != key));
-
   const addVideoSource = addSourceFn(setSelectedVideoSources, selectedVideoSources);
   const addAudioSource = addSourceFn(setSelectedAudioSources, selectedAudioSources);
 
+  const removeSourceFn =
+    (setter: (newData: Key[]) => void, currentData: Key[]) =>
+      (key: Key) => setter(currentData.filter(src => src != key));
   const removeVideoSource = removeSourceFn(setSelectedVideoSources, selectedVideoSources);
   const removeAudioSource = removeSourceFn(setSelectedAudioSources, selectedAudioSources);
 
-  const findTrack = (tracks: MediaStreamTrack[] | undefined, deviceId: Key) => tracks?.find(track => track.getSettings().deviceId == deviceId);
-  const findVideoTrack = (deviceId: Key) => findTrack(stream?.getVideoTracks(), deviceId);
-  const findAudioTrack = (deviceId: Key) => findTrack(stream?.getAudioTracks(), deviceId);
+  const findTrack = (tracks: MediaStreamTrack[], deviceId: Key) => tracks.find(track => track.getSettings().deviceId == deviceId);
+  const findVideoTrack = (deviceId: Key) => findTrack(stream?.getVideoTracks() ?? [], deviceId);
+  const findAudioTrack = (deviceId: Key) => findTrack(stream?.getAudioTracks() ?? [], deviceId);
 
   const isRecording = recorder != null;
 
@@ -67,14 +66,14 @@ export default function Home() {
     const videoTracks = selectedVideoSources.map(findVideoTrack).filter(track => track !== undefined);
     const audioTracks = selectedAudioSources.map(findAudioTrack).filter(track => track !== undefined);
     const displayTracks = selectedDisplayStreams.flatMap(stream => stream.getTracks());
-    const allTracks = displayTracks.concat(videoTracks ?? []).concat(audioTracks ?? []);
+    const allTracks = displayTracks.concat(videoTracks).concat(audioTracks);
 
     if(allTracks.length == 0) {
       return;
     }
 
     const recordedStream = new MediaStream(allTracks);
-    const newRecorder = new MediaRecorder(recordedStream, { mimeType: "video/mp4" } );
+    const newRecorder = new MediaRecorder(recordedStream);
 
     const timestamp = new Date();
 
