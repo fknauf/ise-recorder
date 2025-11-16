@@ -250,7 +250,7 @@ export default function Home() {
         }
       </Flex>
 
-      <Flex direction="row" gap="size-100">
+      <Flex direction="row" gap="size-100" wrap={true}>
         {
           recordings.map(r =>
             <SavedRecordingsCard

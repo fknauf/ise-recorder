@@ -33,6 +33,8 @@ export interface SavedRecordingsCardProps {
 export function SavedRecordingsCard(
   { recording, isBeingRecorded, onRemoved }: SavedRecordingsCardProps
 ) {
+  const formatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   return (
     <View
       borderWidth="thin"
@@ -43,14 +45,14 @@ export function SavedRecordingsCard(
       <Flex direction="column" justifyContent="center" gap="size-100">
         <Text>{recording.name}</Text>
         {
-          recording.files.map(file =>
+          recording.fileinfos.map(({ filename, size }) =>
             <ActionButton
-            key={`download-${file}`}
+            key={`download-${filename}`}
             isDisabled={isBeingRecorded}
-            onPress={() => downloadFile(recording.name, file)}
+            onPress={() => downloadFile(recording.name, filename)}
           >
               <Download/>
-              <Text>Download {file}</Text>
+              <Text>Download {filename} {size && `(${formatter.format(size / 1048576)} MiB)`}</Text>
             </ActionButton>
           )
         }

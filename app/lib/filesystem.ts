@@ -1,6 +1,11 @@
+export interface RecordingFileInfo {
+    filename: string
+    size?: number
+}
+
 export interface RecordingFileList {
     name: string,
-    files: string[]
+    fileinfos: RecordingFileInfo[]
 }
 
 export async function getRecordingsDirectory() {
@@ -23,9 +28,24 @@ export async function getRecordingsList() {
         const dir = await recordingsDir.getDirectoryHandle(rname);
         const fnames = await Array.fromAsync(dir.keys());
 
+        const getFileInfo = async (filename: string) => {
+            let size: number | undefined
+
+            try {
+                const fileHandle = await dir.getFileHandle(filename);
+                const file = await fileHandle.getFile();
+                size = file.size
+            } catch { }
+
+            return <RecordingFileInfo>{
+                filename: filename,
+                size: size
+            }
+        }
+
         result.push({
             name: rname,
-            files: fnames
+            fileinfos: await Promise.all(fnames.map(getFileInfo))
         })
     }
 
