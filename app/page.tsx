@@ -119,16 +119,17 @@ export default function Home() {
 
     let allJobs: RecordingJob[] = [];
 
-    if(videoTracks.length >= 1) {
-      const mainJob = recordTracks([ videoTracks[0] ].concat(audioTracks), 'stream.mp4', { mimeType: "video/mp4" });
+    if(videoTracks.length > 0) {
+      const mainJob = recordTracks([videoTracks[0]].concat(audioTracks), 'stream.mp4', { mimeType: "video/mp4" });
       const videoJobs = videoTracks.slice(1).map((track, index) => recordTracks([track], `video-${index + 1}.mp4`), { mimeType: "video/mp4" });
       const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}.mp4`), { mimeType: "video/mp4" });
       allJobs = [mainJob].concat(videoJobs).concat(displayJobs);
+    } else if(displayTracks.length > 0) {
+      const mainJob = recordTracks([displayTracks[0]].concat(audioTracks), 'stream.mp4', { mimeType: "video/mp4" });
+      const displayJobs = displayTracks.slice(1).map((track, index) => recordTracks([track], `display-${index + 1}.mp4`), { mimeType: "video/mp4" });
+      allJobs = [mainJob].concat(displayJobs);
     } else {
-      const videoJobs = videoTracks.map((track, index) => recordTracks([track], `video-${index}.mp4`), { mimeType: "video/mp4" });
-      const audioJobs = audioTracks.map((track, index) => recordTracks([track], `audio-${index}.ogx`), { mimeType: "audio/ogg" });
-      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}.mp4`), { mimeType: "video/mp4" });
-      allJobs = videoJobs.concat(audioJobs).concat(displayJobs);
+      allJobs = audioTracks.map((track, index) => recordTracks([track], `audio-${index}.ogx`), { mimeType: "audio/ogg" });
     }
 
     const allRecorders = allJobs.map(job => job.recorder);
