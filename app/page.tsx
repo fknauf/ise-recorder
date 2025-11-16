@@ -131,8 +131,8 @@ export default function Home() {
     const timestamp = new Date();
     const recordingName = timestamp.toISOString().replace(".", "_");
 
-    const videoOptions: MediaRecorderOptions = { mimeType: 'video/mp4; codecs="avc1.4d002a"' };
-    const audioOptions: MediaRecorderOptions = { mimeType: 'audio/ogg; codecs=vorbis' };
+    const videoOptions: MediaRecorderOptions = { mimeType: 'video/webm' };
+    const audioOptions: MediaRecorderOptions = { mimeType: 'audio/ogg' };
 
     const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, videoOptions);
     const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, audioOptions);
@@ -140,13 +140,13 @@ export default function Home() {
     let allJobs: RecordingJob[] = [];
 
     if(videoTracks.length > 0) {
-      const mainJob = recordVideoTracks([videoTracks[0]].concat(audioTracks), 'stream.mp4');
-      const videoJobs = videoTracks.slice(1).map((track, index) => recordVideoTracks([track], `video-${index + 1}.mp4`));
-      const displayJobs = displayTracks.map((track, index) => recordVideoTracks([track], `display-${index}.mp4`));
+      const mainJob = recordVideoTracks([videoTracks[0]].concat(audioTracks), 'stream.webm');
+      const videoJobs = videoTracks.slice(1).map((track, index) => recordVideoTracks([track], `video-${index + 1}.webm`));
+      const displayJobs = displayTracks.map((track, index) => recordVideoTracks([track], `display-${index}.webm`));
       allJobs = [mainJob].concat(videoJobs).concat(displayJobs);
     } else if(displayTracks.length > 0) {
-      const mainJob = recordVideoTracks([displayTracks[0]].concat(audioTracks), 'stream.mp4');
-      const displayJobs = displayTracks.slice(1).map((track, index) => recordVideoTracks([track], `display-${index + 1}.mp4`));
+      const mainJob = recordVideoTracks([displayTracks[0]].concat(audioTracks), 'stream.webm');
+      const displayJobs = displayTracks.slice(1).map((track, index) => recordVideoTracks([track], `display-${index + 1}.webm`));
       allJobs = [mainJob].concat(displayJobs);
     } else {
       allJobs = audioTracks.map((track, index) => recordAudioTracks([track], `audio-${index}.ogg`));
