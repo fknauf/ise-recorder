@@ -119,17 +119,20 @@ export default function Home() {
 
     let allJobs: RecordingJob[] = [];
 
+    const videoOptions: MediaRecorderOptions = { mimeType: 'video/mp4; codecs="avc1.4d002a"' };
+    const audioOptions: MediaRecorderOptions = { mimeType: 'audio/ogg; codecs=vorbis' };
+
     if(videoTracks.length > 0) {
-      const mainJob = recordTracks([videoTracks[0]].concat(audioTracks), 'stream.mp4', { mimeType: "video/mp4" });
-      const videoJobs = videoTracks.slice(1).map((track, index) => recordTracks([track], `video-${index + 1}.mp4`), { mimeType: "video/mp4" });
-      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}.mp4`), { mimeType: "video/mp4" });
+      const mainJob = recordTracks([videoTracks[0]].concat(audioTracks), 'stream.mp4', videoOptions);
+      const videoJobs = videoTracks.slice(1).map((track, index) => recordTracks([track], `video-${index + 1}.mp4`), videoOptions);
+      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}.mp4`), videoOptions);
       allJobs = [mainJob].concat(videoJobs).concat(displayJobs);
     } else if(displayTracks.length > 0) {
-      const mainJob = recordTracks([displayTracks[0]].concat(audioTracks), 'stream.mp4', { mimeType: "video/mp4" });
-      const displayJobs = displayTracks.slice(1).map((track, index) => recordTracks([track], `display-${index + 1}.mp4`), { mimeType: "video/mp4" });
+      const mainJob = recordTracks([displayTracks[0]].concat(audioTracks), 'stream.mp4', videoOptions);
+      const displayJobs = displayTracks.slice(1).map((track, index) => recordTracks([track], `display-${index + 1}.mp4`), videoOptions);
       allJobs = [mainJob].concat(displayJobs);
     } else {
-      allJobs = audioTracks.map((track, index) => recordTracks([track], `audio-${index}.ogx`), { mimeType: "audio/ogg" });
+      allJobs = audioTracks.map((track, index) => recordTracks([track], `audio-${index}.ogg`), audioOptions);
     }
 
     const allRecorders = allJobs.map(job => job.recorder);
