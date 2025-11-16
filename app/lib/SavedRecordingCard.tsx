@@ -49,7 +49,7 @@ export function SavedRecordingsCard(
             </ActionButton>
           )
         }
-        <ActionButton onPress={() => { deleteRecording(recording.name).then(_ => onRemoved()) }}>
+        <ActionButton onPress={() => { deleteRecording(recording.name).then(() => onRemoved()) }}>
           <Delete/>
           <Text>Remove</Text>
         </ActionButton>
