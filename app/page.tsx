@@ -96,10 +96,9 @@ export default function Home() {
     const recordedStream = new MediaStream(tracks);
     const newRecorder = new MediaRecorder(recordedStream, options);
 
-    newRecorder.ondataavailable = event => {
-      appendToRecordingFile(recordingName, trackTitle, event.data)
-        .then(getRecordingsList)
-        .then(setRecordings);
+    newRecorder.ondataavailable = async event => {
+      await appendToRecordingFile(recordingName, trackTitle, event.data);
+      setRecordings(await getRecordingsList());
     }
 
     const finishedPromise = new Promise<void>((resolve, reject) => {
