@@ -231,7 +231,7 @@ export default function Home() {
         {
           recordings.map(r =>
             <SavedRecordingsCard
-              key={`saved-recording-${r}`}
+              key={`saved-recording-${r.name}`}
               recording={r}
               onRemoved={() => getRecordingsList().then(setRecordings) }
             />
