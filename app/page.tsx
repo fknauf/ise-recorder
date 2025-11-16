@@ -14,6 +14,11 @@ import { PreviewCard } from "./lib/PreviewCard";
 import { SavedTrack, SavedRecording } from "./lib/types";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 
+interface RecordingJob {
+  recorder: MediaRecorder
+  promise: Promise<SavedTrack>
+}
+
 export default function Home() {
   const [ selectedVideoSources, setSelectedVideoSources ] = useState<Key[]>([]);
   const [ selectedAudioSources, setSelectedAudioSources ] = useState<Key[]>([]);
@@ -63,7 +68,7 @@ export default function Home() {
 
   const removeSavedRecording = (recording_index: number) => setSavedRecordings(savedRecordings.filter((r, i) => i != recording_index))
 
-  const recordTrack = (tracks: MediaStreamTrack[], title: string) => {
+  const recordTracks = (tracks: MediaStreamTrack[], title: string): RecordingJob => {
     const recordedStream = new MediaStream(tracks);
     const newRecorder = new MediaRecorder(recordedStream);
     const blobPromise = new Promise<SavedTrack>((resolve, reject) => {
@@ -101,11 +106,20 @@ export default function Home() {
 
     const timestamp = new Date();
 
-    const videoJobs = videoTracks.map((track, index) => recordTrack([track], `video-${index}`));
-    const audioJobs = audioTracks.map((track, index) => recordTrack([track], `audio-${index}`));
-    const displayJobs = displayTracks.map((track, index) => recordTrack([track], `display-${index}`));
+    let allJobs: RecordingJob[] = [];
 
-    const allJobs = displayJobs.concat(videoJobs).concat(audioJobs);
+    if(videoTracks.length >= 1) {
+      const mainJob = recordTracks([ videoTracks[0] ].concat(audioTracks), 'stream');
+      const videoJobs = videoTracks.slice(1).map((track, index) => recordTracks([track], `video-${index + 1}`));
+      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}`));
+      allJobs = [mainJob].concat(videoJobs).concat(displayJobs);
+    } else {
+      const videoJobs = videoTracks.map((track, index) => recordTracks([track], `video-${index}`));
+      const audioJobs = audioTracks.map((track, index) => recordTracks([track], `audio-${index}`));
+      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}`));
+      allJobs = videoJobs.concat(audioJobs).concat(displayJobs);
+    }
+
     const allRecorders = allJobs.map(job => job.recorder);
     const allBlobPromises = allJobs.map(job => job.promise);
 
@@ -132,11 +146,6 @@ export default function Home() {
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
       <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100">
-        <ActionButton onPress={openDisplayStream} isDisabled={isRecording}>
-          <DeviceDesktop/>
-          <Text>Add Screen/Window</Text>
-        </ActionButton>
-
         <MenuTrigger onOpenChange={getMediaDevices}>
           <ActionButton isDisabled={isRecording}>
             <MovieCamera/>
@@ -157,6 +166,11 @@ export default function Home() {
           </Menu>
         </MenuTrigger>
 
+        <ActionButton onPress={openDisplayStream} isDisabled={isRecording}>
+          <DeviceDesktop/>
+          <Text>Add Screen/Window</Text>
+        </ActionButton>
+
         <Divider orientation="vertical" size="M"/>
 
         {
@@ -167,20 +181,6 @@ export default function Home() {
       </Flex>
 
       <Flex direction="row" gap="size-100" justifyContent="center" wrap={true}>
-        {
-          selectedDisplayStreams.map((stream, ix) =>
-            <PreviewCard
-              key={`preview-card-display-${ix}`}
-              label={`Screen capture ${ix}`}
-              buttonDisabled={isRecording}
-              onRemove={() => removeDisplayStream(stream)}
-            >
-              <VideoPreview
-                track={stream.getTracks()[0]}
-              />
-            </PreviewCard>
-          )
-        }
         {
           selectedVideoSources.map(deviceId =>
             <PreviewCard
@@ -202,6 +202,20 @@ export default function Home() {
               onRemove={() => removeAudioSource(deviceId)}
             >
               <AudioPreview track={findAudioTrack(deviceId)}/>
+            </PreviewCard>
+          )
+        }
+        {
+          selectedDisplayStreams.map((stream, ix) =>
+            <PreviewCard
+              key={`preview-card-display-${ix}`}
+              label={`Screen capture ${ix}`}
+              buttonDisabled={isRecording}
+              onRemove={() => removeDisplayStream(stream)}
+            >
+              <VideoPreview
+                track={stream.getTracks()[0]}
+              />
             </PreviewCard>
           )
         }
