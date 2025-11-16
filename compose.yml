@@ -1,0 +1,7 @@
+services:
+  ise-recorder:
+    image: code.rinderher.de/library/ise-recorder
+    build: .
+    container_name: ise-recorder
+    ports:
+      - 3000:3000
