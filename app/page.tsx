@@ -6,13 +6,18 @@ import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';
 import DeviceDesktop from '@spectrum-icons/workflow/DeviceDesktop';
 import Stop from '@spectrum-icons/workflow/Stop';
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useMediaStream from "use-media-stream";
 import VideoPreview from "./lib/VideoPreview";
 import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
-import { SavedTrack, SavedRecording } from "./lib/types";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
+import { getRecordingsList, RecordingNode, writeRecordingFile } from "./lib/filesystem";
+
+interface SavedTrack {
+  blob: Blob,
+  title: string
+};
 
 interface RecordingJob {
   recorder: MediaRecorder
@@ -24,7 +29,11 @@ export default function Home() {
   const [ selectedAudioSources, setSelectedAudioSources ] = useState<Key[]>([]);
   const [ selectedDisplayStreams, setSelectedDisplayStreams ]= useState<MediaStream[]>([]);
   const [ recorders, setRecorders ] = useState<MediaRecorder[]>([]);
-  const [ savedRecordings, setSavedRecordings ] = useState<SavedRecording[]>([]);
+  const [ recordings, setRecordings ] = useState<RecordingNode[]>([]);
+
+  useEffect(() => {
+    getRecordingsList().then(setRecordings);
+  }, [])
 
   const {
     stream,
@@ -66,11 +75,9 @@ export default function Home() {
 
   const findLabel = (devs: MediaDeviceInfo[], id: Key) => devs.find(dev => dev.deviceId == id)?.label;
 
-  const removeSavedRecording = (recording_index: number) => setSavedRecordings(savedRecordings.filter((r, i) => i != recording_index))
-
-  const recordTracks = (tracks: MediaStreamTrack[], title: string): RecordingJob => {
+  const recordTracks = (tracks: MediaStreamTrack[], title: string, options?: MediaRecorderOptions): RecordingJob => {
     const recordedStream = new MediaStream(tracks);
-    const newRecorder = new MediaRecorder(recordedStream);
+    const newRecorder = new MediaRecorder(recordedStream, options);
     const blobPromise = new Promise<SavedTrack>((resolve, reject) => {
 
       newRecorder.ondataavailable = event => {
@@ -109,14 +116,14 @@ export default function Home() {
     let allJobs: RecordingJob[] = [];
 
     if(videoTracks.length >= 1) {
-      const mainJob = recordTracks([ videoTracks[0] ].concat(audioTracks), 'stream');
-      const videoJobs = videoTracks.slice(1).map((track, index) => recordTracks([track], `video-${index + 1}`));
-      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}`));
+      const mainJob = recordTracks([ videoTracks[0] ].concat(audioTracks), 'stream.mp4', { mimeType: "video/mp4" });
+      const videoJobs = videoTracks.slice(1).map((track, index) => recordTracks([track], `video-${index + 1}.mp4`), { mimeType: "video/mp4" });
+      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}.mp4`), { mimeType: "video/mp4" });
       allJobs = [mainJob].concat(videoJobs).concat(displayJobs);
     } else {
-      const videoJobs = videoTracks.map((track, index) => recordTracks([track], `video-${index}`));
-      const audioJobs = audioTracks.map((track, index) => recordTracks([track], `audio-${index}`));
-      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}`));
+      const videoJobs = videoTracks.map((track, index) => recordTracks([track], `video-${index}.mp4`), { mimeType: "video/mp4" });
+      const audioJobs = audioTracks.map((track, index) => recordTracks([track], `audio-${index}.ogx`), { mimeType: "audio/ogg" });
+      const displayJobs = displayTracks.map((track, index) => recordTracks([track], `display-${index}.mp4`), { mimeType: "video/mp4" });
       allJobs = videoJobs.concat(audioJobs).concat(displayJobs);
     }
 
@@ -125,13 +132,12 @@ export default function Home() {
 
     setRecorders(allRecorders);
 
-    const allBlobs = await Promise.all(allBlobPromises);
-    const newRecording: SavedRecording = {
-      tracks: allBlobs,
-      timestamp: timestamp.toISOString().replace(".", "_")
-    };
+    const allSavedTracks = await Promise.all(allBlobPromises);
+    const recordingName = timestamp.toISOString().replace(".", "_");
 
-    setSavedRecordings(savedRecordings.concat([newRecording]));
+    await Promise.all(allSavedTracks.map(st => writeRecordingFile(recordingName, st.title, st.blob)));
+
+    setRecordings(await getRecordingsList());
   };
 
   const stopRecording = () => {
@@ -223,11 +229,11 @@ export default function Home() {
 
       <Flex direction="row" gap="size-100">
         {
-          savedRecordings.map((recording, recording_index) =>
+          recordings.map(r =>
             <SavedRecordingsCard
-              key={`saved-recording-${recording_index}`}
-              recording={recording}
-              onRemove={() => removeSavedRecording(recording_index)}
+              key={`saved-recording-${r}`}
+              recording={r}
+              onRemoved={() => getRecordingsList().then(setRecordings) }
             />
           )
         }
