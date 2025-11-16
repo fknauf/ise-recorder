@@ -45,8 +45,12 @@ export default function Home() {
   const isRecording = recorders.length != 0;
 
   const openDisplayStream = async () => {
-    const screenStream = await navigator.mediaDevices.getDisplayMedia();
-    setSelectedDisplayStreams(selectedDisplayStreams.concat([screenStream]));
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia();
+      setSelectedDisplayStreams(selectedDisplayStreams.concat([screenStream]));
+    } catch(e) {
+      console.log(e);
+    }
   }
 
   const addSourceFn =
