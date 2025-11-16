@@ -96,16 +96,53 @@ export default function Home() {
     const recordedStream = new MediaStream(tracks);
     const newRecorder = new MediaRecorder(recordedStream, options);
 
-    newRecorder.ondataavailable = async event => {
-      await appendToRecordingFile(recordingName, trackTitle, event.data);
-      setRecordings(await getRecordingsList());
-    }
+    // This is a little bit involved so that we're guaranteed to not drop any chunks and also
+    // not process them out of order.
+    //
+    // This is a problem we have to solve because the OPFS api is extremely asynchronous, so in
+    // a naive implementation that starts an appendToRecordingFile job in the ondataavailable
+    // handler we could end up with multiple such jobs in flight at the same time, which leads
+    // to data loss.
+    //
+    // To get around this, we instead queue incoming chunks and spawn a background task that
+    // appends them to the file sequentially. The event handler signals to the background task
+    // through a promise object that is exchanged after every delivered chunk. Promise objects
+    // may be dropped without being awaited, but the chunks will be in the queue and handled
+    // anyway. The exchange makes clever/ugly use of typescript capturing semantics, but this
+    // is the least involved way I came up with.
+    const chunkQueue: Blob[] = [];
+    let chunkSignalResolve: (finished: boolean) => void
+    let chunkSignalPromise = new Promise<boolean>(resolve => chunkSignalResolve = resolve);
 
-    const finishedPromise = new Promise<void>((resolve, reject) => {
-      newRecorder.onstop = () => resolve();
-      newRecorder.onerror = event => reject(event.error);
-      newRecorder.start(5000);
-    });
+    newRecorder.ondataavailable = event => {
+      chunkQueue.push(event.data);
+      chunkSignalResolve(false);
+      chunkSignalPromise = new Promise<boolean>(resolve => chunkSignalResolve = resolve);
+    }
+    newRecorder.onstop = () => chunkSignalResolve(true);
+    newRecorder.onerror = () => chunkSignalResolve(true);
+
+    const finishedPromise = new Promise<void>(resolve => {
+      (async () => {
+        let finished = false;
+
+        while(!finished) {
+          finished = await chunkSignalPromise;
+
+          while(chunkQueue.length > 0) {
+            const chunk = chunkQueue.shift();
+            if(chunk) {
+              await appendToRecordingFile(recordingName, trackTitle, chunk);
+              setRecordings(await getRecordingsList());
+            }
+          }
+        }
+
+        resolve();
+      })();
+    })
+
+    newRecorder.start(5000);
 
     return {
       recorder: newRecorder,
