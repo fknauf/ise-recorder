@@ -3,5 +3,6 @@ services:
     image: code.rinderher.de/library/ise-recorder
     build: .
     container_name: ise-recorder
+    restart: unless-stopped
     ports:
       - 127.0.0.1:3000:3000
