@@ -1,4 +1,4 @@
-export interface RecordingNode {
+export interface RecordingFileList {
     name: string,
     files: string[]
 }
@@ -17,7 +17,7 @@ export async function getRecordingsList() {
     const recordingsDir = await getRecordingsDirectory();
     const recordingNames = await Array.fromAsync(recordingsDir.keys())
 
-    const result: RecordingNode[] = [];
+    const result: RecordingFileList[] = [];
 
     for(const rname of recordingNames.sort()) {
         const dir = await recordingsDir.getDirectoryHandle(rname);
@@ -37,11 +37,16 @@ export async function getRecordingFile(recordingName: string, filename: string, 
     return await recordingDir.getFileHandle(filename, options);
 }
 
-export async function writeRecordingFile(recordingName: string, filename: string, data: Blob) {
+export async function appendToRecordingFile(recordingName: string, filename: string, data: Blob) {
     const file = await getRecordingFile(recordingName, filename, { create: true });
-    const stream = await file.createWritable();
+    const fd = await file.getFile()
+    const stream = await file.createWritable({ keepExistingData: true });
 
-    await stream.write(data);
+    await stream.write({
+        type: "write",
+        data: data,
+        position: fd.size
+    });
     await stream.close();
 }
 

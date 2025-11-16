@@ -2,7 +2,7 @@
 import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import Delete from '@spectrum-icons/workflow/Delete';
 import Download from '@spectrum-icons/workflow/Download';
-import { readRecordingFile, deleteRecording, RecordingNode } from "./filesystem";
+import { readRecordingFile, deleteRecording, RecordingFileList } from "./filesystem";
 
 async function downloadFile(dir: string, filename: string) {
   const file = await readRecordingFile(dir, filename);
@@ -25,12 +25,13 @@ async function downloadFile(dir: string, filename: string) {
 }
 
 export interface SavedRecordingsCardProps {
-  recording: RecordingNode,
+  recording: RecordingFileList,
+  isBeingRecorded: boolean,
   onRemoved: () => void
 }
 
 export function SavedRecordingsCard(
-  { recording, onRemoved }: SavedRecordingsCardProps
+  { recording, isBeingRecorded, onRemoved }: SavedRecordingsCardProps
 ) {
   return (
     <View
@@ -43,13 +44,20 @@ export function SavedRecordingsCard(
         <Text>{recording.name}</Text>
         {
           recording.files.map(file =>
-            <ActionButton key={`download-${file}`} onPress={() => downloadFile(recording.name, file)}>
+            <ActionButton
+            key={`download-${file}`}
+            isDisabled={isBeingRecorded}
+            onPress={() => downloadFile(recording.name, file)}
+          >
               <Download/>
               <Text>Download {file}</Text>
             </ActionButton>
           )
         }
-        <ActionButton onPress={() => { deleteRecording(recording.name).then(() => onRemoved()) }}>
+        <ActionButton
+          isDisabled={isBeingRecorded}
+          onPress={() => { deleteRecording(recording.name).then(() => onRemoved()) }}
+        >
           <Delete/>
           <Text>Remove</Text>
         </ActionButton>
