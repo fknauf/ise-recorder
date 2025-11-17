@@ -13,6 +13,7 @@ import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
+import { sendChunkToServer } from "./lib/serverStorage";
 
 interface RecordingJob {
   recorder: MediaRecorder
@@ -91,6 +92,7 @@ export default function Home() {
     tracks: MediaStreamTrack[],
     recordingName: string,
     trackTitle: string,
+    fileExtension: string,
     options?: MediaRecorderOptions
   ): RecordingJob => {
     const recordedStream = new MediaStream(tracks);
@@ -125,6 +127,7 @@ export default function Home() {
     const finishedPromise = new Promise<void>(resolve => {
       (async () => {
         let finished = false;
+        let chunkNum = 0;
 
         while(!finished) {
           finished = await chunkSignalPromise;
@@ -132,8 +135,13 @@ export default function Home() {
           while(chunkQueue.length > 0) {
             const chunk = chunkQueue.shift();
             if(chunk) {
-              await appendToRecordingFile(recordingName, trackTitle, chunk);
+              const chunkLabel = String(chunkNum).padStart(4, '0');
+
+              sendChunkToServer(chunk, recordingName, trackTitle, chunkNum);
+              await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
               setRecordings(await getRecordingsList());
+
+              ++chunkNum;
             }
           }
         }
@@ -166,27 +174,24 @@ export default function Home() {
     }
 
     const timestamp = new Date();
-    const recordingName = timestamp.toISOString().replace(".", "_");
+    const recordingName = timestamp.toISOString();
 
-    const videoOptions: MediaRecorderOptions = { mimeType: 'video/webm' };
-    const audioOptions: MediaRecorderOptions = { mimeType: 'audio/ogg' };
-
-    const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, videoOptions);
-    const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, audioOptions);
+    const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.webm', { mimeType: 'video/webm' });
+    const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.ogg', { mimeType: 'audio/ogg' });
 
     let allJobs: RecordingJob[] = [];
 
     if(videoTracks.length > 0) {
-      const mainJob = recordVideoTracks([videoTracks[0]].concat(audioTracks), 'stream.webm');
-      const videoJobs = videoTracks.slice(1).map((track, index) => recordVideoTracks([track], `video-${index + 1}.webm`));
-      const displayJobs = displayTracks.map((track, index) => recordVideoTracks([track], `display-${index}.webm`));
+      const mainJob = recordVideoTracks([videoTracks[0]].concat(audioTracks), 'stream');
+      const videoJobs = videoTracks.slice(1).map((track, index) => recordVideoTracks([track], `video-${index + 1}`));
+      const displayJobs = displayTracks.map((track, index) => recordVideoTracks([track], `display-${index}`));
       allJobs = [mainJob].concat(videoJobs).concat(displayJobs);
     } else if(displayTracks.length > 0) {
-      const mainJob = recordVideoTracks([displayTracks[0]].concat(audioTracks), 'stream.webm');
-      const displayJobs = displayTracks.slice(1).map((track, index) => recordVideoTracks([track], `display-${index + 1}.webm`));
+      const mainJob = recordVideoTracks([displayTracks[0]].concat(audioTracks), 'stream');
+      const displayJobs = displayTracks.slice(1).map((track, index) => recordVideoTracks([track], `display-${index + 1}`));
       allJobs = [mainJob].concat(displayJobs);
     } else {
-      allJobs = audioTracks.map((track, index) => recordAudioTracks([track], `audio-${index}.ogg`));
+      allJobs = audioTracks.map((track, index) => recordAudioTracks([track], `audio-${index}`));
     }
 
     setActiveRecording({
