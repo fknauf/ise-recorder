@@ -13,7 +13,7 @@ import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
-import { sendChunkToServer } from "./lib/serverStorage";
+import { scheduleRenderingJob, sendChunkToServer } from "./lib/serverStorage";
 
 interface RecordingJob {
   recorder: MediaRecorder
@@ -135,8 +135,6 @@ export default function Home() {
           while(chunkQueue.length > 0) {
             const chunk = chunkQueue.shift();
             if(chunk) {
-              const chunkLabel = String(chunkNum).padStart(4, '0');
-
               sendChunkToServer(chunk, recordingName, trackTitle, chunkNum);
               await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
               setRecordings(await getRecordingsList());
@@ -200,6 +198,8 @@ export default function Home() {
     });
 
     await Promise.all(allJobs.map(job => job.finished));
+
+    scheduleRenderingJob(recordingName, recordingName)
 
     setActiveRecording(null);
     setRecordings(await getRecordingsList());

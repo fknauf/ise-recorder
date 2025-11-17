@@ -22,7 +22,7 @@ export async function sendChunkToServer(
 
     for(let attempt = 0; attempt < retries; ++attempt) {
         try {
-            await fetch(chunkUrl, { 
+            await fetch(chunkUrl, {
                 method: "POST",
                 body: data
             });
@@ -37,8 +37,7 @@ export async function sendChunkToServer(
 export async function scheduleRenderingJob(
     recording: string,
     title: string,
-    screenTrack: string,
-    speakerTrack: string
+    recipient?: string
 ) {
     if(!process.env.NEXT_PUBLIC_API_URL) {
         return;
@@ -50,11 +49,10 @@ export async function scheduleRenderingJob(
         const data = {
             title,
             recording,
-            screenTrack,
-            speakerTrack
+            recipient
         };
 
-        await fetch(jobUrl, { 
+        await fetch(jobUrl, {
             method: "POST",
             headers: {
                 'Content-Type': 'application/json',
