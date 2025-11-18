@@ -1,2 +1,2 @@
 from .postprocess import postprocess_recording
-from .reporting import send_report
+from .reporting import send_report, SmtpSink

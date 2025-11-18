@@ -1,28 +1,44 @@
+"""
+    ISE-Recorder postprocessing module. Combines camera and slide feeds into a useful
+    whole. Tries to handle partially available data in the most sensible way possible
+    (e.g. missing camera feed -> still produce slides with audio)
+"""
+
 import json
 import logging
-import os
 from pathlib import Path
-from subprocess import run, CompletedProcess, CalledProcessError, PIPE
+from subprocess import run, CalledProcessError, PIPE
 import sys
-from typing import NamedTuple, List, Tuple
+from typing import NamedTuple, Tuple
 
 logger = logging.getLogger(__name__)
 
 class PostProcessingResult(NamedTuple):
+    """ Result of a postprocessing job """
     success: bool
     output_file: Path | None
 
 class Rectangle(NamedTuple):
+    """ rectangular area in a video stream, used for cropping """
     width: int
     height: int
     left: int
     top: int
 
 class VideoProperties(NamedTuple):
+    """ Properties of a video stream that we need for postprocessing """
     width: int
     height: int
     has_audio: bool
     crop_area: Rectangle
+
+def _log_error(err: CalledProcessError) -> None:
+    logger.error("Failed with return code %d.\n" \
+                 "command = %s\n\n" \
+                 "stdout\n------\n%s\n\n" \
+                 "stderr\n------\n%s\n",
+                 err.returncode, ' '.join(err.args), err.stdout, err.stderr)
+
 
 def video_properties(path: Path) -> VideoProperties:
     """
@@ -158,7 +174,7 @@ def postprocess_picture_in_picture(
             overlay_height = max(slack_height // 2, outer_height // 10)
             overlay_scale = f'scale=-1:{overlay_height}'
 
-        # run crop filter if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
+        # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
         if display.width == display.crop_area.width and display.height == display.crop_area.height:
             crop_filter = ''
         else:
@@ -169,7 +185,8 @@ def postprocess_picture_in_picture(
         combine_filter = '[main][overlay]overlay=(main_w-overlay_w):0'
         ffmpeg_filter = f'{display_filter};{overlay_filter};{combine_filter}'
 
-        # map all audio streams if there are any. ffmpeg fails if we pass -map 1:a when there's no audio.
+        # map all audio streams if there are any.
+        # ffmpeg fails if we pass -map 1:a when there's no audio.
         audio_map = ['-map', '1:a' ] if stream.has_audio else []
 
         render_command = [
@@ -186,7 +203,7 @@ def postprocess_picture_in_picture(
 
         return PostProcessingResult(success=True, output_file=output_path)
     except CalledProcessError as err:
-        logger.error("Failed with return code {}.\ncommand = {}\n\nstdout\n------\n{}\n\nstderr\n------\n{}\n", err.returncode, err.args, err.stdout, err.stderr)
+        _log_error(err)
         return PostProcessingResult(success=False, output_file=None)
     finally:
         if stream_path is not None:
@@ -209,10 +226,11 @@ def postprocess_index(
 
     try:
         command =[ 'ffmpeg', '-i', stream_path, '-y', output_path ]
-        run(command, stdout=PIPE, stderr=PIPE, text=True)
+        run(command, stdout=PIPE, stderr=PIPE, text=True, check=True)
 
         return PostProcessingResult(success=True, output_file=output_path)
     except CalledProcessError as err:
+        _log_error(err)
         return PostProcessingResult(success=False, output_file=None)
     finally:
         stream_path.unlink()
@@ -221,7 +239,11 @@ def postprocess_recording(recording_path: Path) -> PostProcessingResult | None:
     """ Postprocess the chunks of a recording """
 
     if not recording_path.is_dir():
-        return PostProcessingResult(args=[], returncode=255, stdout='', stderr="Requested postprocessing for recording that doesn't exist")
+        return PostProcessingResult(
+            args=[],
+            returncode=255,
+            stdout='',
+            stderr="Requested postprocessing for recording that doesn't exist")
 
     stream_dir = recording_path / "stream"
     display_dir = recording_path / "display-0"
@@ -233,8 +255,7 @@ def postprocess_recording(recording_path: Path) -> PostProcessingResult | None:
 
     if display_dir.is_dir():
         return postprocess_picture_in_picture(stream_dir, display_dir, output_path)
-    else:
-        return postprocess_index(stream_dir, output_path)
+    return postprocess_index(stream_dir, output_path)
 
 if __name__ == "__main__":
     print(postprocess_recording(Path(sys.argv[1])))

@@ -1,7 +1,10 @@
 #!/usr/bin/python3
 
-from flask import Flask, request
-from flask_cors import CORS
+"""
+   ISE-Recorder backend service. Stores chunk files and does postprocessing.
+
+   This module defines the HTTP API endpoints and validates inputs.
+"""
 
 import logging
 import re
@@ -10,29 +13,36 @@ from pathlib import Path
 import threading
 from email_validator import validate_email, EmailNotValidError
 
-from ise_record import postprocess_recording, send_report
+from flask import Flask, request
+from flask_cors import CORS
+
+from ise_record import postprocess_recording, send_report, SmtpSink
 
 app = Flask(__name__)
 
 app.config['DESTDIR'] = './data'
-app.config['REPORT_SENDER'] = None
-app.config['SMTP_SERVER'] = ''
-app.config['SMTP_PORT'] = ''
+app.config['SMTP_SERVER'] = None
+app.config['SMTP_PORT'] = 0
+app.config['SMTP_LOCAL_HOSTNAME'] = None
+app.config['SMTP_USERNAME'] = None
+app.config['SMTP_PASSWORD'] = None
+app.config['SMTP_SENDER'] = None
+app.config['SMTP_STARTTLS'] = False
 
 app.config.from_prefixed_env("ISE_RECORD")
 
 CORS(app, resources={r"/api/*": { "origins": "*" }})
 
-def create_track_path(recording: str, track: str) -> Path:
+def _create_track_path(recording: str, track: str) -> Path:
     destdir = Path(app.config["DESTDIR"])
     path = destdir / recording / track
     os.makedirs(path, exist_ok=True)
     return path
 
-def is_safe_name(name: str | None) -> bool:
+def _is_safe_name(name: str | None) -> bool:
     return name is not None and re.fullmatch('^[A-Za-z0-9_.-]+$', name) is not None
 
-def is_valid_email_or_none(address: str | None) -> bool:
+def _is_valid_email_or_none(address: str | None) -> bool:
     if address is None:
         return True
 
@@ -42,24 +52,37 @@ def is_valid_email_or_none(address: str | None) -> bool:
     except EmailNotValidError:
         return False
 
-def recording_exists(recording: str | None) -> bool:
-    if not is_safe_name(recording):
+def _recording_exists(recording: str | None) -> bool:
+    if not _is_safe_name(recording):
         return False
 
     destdir = Path(app.config["DESTDIR"])
     return os.path.isdir(destdir / recording)
 
-def postprocessing_task(
+def _postprocessing_task(
         recording: str,
-        report_recipient: str | None,
+        recipient: str | None,
         job_title: str | None
 ) -> None:
     recording_path = Path(app.config["DESTDIR"]) / recording
     job_result = postprocess_recording(recording_path)
 
-    report_recipient="foo@bar.com"
-    if report_recipient is not None:
-        send_report(job_title or recording, job_result, app.config['REPORT_SENDER'], report_recipient)
+    smtp_sink = SmtpSink(
+        server = app.config['SMTP_SERVER'],
+        port = int(app.config['SMTP_PORT']),
+        local_hostname = app.config['SMTP_LOCAL_HOSTNAME'],
+        starttls = bool(app.config['SMTP_STARTTLS']),
+        username = app.config['SMTP_USERNAME'],
+        password = app.config['SMTP_PASSWORD'])
+
+    sender = app.config['SMTP_SENDER']
+
+    send_report(
+        smtp_sink=smtp_sink,
+        sender=sender,
+        recipient=recipient,
+        job_title=job_title or recording,
+        result=job_result)
 
 @app.route('/api/chunks', methods=['POST'])
 def upload_chunk():
@@ -70,14 +93,14 @@ def upload_chunk():
     index = request.form.get('index')
     chunk = request.files.get('chunk')
 
-    if not is_safe_name(recording) or not is_safe_name(track):
+    if not _is_safe_name(recording) or not _is_safe_name(track):
         return f'invalid track {recording}, {track}', 400
-    elif index is None or not index.isdigit():
+    if index is None or not index.isdigit():
         return f'invalid index "{index}"', 400
-    elif chunk is None:
+    if chunk is None:
         return 'no chunk supplied', 400
 
-    filepath = create_track_path(recording, track) / f'chunk.{index.zfill(4)}'
+    filepath = _create_track_path(recording, track) / f'chunk.{index.zfill(4)}'
     chunk.save(filepath)
 
     return '', 201
@@ -94,11 +117,11 @@ def schedule_job():
     recipient = job_json.get('recipient')
     job_title = job_json.get('title')
 
-    if not recording_exists(recording) or not is_valid_email_or_none(recipient):
+    if not _recording_exists(recording) or not _is_valid_email_or_none(recipient):
         return 'Bad Request', 400
 
     thread = threading.Thread(
-        target=postprocessing_task,
+        target=_postprocessing_task,
         args=(
             recording,
             recipient,
