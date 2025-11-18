@@ -32,5 +32,6 @@ USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV ISE_RECORD_API_URL=
 
 CMD [ "node", "server.js" ]

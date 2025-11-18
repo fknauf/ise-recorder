@@ -1,10 +1,22 @@
 services:
-  ise-recorder:
+  frontend:
     image: code.rinderher.de/library/ise-recorder
-    build: .
-    container_name: ise-recorder
+    build: frontend
+    container_name: ise-recorder-frontend
     restart: unless-stopped
     ports:
       - 127.0.0.1:3000:3000
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:5000
+      - ISE_RECORD_API_URL=http://localhost:8000
+
+  backend:
+    image: code.rinderher.de/library/ise-recorder-backend:latest
+    build: backend
+    container_name: ise-recorder-backend
+    init: true
+    restart: unless-stopped
+    user: 1000:1000
+    ports:
+      - 127.0.0.1:8000:8000
+    volumes:
+      - ./data:/app/data

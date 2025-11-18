@@ -1,14 +1,23 @@
+import { clientGetPublicServerEnvironment, PublicServerEnvironment } from "../env/lib";
+
+async function getApiUrl(): Promise<string | undefined> {
+    const env = await clientGetPublicServerEnvironment();
+    return env.api_url;
+}
+
 export async function sendChunkToServer(
     chunk: Blob,
     recording: string,
     track: string,
     index: number
 ) {
-    if(!process.env.NEXT_PUBLIC_API_URL) {
+    const api_url = await getApiUrl();
+
+    if(!api_url) {
         return;
     }
 
-    const chunkUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/chunks`;
+    const chunkUrl = `${api_url}/api/chunks`;
 
     const retries = 5;
     const intervalMillis = 2000;
@@ -39,11 +48,13 @@ export async function scheduleRenderingJob(
     title: string,
     recipient?: string
 ) {
-    if(!process.env.NEXT_PUBLIC_API_URL) {
+    const api_url = await getApiUrl();
+
+    if(!api_url) {
         return;
     }
 
-    const jobUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/jobs`;
+    const jobUrl = `${api_url}/api/jobs`;
 
     try {
         const data = {
