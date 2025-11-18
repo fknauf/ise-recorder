@@ -172,7 +172,7 @@ export default function Home() {
     }
 
     const timestamp = new Date();
-    const recordingName = timestamp.toISOString();
+    const recordingName = timestamp.toISOString().replaceAll(':', '');
 
     const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.webm', { mimeType: 'video/webm' });
     const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.ogg', { mimeType: 'audio/ogg' });
