@@ -12,10 +12,8 @@ post-processing when the recording stops.
 
 I recommend running in docker:
 
-```
     docker compose build
     docker compose up
-```
 
 then visit http://localhost:3000
 
@@ -25,9 +23,17 @@ subdomain.
 
 ## Hack it yourself
 
-Clone repo and run
+Clone repo and for the frontend run
 
-```
-npm install
-npm run dev
-```
+    cd frontend
+    npm install
+	# omit the ISE_RECORD_API_URL envvar to run serverless
+    ISE_RECORD_API_URL=http://localhost:5000 npm run dev
+
+For the backend run
+
+    cd backend
+	python -m venv .venv
+	. .venv/bin/activate
+	pip install -r app/requirements.txt
+	python app/server.py
