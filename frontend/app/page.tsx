@@ -219,27 +219,31 @@ export default function Home() {
     const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'webm', { mimeType: 'video/webm' });
     const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'ogg', { mimeType: 'audio/ogg' });
 
-    let allJobs: RecordingJob[] = [];
+    const jobs: RecordingJob[] = [];
 
-    if(videoTracks.length > 0) {
-      const mainJob = recordVideoTracks([videoTracks[0]].concat(audioTracks), 'stream');
-      const videoJobs = videoTracks.slice(1).map((track, index) => recordVideoTracks([track], `video-${index + 1}`));
-      const displayJobs = displayTracks.map((track, index) => recordVideoTracks([track], `display-${index}`));
-      allJobs = [mainJob].concat(videoJobs).concat(displayJobs);
-    } else if(displayTracks.length > 0) {
-      const mainJob = recordVideoTracks([displayTracks[0]].concat(audioTracks), 'stream');
-      const displayJobs = displayTracks.slice(1).map((track, index) => recordVideoTracks([track], `display-${index + 1}`));
-      allJobs = [mainJob].concat(displayJobs);
+    const effectiveMainDisplay = mainDisplay ?? displayTracks.filter(t => t !== overlay).at(0) ?? videoTracks.filter(t => t !== overlay).at(0)
+
+    if(effectiveMainDisplay) {
+      jobs.push(recordVideoTracks([ effectiveMainDisplay, ...audioTracks ], 'stream'));
     } else {
-      allJobs = audioTracks.map((track, index) => recordAudioTracks([track], `audio-${index}`));
+      jobs.push(...audioTracks.map((track, index) => recordAudioTracks([track], `audio-${index}`)));
     }
+
+    if(overlay != null) {
+      jobs.push(recordVideoTracks([ overlay ], 'overlay'));
+    }
+
+    const notYetHandled = (track: MediaStreamTrack) => track !== effectiveMainDisplay && track !== overlay;
+
+    jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => recordVideoTracks([track], `video-${i}`)));
+    jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => recordVideoTracks([track], `display-${i}`)));
 
     setActiveRecording({
       name: recordingName,
-      recorders: allJobs.map(job => job.recorder)
+      recorders: jobs.map(job => job.recorder)
     });
 
-    await Promise.all(allJobs.map(job => job.finished));
+    await Promise.all(jobs.map(job => job.finished));
 
     scheduleRenderingJob(apiUrl, recordingName, recordingName, lecturerEmail);
 

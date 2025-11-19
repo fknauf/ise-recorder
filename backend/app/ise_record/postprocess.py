@@ -4,6 +4,7 @@
     (e.g. missing camera feed -> still produce slides with audio)
 """
 
+from enum import Enum
 import json
 import logging
 from pathlib import Path
@@ -13,10 +14,15 @@ from typing import NamedTuple, Tuple
 
 logger = logging.getLogger(__name__)
 
-class PostProcessingResult(NamedTuple):
+class ResultReason(Enum):
+    SUCCESS = 1
+    FAILURE = 2
+    MAIN_STREAM_MISSING = 3
+
+class Result(NamedTuple):
     """ Result of a postprocessing job """
-    success: bool
     output_file: Path | None
+    reason: ResultReason
 
 class Rectangle(NamedTuple):
     """ rectangular area in a video stream, used for cropping """
@@ -24,10 +30,6 @@ class Rectangle(NamedTuple):
     height: int
     left: int
     top: int
-
-    def crop_filter(self) -> str:
-        """ returns an ffmpeg crop filter for rectangle """
-        return f'crop={self.width}:{self.height}:{self.left}:{self.top}'
 
 class VideoProperties(NamedTuple):
     """ Properties of a video stream that we need for postprocessing """
@@ -45,7 +47,7 @@ def _log_error(err: CalledProcessError) -> None:
                  "command = %s\n\n" \
                  "stdout\n------\n%s\n\n" \
                  "stderr\n------\n%s\n",
-                 err.returncode, ' '.join(err.args), err.stdout, err.stderr)
+                 err.returncode, err.cmd, err.stdout, err.stderr)
 
 
 def video_properties(path: Path) -> VideoProperties:
@@ -129,22 +131,21 @@ def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
 
     return candidates[-1]
 
-def pip_filter(display: VideoProperties) -> str:
+def pip_filter(stream: VideoProperties) -> str:
     """ Assembles the picture-in-picture rendering filter for ffmpeg """
-    outer_width, outer_height = pick_target_geometry(display.crop)
+    outer_width, outer_height = pick_target_geometry(stream.crop)
+
+    scaling_x = outer_width / stream.crop.width
+    scaling_y = outer_height / stream.crop.height
 
     # Use the smaller scaling factor so the full display is always in the output.
-    scaling_x = outer_width / display.crop.width
-    scaling_y = outer_height / display.crop.height
-    scaling_factor = min(scaling_x, scaling_y)
-
     if scaling_y < scaling_x:
         # e.g. 4:3 slides to 16:9 output
         scale_filter = f'scale=-1:{outer_height}'
 
         # Slides will appear on the left, so the full slack_width is available for the
         # overlay. But make sure it's still at least visible.
-        slack = outer_width - int(scaling_factor * display.crop.width)
+        slack = outer_width - int(scaling_y * stream.crop.width)
         overlay_width = max(slack, outer_width // 10)
         overlay_scale = f'scale={overlay_width}:-1'
     else:
@@ -153,27 +154,29 @@ def pip_filter(display: VideoProperties) -> str:
 
         # slides will be vertically centered, so the overlay should ideally only use
         # the top half of the slack
-        slack = outer_height - int(scaling_factor * display.crop.height)
+        slack = outer_height - int(scaling_x * stream.crop.height)
         overlay_height = max(slack // 2, outer_height // 10)
         overlay_scale = f'scale=-1:{overlay_height}'
 
     # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
-    crop_filter = f'{display.crop.crop_filter()},' if display.needs_cropping() else ''
+    crop_filter = \
+        f'crop={stream.crop.width}:{stream.crop.height}:{stream.crop.left}:{stream.crop.top},' \
+        if stream.needs_cropping() else ''
 
     # pad to desired dimensions, place content left and vertically centered
     pad_filter = f'pad={outer_width}:{outer_height}:0:-1'
 
-    display_filter = f'[0:v]{crop_filter}{scale_filter},{pad_filter},fps=30[main]'
+    stream_filter = f'[0:v]{crop_filter}{scale_filter},{pad_filter},fps=30[main]'
     overlay_filter = f'[1:v]{overlay_scale}[overlay]'
     combine_filter = '[main][overlay]overlay=(main_w-overlay_w):0'
 
-    return f'{display_filter};{overlay_filter};{combine_filter}'
+    return f'{stream_filter};{overlay_filter};{combine_filter}'
 
 def postprocess_picture_in_picture(
         stream_dir: Path,
-        display_dir: Path,
+        overlay_dir: Path,
         output_path: Path
-) -> PostProcessingResult:
+) -> Result:
     """
         Render the (first) camera stream as an overlay onto the (first) display stream.
         This is the normal case. Frontend feeds us the first camera with all audio tracks
@@ -186,25 +189,25 @@ def postprocess_picture_in_picture(
     """
 
     stream_path = None
-    display_path = None
+    overlay_path = None
 
     try:
         stream_path = concat_chunks(stream_dir)
-        display_path = concat_chunks(display_dir)
+        overlay_path = concat_chunks(overlay_dir)
 
         stream = video_properties(stream_path)
-        display = video_properties(display_path)
+        #overlay = video_properties(overlay_path)
 
-        ffmpeg_filter = pip_filter(display)
+        ffmpeg_filter = pip_filter(stream)
 
         # map all audio streams if there are any.
         # ffmpeg fails if we pass -map 1:a when there's no audio.
-        audio_map = ['-map', '1:a' ] if stream.has_audio else []
+        audio_map = ['-map', '0:a' ] if stream.has_audio else []
 
         render_command = [
             'ffmpeg',
-            '-i', str(display_path),
             '-i', str(stream_path),
+            '-i', str(overlay_path),
             '-filter_complex', ffmpeg_filter,
         ] + audio_map + [
             '-y',
@@ -213,20 +216,20 @@ def postprocess_picture_in_picture(
 
         run(render_command, stdout=PIPE, stderr=PIPE, check=True, text=True)
 
-        return PostProcessingResult(success=True, output_file=output_path)
+        return Result(output_file=output_path, reason=ResultReason.SUCCESS)
     except CalledProcessError as err:
         _log_error(err)
-        return PostProcessingResult(success=False, output_file=None)
+        return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
         if stream_path is not None:
             stream_path.unlink()
-        if display_path is not None:
-            display_path.unlink()
+        if overlay_path is not None:
+            overlay_path.unlink()
 
 def postprocess_index(
         stream_dir: Path,
         output_path: Path
-) -> PostProcessingResult:
+) -> Result:
     """
         Run when there aren't both a camera and display stream, so that picture-in-picture
         makes no sense. In that case we just slap an index onto the video stream.
@@ -240,33 +243,33 @@ def postprocess_index(
         command =[ 'ffmpeg', '-i', stream_path, '-y', output_path ]
         run(command, stdout=PIPE, stderr=PIPE, text=True, check=True)
 
-        return PostProcessingResult(success=True, output_file=output_path)
+        return Result(output_file=output_path, reason=ResultReason.SUCCESS)
     except CalledProcessError as err:
         _log_error(err)
-        return PostProcessingResult(success=False, output_file=None)
+        return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
         stream_path.unlink()
 
-def postprocess_recording(recording_path: Path) -> PostProcessingResult | None:
+def postprocess_recording(recording_path: Path) -> Result | None:
     """ Postprocess the chunks of a recording """
 
     if not recording_path.is_dir():
-        return PostProcessingResult(
+        return Result(
             args=[],
             returncode=255,
             stdout='',
             stderr="Requested postprocessing for recording that doesn't exist")
 
     stream_dir = recording_path / "stream"
-    display_dir = recording_path / "display-0"
+    overlay_dir = recording_path / "overlay"
     output_path = recording_path / 'presentation.webm'
 
     if not stream_dir.is_dir():
         # audio only, nothing to do.
-        return None
+        return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
-    if display_dir.is_dir():
-        return postprocess_picture_in_picture(stream_dir, display_dir, output_path)
+    if overlay_dir.is_dir():
+        return postprocess_picture_in_picture(stream_dir, overlay_dir, output_path)
     return postprocess_index(stream_dir, output_path)
 
 if __name__ == "__main__":

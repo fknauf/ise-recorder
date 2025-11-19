@@ -9,7 +9,7 @@ import smtplib
 from textwrap import dedent
 from typing import NamedTuple
 
-from .postprocess import PostProcessingResult
+from .postprocess import Result, ResultReason
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def send_report(
         sender: str | None,
         recipient: str | None,
         job_title: str,
-        result: PostProcessingResult
+        result: Result
 ) -> None:
     """
        Sends a report about a finished job to the specified recipient.
@@ -36,17 +36,25 @@ def send_report(
 
     subject = f'ise-record finished {job_title}'
 
+    match result.reason:
+        case ResultReason.SUCCESS:
+            message = 'Encoding succeded. Enjoy your video file.'
+        case ResultReason.FAILURE:
+            message = 'Encoding failed. Check server logs.'
+        case ResultReason.MAIN_STREAM_MISSING:
+            message = 'Missing main display stream. Manual intervention required.'
+
     content = dedent(
         """
         ise-record just finished rendering {job_title}.
 
-        success: {success}
-
         output file: {output}
+
+        reason: {reason}
         """).format(
             job_title=job_title,
-            success=result.success,
-            output=result.output_file
+            output=result.output_file,
+            reason=message
         )
 
     msg = EmailMessage()
