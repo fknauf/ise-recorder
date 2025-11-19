@@ -42,8 +42,8 @@ def _create_track_path(recording: str, track: str) -> Path:
 def _is_safe_name(name: str | None) -> bool:
     return name is not None and re.fullmatch('^[A-Za-z0-9_.-]+$', name) is not None
 
-def _is_valid_email_or_none(address: str | None) -> bool:
-    if address is None:
+def _is_valid_email_or_empty(address: str | None) -> bool:
+    if address is None or address.strip() == "":
         return True
 
     try:
@@ -117,7 +117,7 @@ def schedule_job():
     recipient = job_json.get('recipient')
     job_title = job_json.get('title')
 
-    if not _recording_exists(recording) or not _is_valid_email_or_none(recipient):
+    if not _recording_exists(recording) or not _is_valid_email_or_empty(recipient):
         return 'Bad Request', 400
 
     thread = threading.Thread(

@@ -14,7 +14,9 @@ import { PreviewCard } from "./lib/PreviewCard";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
 import { scheduleRenderingJob, sendChunkToServer } from "./lib/serverStorage";
-import isEmail from 'validator/lib/isEmail';
+import isEmail from 'validator/es/lib/isEmail';
+import useSWR from "swr";
+import { clientGetPublicServerEnvironment } from "./env/lib";
 
 interface RecordingJob {
   recorder: MediaRecorder
@@ -51,6 +53,8 @@ export default function Home() {
     videoInputDevices,
   } = useMediaStream();
 
+  const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
+
   useEffect(() => {
     getRecordingsList().then(setRecordings);
   }, [])
@@ -60,6 +64,7 @@ export default function Home() {
   ////////////////
 
   const isRecording = activeRecording != null;
+  const apiUrl = serverEnv?.api_url
 
   const openDisplayStream = async () => {
     try {
@@ -143,7 +148,7 @@ export default function Home() {
           while(chunkQueue.length > 0) {
             const chunk = chunkQueue.shift();
             if(chunk) {
-              sendChunkToServer(chunk, recordingName, trackTitle, chunkNum);
+              sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkNum);
               await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
               setRecordings(await getRecordingsList());
 
@@ -183,8 +188,8 @@ export default function Home() {
     const lecturePrefix = lectureTitle ? `${lectureTitle}_` : '';
     const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeCharacters, '');
 
-    const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.webm', { mimeType: 'video/webm' });
-    const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.ogg', { mimeType: 'audio/ogg' });
+    const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'webm', { mimeType: 'video/webm' });
+    const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'ogg', { mimeType: 'audio/ogg' });
 
     let allJobs: RecordingJob[] = [];
 
@@ -208,7 +213,7 @@ export default function Home() {
 
     await Promise.all(allJobs.map(job => job.finished));
 
-    scheduleRenderingJob(recordingName, recordingName, lecturerEmail);
+    scheduleRenderingJob(apiUrl, recordingName, recordingName, lecturerEmail);
 
     setActiveRecording(null);
     setRecordings(await getRecordingsList());
@@ -233,14 +238,16 @@ export default function Home() {
           isDisabled={isRecording}
           onChange={setLectureTitle}
         />
-        <TextField
-          label="e-Mail"
-          validate={validateEmail}
-          value={lecturerEmail}
-          isReadOnly={false}
-          onChange={setLecturerEmail}
-        />
-
+        { 
+          apiUrl !== undefined &&
+            <TextField
+              label="e-Mail"
+              validate={validateEmail}
+              value={lecturerEmail}
+              isReadOnly={false}
+              onChange={setLecturerEmail}
+            />
+        }
         <Divider orientation="vertical" size="M"/>
 
         <MenuTrigger onOpenChange={getMediaDevices}>
