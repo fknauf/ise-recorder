@@ -58,16 +58,21 @@ export async function getRecordingFile(recordingName: string, filename: string, 
 }
 
 export async function appendToRecordingFile(recordingName: string, filename: string, data: Blob) {
-    const file = await getRecordingFile(recordingName, filename, { create: true });
-    const fd = await file.getFile()
-    const stream = await file.createWritable({ keepExistingData: true });
+    try {
+        const file = await getRecordingFile(recordingName, filename, { create: true });
+        const fd = await file.getFile()
+        const stream = await file.createWritable({ keepExistingData: true });
 
-    await stream.write({
-        type: "write",
-        data: data,
-        position: fd.size
-    });
-    await stream.close();
+        await stream.write({
+            type: "write",
+            data: data,
+            position: fd.size
+        });
+
+        await stream.close();
+    } catch(e) {
+        console.log(e);
+    }
 }
 
 export async function readRecordingFile(recordingName: string, filename: string) {

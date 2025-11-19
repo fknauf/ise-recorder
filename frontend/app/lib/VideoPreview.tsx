@@ -23,8 +23,8 @@ export default function VideoPreview(
     return (
         <video
             ref={videoRef}
-            autoPlay={true}
-            muted={true}
+            autoPlay
+            muted
             width={384}
             height={216}
             style={{backgroundColor: "blue"}}
