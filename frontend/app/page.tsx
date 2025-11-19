@@ -46,6 +46,9 @@ export default function Home() {
   const [ lectureTitle, setLectureTitle ] = useState("")
   const [ lecturerEmail, setLecturerEmail ] = useState("")
 
+  const [ mainDisplay, setMainDisplay ] = useState<Key>();
+  const [ overlay, setOverlay ] = useState<Key>();
+
   const {
     stream,
     getMediaDevices,
@@ -70,20 +73,30 @@ export default function Home() {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia();
       setSelectedDisplayStreams(selectedDisplayStreams.concat([screenStream]));
+
+      if(!mainDisplay) {
+        setMainDisplay(`display-${selectedDisplayStreams.length}`)
+      }
     } catch(e) {
       console.log(e);
     }
   }
 
-  const addSourceFn =
-    (setter: (newData: Key[]) => void, currentData: Key[]) =>
-      (key: Key) => {
-        if(!currentData.includes(key)) {
-          setter(currentData.concat([key]));
-        }
-      };
-  const addVideoSource = addSourceFn(setSelectedVideoSources, selectedVideoSources);
-  const addAudioSource = addSourceFn(setSelectedAudioSources, selectedAudioSources);
+  const addVideoSource = (deviceId: Key) => {
+    if(!selectedVideoSources.includes(deviceId)) {
+      setSelectedVideoSources(selectedVideoSources.concat([deviceId]));
+
+      if(!overlay) {
+        setOverlay(deviceId);
+      }
+    }
+  }
+
+  const addAudioSource = (deviceId: Key) => {
+    if(!selectedAudioSources.includes(deviceId)) {
+      setSelectedAudioSources(selectedAudioSources.concat([deviceId]));
+    }
+  }
 
   const removeSourceFn =
     (setter: (newData: Key[]) => void, currentData: Key[]) =>
@@ -250,6 +263,11 @@ export default function Home() {
         }
         <Divider orientation="vertical" size="M"/>
 
+        <ActionButton onPress={openDisplayStream} isDisabled={isRecording} alignSelf="end">
+          <DeviceDesktop/>
+          <Text>Add Screen/Window</Text>
+        </ActionButton>
+
         <MenuTrigger onOpenChange={getMediaDevices}>
           <ActionButton isDisabled={isRecording} alignSelf="end">
             <MovieCamera/>
@@ -270,11 +288,6 @@ export default function Home() {
           </Menu>
         </MenuTrigger>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={isRecording} alignSelf="end">
-          <DeviceDesktop/>
-          <Text>Add Screen/Window</Text>
-        </ActionButton>
-
         <Divider orientation="vertical" size="M"/>
 
         {
@@ -286,6 +299,32 @@ export default function Home() {
 
       <Flex direction="row" gap="size-100" justifyContent="center" wrap>
         {
+          selectedDisplayStreams.map((stream, ix) =>
+            <PreviewCard
+              key={`preview-card-display-${ix}`}
+              label={`Screen capture ${ix}`}
+              buttonDisabled={isRecording}
+              onRemove={() => {
+                if(mainDisplay == `display-${ix}`) {
+                  setMainDisplay(undefined);
+                }
+                if(overlay == `display-${ix}`) {
+                  setOverlay(undefined);
+                }
+                removeDisplayStream(stream)
+              }}
+            >
+              <VideoPreview
+                track={stream.getTracks()[0]}
+                isMainDisplay={mainDisplay == `display-${ix}`}
+                isOverlay={overlay == `display-${ix}`}
+                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? `display-${ix}` : undefined) }}
+                onToggleOverlay={isSelected => { setOverlay(isSelected ? `display-${ix}` : undefined)}}
+              />
+            </PreviewCard>
+          )
+        }
+        {
           selectedVideoSources.map(deviceId =>
             <PreviewCard
               key={`preview-card-${deviceId}`}
@@ -293,7 +332,13 @@ export default function Home() {
               buttonDisabled={isRecording}
               onRemove={() => removeVideoSource(deviceId)}
             >
-              <VideoPreview track={findVideoTrack(deviceId)}/>
+              <VideoPreview
+                track={findVideoTrack(deviceId)}
+                isMainDisplay={mainDisplay == deviceId}
+                isOverlay={overlay == deviceId}
+                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? deviceId : undefined) }}
+                onToggleOverlay={isSelected => setOverlay(isSelected ? deviceId : undefined) }
+              />
             </PreviewCard>
           )
         }
@@ -306,20 +351,6 @@ export default function Home() {
               onRemove={() => removeAudioSource(deviceId)}
             >
               <AudioPreview track={findAudioTrack(deviceId)}/>
-            </PreviewCard>
-          )
-        }
-        {
-          selectedDisplayStreams.map((stream, ix) =>
-            <PreviewCard
-              key={`preview-card-display-${ix}`}
-              label={`Screen capture ${ix}`}
-              buttonDisabled={isRecording}
-              onRemove={() => removeDisplayStream(stream)}
-            >
-              <VideoPreview
-                track={stream.getTracks()[0]}
-              />
             </PreviewCard>
           )
         }

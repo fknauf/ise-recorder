@@ -25,12 +25,20 @@ class Rectangle(NamedTuple):
     left: int
     top: int
 
+    def crop_filter(self) -> str:
+        """ returns an ffmpeg crop filter for rectangle """
+        return f'crop={self.width}:{self.height}:{self.left}:{self.top}'
+
 class VideoProperties(NamedTuple):
     """ Properties of a video stream that we need for postprocessing """
     width: int
     height: int
     has_audio: bool
-    crop_area: Rectangle
+    crop: Rectangle
+
+    def needs_cropping(self) -> bool:
+        """ determines if this video stream needs to be cropped """
+        return self.width != self.crop.width or self.height != self.crop.height
 
 def _log_error(err: CalledProcessError) -> None:
     logger.error("Failed with return code %d.\n" \
@@ -57,7 +65,8 @@ def video_properties(path: Path) -> VideoProperties:
         '-f', 'lavfi',
         '-i', f'movie={str(path)},cropdetect',
         '-show_streams',
-        '-show_entries', 'packet_tags=lavfi.cropdetect.x1,lavfi.cropdetect.y1,lavfi.cropdetect.x2,lavfi.cropdetect.y2'
+        '-show_entries', 'packet_tags=lavfi.cropdetect.x1,lavfi.cropdetect.y1,'
+                                     'lavfi.cropdetect.x2,lavfi.cropdetect.y2'
     ]
 
     probe_result = run(probe_command, stdout=PIPE, stderr=PIPE, check=True, text=True)
@@ -82,7 +91,7 @@ def video_properties(path: Path) -> VideoProperties:
         width = width,
         height = height,
         has_audio = has_audio,
-        crop_area = Rectangle(
+        crop = Rectangle(
             width = (crop_right - crop_left + 1),
             height = (crop_bottom - crop_top + 1),
             left = crop_left,
@@ -120,6 +129,46 @@ def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
 
     return candidates[-1]
 
+def pip_filter(display: VideoProperties) -> str:
+    """ Assembles the picture-in-picture rendering filter for ffmpeg """
+    outer_width, outer_height = pick_target_geometry(display.crop)
+
+    # Use the smaller scaling factor so the full display is always in the output.
+    scaling_x = outer_width / display.crop.width
+    scaling_y = outer_height / display.crop.height
+    scaling_factor = min(scaling_x, scaling_y)
+
+    if scaling_y < scaling_x:
+        # e.g. 4:3 slides to 16:9 output
+        scale_filter = f'scale=-1:{outer_height}'
+
+        # Slides will appear on the left, so the full slack_width is available for the
+        # overlay. But make sure it's still at least visible.
+        slack = outer_width - int(scaling_factor * display.crop.width)
+        overlay_width = max(slack, outer_width // 10)
+        overlay_scale = f'scale={overlay_width}:-1'
+    else:
+        # e.g. 16:9 slides to 1280x800
+        scale_filter = f'scale={outer_width}:-1'
+
+        # slides will be vertically centered, so the overlay should ideally only use
+        # the top half of the slack
+        slack = outer_height - int(scaling_factor * display.crop.height)
+        overlay_height = max(slack // 2, outer_height // 10)
+        overlay_scale = f'scale=-1:{overlay_height}'
+
+    # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
+    crop_filter = f'{display.crop.crop_filter()},' if display.needs_cropping() else ''
+
+    # pad to desired dimensions, place content left and vertically centered
+    pad_filter = f'pad={outer_width}:{outer_height}:0:-1'
+
+    display_filter = f'[0:v]{crop_filter}{scale_filter},{pad_filter},fps=30[main]'
+    overlay_filter = f'[1:v]{overlay_scale}[overlay]'
+    combine_filter = '[main][overlay]overlay=(main_w-overlay_w):0'
+
+    return f'{display_filter};{overlay_filter};{combine_filter}'
+
 def postprocess_picture_in_picture(
         stream_dir: Path,
         display_dir: Path,
@@ -146,44 +195,7 @@ def postprocess_picture_in_picture(
         stream = video_properties(stream_path)
         display = video_properties(display_path)
 
-        outer_width, outer_height = pick_target_geometry(display.crop_area)
-
-        # Use the smaller scaling factor so the full display is always in the output.
-        scaling_x = outer_width / display.crop_area.width
-        scaling_y = outer_height / display.crop_area.height
-        scaling_factor = min(scaling_x, scaling_y)
-
-        # one of these is zero (modulo rounding error) and not used.
-        slack_width = outer_width - int(scaling_factor * display.crop_area.width)
-        slack_height = outer_height - int(scaling_factor * display.crop_area.height)
-
-        if scaling_y < scaling_x:
-            # e.g. 4:3 slides to 16:9 output
-            scale_filter = f'scale=-1:{outer_height}'
-
-            # Slides will appear on the left, so the full slack_width is available for the
-            # overlay. But make sure it's still at least visible.
-            overlay_width = max(slack_width, outer_width // 10)
-            overlay_scale = f'scale={overlay_width}:-1'
-        else:
-            # e.g. 16:9 slides to 1280x800
-            scale_filter = f'scale={outer_width}:-1'
-
-            # slides will be vertically centered, so the overlay should ideally only use
-            # the top half of the slack
-            overlay_height = max(slack_height // 2, outer_height // 10)
-            overlay_scale = f'scale=-1:{overlay_height}'
-
-        # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
-        if display.width == display.crop_area.width and display.height == display.crop_area.height:
-            crop_filter = ''
-        else:
-            crop_filter = f'crop={display.crop_area.width}:{display.crop_area.height}:{display.crop_area.left}:{display.crop_area.top},'
-
-        display_filter = f'[0:v]{crop_filter}{scale_filter},pad={outer_width}:{outer_height}:0:-1,fps=30[main]'
-        overlay_filter = f'[1:v]{overlay_scale}[overlay]'
-        combine_filter = '[main][overlay]overlay=(main_w-overlay_w):0'
-        ffmpeg_filter = f'{display_filter};{overlay_filter};{combine_filter}'
+        ffmpeg_filter = pip_filter(display)
 
         # map all audio streams if there are any.
         # ffmpeg fails if we pass -map 1:a when there's no audio.

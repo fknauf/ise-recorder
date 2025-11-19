@@ -7,16 +7,16 @@ import { Flex, Text, View } from '@adobe/react-spectrum';
 export interface PreviewCardProps {
     label: string | undefined,
     onRemove: () => void,
-    children: Readonly<ReactNode>,
-    buttonDisabled: boolean
+    buttonDisabled: boolean,
+    children: Readonly<ReactNode>
 }
 
 export const PreviewCard = (props: Readonly<PreviewCardProps>) =>
     <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
-        <Flex direction="column" justifyContent="center" gap="size-100">
-            {props.children}
+        <Flex direction="column" justifyContent="center" gap="size-100" height="100%">
             <Text>{props.label}</Text>
-            <ActionButton onPress={props.onRemove} isDisabled={props.buttonDisabled}>Remove</ActionButton>
+            {props.children}
+            <ActionButton  marginTop="auto" onPress={props.onRemove} isDisabled={props.buttonDisabled}>Remove</ActionButton>
         </Flex>
     </View>;
 
