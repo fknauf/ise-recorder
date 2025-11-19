@@ -259,6 +259,23 @@ export default function Home() {
   // view
   ////////////////
 
+  const video_preview_card = (track: MediaStreamTrack, label: string, onRemove: (track: MediaStreamTrack) => void) =>
+    <PreviewCard
+      key={`preview-card-${track.id}`}
+      label={label}
+      buttonDisabled={isRecording}
+      onRemove={() => onRemove(track)}
+    >
+      <VideoPreview
+        track={track}
+        switchesDisabled={isRecording}
+        isMainDisplay={mainDisplay === track}
+        isOverlay={overlay === track}
+        onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? track : null) }}
+        onToggleOverlay={isSelected => { setOverlay(isSelected ? track : null)}}
+      />
+    </PreviewCard>;
+
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
       <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
@@ -266,8 +283,8 @@ export default function Home() {
           label="Lecture Title"
           value={lectureTitle}
           isReadOnly={isRecording}
-          validate={validateLectureTitle}
           isDisabled={isRecording}
+          validate={validateLectureTitle}
           onChange={setLectureTitle}
         />
         {
@@ -276,82 +293,54 @@ export default function Home() {
               label="e-Mail"
               validate={validateEmail}
               value={lecturerEmail}
-              isReadOnly={false}
               onChange={setLecturerEmail}
             />
         }
-        <Divider orientation="vertical" size="M"/>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={isRecording} alignSelf="end">
-          <DeviceDesktop/>
-          <Text>Add Screen/Window</Text>
-        </ActionButton>
+        <Flex direction="row" justifyContent="center" alignSelf="end" gap="size-100" wrap>
+          <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        <MenuTrigger onOpenChange={getMediaDevices}>
-          <ActionButton isDisabled={isRecording} alignSelf="end">
-            <MovieCamera/>
-            <Text>Add Video Source</Text>
+          <ActionButton onPress={openDisplayStream} isDisabled={isRecording} alignSelf="end">
+            <DeviceDesktop/>
+            <Text>Add Screen/Window</Text>
           </ActionButton>
-          <Menu onAction={addVideoSource}>
-            { camVideoTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
-          </Menu>
-        </MenuTrigger>
 
-        <MenuTrigger onOpenChange={getMediaDevices}>
-          <ActionButton isDisabled={isRecording} alignSelf="end">
-            <CallCenter/>
-            <Text>Add Audio Source</Text>
-          </ActionButton>
-          <Menu onAction={addAudioSource}>
-            { camAudioTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
-          </Menu>
-        </MenuTrigger>
+          <MenuTrigger onOpenChange={getMediaDevices}>
+            <ActionButton isDisabled={isRecording} alignSelf="end">
+              <MovieCamera/>
+              <Text>Add Video Source</Text>
+            </ActionButton>
+            <Menu onAction={addVideoSource}>
+              { camVideoTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
+            </Menu>
+          </MenuTrigger>
 
-        <Divider orientation="vertical" size="M"/>
+          <MenuTrigger onOpenChange={getMediaDevices}>
+            <ActionButton isDisabled={isRecording} alignSelf="end">
+              <CallCenter/>
+              <Text>Add Audio Source</Text>
+            </ActionButton>
+            <Menu onAction={addAudioSource}>
+              { camAudioTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
+            </Menu>
+          </MenuTrigger>
 
-        {
+          <Divider orientation="vertical" size="S" marginX="size-100"/>
+
+          {
             isRecording
             ? <ActionButton alignSelf="end" onPress={stopRecording}><Stop/> <Text>Stop Recording</Text></ActionButton>
             : <ActionButton alignSelf="end" onPress={startRecording}><Circle/> <Text>Start Recording</Text></ActionButton>
-        }
+          }
+        </Flex>
       </Flex>
 
       <Flex direction="row" gap="size-100" justifyContent="center" wrap>
         {
-          displayTracks.map((track, ix) =>
-            <PreviewCard
-              key={`preview-card-${track.id}`}
-              label={`Screen capture ${ix}`}
-              buttonDisabled={isRecording}
-              onRemove={() => removeDisplayTrack(track)}
-            >
-              <VideoPreview
-                track={track}
-                isMainDisplay={mainDisplay === track}
-                isOverlay={overlay === track}
-                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? track : null) }}
-                onToggleOverlay={isSelected => { setOverlay(isSelected ? track : null)}}
-              />
-            </PreviewCard>
-          )
+          displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`, removeDisplayTrack))
         }
         {
-          videoTracks.map(track =>
-            <PreviewCard
-              key={`preview-card-${track.id}`}
-              label={track.label}
-              buttonDisabled={isRecording}
-              onRemove={() => removeVideoTrack(track)}
-            >
-              <VideoPreview
-                track={track}
-                isMainDisplay={mainDisplay === track}
-                isOverlay={overlay === track}
-                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? track : null) }}
-                onToggleOverlay={isSelected => { setOverlay(isSelected ? track : null)}}
-              />
-            </PreviewCard>
-          )
+          videoTracks.map(track => video_preview_card(track, track.label, removeVideoTrack))
         }
         {
           audioTracks.map(track =>

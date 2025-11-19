@@ -7,6 +7,7 @@ export interface VideoPreviewProps {
     track: MediaStreamTrack | undefined,
     isMainDisplay: boolean,
     isOverlay: boolean,
+    switchesDisabled: boolean,
     onToggleMainDisplay: (isSelected: boolean) => void,
     onToggleOverlay: (isSelected: boolean) => void
 }
@@ -37,12 +38,14 @@ export default function VideoPreview(
             />
             <Flex direction="row" justifyContent="space-between">
                 <Switch
+                    isDisabled={props.switchesDisabled}
                     isSelected={props.isMainDisplay}
                     onChange={props.onToggleMainDisplay}
                 >
                     Main Display
                 </Switch>
                 <Switch
+                    isDisabled={props.switchesDisabled}
                     isSelected={props.isOverlay}
                     onChange={props.onToggleOverlay}
                 >
