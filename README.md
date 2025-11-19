@@ -8,10 +8,6 @@ the environment variable `ISE_RECORD_API_URL`. If it is set, the recorded
 streams will be posted there chunk by chunk and the server notified to start
 post-processing when the recording stops.
 
-## Live Demo
-
-See https://record.rinderher.de
-
 ## Run it yourself
 
 I recommend running in docker:
