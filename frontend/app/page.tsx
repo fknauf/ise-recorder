@@ -31,30 +31,26 @@ interface RecordingJobs {
 const unsafeCharacters = /[^A-Za-z0-9_.-]/g;
 
 const validateLectureTitle = (title: string) => !unsafeCharacters.test(title) || 'unsafe character in lecture title';
-const validateEmail = (email: string) => email.trim() == '' || isEmail(email) || 'invalid e-mail address';
+const validateEmail = (email: string) => email.trim() === '' || isEmail(email) || 'invalid e-mail address';
 
 export default function Home() {
   ////////////////
   // hooks
   ////////////////
 
-  const [ selectedVideoSources, setSelectedVideoSources ] = useState<Key[]>([]);
-  const [ selectedAudioSources, setSelectedAudioSources ] = useState<Key[]>([]);
-  const [ selectedDisplayStreams, setSelectedDisplayStreams ]= useState<MediaStream[]>([]);
+  const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
+  const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
+  const [ displayTracks, setDisplayTracks ]= useState<MediaStreamTrack[]>([]);
+
   const [ activeRecording, setActiveRecording ] = useState<RecordingJobs | null>(null);
   const [ recordings, setRecordings ] = useState<RecordingFileList[]>([]);
   const [ lectureTitle, setLectureTitle ] = useState("")
   const [ lecturerEmail, setLecturerEmail ] = useState("")
 
-  const [ mainDisplay, setMainDisplay ] = useState<Key>();
-  const [ overlay, setOverlay ] = useState<Key>();
+  const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
+  const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
 
-  const {
-    stream,
-    getMediaDevices,
-    audioInputDevices,
-    videoInputDevices,
-  } = useMediaStream();
+  const { stream, getMediaDevices } = useMediaStream();
 
   const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
 
@@ -66,53 +62,76 @@ export default function Home() {
   // logic
   ////////////////
 
-  const isRecording = activeRecording != null;
+  const isRecording = activeRecording !== null;
   const apiUrl = serverEnv?.api_url
+
+  const camVideoTracks = stream?.getVideoTracks() ?? []
+  const camAudioTracks = stream?.getAudioTracks() ?? []
 
   const openDisplayStream = async () => {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia();
-      setSelectedDisplayStreams(selectedDisplayStreams.concat([screenStream]));
+      const screenTracks = screenStream.getVideoTracks();
 
-      if(!mainDisplay) {
-        setMainDisplay(`display-${selectedDisplayStreams.length}`)
+      // should only ever be one video track, but let's just grab all just in case. user can
+      // still remove them manually if there happen to be more.
+      setDisplayTracks([ ...displayTracks, ...screenTracks ]);
+
+      if(!mainDisplay && screenTracks.length > 0) {
+        setMainDisplay(screenTracks[0])
       }
     } catch(e) {
       console.log(e);
     }
   }
 
-  const addVideoSource = (deviceId: Key) => {
-    if(!selectedVideoSources.includes(deviceId)) {
-      setSelectedVideoSources(selectedVideoSources.concat([deviceId]));
+  const addVideoSource = (newTrackId: Key) => {
+    const newTrack = camVideoTracks.find(track => track.id === newTrackId);
+
+    if(newTrack && !videoTracks.find(track => track.id === newTrackId)) {
+      setVideoTracks([...videoTracks, newTrack ])
 
       if(!overlay) {
-        setOverlay(deviceId);
+        setOverlay(newTrack);
       }
     }
   }
 
-  const addAudioSource = (deviceId: Key) => {
-    if(!selectedAudioSources.includes(deviceId)) {
-      setSelectedAudioSources(selectedAudioSources.concat([deviceId]));
+  const addAudioSource = (newTrackId: Key) => {
+    const newTrack = camAudioTracks.find(track => track.id === newTrackId);
+
+    if(newTrack && !audioTracks.find(track => track.id === newTrackId)) {
+      setAudioTracks([ ...audioTracks, newTrack ]);
     }
   }
 
-  const removeSourceFn =
-    (setter: (newData: Key[]) => void, currentData: Key[]) =>
-      (key: Key) => setter(currentData.filter(src => src != key));
-  const removeVideoSource = removeSourceFn(setSelectedVideoSources, selectedVideoSources);
-  const removeAudioSource = removeSourceFn(setSelectedAudioSources, selectedAudioSources);
-  const removeDisplayStream = (stream: MediaStream) => {
-    stream.getTracks().forEach(track => track.stop())
-    setSelectedDisplayStreams(selectedDisplayStreams.filter(s => s !== stream));
+  const removeVideoTrack = (track: MediaStreamTrack) => {
+    if(mainDisplay === track) {
+      setMainDisplay(null)
+    }
+    if(overlay === track) {
+      setOverlay(null)
+    }
+
+    setVideoTracks(videoTracks.filter(t => t !== track));
   }
 
-  const findTrack = (tracks: MediaStreamTrack[], deviceId: Key) => tracks.find(track => track.getSettings().deviceId == deviceId);
-  const findVideoTrack = (deviceId: Key) => findTrack(stream?.getVideoTracks() ?? [], deviceId);
-  const findAudioTrack = (deviceId: Key) => findTrack(stream?.getAudioTracks() ?? [], deviceId);
+  const removeAudioTrack = (track: MediaStreamTrack) => {
+    setAudioTracks(audioTracks.filter(t => t !== track));
+  }
 
-  const findLabel = (devs: MediaDeviceInfo[], id: Key) => devs.find(dev => dev.deviceId == id)?.label;
+  const removeDisplayTrack = (track: MediaStreamTrack) => {
+    if(mainDisplay === track) {
+      setMainDisplay(null)
+    }
+    if(overlay === track) {
+      setOverlay(null)
+    }
+
+    track.stop();
+
+    setDisplayTracks(displayTracks.filter(t => t !== track));
+  }
 
   const recordTracks = (
     tracks: MediaStreamTrack[],
@@ -187,13 +206,9 @@ export default function Home() {
       return;
     }
 
-    const videoTracks = selectedVideoSources.map(findVideoTrack).filter(track => track !== undefined);
-    const audioTracks = selectedAudioSources.map(findAudioTrack).filter(track => track !== undefined);
-    const displayTracks = selectedDisplayStreams.flatMap(stream => stream.getTracks());
-
     const allTracks = displayTracks.concat(videoTracks).concat(audioTracks);
 
-    if(allTracks.length == 0) {
+    if(allTracks.length === 0) {
       return;
     }
 
@@ -251,7 +266,7 @@ export default function Home() {
           isDisabled={isRecording}
           onChange={setLectureTitle}
         />
-        { 
+        {
           apiUrl !== undefined &&
             <TextField
               label="e-Mail"
@@ -274,7 +289,7 @@ export default function Home() {
             <Text>Add Video Source</Text>
           </ActionButton>
           <Menu onAction={addVideoSource}>
-            { videoInputDevices.map(dev => <Item key={dev.deviceId}>{dev.label}</Item>) }
+            { camVideoTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
           </Menu>
         </MenuTrigger>
 
@@ -284,7 +299,7 @@ export default function Home() {
             <Text>Add Audio Source</Text>
           </ActionButton>
           <Menu onAction={addAudioSource}>
-            { audioInputDevices.map(dev => <Item key={dev.deviceId}>{dev.label}</Item>) }
+            { camAudioTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
           </Menu>
         </MenuTrigger>
 
@@ -299,58 +314,50 @@ export default function Home() {
 
       <Flex direction="row" gap="size-100" justifyContent="center" wrap>
         {
-          selectedDisplayStreams.map((stream, ix) =>
+          displayTracks.map((track, ix) =>
             <PreviewCard
-              key={`preview-card-display-${ix}`}
+              key={`preview-card-${track.id}`}
               label={`Screen capture ${ix}`}
               buttonDisabled={isRecording}
-              onRemove={() => {
-                if(mainDisplay == `display-${ix}`) {
-                  setMainDisplay(undefined);
-                }
-                if(overlay == `display-${ix}`) {
-                  setOverlay(undefined);
-                }
-                removeDisplayStream(stream)
-              }}
+              onRemove={() => removeDisplayTrack(track)}
             >
               <VideoPreview
-                track={stream.getTracks()[0]}
-                isMainDisplay={mainDisplay == `display-${ix}`}
-                isOverlay={overlay == `display-${ix}`}
-                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? `display-${ix}` : undefined) }}
-                onToggleOverlay={isSelected => { setOverlay(isSelected ? `display-${ix}` : undefined)}}
+                track={track}
+                isMainDisplay={mainDisplay === track}
+                isOverlay={overlay === track}
+                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? track : null) }}
+                onToggleOverlay={isSelected => { setOverlay(isSelected ? track : null)}}
               />
             </PreviewCard>
           )
         }
         {
-          selectedVideoSources.map(deviceId =>
+          videoTracks.map(track =>
             <PreviewCard
-              key={`preview-card-${deviceId}`}
-              label={findLabel(videoInputDevices, deviceId)}
+              key={`preview-card-${track.id}`}
+              label={track.label}
               buttonDisabled={isRecording}
-              onRemove={() => removeVideoSource(deviceId)}
+              onRemove={() => removeVideoTrack(track)}
             >
               <VideoPreview
-                track={findVideoTrack(deviceId)}
-                isMainDisplay={mainDisplay == deviceId}
-                isOverlay={overlay == deviceId}
-                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? deviceId : undefined) }}
-                onToggleOverlay={isSelected => setOverlay(isSelected ? deviceId : undefined) }
+                track={track}
+                isMainDisplay={mainDisplay === track}
+                isOverlay={overlay === track}
+                onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? track : null) }}
+                onToggleOverlay={isSelected => { setOverlay(isSelected ? track : null)}}
               />
             </PreviewCard>
           )
         }
         {
-          selectedAudioSources.map(deviceId =>
+          audioTracks.map(track =>
             <PreviewCard
-              key={`preview-card-${deviceId}`}
-              label={findLabel(audioInputDevices, deviceId)}
+              key={`preview-card-${track.id}`}
+              label={track.label}
               buttonDisabled={isRecording}
-              onRemove={() => removeAudioSource(deviceId)}
+              onRemove={() => removeAudioTrack(track)}
             >
-              <AudioPreview track={findAudioTrack(deviceId)}/>
+              <AudioPreview track={track}/>
             </PreviewCard>
           )
         }
@@ -362,7 +369,7 @@ export default function Home() {
             <SavedRecordingsCard
               key={`saved-recording-${r.name}`}
               recording={r}
-              isBeingRecorded={r.name == activeRecording?.name}
+              isBeingRecorded={r.name === activeRecording?.name}
               onRemoved={() => getRecordingsList().then(setRecordings) }
             />
           )
