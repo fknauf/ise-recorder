@@ -1,6 +1,6 @@
 'use client';
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, Key } from "@adobe/react-spectrum";
+import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, Key, TextField } from "@adobe/react-spectrum";
 import CallCenter from '@spectrum-icons/workflow/CallCenter';
 import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';
@@ -14,6 +14,7 @@ import { PreviewCard } from "./lib/PreviewCard";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
 import { scheduleRenderingJob, sendChunkToServer } from "./lib/serverStorage";
+import isEmail from 'validator/lib/isEmail';
 
 interface RecordingJob {
   recorder: MediaRecorder
@@ -25,6 +26,11 @@ interface RecordingJobs {
   recorders: MediaRecorder[]
 }
 
+const unsafeCharacters = /[^A-Za-z0-9_.-]/g;
+
+const validateLectureTitle = (title: string) => !unsafeCharacters.test(title) || 'unsafe character in lecture title';
+const validateEmail = (email: string) => email.trim() == '' || isEmail(email) || 'invalid e-mail address';
+
 export default function Home() {
   ////////////////
   // hooks
@@ -35,6 +41,8 @@ export default function Home() {
   const [ selectedDisplayStreams, setSelectedDisplayStreams ]= useState<MediaStream[]>([]);
   const [ activeRecording, setActiveRecording ] = useState<RecordingJobs | null>(null);
   const [ recordings, setRecordings ] = useState<RecordingFileList[]>([]);
+  const [ lectureTitle, setLectureTitle ] = useState("")
+  const [ lecturerEmail, setLecturerEmail ] = useState("")
 
   const {
     stream,
@@ -172,7 +180,8 @@ export default function Home() {
     }
 
     const timestamp = new Date();
-    const recordingName = timestamp.toISOString().replaceAll(':', '');
+    const lecturePrefix = lectureTitle ? `${lectureTitle}_` : '';
+    const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeCharacters, '');
 
     const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.webm', { mimeType: 'video/webm' });
     const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, '.ogg', { mimeType: 'audio/ogg' });
@@ -199,7 +208,7 @@ export default function Home() {
 
     await Promise.all(allJobs.map(job => job.finished));
 
-    scheduleRenderingJob(recordingName, recordingName)
+    scheduleRenderingJob(recordingName, recordingName, lecturerEmail);
 
     setActiveRecording(null);
     setRecordings(await getRecordingsList());
@@ -215,9 +224,27 @@ export default function Home() {
 
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
-      <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100">
+      <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
+        <TextField
+          label="Lecture Title"
+          value={lectureTitle}
+          isReadOnly={isRecording}
+          validate={validateLectureTitle}
+          isDisabled={isRecording}
+          onChange={setLectureTitle}
+        />
+        <TextField
+          label="e-Mail"
+          validate={validateEmail}
+          value={lecturerEmail}
+          isReadOnly={false}
+          onChange={setLecturerEmail}
+        />
+
+        <Divider orientation="vertical" size="M"/>
+
         <MenuTrigger onOpenChange={getMediaDevices}>
-          <ActionButton isDisabled={isRecording}>
+          <ActionButton isDisabled={isRecording} alignSelf="end">
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
@@ -227,7 +254,7 @@ export default function Home() {
         </MenuTrigger>
 
         <MenuTrigger onOpenChange={getMediaDevices}>
-          <ActionButton isDisabled={isRecording}>
+          <ActionButton isDisabled={isRecording} alignSelf="end">
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
@@ -236,7 +263,7 @@ export default function Home() {
           </Menu>
         </MenuTrigger>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={isRecording}>
+        <ActionButton onPress={openDisplayStream} isDisabled={isRecording} alignSelf="end">
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
@@ -245,12 +272,12 @@ export default function Home() {
 
         {
             isRecording
-            ? <ActionButton onPress={stopRecording}><Stop/> <Text>Stop Recording</Text></ActionButton>
-            : <ActionButton onPress={startRecording}><Circle/> <Text>Start Recording</Text></ActionButton>
+            ? <ActionButton alignSelf="end" onPress={stopRecording}><Stop/> <Text>Stop Recording</Text></ActionButton>
+            : <ActionButton alignSelf="end" onPress={startRecording}><Circle/> <Text>Start Recording</Text></ActionButton>
         }
       </Flex>
 
-      <Flex direction="row" gap="size-100" justifyContent="center" wrap={true}>
+      <Flex direction="row" gap="size-100" justifyContent="center" wrap>
         {
           selectedVideoSources.map(deviceId =>
             <PreviewCard
@@ -291,7 +318,7 @@ export default function Home() {
         }
       </Flex>
 
-      <Flex direction="row" gap="size-100" wrap={true}>
+      <Flex direction="row" gap="size-100" wrap>
         {
           recordings.map(r =>
             <SavedRecordingsCard
