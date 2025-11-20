@@ -6,7 +6,7 @@ import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';
 import DeviceDesktop from '@spectrum-icons/workflow/DeviceDesktop';
 import Stop from '@spectrum-icons/workflow/Stop';
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import VideoPreview from "./lib/VideoPreview";
 import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
