@@ -325,7 +325,7 @@ export default function Home() {
           onChange={setLectureTitle}
         />
         {
-          apiUrl !== undefined &&
+          apiUrl &&
             <TextField
               label="e-Mail"
               validate={validateEmail}
