@@ -250,7 +250,7 @@ export default function Home() {
   };
 
   const stopRecording = () => {
-    activeRecording?.recorders.forEach(async r => r.stop());
+    activeRecording?.recorders.forEach(r => r.stop());
     setActiveRecording(null);
   };
 
