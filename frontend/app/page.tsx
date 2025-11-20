@@ -34,17 +34,18 @@ function useUserMediaDevices(): [ MediaDeviceInfo[], MediaDeviceInfo[], () => Pr
 
   const refresh = useCallback(async () => {
     if(!initialized) {
+      // Request permissions, needs to happen before devices can be enumerated
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       await navigator.permissions.query({ name: "microphone" });
       stream.getTracks().forEach(t => t.stop());
 
       setInitialized(initialized);
-
-      const devs = await navigator.mediaDevices.enumerateDevices();
-
-      setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
-      setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
     }
+
+    const devs = await navigator.mediaDevices.enumerateDevices();
+
+    setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
+    setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
   }, [ initialized ])
 
   return [ videoDevices, audioDevices, refresh ]

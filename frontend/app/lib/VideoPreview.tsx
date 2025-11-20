@@ -34,7 +34,7 @@ export default function VideoPreview(
                 muted
                 width={384}
                 height={216}
-                style={{backgroundColor: "blue"}}
+                style={{backgroundColor: "black"}}
             />
             <Flex direction="row" justifyContent="space-between">
                 <Switch
