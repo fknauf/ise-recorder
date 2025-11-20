@@ -104,8 +104,9 @@ export default function Home() {
     }
   }
 
-  const deviceUniqueId = (dev: MediaDeviceInfo) => `${dev.groupId}|${dev.deviceId}`;
-  const splitDeviceUniqueId = (devUid: string) => devUid.split('|');
+  // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
+  const deviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
+  const splitDeviceUniqueId = (devUid: string): [ string, string ] => JSON.parse(devUid);
   const deviceConstraints = (groupId: string, deviceId: string): MediaTrackConstraints =>
     ({
       groupId: { exact: groupId },
