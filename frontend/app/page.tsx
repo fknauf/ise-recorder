@@ -27,29 +27,17 @@ interface RecordingJobs {
   recorders: MediaRecorder[]
 }
 
-function useUserMediaDevices(): [ MediaDeviceInfo[], MediaDeviceInfo[], () => Promise<void> ] {
-  const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([])
-  const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([])
-  const [ initialized, setInitialized ] = useState(false);
+// This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
+const deviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
+const splitDeviceUniqueId = (devUid: string): [ string, string ] => JSON.parse(devUid);
+const deviceConstraints = (groupId: string, deviceId: string): MediaTrackConstraints =>
+  ({
+    groupId: { exact: groupId },
+    deviceId: { exact: deviceId }
+  });
 
-  const refresh = useCallback(async () => {
-    if(!initialized) {
-      // Request permissions, needs to happen before devices can be enumerated
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      await navigator.permissions.query({ name: "microphone" });
-      stream.getTracks().forEach(t => t.stop());
-
-      setInitialized(initialized);
-    }
-
-    const devs = await navigator.mediaDevices.enumerateDevices();
-
-    setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
-    setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
-  }, [ initialized ])
-
-  return [ videoDevices, audioDevices, refresh ]
-}
+const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
+  track.getSettings().groupId === groupId && track.getSettings().deviceId == deviceId;
 
 const unsafeCharacters = /[^A-Za-z0-9_.-]/g;
 
@@ -60,6 +48,10 @@ export default function Home() {
   ////////////////
   // hooks
   ////////////////
+
+  const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([])
+  const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([])
+  const [ hasPermissions, setHasPermissions ] = useState(false);
 
   const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
   const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
@@ -73,7 +65,6 @@ export default function Home() {
   const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
   const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
 
-  const [ videoDevices, audioDevices, refreshUserMediaDevices ] = useUserMediaDevices();
   const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
 
   useEffect(() => {
@@ -86,6 +77,23 @@ export default function Home() {
 
   const isRecording = activeRecording !== null;
   const apiUrl = serverEnv?.api_url
+
+  const refreshUserMediaDevices = async () => {
+    if(!hasPermissions) {
+      // Request permissions, needs to happen before devices can be enumerated
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+      if(stream) {
+        stream.getTracks().forEach(t => t.stop());
+        setHasPermissions(true);
+      }
+    }
+
+    const devs = await navigator.mediaDevices.enumerateDevices();
+
+    setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
+    setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
+  };
 
   const openDisplayStream = async () => {
     try {
@@ -102,19 +110,7 @@ export default function Home() {
     } catch(e) {
       console.log(e);
     }
-  }
-
-  // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
-  const deviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
-  const splitDeviceUniqueId = (devUid: string): [ string, string ] => JSON.parse(devUid);
-  const deviceConstraints = (groupId: string, deviceId: string): MediaTrackConstraints =>
-    ({
-      groupId: { exact: groupId },
-      deviceId: { exact: deviceId }
-    });
-
-  const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
-    track.getSettings().groupId === groupId && track.getSettings().deviceId == deviceId;
+  };
 
   const addVideoDevice = async (devUid: string) => {
     const [ groupId, deviceId ] = splitDeviceUniqueId(devUid);
