@@ -13,7 +13,7 @@ import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
-import { scheduleRenderingJob, sendChunkToServer } from "./lib/serverStorage";
+import { scheduleRenderingJob as schedulePostprocessing, sendChunkToServer } from "./lib/serverStorage";
 import isEmail from 'validator/es/lib/isEmail';
 import useSWR from "swr";
 import { clientGetPublicServerEnvironment } from "./env/lib";
@@ -245,14 +245,13 @@ export default function Home() {
 
     await Promise.all(jobs.map(job => job.finished));
 
-    scheduleRenderingJob(apiUrl, recordingName, recordingName, lecturerEmail);
-
-    setActiveRecording(null);
+    schedulePostprocessing(apiUrl, recordingName, recordingName, lecturerEmail);
     setRecordings(await getRecordingsList());
   };
 
   const stopRecording = () => {
-    activeRecording?.recorders.forEach(r => r.stop());
+    activeRecording?.recorders.forEach(async r => r.stop());
+    setActiveRecording(null);
   };
 
   ////////////////
