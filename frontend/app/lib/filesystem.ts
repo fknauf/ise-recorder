@@ -26,7 +26,7 @@ export async function getRecordingsList() {
 
     for(const rname of recordingNames.sort()) {
         const dir = await recordingsDir.getDirectoryHandle(rname);
-        const fnames = await Array.fromAsync(dir.keys());
+        const fnames = (await Array.fromAsync(dir.keys())).sort();
 
         const getFileInfo = async (filename: string) => {
             let size: number | undefined

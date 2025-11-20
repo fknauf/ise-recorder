@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from subprocess import run, CalledProcessError, PIPE
 import sys
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +175,7 @@ def pip_filter(stream: VideoProperties) -> str:
 def postprocess_picture_in_picture(
         stream_dir: Path,
         overlay_dir: Path,
+        audio_dirs: List[Path],
         output_path: Path
 ) -> Result:
     """
@@ -190,10 +191,12 @@ def postprocess_picture_in_picture(
 
     stream_path = None
     overlay_path = None
+    audio_paths = []
 
     try:
         stream_path = concat_chunks(stream_dir)
         overlay_path = concat_chunks(overlay_dir)
+        audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
 
         stream = video_properties(stream_path)
         #overlay = video_properties(overlay_path)
@@ -203,12 +206,16 @@ def postprocess_picture_in_picture(
         # map all audio streams if there are any.
         # ffmpeg fails if we pass -map 1:a when there's no audio.
         audio_map = ['-map', '0:a' ] if stream.has_audio else []
+        audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
+        audio_map = [ token for num in range(len(audio_paths)) for token in [ '-map', f'{num + 2}:a' ] ]
 
         render_command = [
             'ffmpeg',
             '-i', str(stream_path),
-            '-i', str(overlay_path),
+            '-i', str(overlay_path)
+        ] + audio_input + [
             '-filter_complex', ffmpeg_filter,
+            '-map', '0:a?',
         ] + audio_map + [
             '-y',
             str(output_path)
@@ -225,9 +232,12 @@ def postprocess_picture_in_picture(
             stream_path.unlink()
         if overlay_path is not None:
             overlay_path.unlink()
+        for p in audio_paths:
+            p.unlink()
 
 def postprocess_index(
         stream_dir: Path,
+        audio_dirs: List[Path],
         output_path: Path
 ) -> Result:
     """
@@ -237,10 +247,16 @@ def postprocess_index(
         This will usually be a recording of slides with just a microphone but no camera.
     """
 
+    audio_paths = []
     stream_path = concat_chunks(stream_dir)
 
     try:
-        command =[ 'ffmpeg', '-i', stream_path, '-y', output_path ]
+        audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
+        audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
+        maps = [ '-map', '0' ] + [ token for num in range(len(audio_paths)) for token in [ '-map', f'{num + 1}:a' ] ]
+
+        command = [ 'ffmpeg', '-i', stream_path ] + audio_input + maps + [ '-y', output_path ]
+        print(command)
         run(command, stdout=PIPE, stderr=PIPE, text=True, check=True)
 
         return Result(output_file=output_path, reason=ResultReason.SUCCESS)
@@ -249,6 +265,9 @@ def postprocess_index(
         return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
         stream_path.unlink()
+        for p in audio_paths:
+            p.unlink()
+
 
 def postprocess_recording(recording_path: Path) -> Result | None:
     """ Postprocess the chunks of a recording """
@@ -262,6 +281,7 @@ def postprocess_recording(recording_path: Path) -> Result | None:
 
     stream_dir = recording_path / "stream"
     overlay_dir = recording_path / "overlay"
+    audio_dirs = list(recording_path.glob('audio-*'))
     output_path = recording_path / 'presentation.webm'
 
     if not stream_dir.is_dir():
@@ -269,8 +289,8 @@ def postprocess_recording(recording_path: Path) -> Result | None:
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     if overlay_dir.is_dir():
-        return postprocess_picture_in_picture(stream_dir, overlay_dir, output_path)
-    return postprocess_index(stream_dir, output_path)
+        return postprocess_picture_in_picture(stream_dir, overlay_dir, audio_dirs, output_path)
+    return postprocess_index(stream_dir, audio_dirs, output_path)
 
 if __name__ == "__main__":
     print(postprocess_recording(Path(sys.argv[1])))

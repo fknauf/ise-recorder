@@ -6,8 +6,7 @@ import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';
 import DeviceDesktop from '@spectrum-icons/workflow/DeviceDesktop';
 import Stop from '@spectrum-icons/workflow/Stop';
-import { useEffect, useState } from "react";
-import useMediaStream from "use-media-stream";
+import { useCallback, useEffect, useState } from "react";
 import VideoPreview from "./lib/VideoPreview";
 import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
@@ -26,6 +25,29 @@ interface RecordingJob {
 interface RecordingJobs {
   name: string,
   recorders: MediaRecorder[]
+}
+
+function useUserMediaDevices(): [ MediaDeviceInfo[], MediaDeviceInfo[], () => Promise<void> ] {
+  const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([])
+  const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([])
+  const [ initialized, setInitialized ] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if(!initialized) {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      await navigator.permissions.query({ name: "microphone" });
+      stream.getTracks().forEach(t => t.stop());
+
+      setInitialized(initialized);
+
+      const devs = await navigator.mediaDevices.enumerateDevices();
+
+      setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
+      setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
+    }
+  }, [ initialized ])
+
+  return [ videoDevices, audioDevices, refresh ]
 }
 
 const unsafeCharacters = /[^A-Za-z0-9_.-]/g;
@@ -50,8 +72,7 @@ export default function Home() {
   const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
   const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
 
-  const { stream, getMediaDevices } = useMediaStream();
-
+  const [ videoDevices, audioDevices, refreshUserMediaDevices ] = useUserMediaDevices();
   const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
 
   useEffect(() => {
@@ -64,9 +85,6 @@ export default function Home() {
 
   const isRecording = activeRecording !== null;
   const apiUrl = serverEnv?.api_url
-
-  const camVideoTracks = stream?.getVideoTracks() ?? []
-  const camAudioTracks = stream?.getAudioTracks() ?? []
 
   const openDisplayStream = async () => {
     try {
@@ -85,51 +103,67 @@ export default function Home() {
     }
   }
 
-  const addVideoSource = (newTrackId: Key) => {
-    const newTrack = camVideoTracks.find(track => track.id === newTrackId);
+  const deviceUniqueId = (dev: MediaDeviceInfo) => `${dev.groupId}|${dev.deviceId}`;
+  const splitDeviceUniqueId = (devUid: string) => devUid.split('|');
+  const deviceConstraints = (groupId: string, deviceId: string): MediaTrackConstraints =>
+    ({
+      groupId: { exact: groupId },
+      deviceId: { exact: deviceId }
+    });
 
-    if(newTrack && !videoTracks.find(track => track.id === newTrackId)) {
-      setVideoTracks([...videoTracks, newTrack ])
+  const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
+    track.getSettings().groupId === groupId && track.getSettings().deviceId == deviceId;
 
-      if(!overlay) {
-        setOverlay(newTrack);
-      }
+  const addVideoDevice = async (devUid: string) => {
+    const [ groupId, deviceId ] = splitDeviceUniqueId(devUid);
+
+    if(videoTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
+      return;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: deviceConstraints(groupId, deviceId), audio: false });
+    setVideoTracks([...videoTracks, ...stream.getVideoTracks() ])
+
+    if(!overlay) {
+      setOverlay(stream.getVideoTracks().at(0) ?? null);
     }
   }
 
-  const addAudioSource = (newTrackId: Key) => {
-    const newTrack = camAudioTracks.find(track => track.id === newTrackId);
+  const addAudioDevice = async (devUid: string) => {
+    const [ groupId, deviceId ] = splitDeviceUniqueId(devUid);
 
-    if(newTrack && !audioTracks.find(track => track.id === newTrackId)) {
-      setAudioTracks([ ...audioTracks, newTrack ]);
+    if(audioTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
+      return;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: deviceConstraints(groupId, deviceId), video: false });
+    setAudioTracks([...audioTracks, ...stream.getAudioTracks()])
+  }
+
+  const removeTrackFromPostprocessing = (track: MediaStreamTrack) => {
+    if(mainDisplay === track) {
+      setMainDisplay(null);
+    }
+
+    if(overlay === track) {
+      setOverlay(null);
     }
   }
 
   const removeVideoTrack = (track: MediaStreamTrack) => {
-    if(mainDisplay === track) {
-      setMainDisplay(null)
-    }
-    if(overlay === track) {
-      setOverlay(null)
-    }
-
+    removeTrackFromPostprocessing(track);
+    track.stop();
     setVideoTracks(videoTracks.filter(t => t !== track));
   }
 
   const removeAudioTrack = (track: MediaStreamTrack) => {
+    track.stop();
     setAudioTracks(audioTracks.filter(t => t !== track));
   }
 
   const removeDisplayTrack = (track: MediaStreamTrack) => {
-    if(mainDisplay === track) {
-      setMainDisplay(null)
-    }
-    if(overlay === track) {
-      setOverlay(null)
-    }
-
+    removeTrackFromPostprocessing(track);
     track.stop();
-
     setDisplayTracks(displayTracks.filter(t => t !== track));
   }
 
@@ -202,13 +236,9 @@ export default function Home() {
   };
 
   const startRecording = async () => {
-    if(isRecording) {
-      return;
-    }
+    const noTracksAvailable = displayTracks.length === 0 && videoTracks.length === 0 && audioTracks.length === 0;
 
-    const allTracks = displayTracks.concat(videoTracks).concat(audioTracks);
-
-    if(allTracks.length === 0) {
+    if(isRecording || noTracksAvailable) {
       return;
     }
 
@@ -216,27 +246,34 @@ export default function Home() {
     const lecturePrefix = lectureTitle ? `${lectureTitle}_` : '';
     const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeCharacters, '');
 
-    const recordVideoTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'webm', { mimeType: 'video/webm' });
-    const recordAudioTracks = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'ogg', { mimeType: 'audio/ogg' });
+    const recordVideo = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'webm', { mimeType: 'video/webm' });
+    const recordAudio = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'webm', { mimeType: 'audio/webm' });
 
     const jobs: RecordingJob[] = [];
 
+    // if no main display is selected, guess a sensible default: first captured display if there
+    // are display streams, first video input otherwise, but don't use the overlay track.
     const effectiveMainDisplay = mainDisplay ?? displayTracks.filter(t => t !== overlay).at(0) ?? videoTracks.filter(t => t !== overlay).at(0)
 
     if(effectiveMainDisplay) {
-      jobs.push(recordVideoTracks([ effectiveMainDisplay, ...audioTracks ], 'stream'));
+      // attach first audio stream to main display if available, record the rest into individual files.
+      // This is because at time of writing MediaRecorder on FF and Chrome does not support multiple
+      // audio tracks (nor multiple video tracks, for that matter).
+      jobs.push(recordVideo([ effectiveMainDisplay, ...audioTracks.slice(0, 1) ], 'stream'));
+      jobs.push(...audioTracks.slice(1).map((track, index) => recordAudio([track], `audio-${index}`)));
     } else {
-      jobs.push(...audioTracks.map((track, index) => recordAudioTracks([track], `audio-${index}`)));
+      // if no video streams are available, record each audio track into its own file
+      jobs.push(...audioTracks.map((track, index) => recordAudio([track], `audio-${index}`)));
     }
 
     if(overlay != null) {
-      jobs.push(recordVideoTracks([ overlay ], 'overlay'));
+      jobs.push(recordVideo([ overlay ], 'overlay'));
     }
 
+    // If there are more video tracks than main and overlay, record each into its own file for manual postprocessing.
     const notYetHandled = (track: MediaStreamTrack) => track !== effectiveMainDisplay && track !== overlay;
-
-    jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => recordVideoTracks([track], `video-${i}`)));
-    jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => recordVideoTracks([track], `display-${i}`)));
+    jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `video-${i}`)));
+    jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `display-${i}`)));
 
     setActiveRecording({
       name: recordingName,
@@ -304,23 +341,23 @@ export default function Home() {
             <Text>Add Screen/Window</Text>
           </ActionButton>
 
-          <MenuTrigger onOpenChange={getMediaDevices}>
+          <MenuTrigger onOpenChange={refreshUserMediaDevices}>
             <ActionButton isDisabled={isRecording} alignSelf="end">
               <MovieCamera/>
               <Text>Add Video Source</Text>
             </ActionButton>
-            <Menu onAction={addVideoSource}>
-              { camVideoTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
+            <Menu onAction={devUid => addVideoDevice(devUid as string)}>
+              { videoDevices.map(dev => <Item key={deviceUniqueId(dev)}>{dev.label}</Item>) }
             </Menu>
           </MenuTrigger>
 
-          <MenuTrigger onOpenChange={getMediaDevices}>
+          <MenuTrigger onOpenChange={refreshUserMediaDevices}>
             <ActionButton isDisabled={isRecording} alignSelf="end">
               <CallCenter/>
               <Text>Add Audio Source</Text>
             </ActionButton>
-            <Menu onAction={addAudioSource}>
-              { camAudioTracks.map(track => <Item key={track.id}>{track.label}</Item>) }
+            <Menu onAction={devUid => addAudioDevice(devUid as string)}>
+              { audioDevices.map(dev => <Item key={deviceUniqueId(dev)}>{dev.label}</Item>) }
             </Menu>
           </MenuTrigger>
 
