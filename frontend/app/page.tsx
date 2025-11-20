@@ -15,8 +15,7 @@ import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
 import { scheduleRenderingJob, sendChunkToServer } from "./lib/serverStorage";
 import isEmail from 'validator/es/lib/isEmail';
-import useSWR from "swr";
-import { clientGetPublicServerEnvironment } from "./env/lib";
+import { useServerEnv } from "./lib/ServerEnvProvider";
 
 interface RecordingJob {
   recorder: MediaRecorder
@@ -52,7 +51,7 @@ export default function Home() {
 
   const { stream, getMediaDevices } = useMediaStream();
 
-  const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
+  const { apiUrl } = useServerEnv();
 
   useEffect(() => {
     getRecordingsList().then(setRecordings);
@@ -63,7 +62,6 @@ export default function Home() {
   ////////////////
 
   const isRecording = activeRecording !== null;
-  const apiUrl = serverEnv?.api_url
 
   const camVideoTracks = stream?.getVideoTracks() ?? []
   const camAudioTracks = stream?.getAudioTracks() ?? []

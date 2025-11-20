@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { ClientProviders } from "./lib/Provider";
+import { SpectrumProvider } from "./lib/SpectrumProvider";
+import ServerEnvProvider from "./lib/ServerEnvProvider";
+import { getServerEnv } from "./lib/ServerEnv";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,17 +20,23 @@ export const metadata: Metadata = {
   description: "Client-only lecture recorder",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  'use server';
+
+  const env = await getServerEnv();
+
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <ClientProviders>
-          {children}
-        </ClientProviders>
+        <SpectrumProvider>
+          <ServerEnvProvider env={env}>
+            {children}
+          </ServerEnvProvider>
+        </SpectrumProvider>
       </body>
     </html>
   );

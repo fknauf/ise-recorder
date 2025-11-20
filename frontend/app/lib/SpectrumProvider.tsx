@@ -11,7 +11,8 @@ declare module '@adobe/react-spectrum' {
     }
 }
 
-export function ClientProviders(
+// Provider for react-spectrum components, see https://react-spectrum.adobe.com/react-spectrum/Provider.html
+export function SpectrumProvider(
     { children }: Readonly<{children: React.ReactNode}>
 ) {
     const router = useRouter();
