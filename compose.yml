@@ -1,6 +1,6 @@
 services:
   frontend:
-    image: code.rinderher.de/library/ise-recorder
+    image: code.rinderher.de/library/ise-recorder:latest
     build: frontend
     container_name: ise-recorder-frontend
     restart: unless-stopped
@@ -20,3 +20,12 @@ services:
       - 127.0.0.1:8000:8000
     volumes:
       - ./data:/app/data
+#    environment:
+#      - ISE_RECORD_DESTDIR=/app/data
+#      - ISE_RECORD_SMTP_SERVER=mail.example.com
+#      - ISE_RECORD_SMTP_PORT=25
+#      - ISE_RECORD_SMTP_LOCAL_HOSTNAME=ise-record.example.com
+#      - ISE_RECORD_SMTP_USERNAME=user1
+#      - ISE_RECORD_SMTP_PASSWORD=supersecure
+#      - ISE_RECORD_SMTP_SENDER=ise-record@example.com
+#      - ISE_RECORD_SMTP_STARTTLS=true
