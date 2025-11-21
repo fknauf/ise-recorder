@@ -52,7 +52,7 @@ export function SavedRecordingsCard(
             onPress={() => downloadFile(recording.name, filename)}
           >
               <Download/>
-              <Text>Download {filename} {size !== undefined ? `(${formatter.format(size / 1048576)} MiB)` : ''}</Text>
+              <Text>Download {filename} {size !== undefined ? `(${formatter.format(size / 2 ** 20)} MiB)` : ''}</Text>
             </ActionButton>
           )
         }

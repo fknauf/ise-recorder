@@ -1,6 +1,6 @@
 'use client';
 
-import { Flex, ToastContainer } from "@adobe/react-spectrum";
+import { Content, Flex, Heading, InlineAlert, ToastContainer } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { VideoPreview } from "./lib/components/VideoPreview";
@@ -8,10 +8,20 @@ import { AudioPreview } from "./lib/components/AudioPreview";
 import { PreviewCard } from "./lib/components/PreviewCard";
 import { RecorderControls } from "./lib/components/RecorderControls";
 import { SavedRecordingsCard } from "./lib/components/SavedRecordingCard";
-import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/utils/filesystem";
+import { appendToRecordingFile, RecordingsState, getRecordingsState } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
 import { recordLecture, stopLectureRecording, ChunkAddress, RecordingJobs } from "./lib/utils/recording";
 import { clientGetPublicServerEnvironment } from "./env/lib";
+
+const mibFormatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 0, maximumFractionDigits: 0, useGrouping: false });
+
+function formatMib(x: number | undefined) {
+  if(x === undefined) {
+    return "N/A"
+  } else {
+    return mibFormatter.format(x / 2 ** 20) + " MiB";
+  }
+}
 
 export default function Home() {
   ////////////////
@@ -23,7 +33,7 @@ export default function Home() {
   const [ displayTracks, setDisplayTracks ]= useState<MediaStreamTrack[]>([]);
 
   const [ activeRecording, setActiveRecording ] = useState<RecordingJobs | null>(null);
-  const [ savedRecordings, setSavedRecordings ] = useState<RecordingFileList[]>([]);
+  const [ savedRecordingsState, setSavedRecordingsState ] = useState<RecordingsState>({ recordings: [] });
   const [ lectureTitle, setLectureTitle ] = useState("")
   const [ lecturerEmail, setLecturerEmail ] = useState("")
 
@@ -33,7 +43,7 @@ export default function Home() {
   const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
 
   useEffect(() => {
-    getRecordingsList().then(setSavedRecordings);
+    getRecordingsState().then(setSavedRecordingsState);
   }, [])
 
   useEffect(() => {
@@ -112,12 +122,12 @@ export default function Home() {
 
       sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
       await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
-      setSavedRecordings(await getRecordingsList());
+      setSavedRecordingsState(await getRecordingsState());
     };
 
     const onFinished = async (recordingName: string) => {
       schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
-      setSavedRecordings(await getRecordingsList());
+      setSavedRecordingsState(await getRecordingsState());
     }
 
     recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);
@@ -126,6 +136,11 @@ export default function Home() {
   const stopRecording = () => {
     stopLectureRecording(activeRecording, () => setActiveRecording(null));
   };
+
+  const quotaCritical =
+    savedRecordingsState.quota !== undefined &&
+    savedRecordingsState.usage !== undefined &&
+    savedRecordingsState.quota - savedRecordingsState.usage < 2 ** 30 * 1;
 
   ////////////////
   // view
@@ -166,6 +181,19 @@ export default function Home() {
         onStopRecording={stopRecording}
       />
 
+      {
+        quotaCritical ?
+          <Flex direction="row" justifyContent="center" marginTop="size-200">
+            <InlineAlert variant="notice">
+              <Heading>Quota warning</Heading>
+              <Content>
+                Browser storage running low: {formatMib(savedRecordingsState.usage)} of {formatMib(savedRecordingsState.quota)} used. Please consider removing some old recordings.
+              </Content>
+            </InlineAlert>
+          </Flex>
+          : <></>
+      }
+
       <Flex direction="row" gap="size-100" justifyContent="center" wrap>
         {
           displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`, removeDisplayTrack))
@@ -189,12 +217,12 @@ export default function Home() {
 
       <Flex direction="row" gap="size-100" wrap>
         {
-          savedRecordings.map(r =>
+          savedRecordingsState.recordings.map(r =>
             <SavedRecordingsCard
               key={`saved-recording-${r.name}`}
               recording={r}
               isBeingRecorded={r.name === activeRecording?.name}
-              onRemoved={() => getRecordingsList().then(setSavedRecordings) }
+              onRemoved={() => getRecordingsState().then(setSavedRecordingsState) }
             />
           )
         }

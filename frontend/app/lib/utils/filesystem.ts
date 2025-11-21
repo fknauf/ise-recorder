@@ -8,17 +8,23 @@ export interface RecordingFileList {
     fileinfos: RecordingFileInfo[]
 }
 
-export async function getRecordingsDirectory() {
+export interface RecordingsState {
+    quota?: number
+    usage?: number
+    recordings: RecordingFileList[]
+}
+
+async function getRecordingsDirectory() {
     const rootDir = await navigator.storage.getDirectory();
     return await rootDir.getDirectoryHandle("recordings", { create: true });
 }
 
-export async function getRecordingDirectory(name: string, options?: FileSystemGetDirectoryOptions) {
+async function getRecordingDirectory(name: string, options?: FileSystemGetDirectoryOptions) {
     const recordingDir = await getRecordingsDirectory();
     return await recordingDir.getDirectoryHandle(name, options);
 }
 
-export async function getRecordingsList() {
+async function getRecordingsList() {
     const recordingsDir = await getRecordingsDirectory();
     const recordingNames = await Array.fromAsync(recordingsDir.keys())
 
@@ -50,6 +56,17 @@ export async function getRecordingsList() {
     }
 
     return result;
+}
+
+export async function getRecordingsState(): Promise<RecordingsState> {
+    const recordings = await getRecordingsList();
+    const fs = await navigator.storage.estimate();
+
+    return {
+        quota: fs.quota,
+        usage: fs.usage,
+        recordings
+    }
 }
 
 export async function getRecordingFile(recordingName: string, filename: string, options?: FileSystemGetFileOptions) {
