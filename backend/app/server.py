@@ -61,8 +61,7 @@ def _recording_exists(recording: str | None) -> bool:
 
 def _postprocessing_task(
         recording: str,
-        recipient: str | None,
-        job_title: str | None
+        recipient: str | None
 ) -> None:
     recording_path = Path(app.config["DESTDIR"]) / recording
     job_result = postprocess_recording(recording_path)
@@ -81,7 +80,7 @@ def _postprocessing_task(
         smtp_sink=smtp_sink,
         sender=sender,
         recipient=recipient,
-        job_title=job_title or recording,
+        job_title=recording,
         result=job_result)
 
 @app.route('/api/chunks', methods=['POST'])
@@ -115,7 +114,6 @@ def schedule_job():
 
     recording = job_json.get('recording')
     recipient = job_json.get('recipient')
-    job_title = job_json.get('title')
 
     if not _recording_exists(recording) or not _is_valid_email_or_empty(recipient):
         return 'Bad Request', 400
@@ -124,8 +122,7 @@ def schedule_job():
         target=_postprocessing_task,
         args=(
             recording,
-            recipient,
-            job_title
+            recipient
         )
     )
     thread.start()

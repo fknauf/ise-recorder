@@ -12,20 +12,11 @@ import AudioPreview from "./lib/AudioPreview";
 import { PreviewCard } from "./lib/PreviewCard";
 import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
-import { scheduleRenderingJob as schedulePostprocessing, sendChunkToServer } from "./lib/serverStorage";
+import { schedulePostprocessing, sendChunkToServer } from "./lib/serverStorage";
 import isEmail from 'validator/es/lib/isEmail';
 import useSWR from "swr";
 import { clientGetPublicServerEnvironment } from "./env/lib";
-
-interface RecordingJob {
-  recorder: MediaRecorder
-  finished: Promise<void>
-}
-
-interface RecordingJobs {
-  name: string,
-  recorders: MediaRecorder[]
-}
+import { unsafeTitleCharacters, recordLecture, stopLectureRecording, ChunkAddress, RecordingJob, RecordingJobs } from "./lib/recording";
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 const deviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
@@ -39,9 +30,7 @@ const deviceConstraints = (groupId: string, deviceId: string): MediaTrackConstra
 const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
   track.getSettings().groupId === groupId && track.getSettings().deviceId == deviceId;
 
-const unsafeCharacters = /[^A-Za-z0-9_.-]/g;
-
-const validateLectureTitle = (title: string) => !unsafeCharacters.test(title) || 'unsafe character in lecture title';
+const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || 'unsafe character in lecture title';
 const validateEmail = (email: string) => email.trim() === '' || isEmail(email) || 'invalid e-mail address';
 
 export default function Home() {
@@ -165,128 +154,25 @@ export default function Home() {
     setDisplayTracks(displayTracks.filter(t => t !== track));
   }
 
-  const recordTracks = (
-    tracks: MediaStreamTrack[],
-    recordingName: string,
-    trackTitle: string,
-    fileExtension: string,
-    options?: MediaRecorderOptions
-  ): RecordingJob => {
-    const recordedStream = new MediaStream(tracks);
-    const newRecorder = new MediaRecorder(recordedStream, options);
+  const startRecording = () => {
+    const onChunkAvailable = async (chunk: Blob, address: ChunkAddress, fileExtension: string) => {
+      const { recordingName, trackTitle, chunkIndex } = address;
 
-    // This is a little bit involved so that we're guaranteed to not drop any chunks and also
-    // not process them out of order.
-    //
-    // This is a problem we have to solve because the OPFS api is extremely asynchronous, so in
-    // a naive implementation that starts an appendToRecordingFile job in the ondataavailable
-    // handler we could end up with multiple such jobs in flight at the same time, which leads
-    // to data loss.
-    //
-    // To get around this, we instead queue incoming chunks and spawn a background task that
-    // appends them to the file sequentially. The event handler signals to the background task
-    // through a promise object that is exchanged after every delivered chunk. Promise objects
-    // may be dropped without being awaited, but the chunks will be in the queue and handled
-    // anyway. The exchange makes clever/ugly use of typescript capturing semantics, but this
-    // is the least involved way I came up with.
-    const chunkQueue: Blob[] = [];
-    let chunkSignalResolve: (finished: boolean) => void
-    let chunkSignalPromise = new Promise<boolean>(resolve => chunkSignalResolve = resolve);
-
-    newRecorder.ondataavailable = event => {
-      chunkQueue.push(event.data);
-      chunkSignalResolve(false);
-      chunkSignalPromise = new Promise<boolean>(resolve => chunkSignalResolve = resolve);
-    }
-    newRecorder.onstop = () => chunkSignalResolve(true);
-    newRecorder.onerror = () => chunkSignalResolve(true);
-
-    const finishedPromise = new Promise<void>(resolve => {
-      (async () => {
-        let finished = false;
-        let chunkNum = 0;
-
-        while(!finished) {
-          finished = await chunkSignalPromise;
-
-          while(chunkQueue.length > 0) {
-            const chunk = chunkQueue.shift();
-            if(chunk) {
-              sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkNum);
-              await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
-              setRecordings(await getRecordingsList());
-
-              ++chunkNum;
-            }
-          }
-        }
-
-        resolve();
-      })();
-    })
-
-    newRecorder.start(5000);
-
-    return {
-      recorder: newRecorder,
-      finished: finishedPromise
+      sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
+      await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
+      setRecordings(await getRecordingsList());
     };
-  };
 
-  const startRecording = async () => {
-    const noTracksAvailable = displayTracks.length === 0 && videoTracks.length === 0 && audioTracks.length === 0;
-
-    if(isRecording || noTracksAvailable) {
-      return;
+    const onFinished = async (recordingName: string) => {
+      schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+      setRecordings(await getRecordingsList());
     }
 
-    const timestamp = new Date();
-    const lecturePrefix = lectureTitle ? `${lectureTitle}_` : '';
-    const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeCharacters, '');
-
-    const recordVideo = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'webm', { mimeType: 'video/webm' });
-    const recordAudio = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, recordingName, trackTitle, 'webm', { mimeType: 'audio/webm' });
-
-    const jobs: RecordingJob[] = [];
-
-    // if no main display is selected, guess a sensible default: first captured display if there
-    // are display streams, first video input otherwise, but don't use the overlay track.
-    const effectiveMainDisplay = mainDisplay ?? displayTracks.filter(t => t !== overlay).at(0) ?? videoTracks.filter(t => t !== overlay).at(0)
-
-    if(effectiveMainDisplay) {
-      // attach first audio stream to main display if available, record the rest into individual files.
-      // This is because at time of writing MediaRecorder on FF and Chrome does not support multiple
-      // audio tracks (nor multiple video tracks, for that matter).
-      jobs.push(recordVideo([ effectiveMainDisplay, ...audioTracks.slice(0, 1) ], 'stream'));
-      jobs.push(...audioTracks.slice(1).map((track, index) => recordAudio([track], `audio-${index}`)));
-    } else {
-      // if no video streams are available, record each audio track into its own file
-      jobs.push(...audioTracks.map((track, index) => recordAudio([track], `audio-${index}`)));
-    }
-
-    if(overlay != null) {
-      jobs.push(recordVideo([ overlay ], 'overlay'));
-    }
-
-    // If there are more video tracks than main and overlay, record each into its own file for manual postprocessing.
-    const notYetHandled = (track: MediaStreamTrack) => track !== effectiveMainDisplay && track !== overlay;
-    jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `video-${i}`)));
-    jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `display-${i}`)));
-
-    setActiveRecording({
-      name: recordingName,
-      recorders: jobs.map(job => job.recorder)
-    });
-
-    await Promise.all(jobs.map(job => job.finished));
-
-    schedulePostprocessing(apiUrl, recordingName, recordingName, lecturerEmail);
-    setRecordings(await getRecordingsList());
+    recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);
   };
 
   const stopRecording = () => {
-    activeRecording?.recorders.forEach(r => r.stop());
-    setActiveRecording(null);
+    stopLectureRecording(activeRecording, () => setActiveRecording(null));
   };
 
   ////////////////

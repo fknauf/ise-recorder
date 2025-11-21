@@ -35,10 +35,9 @@ export async function sendChunkToServer(
     }
 }
 
-export async function scheduleRenderingJob(
+export async function schedulePostprocessing(
     apiUrl: string | undefined,
     recording: string,
-    title: string,
     recipient?: string
 ) {
     if(!apiUrl) {
@@ -49,7 +48,6 @@ export async function scheduleRenderingJob(
 
     try {
         const data = {
-            title,
             recording,
             recipient
         };
