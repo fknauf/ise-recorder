@@ -11,11 +11,18 @@ export interface PreviewCardProps {
     children: Readonly<ReactNode>
 }
 
-export const PreviewCard = (props: Readonly<PreviewCardProps>) =>
+export const PreviewCard = (
+    {
+        label,
+        onRemove,
+        buttonDisabled,
+        children
+    }: Readonly<PreviewCardProps>
+) =>
     <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
         <Flex direction="column" justifyContent="center" gap="size-100" height="100%">
-            <Text>{props.label}</Text>
-            {props.children}
-            <ActionButton  marginTop="auto" onPress={props.onRemove} isDisabled={props.buttonDisabled}>Remove</ActionButton>
+            <Text>{label}</Text>
+            {children}
+            <ActionButton  marginTop="auto" onPress={onRemove} isDisabled={buttonDisabled}>Remove</ActionButton>
         </Flex>
     </View>;

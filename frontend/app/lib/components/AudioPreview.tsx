@@ -7,12 +7,12 @@ export interface AudioPreviewProps {
 }
 
 export function AudioPreview(
-    props: AudioPreviewProps
+    { track }: AudioPreviewProps
 ): ReactNode {
     const canvasElement = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
-        if(!props.track) {
+        if(!track) {
             return;
         }
 
@@ -20,7 +20,7 @@ export function AudioPreview(
         const audioAnalyzer = audioContext.createAnalyser();
         audioAnalyzer.fftSize = 512;
 
-        const audioSource = audioContext.createMediaStreamSource(new MediaStream([props.track]))
+        const audioSource = audioContext.createMediaStreamSource(new MediaStream([track]))
         audioSource.connect(audioAnalyzer);
 
         const data = new Uint8Array(audioAnalyzer.frequencyBinCount);
@@ -56,7 +56,7 @@ export function AudioPreview(
 
         timerId = requestAnimationFrame(renderFunction);
         return () => cancelAnimationFrame(timerId);
-    }, [props.track]);
+    }, [track]);
 
     return (
         <div>

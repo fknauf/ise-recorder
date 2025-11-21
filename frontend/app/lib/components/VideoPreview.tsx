@@ -13,7 +13,14 @@ export interface VideoPreviewProps {
 }
 
 export function VideoPreview(
-    props: VideoPreviewProps
+    {
+        track,
+        isMainDisplay,
+        isOverlay,
+        switchesDisabled,
+        onToggleMainDisplay,
+        onToggleOverlay
+    }: VideoPreviewProps
 ): ReactNode {
     const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -21,10 +28,10 @@ export function VideoPreview(
         const currentVideo = videoRef.current;
 
         if(currentVideo !== null) {
-            const trackStream = props.track ? new MediaStream([props.track]) : null;
+            const trackStream = track ? new MediaStream([track]) : null;
             currentVideo.srcObject = trackStream;
         }
-    }, [videoRef, props.track])
+    }, [videoRef, track])
 
     return (
         <Flex direction="column" gap="size-100">
@@ -38,16 +45,16 @@ export function VideoPreview(
             />
             <Flex direction="row" justifyContent="space-between">
                 <Switch
-                    isDisabled={props.switchesDisabled}
-                    isSelected={props.isMainDisplay}
-                    onChange={props.onToggleMainDisplay}
+                    isDisabled={switchesDisabled}
+                    isSelected={isMainDisplay}
+                    onChange={onToggleMainDisplay}
                 >
                     Main Display
                 </Switch>
                 <Switch
-                    isDisabled={props.switchesDisabled}
-                    isSelected={props.isOverlay}
-                    onChange={props.onToggleOverlay}
+                    isDisabled={switchesDisabled}
+                    isSelected={isOverlay}
+                    onChange={onToggleOverlay}
                 >
                     Overlay
                 </Switch>
