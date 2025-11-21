@@ -6,16 +6,16 @@ import { Flex, Text, View } from '@adobe/react-spectrum';
 
 export interface PreviewCardProps {
     label: string | undefined,
+    hasDisabledButtons: boolean,
     onRemove: () => void,
-    buttonDisabled: boolean,
     children: Readonly<ReactNode>
 }
 
 export const PreviewCard = (
     {
         label,
+        hasDisabledButtons,
         onRemove,
-        buttonDisabled,
         children
     }: Readonly<PreviewCardProps>
 ) =>
@@ -23,6 +23,6 @@ export const PreviewCard = (
         <Flex direction="column" justifyContent="center" gap="size-100" height="100%">
             <Text>{label}</Text>
             {children}
-            <ActionButton  marginTop="auto" onPress={onRemove} isDisabled={buttonDisabled}>Remove</ActionButton>
+            <ActionButton  marginTop="auto" onPress={onRemove} isDisabled={hasDisabledButtons}>Remove</ActionButton>
         </Flex>
     </View>;

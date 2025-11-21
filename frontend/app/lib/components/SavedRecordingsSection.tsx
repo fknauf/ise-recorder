@@ -24,13 +24,13 @@ async function downloadFile(dir: string, filename: string) {
   }
 }
 
-export interface SavedRecordingsCardProps {
+interface SavedRecordingsCardProps {
   recording: RecordingFileList,
   isBeingRecorded: boolean,
   onRemoved: () => void
 }
 
-export function SavedRecordingsCard(
+function SavedRecordingsCard(
   { recording, isBeingRecorded, onRemoved }: SavedRecordingsCardProps
 ) {
   const formatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -67,3 +67,25 @@ export function SavedRecordingsCard(
     </View>
   );
 }
+
+export interface SavedRecordingsSectionProps {
+  recordings: RecordingFileList[],
+  activeRecordingName?: string,
+  onRemoved: () => void
+}
+
+export const SavedRecordingsSection = (
+  { recordings, activeRecordingName, onRemoved }: SavedRecordingsSectionProps
+) =>
+  <Flex direction="row" gap="size-100" wrap>
+    {
+      recordings.map(r =>
+        <SavedRecordingsCard
+          key={`saved-recording-${r.name}`}
+          recording={r}
+          isBeingRecorded={r.name === activeRecordingName}
+          onRemoved={onRemoved}
+        />
+      )
+    }
+  </Flex>

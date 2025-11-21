@@ -1,27 +1,16 @@
 'use client';
 
-import { Content, Flex, Heading, InlineAlert, ToastContainer } from "@adobe/react-spectrum";
+import { Flex, ToastContainer } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";
 import useSWR from "swr";
-import { VideoPreview } from "./lib/components/VideoPreview";
-import { AudioPreview } from "./lib/components/AudioPreview";
-import { PreviewCard } from "./lib/components/PreviewCard";
+import { QuotaWarning } from "./lib/components/QuotaWarning";
 import { RecorderControls } from "./lib/components/RecorderControls";
-import { SavedRecordingsCard } from "./lib/components/SavedRecordingCard";
+import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
 import { appendToRecordingFile, RecordingsState, getRecordingsState } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
 import { recordLecture, stopLectureRecording, RecordingJobs } from "./lib/utils/recording";
 import { clientGetPublicServerEnvironment } from "./env/lib";
-
-const mibFormatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 0, maximumFractionDigits: 0, useGrouping: false });
-
-function formatMib(x: number | undefined) {
-  if(x === undefined) {
-    return "N/A"
-  } else {
-    return mibFormatter.format(x / 2 ** 20) + " MiB";
-  }
-}
+import { PreviewSection } from "./lib/components/PreviewSection";
 
 export default function Home() {
   ////////////////
@@ -135,31 +124,9 @@ export default function Home() {
     stopLectureRecording(activeRecording, () => setActiveRecording(null));
   };
 
-  const quotaCritical =
-    savedRecordingsState.quota !== undefined &&
-    savedRecordingsState.usage !== undefined &&
-    savedRecordingsState.quota - savedRecordingsState.usage < 2 ** 30 * 1;
-
   ////////////////
   // view
   ////////////////
-
-  const video_preview_card = (track: MediaStreamTrack, label: string, onRemove: (track: MediaStreamTrack) => void) =>
-    <PreviewCard
-      key={`preview-card-${track.id}`}
-      label={label}
-      buttonDisabled={isRecording}
-      onRemove={() => onRemove(track)}
-    >
-      <VideoPreview
-        track={track}
-        switchesDisabled={isRecording}
-        isMainDisplay={mainDisplay === track}
-        isOverlay={overlay === track}
-        onToggleMainDisplay={isSelected => { setMainDisplay(isSelected ? track : null) }}
-        onToggleOverlay={isSelected => { setOverlay(isSelected ? track : null)}}
-      />
-    </PreviewCard>;
 
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
@@ -179,52 +146,31 @@ export default function Home() {
         onStopRecording={stopRecording}
       />
 
-      {
-        quotaCritical ?
-          <Flex direction="row" justifyContent="center" marginTop="size-200">
-            <InlineAlert variant="notice">
-              <Heading>Quota warning</Heading>
-              <Content>
-                Browser storage running low: {formatMib(savedRecordingsState.usage)} of {formatMib(savedRecordingsState.quota)} used. Please consider removing some old recordings.
-              </Content>
-            </InlineAlert>
-          </Flex>
-          : <></>
-      }
+      <QuotaWarning
+        usage={savedRecordingsState.usage}
+        quota={savedRecordingsState.quota}
+      />
 
-      <Flex direction="row" gap="size-100" justifyContent="center" wrap>
-        {
-          displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`, removeDisplayTrack))
-        }
-        {
-          videoTracks.map(track => video_preview_card(track, track.label, removeVideoTrack))
-        }
-        {
-          audioTracks.map(track =>
-            <PreviewCard
-              key={`preview-card-${track.id}`}
-              label={track.label}
-              buttonDisabled={isRecording}
-              onRemove={() => removeAudioTrack(track)}
-            >
-              <AudioPreview track={track}/>
-            </PreviewCard>
-          )
-        }
-      </Flex>
+      <PreviewSection
+        displayTracks={displayTracks}
+        videoTracks={videoTracks}
+        audioTracks={audioTracks}
+        mainDisplay={mainDisplay}
+        overlay={overlay}
+        hasDisabledButtons={isRecording}
+        onToggleMainDisplay={(track, isSelected) => setMainDisplay(isSelected ? track : null)}
+        onToggleOverlay={(track, isSelected) => setOverlay(isSelected ? track : null)}
+        onRemoveDisplayTrack={removeDisplayTrack}
+        onRemoveVideoTrack={removeVideoTrack}
+        onRemoveAudioTrack={removeAudioTrack}
+      />
 
-      <Flex direction="row" gap="size-100" wrap>
-        {
-          savedRecordingsState.recordings.map(r =>
-            <SavedRecordingsCard
-              key={`saved-recording-${r.name}`}
-              recording={r}
-              isBeingRecorded={r.name === activeRecording?.name}
-              onRemoved={() => getRecordingsState().then(setSavedRecordingsState) }
-            />
-          )
-        }
-      </Flex>
+      <SavedRecordingsSection
+        recordings={savedRecordingsState.recordings}
+        activeRecordingName={activeRecording?.name}
+        onRemoved={() => getRecordingsState().then(setSavedRecordingsState)}
+      />
+
       <ToastContainer/>
     </Flex>
   );
