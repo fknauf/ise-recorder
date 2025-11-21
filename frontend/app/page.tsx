@@ -7,16 +7,16 @@ import Circle from '@spectrum-icons/workflow/Circle';
 import DeviceDesktop from '@spectrum-icons/workflow/DeviceDesktop';
 import Stop from '@spectrum-icons/workflow/Stop';
 import { useEffect, useState } from "react";
-import VideoPreview from "./lib/VideoPreview";
-import AudioPreview from "./lib/AudioPreview";
-import { PreviewCard } from "./lib/PreviewCard";
-import { SavedRecordingsCard } from "./lib/SavedRecordingCard";
-import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/filesystem";
-import { schedulePostprocessing, sendChunkToServer } from "./lib/serverStorage";
+import VideoPreview from "./lib/components/VideoPreview";
+import AudioPreview from "./lib/components/AudioPreview";
+import { PreviewCard } from "./lib/components/PreviewCard";
+import { SavedRecordingsCard } from "./lib/components/SavedRecordingCard";
+import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/utils/filesystem";
+import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
 import isEmail from 'validator/es/lib/isEmail';
 import useSWR from "swr";
 import { clientGetPublicServerEnvironment } from "./env/lib";
-import { unsafeTitleCharacters, recordLecture, stopLectureRecording, ChunkAddress, RecordingJob, RecordingJobs } from "./lib/recording";
+import { unsafeTitleCharacters, recordLecture, stopLectureRecording, ChunkAddress, RecordingJob, RecordingJobs } from "./lib/utils/recording";
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 const deviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])

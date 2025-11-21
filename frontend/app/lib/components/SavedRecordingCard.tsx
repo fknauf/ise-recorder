@@ -2,7 +2,7 @@
 import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import Delete from '@spectrum-icons/workflow/Delete';
 import Download from '@spectrum-icons/workflow/Download';
-import { readRecordingFile, deleteRecording, RecordingFileList } from "./filesystem";
+import { readRecordingFile, deleteRecording, RecordingFileList } from "../utils/filesystem";
 
 async function downloadFile(dir: string, filename: string) {
   const file = await readRecordingFile(dir, filename);
