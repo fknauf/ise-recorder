@@ -7,12 +7,13 @@
 """
 
 import logging
-import re
 import os
 from pathlib import Path
+import re
 import threading
-from email_validator import validate_email, EmailNotValidError
+from typing import List, Tuple
 
+from email_validator import validate_email, EmailNotValidError
 from flask import Flask, request
 from flask_cors import CORS
 
@@ -28,6 +29,7 @@ app.config['SMTP_USERNAME'] = None
 app.config['SMTP_PASSWORD'] = None
 app.config['SMTP_SENDER'] = None
 app.config['SMTP_STARTTLS'] = False
+app.config['SMTP_ALLOWED_DOMAINS'] = []
 
 app.config.from_prefixed_env("ISE_RECORD")
 
@@ -42,22 +44,35 @@ def _create_track_path(recording: str, track: str) -> Path:
 def _is_safe_name(name: str | None) -> bool:
     return name is not None and re.fullmatch('^[A-Za-z0-9_.-]+$', name) is not None
 
-def _is_valid_email_or_empty(address: str | None) -> bool:
-    if address is None or address.strip() == "":
-        return True
-
-    try:
-        validate_email(address)
-        return True
-    except EmailNotValidError:
-        return False
-
 def _recording_exists(recording: str | None) -> bool:
     if not _is_safe_name(recording):
         return False
 
     destdir = Path(app.config["DESTDIR"])
     return os.path.isdir(destdir / recording)
+
+def _is_in_domain(domain: str, normalized_address: str):
+    return normalized_address.endswith(f'@{domain}') or normalized_address.endswith(f'.{domain}')
+
+def _is_whitelisted(normalized_address: str):
+    whitelist: List[str] = app.config['SMTP_ALLOWED_DOMAINS']
+
+    if whitelist == []:
+        return True
+    return next((True for d in whitelist if _is_in_domain(d, normalized_address)), False)
+
+def _validate_email(address: str | None) -> str | None:
+    if address is None or address.strip() == "":
+        return None
+
+    try:
+        validated = validate_email(address)
+        if _is_whitelisted(validated.normalized):
+            return validated.normalized
+    except EmailNotValidError:
+        logging.warning("Invalid or blacklisted recipient address: %s", address)
+
+    return None
 
 def _postprocessing_task(
         recording: str,
@@ -66,22 +81,25 @@ def _postprocessing_task(
     recording_path = Path(app.config["DESTDIR"]) / recording
     job_result = postprocess_recording(recording_path)
 
-    smtp_sink = SmtpSink(
-        server = app.config['SMTP_SERVER'],
-        port = int(app.config['SMTP_PORT']),
-        local_hostname = app.config['SMTP_LOCAL_HOSTNAME'],
-        starttls = bool(app.config['SMTP_STARTTLS']),
-        username = app.config['SMTP_USERNAME'],
-        password = app.config['SMTP_PASSWORD'])
+    normalized_recipient = _validate_email(recipient)
 
-    sender = app.config['SMTP_SENDER']
+    if normalized_recipient is not None:
+        smtp_sink = SmtpSink(
+            server = app.config['SMTP_SERVER'],
+            port = int(app.config['SMTP_PORT']),
+            local_hostname = app.config['SMTP_LOCAL_HOSTNAME'],
+            starttls = bool(app.config['SMTP_STARTTLS']),
+            username = app.config['SMTP_USERNAME'],
+            password = app.config['SMTP_PASSWORD'])
 
-    send_report(
-        smtp_sink=smtp_sink,
-        sender=sender,
-        recipient=recipient,
-        job_title=recording,
-        result=job_result)
+        sender = app.config['SMTP_SENDER']
+
+        send_report(
+            smtp_sink=smtp_sink,
+            sender=sender,
+            recipient=normalized_recipient,
+            job_title=recording,
+            result=job_result)
 
 @app.route('/api/chunks', methods=['POST'])
 def upload_chunk():
@@ -115,7 +133,7 @@ def schedule_job():
     recording = job_json.get('recording')
     recipient = job_json.get('recipient')
 
-    if not _recording_exists(recording) or not _is_valid_email_or_empty(recipient):
+    if not _recording_exists(recording):
         return 'Bad Request', 400
 
     thread = threading.Thread(

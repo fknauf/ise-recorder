@@ -29,3 +29,4 @@ services:
 #      - ISE_RECORD_SMTP_PASSWORD=supersecure
 #      - ISE_RECORD_SMTP_SENDER=ise-record@example.com
 #      - ISE_RECORD_SMTP_STARTTLS=true
+#      - ISE_RECORD_SMTP_ALLOWED_DOMAINS=[ "example.com", "example.org" ]
