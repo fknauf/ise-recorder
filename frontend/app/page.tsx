@@ -117,9 +117,7 @@ export default function Home() {
   }
 
   const startRecording = () => {
-    const onChunkAvailable = async (chunk: Blob, address: ChunkAddress, fileExtension: string) => {
-      const { recordingName, trackTitle, chunkIndex } = address;
-
+    const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => {
       sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
       await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
       setSavedRecordingsState(await getRecordingsState());

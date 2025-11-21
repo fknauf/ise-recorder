@@ -1,12 +1,6 @@
 // used to remove characters from the recording name that would trip up ffmpeg in post.
 export const unsafeTitleCharacters = /[^A-Za-z0-9_.-]/g;
 
-export interface ChunkAddress {
-  recordingName: string
-  trackTitle: string
-  chunkIndex: number
-}
-
 export interface RecordingJob {
   recorder: MediaRecorder
   finished: Promise<void>
@@ -87,7 +81,7 @@ export const recordLecture = async (
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
   lectureTitle: string,
-  onChunkAvailable: (chunk: Blob, address: ChunkAddress, fileExtension: string) => void,
+  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => void,
   onStarted: (jobs: RecordingJobs) => void,
   onFinished: (recordingName: string) => void
 ) => {
@@ -99,7 +93,7 @@ export const recordLecture = async (
   const lecturePrefix = lectureTitle ? `${lectureTitle}_` : '';
   const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeTitleCharacters, '');
 
-  const onChunkFn = (trackTitle: string) => (chunk: Blob, chunkIndex: number) => onChunkAvailable(chunk, { recordingName, trackTitle, chunkIndex }, 'webm');
+  const onChunkFn = (trackTitle: string) => (chunk: Blob, chunkIndex: number) => onChunkAvailable(chunk, recordingName, trackTitle, chunkIndex, 'webm');
 
   const recordVideo = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, { mimeType: 'video/webm' }, onChunkFn(trackTitle));
   const recordAudio = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, { mimeType: 'audio/webm' }, onChunkFn(trackTitle));
