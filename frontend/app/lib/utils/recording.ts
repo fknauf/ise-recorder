@@ -14,7 +14,7 @@ export interface RecordingJobs {
 const recordTracks = (
   tracks: MediaStreamTrack[],
   options: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, chunkNum: number) => void,
+  onChunkAvailable: (chunk: Blob, chunkNum: number) => Promise<void> | void,
 ): RecordingJob => {
   const recordedStream = new MediaStream(tracks);
   const newRecorder = new MediaRecorder(recordedStream, options);
@@ -56,7 +56,7 @@ const recordTracks = (
         while(chunkQueue.length > 0) {
           const chunk = chunkQueue.shift();
           if(chunk) {
-            onChunkAvailable(chunk, chunkNum);
+            await onChunkAvailable(chunk, chunkNum);
             ++chunkNum;
           }
         }
@@ -81,7 +81,7 @@ export const recordLecture = async (
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
   lectureTitle: string,
-  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => void,
+  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => Promise<void> | void,
   onStarted: (jobs: RecordingJobs) => void,
   onFinished: (recordingName: string) => void
 ) => {
