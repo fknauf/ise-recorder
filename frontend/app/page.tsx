@@ -1,6 +1,6 @@
 'use client';
 
-import { Flex } from "@adobe/react-spectrum";
+import { Flex, ToastContainer } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { VideoPreview } from "./lib/components/VideoPreview";
@@ -199,6 +199,7 @@ export default function Home() {
           )
         }
       </Flex>
+      <ToastContainer/>
     </Flex>
   );
 }

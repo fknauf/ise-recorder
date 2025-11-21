@@ -1,3 +1,5 @@
+import { ToastQueue } from "@adobe/react-spectrum";
+
 export async function sendChunkToServer(
     apiUrl: string | undefined,
     chunk: Blob,
@@ -11,7 +13,7 @@ export async function sendChunkToServer(
 
     const chunkUrl = `${apiUrl}/api/chunks`;
 
-    const retries = 5;
+    const retries = 10;
     const intervalMillis = 2000;
 
     const data = new FormData();
@@ -30,7 +32,12 @@ export async function sendChunkToServer(
             break;
         } catch(e) {
             console.log(e);
-            await new Promise(resolve => setTimeout(resolve, intervalMillis));
+
+            if(attempt == retries) {
+                ToastQueue.negative(`Failed to upload chunk ${index}.`, { timeout: 5000 });
+            } else {
+                await new Promise(resolve => setTimeout(resolve, intervalMillis));
+            }
         }
     }
 }
@@ -61,5 +68,7 @@ export async function schedulePostprocessing(
         });
     } catch(e) {
         console.log(e);
+        const message = e instanceof Error ? e.message : 'unknown reason';
+        ToastQueue.negative(`Failed to schedule postprocessing: ${message}`)
     }
 }
