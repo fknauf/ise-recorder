@@ -4,61 +4,62 @@ import { Flex, Switch } from "@adobe/react-spectrum";
 import { useRef, ReactNode, useEffect } from "react";
 
 export interface VideoPreviewProps {
-    track: MediaStreamTrack | undefined,
-    isMainDisplay: boolean,
-    isOverlay: boolean,
-    switchesDisabled: boolean,
-    onToggleMainDisplay: (isSelected: boolean) => void,
-    onToggleOverlay: (isSelected: boolean) => void
+  track: MediaStreamTrack | undefined,
+  isMainDisplay: boolean,
+  isOverlay: boolean,
+  switchesDisabled: boolean,
+  onToggleMainDisplay: (isSelected: boolean) => void,
+  onToggleOverlay: (isSelected: boolean) => void
 }
 
 export function VideoPreview(
-    {
-        track,
-        isMainDisplay,
-        isOverlay,
-        switchesDisabled,
-        onToggleMainDisplay,
-        onToggleOverlay
-    }: VideoPreviewProps
+  {
+    track,
+    isMainDisplay,
+    isOverlay,
+    switchesDisabled,
+    onToggleMainDisplay,
+    onToggleOverlay
+  }: VideoPreviewProps
 ): ReactNode {
-    const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-    useEffect(() => {
-        const currentVideo = videoRef.current;
+  useEffect(() => {
+    const currentVideo = videoRef.current;
 
-        if(currentVideo !== null) {
-            const trackStream = track ? new MediaStream([track]) : null;
-            currentVideo.srcObject = trackStream;
-        }
-    }, [videoRef, track])
+    if(currentVideo !== null) {
+      const trackStream = track ? new MediaStream([track]) : null;
+      currentVideo.srcObject = trackStream;
+    }
+  }, [videoRef, track])
 
-    return (
-        <Flex direction="column" gap="size-100">
-            <video
-                ref={videoRef}
-                autoPlay
-                muted
-                width={384}
-                height={216}
-                style={{backgroundColor: "black"}}
-            />
-            <Flex direction="row" justifyContent="space-between">
-                <Switch
-                    isDisabled={switchesDisabled}
-                    isSelected={isMainDisplay}
-                    onChange={onToggleMainDisplay}
-                >
-                    Main Display
-                </Switch>
-                <Switch
-                    isDisabled={switchesDisabled}
-                    isSelected={isOverlay}
-                    onChange={onToggleOverlay}
-                >
-                    Overlay
-                </Switch>
-            </Flex>
-        </Flex>
-    );
+  return (
+    <Flex direction="column" gap="size-100">
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        width={384}
+        height={216}
+        style={{backgroundColor: "black"}}
+      />
+
+      <Flex direction="row" justifyContent="space-between">
+        <Switch
+          isDisabled={switchesDisabled}
+          isSelected={isMainDisplay}
+          onChange={onToggleMainDisplay}
+        >
+          Main Display
+        </Switch>
+        <Switch
+          isDisabled={switchesDisabled}
+          isSelected={isOverlay}
+          onChange={onToggleOverlay}
+        >
+          Overlay
+        </Switch>
+      </Flex>
+    </Flex>
+  );
 }

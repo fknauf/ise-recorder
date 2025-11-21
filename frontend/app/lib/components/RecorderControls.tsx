@@ -1,3 +1,5 @@
+'use client';
+
 import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField } from "@adobe/react-spectrum";
 import CallCenter from '@spectrum-icons/workflow/CallCenter';
 import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
@@ -114,7 +116,9 @@ export function RecorderControls(
         validate={validateLectureTitle}
         onChange={onLectureTitleChanged}
       />
+
       {
+        // E-Mail is only used when the postprocessing job is scheduled, so we can leave it editable during recording.
         isEmailHidden ? <></> :
           <TextField
             label="e-Mail"

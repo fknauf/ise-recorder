@@ -1,3 +1,4 @@
+'use client';
 
 import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import Delete from '@spectrum-icons/workflow/Delete';

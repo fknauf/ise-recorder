@@ -1,7 +1,33 @@
-import { Flex } from "@adobe/react-spectrum";
-import { PreviewCard } from "./PreviewCard";
+'use client';
+
+import { ReactNode } from "react";
+import { ActionButton, Flex, Text, View } from '@adobe/react-spectrum';
 import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
+
+interface PreviewCardProps {
+  label: string | undefined,
+  hasDisabledButtons: boolean,
+  onRemove: () => void,
+  children: Readonly<ReactNode>
+}
+
+const PreviewCard = (
+  {
+      label,
+      hasDisabledButtons,
+      onRemove,
+      children
+  }: Readonly<PreviewCardProps>
+) =>
+  <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
+    <Flex direction="column" justifyContent="center" gap="size-100" height="100%">
+      <Text>{label}</Text>
+      {children}
+      <ActionButton  marginTop="auto" onPress={onRemove} isDisabled={hasDisabledButtons}>Remove</ActionButton>
+    </Flex>
+  </View>;
+
 
 interface PreviewSectionProps {
   displayTracks: MediaStreamTrack[]

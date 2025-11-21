@@ -1,74 +1,74 @@
 import { ToastQueue } from "@adobe/react-spectrum";
 
 export async function sendChunkToServer(
-    apiUrl: string | undefined,
-    chunk: Blob,
-    recording: string,
-    track: string,
-    index: number
+  apiUrl: string | undefined,
+  chunk: Blob,
+  recording: string,
+  track: string,
+  index: number
 ) {
-    if(!apiUrl) {
-        return;
+  if(!apiUrl) {
+    return;
+  }
+
+  const chunkUrl = `${apiUrl}/api/chunks`;
+
+  const retries = 10;
+  const intervalMillis = 2000;
+
+  const data = new FormData();
+
+  data.append('recording', recording);
+  data.append('track', track);
+  data.append('index', index.toFixed(0));
+  data.append('chunk', chunk);
+
+  for(let attempt = 0; attempt < retries; ++attempt) {
+    try {
+      await fetch(chunkUrl, {
+        method: "POST",
+        body: data
+      });
+      break;
+    } catch(e) {
+      console.log(e);
+
+      if(attempt == retries) {
+        ToastQueue.negative(`Failed to upload chunk ${index}.`, { timeout: 5000 });
+      } else {
+        await new Promise(resolve => setTimeout(resolve, intervalMillis));
+      }
     }
-
-    const chunkUrl = `${apiUrl}/api/chunks`;
-
-    const retries = 10;
-    const intervalMillis = 2000;
-
-    const data = new FormData();
-
-    data.append('recording', recording);
-    data.append('track', track);
-    data.append('index', index.toFixed(0));
-    data.append('chunk', chunk);
-
-    for(let attempt = 0; attempt < retries; ++attempt) {
-        try {
-            await fetch(chunkUrl, {
-                method: "POST",
-                body: data
-            });
-            break;
-        } catch(e) {
-            console.log(e);
-
-            if(attempt == retries) {
-                ToastQueue.negative(`Failed to upload chunk ${index}.`, { timeout: 5000 });
-            } else {
-                await new Promise(resolve => setTimeout(resolve, intervalMillis));
-            }
-        }
-    }
+  }
 }
 
 export async function schedulePostprocessing(
-    apiUrl: string | undefined,
-    recording: string,
-    recipient?: string
+  apiUrl: string | undefined,
+  recording: string,
+  recipient?: string
 ) {
-    if(!apiUrl) {
-        return;
-    }
+  if(!apiUrl) {
+    return;
+  }
 
-    const jobUrl = `${apiUrl}/api/jobs`;
+  const jobUrl = `${apiUrl}/api/jobs`;
 
-    try {
-        const data = {
-            recording,
-            recipient
-        };
+  try {
+    const data = {
+      recording,
+      recipient
+    };
 
-        await fetch(jobUrl, {
-            method: "POST",
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data)
-        });
-    } catch(e) {
-        console.log(e);
-        const message = e instanceof Error ? e.message : 'unknown reason';
-        ToastQueue.negative(`Failed to schedule postprocessing: ${message}`)
-    }
+    await fetch(jobUrl, {
+      method: "POST",
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data)
+    });
+  } catch(e) {
+    console.log(e);
+    const message = e instanceof Error ? e.message : 'unknown reason';
+    ToastQueue.negative(`Failed to schedule postprocessing: ${message}`)
+  }
 }

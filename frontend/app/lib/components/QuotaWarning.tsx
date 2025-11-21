@@ -1,3 +1,5 @@
+'use client';
+
 import { Content, Flex, Heading, InlineAlert } from "@adobe/react-spectrum";
 
 const mibFormatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 0, maximumFractionDigits: 0, useGrouping: false });
