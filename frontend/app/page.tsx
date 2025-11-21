@@ -68,7 +68,7 @@ export default function Home() {
   };
 
   const addVideoTracks = async (tracks: MediaStreamTrack[]) => {
-    setVideoTracks([...videoTracks, ...tracks ])
+    setVideoTracks([ ...videoTracks, ...tracks ])
 
     if(!overlay) {
       setOverlay(tracks.at(0) ?? null);
@@ -76,7 +76,7 @@ export default function Home() {
   }
 
   const addAudioTracks = async (tracks: MediaStreamTrack[]) => {
-    setAudioTracks([...audioTracks, ...tracks ])
+    setAudioTracks ([...audioTracks, ...tracks ])
   }
 
   const removeTrackFromPostprocessing = (track: MediaStreamTrack) => {
