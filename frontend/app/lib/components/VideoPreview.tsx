@@ -12,7 +12,7 @@ export interface VideoPreviewProps {
     onToggleOverlay: (isSelected: boolean) => void
 }
 
-export default function VideoPreview(
+export function VideoPreview(
     props: VideoPreviewProps
 ): ReactNode {
     const videoRef = useRef<HTMLVideoElement>(null);

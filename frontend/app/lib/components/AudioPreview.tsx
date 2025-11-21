@@ -6,7 +6,7 @@ export interface AudioPreviewProps {
     track: MediaStreamTrack | undefined
 }
 
-export default function AudioPreview(
+export function AudioPreview(
     props: AudioPreviewProps
 ): ReactNode {
     const canvasElement = useRef<HTMLCanvasElement>(null);

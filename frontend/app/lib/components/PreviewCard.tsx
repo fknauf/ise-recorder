@@ -19,5 +19,3 @@ export const PreviewCard = (props: Readonly<PreviewCardProps>) =>
             <ActionButton  marginTop="auto" onPress={props.onRemove} isDisabled={props.buttonDisabled}>Remove</ActionButton>
         </Flex>
     </View>;
-
-export default PreviewCard;

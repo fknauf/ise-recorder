@@ -1,53 +1,29 @@
 'use client';
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField } from "@adobe/react-spectrum";
-import CallCenter from '@spectrum-icons/workflow/CallCenter';
-import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
-import Circle from '@spectrum-icons/workflow/Circle';
-import DeviceDesktop from '@spectrum-icons/workflow/DeviceDesktop';
-import Stop from '@spectrum-icons/workflow/Stop';
+import { Flex } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";
-import VideoPreview from "./lib/components/VideoPreview";
-import AudioPreview from "./lib/components/AudioPreview";
+import useSWR from "swr";
+import { VideoPreview } from "./lib/components/VideoPreview";
+import { AudioPreview } from "./lib/components/AudioPreview";
 import { PreviewCard } from "./lib/components/PreviewCard";
+import { RecorderControls } from "./lib/components/RecorderControls";
 import { SavedRecordingsCard } from "./lib/components/SavedRecordingCard";
 import { getRecordingsList, RecordingFileList, appendToRecordingFile } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
-import isEmail from 'validator/es/lib/isEmail';
-import useSWR from "swr";
+import { recordLecture, stopLectureRecording, ChunkAddress, RecordingJobs } from "./lib/utils/recording";
 import { clientGetPublicServerEnvironment } from "./env/lib";
-import { unsafeTitleCharacters, recordLecture, stopLectureRecording, ChunkAddress, RecordingJob, RecordingJobs } from "./lib/utils/recording";
-
-// This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
-const deviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
-const splitDeviceUniqueId = (devUid: string): [ string, string ] => JSON.parse(devUid);
-const deviceConstraints = (groupId: string, deviceId: string): MediaTrackConstraints =>
-  ({
-    groupId: { exact: groupId },
-    deviceId: { exact: deviceId }
-  });
-
-const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
-  track.getSettings().groupId === groupId && track.getSettings().deviceId == deviceId;
-
-const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || 'unsafe character in lecture title';
-const validateEmail = (email: string) => email.trim() === '' || isEmail(email) || 'invalid e-mail address';
 
 export default function Home() {
   ////////////////
   // hooks
   ////////////////
 
-  const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([])
-  const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([])
-  const [ hasPermissions, setHasPermissions ] = useState(false);
-
   const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
   const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
   const [ displayTracks, setDisplayTracks ]= useState<MediaStreamTrack[]>([]);
 
   const [ activeRecording, setActiveRecording ] = useState<RecordingJobs | null>(null);
-  const [ recordings, setRecordings ] = useState<RecordingFileList[]>([]);
+  const [ savedRecordings, setSavedRecordings ] = useState<RecordingFileList[]>([]);
   const [ lectureTitle, setLectureTitle ] = useState("")
   const [ lecturerEmail, setLecturerEmail ] = useState("")
 
@@ -57,7 +33,7 @@ export default function Home() {
   const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
 
   useEffect(() => {
-    getRecordingsList().then(setRecordings);
+    getRecordingsList().then(setSavedRecordings);
   }, [])
 
   ////////////////
@@ -67,64 +43,26 @@ export default function Home() {
   const isRecording = activeRecording !== null;
   const apiUrl = serverEnv?.api_url
 
-  const refreshUserMediaDevices = async () => {
-    if(!hasPermissions) {
-      // Request permissions, needs to happen before devices can be enumerated
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  const addDisplayTracks = async (tracks: MediaStreamTrack[]) => {
+    // should only ever be one video track, but let's just grab all just in case. user can
+    // still remove them manually if there happen to be more.
+    setDisplayTracks([ ...displayTracks, ...tracks ]);
 
-      if(stream) {
-        stream.getTracks().forEach(t => t.stop());
-        setHasPermissions(true);
-      }
-    }
-
-    const devs = await navigator.mediaDevices.enumerateDevices();
-
-    setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
-    setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
-  };
-
-  const openDisplayStream = async () => {
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia();
-      const screenTracks = screenStream.getVideoTracks();
-
-      // should only ever be one video track, but let's just grab all just in case. user can
-      // still remove them manually if there happen to be more.
-      setDisplayTracks([ ...displayTracks, ...screenTracks ]);
-
-      if(!mainDisplay && screenTracks.length > 0) {
-        setMainDisplay(screenTracks[0])
-      }
-    } catch(e) {
-      console.log(e);
+    if(!mainDisplay) {
+      setMainDisplay(tracks.at(0) ?? null)
     }
   };
 
-  const addVideoDevice = async (devUid: string) => {
-    const [ groupId, deviceId ] = splitDeviceUniqueId(devUid);
-
-    if(videoTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
-      return;
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({ video: deviceConstraints(groupId, deviceId), audio: false });
-    setVideoTracks([...videoTracks, ...stream.getVideoTracks() ])
+  const addVideoTracks = async (tracks: MediaStreamTrack[]) => {
+    setVideoTracks([...videoTracks, ...tracks ])
 
     if(!overlay) {
-      setOverlay(stream.getVideoTracks().at(0) ?? null);
+      setOverlay(tracks.at(0) ?? null);
     }
   }
 
-  const addAudioDevice = async (devUid: string) => {
-    const [ groupId, deviceId ] = splitDeviceUniqueId(devUid);
-
-    if(audioTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
-      return;
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: deviceConstraints(groupId, deviceId), video: false });
-    setAudioTracks([...audioTracks, ...stream.getAudioTracks()])
+  const addAudioTracks = async (tracks: MediaStreamTrack[]) => {
+    setAudioTracks([...audioTracks, ...tracks ])
   }
 
   const removeTrackFromPostprocessing = (track: MediaStreamTrack) => {
@@ -160,12 +98,12 @@ export default function Home() {
 
       sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
       await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
-      setRecordings(await getRecordingsList());
+      setSavedRecordings(await getRecordingsList());
     };
 
     const onFinished = async (recordingName: string) => {
       schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
-      setRecordings(await getRecordingsList());
+      setSavedRecordings(await getRecordingsList());
     }
 
     recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);
@@ -198,62 +136,21 @@ export default function Home() {
 
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
-      <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
-        <TextField
-          label="Lecture Title"
-          value={lectureTitle}
-          isReadOnly={isRecording}
-          isDisabled={isRecording}
-          validate={validateLectureTitle}
-          onChange={setLectureTitle}
-        />
-        {
-          apiUrl &&
-            <TextField
-              label="e-Mail"
-              validate={validateEmail}
-              value={lecturerEmail}
-              onChange={setLecturerEmail}
-            />
-        }
-
-        <Flex direction="row" justifyContent="center" alignSelf="end" gap="size-100" wrap>
-          <Divider orientation="vertical" size="S" marginX="size-100"/>
-
-          <ActionButton onPress={openDisplayStream} isDisabled={isRecording} alignSelf="end">
-            <DeviceDesktop/>
-            <Text>Add Screen/Window</Text>
-          </ActionButton>
-
-          <MenuTrigger onOpenChange={refreshUserMediaDevices}>
-            <ActionButton isDisabled={isRecording} alignSelf="end">
-              <MovieCamera/>
-              <Text>Add Video Source</Text>
-            </ActionButton>
-            <Menu onAction={devUid => addVideoDevice(devUid as string)}>
-              { videoDevices.map(dev => <Item key={deviceUniqueId(dev)}>{dev.label}</Item>) }
-            </Menu>
-          </MenuTrigger>
-
-          <MenuTrigger onOpenChange={refreshUserMediaDevices}>
-            <ActionButton isDisabled={isRecording} alignSelf="end">
-              <CallCenter/>
-              <Text>Add Audio Source</Text>
-            </ActionButton>
-            <Menu onAction={devUid => addAudioDevice(devUid as string)}>
-              { audioDevices.map(dev => <Item key={deviceUniqueId(dev)}>{dev.label}</Item>) }
-            </Menu>
-          </MenuTrigger>
-
-          <Divider orientation="vertical" size="S" marginX="size-100"/>
-
-          {
-            isRecording
-            ? <ActionButton alignSelf="end" onPress={stopRecording}><Stop/> <Text>Stop Recording</Text></ActionButton>
-            : <ActionButton alignSelf="end" onPress={startRecording}><Circle/> <Text>Start Recording</Text></ActionButton>
-          }
-        </Flex>
-      </Flex>
+      <RecorderControls
+        lectureTitle={lectureTitle}
+        lecturerEmail={lecturerEmail}
+        isRecording={isRecording}
+        currentVideoTracks={videoTracks}
+        currentAudioTracks={audioTracks}
+        isEmailHidden={!apiUrl}
+        onLectureTitleChanged={setLectureTitle}
+        onLecturerEmailChanged={setLecturerEmail}
+        onAddDisplayTracks={addDisplayTracks}
+        onAddVideoTracks={addVideoTracks}
+        onAddAudioTracks={addAudioTracks}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+      />
 
       <Flex direction="row" gap="size-100" justifyContent="center" wrap>
         {
@@ -278,12 +175,12 @@ export default function Home() {
 
       <Flex direction="row" gap="size-100" wrap>
         {
-          recordings.map(r =>
+          savedRecordings.map(r =>
             <SavedRecordingsCard
               key={`saved-recording-${r.name}`}
               recording={r}
               isBeingRecorded={r.name === activeRecording?.name}
-              onRemoved={() => getRecordingsList().then(setRecordings) }
+              onRemoved={() => getRecordingsList().then(setSavedRecordings) }
             />
           )
         }
