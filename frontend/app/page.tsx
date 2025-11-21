@@ -10,7 +10,7 @@ import { RecorderControls } from "./lib/components/RecorderControls";
 import { SavedRecordingsCard } from "./lib/components/SavedRecordingCard";
 import { appendToRecordingFile, RecordingsState, getRecordingsState } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
-import { recordLecture, stopLectureRecording, ChunkAddress, RecordingJobs } from "./lib/utils/recording";
+import { recordLecture, stopLectureRecording, RecordingJobs } from "./lib/utils/recording";
 import { clientGetPublicServerEnvironment } from "./env/lib";
 
 const mibFormatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 0, maximumFractionDigits: 0, useGrouping: false });
