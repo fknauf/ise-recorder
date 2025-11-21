@@ -36,6 +36,20 @@ export default function Home() {
     getRecordingsList().then(setSavedRecordings);
   }, [])
 
+  useEffect(() => {
+    if(activeRecording !== null) {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+      }
+
+      window.addEventListener('beforeunload', handleBeforeUnload);
+
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [ activeRecording ]);
+
   ////////////////
   // logic
   ////////////////
