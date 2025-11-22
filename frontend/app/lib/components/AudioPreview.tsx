@@ -39,7 +39,7 @@ export function AudioPreview(
       const ctx = currentCanvas.getContext('2d');
       if(ctx) {
         const space = currentCanvas.width / data.length;
-        ctx.lineWidth = space;
+        ctx.lineWidth = Math.ceil(space);
         ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--foreground');
 
         ctx.clearRect(0, 0, currentCanvas.width, currentCanvas.height);
