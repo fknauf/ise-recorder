@@ -4,10 +4,12 @@ import { useRef, ReactNode, useEffect } from "react";
 
 export interface AudioPreviewProps {
   track: MediaStreamTrack | undefined
+  width: number
+  height: number
 }
 
 export function AudioPreview(
-  { track }: AudioPreviewProps
+  { track, width, height }: AudioPreviewProps
 ): ReactNode {
   const canvasElement = useRef<HTMLCanvasElement>(null);
 
@@ -18,39 +20,39 @@ export function AudioPreview(
 
     const audioContext = new AudioContext();
     const audioAnalyzer = audioContext.createAnalyser();
-    audioAnalyzer.fftSize = 512;
-
     const audioSource = audioContext.createMediaStreamSource(new MediaStream([track]))
+
+    audioAnalyzer.fftSize = 512;
     audioSource.connect(audioAnalyzer);
 
     const data = new Uint8Array(audioAnalyzer.frequencyBinCount);
     let timerId: number;
 
     const renderFunction = () => {
-    const currentCanvas = canvasElement.current;
-
-    if(currentCanvas) {
       timerId = requestAnimationFrame(renderFunction);
+
+      const canvas = canvasElement.current;
+      const ctx = canvas?.getContext('2d');
+
+      if(!canvas || !ctx) {
+        return;
+      }
+
       audioAnalyzer.getByteFrequencyData(data);
 
-      currentCanvas.width = 384;
-      currentCanvas.height = 216;
+      const space = canvas.width / data.length;
+      const overdrivenCount = data.reduce((count, value) => (value === 255 ? count + 1 : count), 0);
 
-      const ctx = currentCanvas.getContext('2d');
-      if(ctx) {
-        const space = currentCanvas.width / data.length;
-        ctx.lineWidth = Math.ceil(space);
-        ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--foreground');
+      ctx.lineWidth = Math.ceil(space);
+      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(overdrivenCount >= 5 ? '--warning' : '--foreground');
 
-        ctx.clearRect(0, 0, currentCanvas.width, currentCanvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        data.forEach((value: number, i : number) => {
-            ctx.beginPath();
-            ctx.moveTo(space * i, currentCanvas.height);
-            ctx.lineTo(space * i, currentCanvas.height - value);
-            ctx.stroke();
-          });
-        }
+      for(const [ i, value ] of data.entries()) {
+        ctx.beginPath();
+        ctx.moveTo(space * i, canvas.height);
+        ctx.lineTo(space * i, canvas.height - (value * canvas.height / 255));
+        ctx.stroke();
       }
     };
 
@@ -62,8 +64,8 @@ export function AudioPreview(
     <div>
       <canvas
         ref={canvasElement}
-        width={384}
-        height={216}
+        width={width}
+        height={height}
       />
     </div>
   );

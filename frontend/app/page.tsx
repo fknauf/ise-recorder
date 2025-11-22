@@ -164,6 +164,8 @@ export default function Home() {
         audioTracks={audioTracks}
         mainDisplay={mainDisplay}
         overlay={overlay}
+        canvasWidth={384}
+        canvasHeight={216}
         hasDisabledButtons={isRecording}
         onMainDisplayChanged={setMainDisplay}
         onOverlayChanged={setOverlay}

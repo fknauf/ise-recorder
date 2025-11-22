@@ -5,6 +5,8 @@ import { useRef, ReactNode, useEffect } from "react";
 
 export interface VideoPreviewProps {
   track: MediaStreamTrack | undefined,
+  width: number
+  height: number
   isMainDisplay: boolean,
   isOverlay: boolean,
   switchesDisabled: boolean,
@@ -15,6 +17,8 @@ export interface VideoPreviewProps {
 export function VideoPreview(
   {
     track,
+    width,
+    height,
     isMainDisplay,
     isOverlay,
     switchesDisabled,
@@ -39,8 +43,8 @@ export function VideoPreview(
         ref={videoRef}
         autoPlay
         muted
-        width={384}
-        height={216}
+        width={width}
+        height={height}
         className="video-preview"
       />
 

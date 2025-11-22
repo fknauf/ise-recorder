@@ -35,6 +35,8 @@ interface PreviewSectionProps {
   audioTracks: MediaStreamTrack[]
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
+  canvasWidth: number,
+  canvasHeight: number,
   hasDisabledButtons: boolean,
   onMainDisplayChanged: (track: MediaStreamTrack | null) => void,
   onOverlayChanged: (track: MediaStreamTrack | null) => void,
@@ -50,6 +52,8 @@ export function PreviewSection(
     audioTracks,
     mainDisplay,
     overlay,
+    canvasWidth,
+    canvasHeight,
     hasDisabledButtons,
     onMainDisplayChanged,
     onOverlayChanged,
@@ -67,6 +71,8 @@ export function PreviewSection(
     >
       <VideoPreview
         track={track}
+        width={canvasWidth}
+        height={canvasHeight}
         switchesDisabled={hasDisabledButtons}
         isMainDisplay={mainDisplay === track}
         isOverlay={overlay === track}
@@ -91,7 +97,11 @@ export function PreviewSection(
             hasDisabledButtons={hasDisabledButtons}
             onRemove={() => onRemoveAudioTrack(track)}
           >
-            <AudioPreview track={track}/>
+            <AudioPreview
+              track={track}
+              width={canvasWidth}
+              height={canvasHeight}
+            />
           </PreviewCard>
         )
       }
