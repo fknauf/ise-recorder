@@ -41,10 +41,11 @@ export function AudioPreview(
       audioAnalyzer.getByteFrequencyData(data);
 
       const space = canvas.width / data.length;
-      const overdrivenCount = data.reduce((count, value) => (value === 255 ? count + 1 : count), 0);
+      const overdrivenBins = data.reduce((count, value) => (value === 255 ? count + 1 : count), 0);
+      const isOverdriven = overdrivenBins >= data.length / 8;
 
       ctx.lineWidth = Math.ceil(space);
-      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(overdrivenCount >= 5 ? '--warning' : '--foreground');
+      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isOverdriven ? '--warning' : '--foreground');
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
