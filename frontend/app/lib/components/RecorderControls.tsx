@@ -100,7 +100,7 @@ export function RecorderControls(
 
   const addVideoDevice = async (devUid: Key) => {
     const [ groupId, deviceId ] = splitDeviceUniqueId(devUid as string);
-    if(currentVideoTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
+    if(currentVideoTracks.some(track => trackIsFromDevice(track, groupId, deviceId))) {
         return;
     }
 
@@ -115,7 +115,7 @@ export function RecorderControls(
 
   const addAudioDevice = async (devUid: Key) => {
     const [ groupId, deviceId ] = splitDeviceUniqueId(devUid as string);
-    if(currentAudioTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
+    if(currentAudioTracks.some(track => trackIsFromDevice(track, groupId, deviceId))) {
         return;
     }
 

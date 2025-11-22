@@ -109,7 +109,11 @@ export default function Home() {
 
   const startRecording = () => {
     const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => {
+      // No need to await: we support sending chunks to server out of order and/or concurrently.
       sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
+
+      // For local file storage on the other hand, it's important that chunks to the same file
+      // are not written concurrently and that filesystem state updates are correctly ordered.
       await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
       await updateSavedRecordingsList();
     };
