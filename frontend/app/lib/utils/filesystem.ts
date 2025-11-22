@@ -71,7 +71,7 @@ export async function getRecordingsState(): Promise<RecordingsState> {
   }
 }
 
-export async function getRecordingFile(recordingName: string, filename: string, options?: FileSystemGetFileOptions) {
+async function getRecordingFile(recordingName: string, filename: string, options?: FileSystemGetFileOptions) {
   const recordingDir = await getRecordingDirectory(recordingName, { create: options?.create });
   return await recordingDir.getFileHandle(filename, options);
 }

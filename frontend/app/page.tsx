@@ -31,10 +31,8 @@ export default function Home() {
 
   const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
 
-  const updateSavedRecordingsList = () => getRecordingsState().then(setSavedRecordingsState);
-
   useEffect(() => {
-    updateSavedRecordingsList();
+    getRecordingsState().then(setSavedRecordingsState);
   }, [])
 
   useEffect(() => {
@@ -57,6 +55,8 @@ export default function Home() {
 
   const isRecording = activeRecording !== null;
   const apiUrl = serverEnv?.api_url
+
+  const updateSavedRecordingsList = () => getRecordingsState().then(setSavedRecordingsState);
 
   const addDisplayTracks = async (tracks: MediaStreamTrack[]) => {
     // should only ever be one video track, but let's just grab all just in case. user can
@@ -111,12 +111,11 @@ export default function Home() {
     const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => {
       sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
       await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
-      updateSavedRecordingsList();
+      await updateSavedRecordingsList();
     };
 
     const onFinished = async (recordingName: string) => {
       schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
-      updateSavedRecordingsList();
     }
 
     recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);
