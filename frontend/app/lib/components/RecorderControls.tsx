@@ -9,6 +9,7 @@ import Stop from '@spectrum-icons/workflow/Stop';
 import { Key, useState } from "react";
 import isEmail from 'validator/es/lib/isEmail';
 import { unsafeTitleCharacters } from "../utils/recording";
+import { showError } from "../utils/errors";
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
@@ -27,19 +28,19 @@ const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(titl
 const validateEmail = (email: string) => email.trim() === '' || isEmail(email) || 'invalid e-mail address';
 
 interface RecorderControlsProps {
-    lectureTitle: string
-    lecturerEmail: string
-    isRecording: boolean
-    isEmailHidden: boolean
-    currentVideoTracks: MediaStreamTrack[],
-    currentAudioTracks: MediaStreamTrack[],
-    onLectureTitleChanged: (lectureTitle: string) => void
-    onLecturerEmailChanged: (lectureTitle: string) => void
-    onAddDisplayTracks: (tracks: MediaStreamTrack[]) => void
-    onAddVideoTracks: (tracks: MediaStreamTrack[]) => void
-    onAddAudioTracks: (tracks: MediaStreamTrack[]) => void
-    onStartRecording: () => void
-    onStopRecording: () => void
+  lectureTitle: string
+  lecturerEmail: string
+  isRecording: boolean
+  isEmailHidden: boolean
+  currentVideoTracks: MediaStreamTrack[],
+  currentAudioTracks: MediaStreamTrack[],
+  onLectureTitleChanged: (lectureTitle: string) => void
+  onLecturerEmailChanged: (lectureTitle: string) => void
+  onAddDisplayTracks: (tracks: MediaStreamTrack[]) => void
+  onAddVideoTracks: (tracks: MediaStreamTrack[]) => void
+  onAddAudioTracks: (tracks: MediaStreamTrack[]) => void
+  onStartRecording: () => void
+  onStopRecording: () => void
 }
 
 export function RecorderControls(
@@ -65,18 +66,26 @@ export function RecorderControls(
 
   const refreshUserMediaDevices = async () => {
     if(!hasPermissions) {
-      // Request permissions, needs to happen before devices can be enumerated
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-      if(stream) {
+      try {
+        // Request permissions, needs to happen before devices can be enumerated
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         stream.getTracks().forEach(t => t.stop());
         setHasPermissions(true);
+      } catch(e) {
+        console.log(e);
+        showError('Could not obtain user media permissions', e);
       }
     }
-    const devs = await navigator.mediaDevices.enumerateDevices();
 
-    setVideoDevices(devs.filter(dev => dev.kind === 'videoinput'));
-    setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+
+      setVideoDevices(devs.filter(dev => dev.kind === 'videoinput'));
+      setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
+    } catch(e) {
+      console.log(e);
+      showError('Could not enumerate devices', e);
+    }
   };
 
   const openDisplayStream = async () => {
@@ -85,6 +94,7 @@ export function RecorderControls(
       onAddDisplayTracks(screenStream.getVideoTracks());
     } catch(e) {
       console.log(e);
+      showError('Could not obtain display stream', e);
     }
   };
 
@@ -93,8 +103,14 @@ export function RecorderControls(
     if(currentVideoTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
         return;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ video: createDeviceConstraints(groupId, deviceId), audio: false });
-    onAddVideoTracks(stream.getVideoTracks());
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: createDeviceConstraints(groupId, deviceId), audio: false });
+      onAddVideoTracks(stream.getVideoTracks());
+    } catch(e) {
+      console.log(e);
+      showError('Could not obtain video stream', e);
+    }
   }
 
   const addAudioDevice = async (devUid: Key) => {
@@ -102,8 +118,14 @@ export function RecorderControls(
     if(currentAudioTracks.find(track => trackIsFromDevice(track, groupId, deviceId))) {
         return;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: createDeviceConstraints(groupId, deviceId), video: false });
-    onAddAudioTracks(stream.getAudioTracks());
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: createDeviceConstraints(groupId, deviceId), video: false });
+      onAddAudioTracks(stream.getAudioTracks());
+    } catch(e) {
+      console.log(e);
+      showError('Could not obtain audio stream', e);
+    }
   }
 
   return (

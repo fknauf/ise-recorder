@@ -36,8 +36,8 @@ interface PreviewSectionProps {
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
   hasDisabledButtons: boolean,
-  onToggleMainDisplay: (track: MediaStreamTrack, enabled: boolean) => void,
-  onToggleOverlay: (track: MediaStreamTrack, enabled: boolean) => void,
+  onMainDisplayChanged: (track: MediaStreamTrack | null) => void,
+  onOverlayChanged: (track: MediaStreamTrack | null) => void,
   onRemoveDisplayTrack: (track: MediaStreamTrack) => void
   onRemoveVideoTrack: (track: MediaStreamTrack) => void
   onRemoveAudioTrack: (track: MediaStreamTrack) => void
@@ -51,8 +51,8 @@ export function PreviewSection(
     mainDisplay,
     overlay,
     hasDisabledButtons,
-    onToggleMainDisplay,
-    onToggleOverlay,
+    onMainDisplayChanged,
+    onOverlayChanged,
     onRemoveDisplayTrack,
     onRemoveVideoTrack,
     onRemoveAudioTrack
@@ -70,8 +70,8 @@ export function PreviewSection(
         switchesDisabled={hasDisabledButtons}
         isMainDisplay={mainDisplay === track}
         isOverlay={overlay === track}
-        onToggleMainDisplay={isSelected => onToggleMainDisplay(track, isSelected) }
-        onToggleOverlay={isSelected => onToggleOverlay(track, isSelected) }
+        onToggleMainDisplay={isSelected => onMainDisplayChanged(isSelected ? track : null) }
+        onToggleOverlay={isSelected => onOverlayChanged(isSelected ? track : null) }
       />
     </PreviewCard>;
 

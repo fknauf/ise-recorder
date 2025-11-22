@@ -1,4 +1,4 @@
-import { ToastQueue } from "@adobe/react-spectrum";
+import { showError } from "./errors";
 
 export async function sendChunkToServer(
   apiUrl: string | undefined,
@@ -34,7 +34,7 @@ export async function sendChunkToServer(
       console.log(e);
 
       if(attempt == retries) {
-        ToastQueue.negative(`Failed to upload chunk ${index}.`, { timeout: 5000 });
+        showError(`Failed to upload chunk ${index}.`, e);
       } else {
         await new Promise(resolve => setTimeout(resolve, intervalMillis));
       }
@@ -68,7 +68,6 @@ export async function schedulePostprocessing(
     });
   } catch(e) {
     console.log(e);
-    const message = e instanceof Error ? e.message : 'unknown reason';
-    ToastQueue.negative(`Failed to schedule postprocessing: ${message}`)
+    showError('Failed to schedule postprocessing', e);
   }
 }

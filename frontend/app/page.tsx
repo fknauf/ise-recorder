@@ -31,8 +31,10 @@ export default function Home() {
 
   const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
 
+  const updateSavedRecordingsList = () => getRecordingsState().then(setSavedRecordingsState);
+
   useEffect(() => {
-    getRecordingsState().then(setSavedRecordingsState);
+    updateSavedRecordingsList();
   }, [])
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export default function Home() {
   const addDisplayTracks = async (tracks: MediaStreamTrack[]) => {
     // should only ever be one video track, but let's just grab all just in case. user can
     // still remove them manually if there happen to be more.
-    setDisplayTracks([ ...displayTracks, ...tracks ]);
+    setDisplayTracks(prev => [ ...prev, ...tracks ]);
 
     if(!mainDisplay) {
       setMainDisplay(tracks.at(0) ?? null)
@@ -67,7 +69,7 @@ export default function Home() {
   };
 
   const addVideoTracks = async (tracks: MediaStreamTrack[]) => {
-    setVideoTracks([ ...videoTracks, ...tracks ])
+    setVideoTracks(prev => [ ...prev, ...tracks ])
 
     if(!overlay) {
       setOverlay(tracks.at(0) ?? null);
@@ -75,7 +77,7 @@ export default function Home() {
   }
 
   const addAudioTracks = async (tracks: MediaStreamTrack[]) => {
-    setAudioTracks ([...audioTracks, ...tracks ])
+    setAudioTracks(prev => [ ...prev, ...tracks ])
   }
 
   const removeTrackFromPostprocessing = (track: MediaStreamTrack) => {
@@ -91,37 +93,38 @@ export default function Home() {
   const removeVideoTrack = (track: MediaStreamTrack) => {
     removeTrackFromPostprocessing(track);
     track.stop();
-    setVideoTracks(videoTracks.filter(t => t !== track));
+    setVideoTracks(prev => prev.filter(t => t !== track));
   }
 
   const removeAudioTrack = (track: MediaStreamTrack) => {
     track.stop();
-    setAudioTracks(audioTracks.filter(t => t !== track));
+    setAudioTracks(prev => prev.filter(t => t !== track));
   }
 
   const removeDisplayTrack = (track: MediaStreamTrack) => {
     removeTrackFromPostprocessing(track);
     track.stop();
-    setDisplayTracks(displayTracks.filter(t => t !== track));
+    setDisplayTracks(prev => prev.filter(t => t !== track));
   }
 
   const startRecording = () => {
     const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => {
       sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
       await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
-      setSavedRecordingsState(await getRecordingsState());
+      updateSavedRecordingsList();
     };
 
     const onFinished = async (recordingName: string) => {
       schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
-      setSavedRecordingsState(await getRecordingsState());
+      updateSavedRecordingsList();
     }
 
     recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);
   };
 
   const stopRecording = () => {
-    stopLectureRecording(activeRecording, () => setActiveRecording(null));
+    stopLectureRecording(activeRecording);
+    setActiveRecording(null);
   };
 
   ////////////////
@@ -158,8 +161,8 @@ export default function Home() {
         mainDisplay={mainDisplay}
         overlay={overlay}
         hasDisabledButtons={isRecording}
-        onToggleMainDisplay={(track, isSelected) => setMainDisplay(isSelected ? track : null)}
-        onToggleOverlay={(track, isSelected) => setOverlay(isSelected ? track : null)}
+        onMainDisplayChanged={setMainDisplay}
+        onOverlayChanged={setOverlay}
         onRemoveDisplayTrack={removeDisplayTrack}
         onRemoveVideoTrack={removeVideoTrack}
         onRemoveAudioTrack={removeAudioTrack}
@@ -168,7 +171,7 @@ export default function Home() {
       <SavedRecordingsSection
         recordings={savedRecordingsState.recordings}
         activeRecordingName={activeRecording?.name}
-        onRemoved={() => getRecordingsState().then(setSavedRecordingsState)}
+        onRemoved={updateSavedRecordingsList}
       />
 
       <ToastContainer/>

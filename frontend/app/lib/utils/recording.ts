@@ -134,7 +134,6 @@ export const recordLecture = async (
   onFinished(recordingName);
 };
 
-export const stopLectureRecording = (activeRecording: RecordingJobs | null, onFinished: () => void) => {
+export const stopLectureRecording = (activeRecording: RecordingJobs | null) => {
   activeRecording?.recorders.forEach(r => r.stop());
-  onFinished();
 };
