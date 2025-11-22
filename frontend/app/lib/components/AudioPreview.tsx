@@ -23,6 +23,7 @@ export function AudioPreview(
     const audioSource = audioContext.createMediaStreamSource(new MediaStream([track]))
 
     audioAnalyzer.fftSize = 512;
+    audioAnalyzer.maxDecibels = 0;
     audioSource.connect(audioAnalyzer);
 
     const data = new Uint8Array(audioAnalyzer.frequencyBinCount);
