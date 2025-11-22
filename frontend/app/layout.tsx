@@ -5,8 +5,8 @@ import { ServerEnvProvider } from "./lib/components/ServerEnvProvider";
 import { getServerEnv } from "./lib/utils/serverEnv";
 
 export const metadata: Metadata = {
-  title: "ise-recorder",
-  description: "Client-only lecture recorder",
+  title: "ISE-Recorder",
+  description: "ISE Lecture Recorder",
 };
 
 export default async function RootLayout({
