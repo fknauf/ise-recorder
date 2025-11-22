@@ -2,15 +2,14 @@
 
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";
-import useSWR from "swr";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
 import { RecorderControls } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
 import { appendToRecordingFile, RecordingsState, getRecordingsState } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
 import { recordLecture, stopLectureRecording, RecordingJobs } from "./lib/utils/recording";
-import { clientGetPublicServerEnvironment } from "./env/lib";
 import { PreviewSection } from "./lib/components/PreviewSection";
+import { useServerEnv } from "./lib/components/ServerEnvProvider";
 
 export default function Home() {
   ////////////////
@@ -29,7 +28,9 @@ export default function Home() {
   const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
   const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
 
-  const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
+  //const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
+
+  const serverEnv = useServerEnv();
 
   useEffect(() => {
     getRecordingsState().then(setSavedRecordingsState);
@@ -54,7 +55,7 @@ export default function Home() {
   ////////////////
 
   const isRecording = activeRecording !== null;
-  const apiUrl = serverEnv?.api_url
+  const apiUrl = serverEnv?.apiUrl
 
   const updateSavedRecordingsList = () => getRecordingsState().then(setSavedRecordingsState);
 

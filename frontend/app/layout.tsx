@@ -1,34 +1,31 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { ClientProviders } from "./lib/components/Provider";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { SpectrumProvider } from "./lib/components/SpectrumProvider";
+import { ServerEnvProvider } from "./lib/components/ServerEnvProvider";
+import { getServerEnv } from "./lib/utils/serverEnv";
 
 export const metadata: Metadata = {
   title: "ise-recorder",
   description: "Client-only lecture recorder",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  'use server';
+
+  const env = await getServerEnv();
+
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <ClientProviders>
-          {children}
-        </ClientProviders>
+      <body>
+        <SpectrumProvider>
+          <ServerEnvProvider env={env}>
+            {children}
+          </ServerEnvProvider>
+        </SpectrumProvider>
       </body>
     </html>
   );

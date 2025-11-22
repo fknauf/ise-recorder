@@ -11,13 +11,18 @@ declare module '@adobe/react-spectrum' {
   }
 }
 
-export function ClientProviders(
+export function SpectrumProvider(
   { children }: Readonly<{children: React.ReactNode}>
 ) {
   const router = useRouter();
 
   return (
-    <Provider theme={defaultTheme} router={{ navigate: router.push }}>
+    <Provider
+      theme={defaultTheme}
+      defaultColorScheme='dark'
+      locale='en-US'
+      router={{ navigate: router.push }
+    }>
       {children}
     </Provider>
   );
