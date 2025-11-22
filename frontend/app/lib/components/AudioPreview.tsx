@@ -38,10 +38,10 @@ export function AudioPreview(
 
       const ctx = currentCanvas.getContext('2d');
       if(ctx) {
-        ctx.fillStyle = 'white';
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#d5d4d5';
         const space = currentCanvas.width / data.length;
+        ctx.lineWidth = space;
+        ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--foreground');
+
         ctx.clearRect(0, 0, currentCanvas.width, currentCanvas.height);
 
         data.forEach((value: number, i : number) => {
