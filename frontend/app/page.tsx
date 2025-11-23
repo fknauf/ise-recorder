@@ -55,7 +55,7 @@ export default function Home() {
   ////////////////
 
   const isRecording = activeRecording !== null;
-  const apiUrl = serverEnv?.apiUrl
+  const apiUrl = serverEnv?.apiUrl;
 
   const updateSavedRecordingsList = () => getRecordingsState().then(setSavedRecordingsState);
 
@@ -140,10 +140,10 @@ export default function Home() {
       <RecorderControls
         lectureTitle={lectureTitle}
         lecturerEmail={lecturerEmail}
+        hasEmailField={apiUrl !== undefined}
         isRecording={isRecording}
         currentVideoTracks={videoTracks}
         currentAudioTracks={audioTracks}
-        isEmailHidden={!apiUrl}
         onLectureTitleChanged={setLectureTitle}
         onLecturerEmailChanged={setLecturerEmail}
         onAddDisplayTracks={addDisplayTracks}

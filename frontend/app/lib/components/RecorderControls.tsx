@@ -30,8 +30,8 @@ const validateEmail = (email: string) => email.trim() === '' || isEmail(email) |
 interface RecorderControlsProps {
   lectureTitle: string
   lecturerEmail: string
+  hasEmailField: boolean
   isRecording: boolean
-  isEmailHidden: boolean
   currentVideoTracks: MediaStreamTrack[],
   currentAudioTracks: MediaStreamTrack[],
   onLectureTitleChanged: (lectureTitle: string) => void
@@ -47,8 +47,8 @@ export function RecorderControls(
   {
     lectureTitle,
     lecturerEmail,
+    hasEmailField,
     isRecording,
-    isEmailHidden,
     currentVideoTracks,
     currentAudioTracks,
     onLectureTitleChanged,
@@ -141,7 +141,7 @@ export function RecorderControls(
 
       {
         // E-Mail is only used when the postprocessing job is scheduled, so we can leave it editable during recording.
-        isEmailHidden ? <></> :
+        hasEmailField &&
           <TextField
             label="e-Mail"
             validate={validateEmail}
