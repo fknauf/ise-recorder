@@ -21,15 +21,17 @@ from ise_record import postprocess_recording, send_report, SmtpSink
 
 app = Flask(__name__)
 
-app.config['DESTDIR'] = './data'
-app.config['SMTP_SERVER'] = None
-app.config['SMTP_PORT'] = 0
-app.config['SMTP_LOCAL_HOSTNAME'] = None
-app.config['SMTP_USERNAME'] = None
-app.config['SMTP_PASSWORD'] = None
-app.config['SMTP_SENDER'] = None
-app.config['SMTP_STARTTLS'] = False
-app.config['SMTP_ALLOWED_DOMAINS'] = []
+app.config.update(
+    DESTDIR = './data',
+    SMTP_SERVER = None,
+    SMTP_PORT = 0,
+    SMTP_LOCAL_HOSTNAME = None,
+    SMTP_USERNAME = None,
+    SMTP_PASSWORD = None,
+    SMTP_SENDER = None,
+    SMTP_STARTTLS = False,
+    SMTP_ALLOWED_DOMAINS = []
+)
 
 app.config.from_prefixed_env("ISE_RECORD")
 

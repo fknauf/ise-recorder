@@ -6,3 +6,6 @@ npm-debug.log
 README.md
 .next
 .git
+next-env.d.ts
+out
+build
