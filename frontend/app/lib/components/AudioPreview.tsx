@@ -43,7 +43,7 @@ export function AudioPreview(
 
       const space = canvas.width / data.length;
       const overdrivenBins = data.reduce((count, value) => (value === 255 ? count + 1 : count), 0);
-      const isOverdriven = overdrivenBins >= data.length / 8;
+      const isOverdriven = overdrivenBins >= data.length / 32;
 
       ctx.lineWidth = Math.ceil(space);
       ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isOverdriven ? '--warning' : '--foreground');

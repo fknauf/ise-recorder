@@ -140,12 +140,13 @@ export function RecorderControls(
       />
 
       {
-        // E-Mail is only used when the postprocessing job is scheduled, so we can leave it editable during recording.
         hasEmailField &&
           <TextField
             label="e-Mail"
-            validate={validateEmail}
             value={lecturerEmail}
+            isReadOnly={isRecording}
+            isDisabled={isRecording}
+            validate={validateEmail}
             onChange={onLecturerEmailChanged}
           />
       }
