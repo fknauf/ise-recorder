@@ -26,7 +26,9 @@ export function AudioPreview(
     audioAnalyzer.maxDecibels = 0;
     audioSource.connect(audioAnalyzer);
 
-    const data = new Uint8Array(audioAnalyzer.frequencyBinCount);
+    const freqData = new Uint8Array(audioAnalyzer.frequencyBinCount);
+    const timeData = new Uint8Array(audioAnalyzer.fftSize);
+
     let timerId: number;
 
     const renderFunction = () => {
@@ -39,18 +41,18 @@ export function AudioPreview(
         return;
       }
 
-      audioAnalyzer.getByteFrequencyData(data);
+      audioAnalyzer.getByteFrequencyData(freqData);
+      audioAnalyzer.getByteTimeDomainData(timeData);
 
-      const space = canvas.width / data.length;
-      const overdrivenBins = data.reduce((count, value) => (value === 255 ? count + 1 : count), 0);
-      const isOverdriven = overdrivenBins >= data.length / 32;
+      const space = canvas.width / freqData.length;
+      const isClipping = timeData.some(v => v <= 5 || v >= 250);
 
       ctx.lineWidth = Math.ceil(space);
-      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isOverdriven ? '--warning' : '--foreground');
+      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isClipping ? '--warning' : '--foreground');
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      for(const [ i, value ] of data.entries()) {
+      for(const [ i, value ] of freqData.entries()) {
         ctx.beginPath();
         ctx.moveTo(space * i, canvas.height);
         ctx.lineTo(space * i, canvas.height - (value * canvas.height / 255));
