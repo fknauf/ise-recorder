@@ -15,6 +15,7 @@ from typing import NamedTuple, List, Tuple
 logger = logging.getLogger(__name__)
 
 class ResultReason(Enum):
+    """ Reason for a job result, i.e. why a file was produced or not produced. """
     SUCCESS = 1
     FAILURE = 2
     MAIN_STREAM_MISSING = 3
@@ -205,9 +206,8 @@ def postprocess_picture_in_picture(
 
         # map all audio streams if there are any.
         # ffmpeg fails if we pass -map 1:a when there's no audio.
-        audio_map = ['-map', '0:a' ] if stream.has_audio else []
         audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
-        audio_map = [ token for num in range(len(audio_paths)) for token in [ '-map', f'{num + 2}:a' ] ]
+        audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + 2}:a' ] ]
 
         render_command = [
             'ffmpeg',
@@ -253,9 +253,18 @@ def postprocess_index(
     try:
         audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
         audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
-        maps = [ '-map', '0' ] + [ token for num in range(len(audio_paths)) for token in [ '-map', f'{num + 1}:a' ] ]
+        audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + 1}:a' ] ]
 
-        command = [ 'ffmpeg', '-i', stream_path ] + audio_input + maps + [ '-y', output_path ]
+        command = [
+            'ffmpeg',
+            '-i', stream_path
+        ] + audio_input + [
+            '-map', '0'
+        ] + audio_map + [
+            '-y',
+            output_path
+        ]
+
         print(command)
         run(command, stdout=PIPE, stderr=PIPE, text=True, check=True)
 

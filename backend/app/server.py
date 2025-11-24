@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import re
 import threading
-from typing import List, Tuple
+from typing import List
 
 from email_validator import validate_email, EmailNotValidError
 from flask import Flask, request
