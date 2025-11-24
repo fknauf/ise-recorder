@@ -8,8 +8,14 @@ export interface AudioPreviewProps {
   height: number
 }
 
+/**
+ * Preview canvas for an audio stream. Paints the FFT spectrum as a histogram.
+ * 
+ * This is mostly meant to give visual feedback that the microphone is working and
+ * whether its volume setting is okay.
+ */
 export function AudioPreview(
-  { track, width, height }: AudioPreviewProps
+  { track, width, height }: Readonly<AudioPreviewProps>
 ): ReactNode {
   const canvasElement = useRef<HTMLCanvasElement>(null);
 
@@ -18,6 +24,8 @@ export function AudioPreview(
       return;
     }
 
+    // Hook up the audio track to an analyzer node to get the FFT spectrum and the time domain
+    // values for clipping detection
     const audioContext = new AudioContext();
     const audioAnalyzer = audioContext.createAnalyser();
     const audioSource = audioContext.createMediaStreamSource(new MediaStream([track]))
@@ -29,6 +37,8 @@ export function AudioPreview(
     const freqData = new Uint8Array(audioAnalyzer.frequencyBinCount);
     const timeData = new Uint8Array(audioAnalyzer.fftSize);
 
+    // Animation is done through a rendering function that schedules itself again and again until
+    // the component is unmounted.
     let timerId: number;
 
     const renderFunction = () => {
@@ -47,6 +57,7 @@ export function AudioPreview(
       const space = canvas.width / freqData.length;
       const isClipping = timeData.some(v => v <= 5 || v >= 250);
 
+      // paint spectum as a histrogram. Use the warning color iff audio is clipping.
       ctx.lineWidth = Math.ceil(space);
       ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isClipping ? '--warning' : '--foreground');
 

@@ -12,6 +12,10 @@ interface PreviewCardProps {
   children: Readonly<ReactNode>
 }
 
+/**
+ * Preview card, i.e. the frame around a video or audio preview. Consists of a frame, title, and a "remove" button.
+ * The actual preview is passed in as a child node.
+ */
 const PreviewCard = (
   {
       label,
@@ -28,7 +32,9 @@ const PreviewCard = (
     </Flex>
   </View>;
 
-
+/**
+ * Previews section on the main page, basically a collection of preview cards for all active streams.
+ */
 interface PreviewSectionProps {
   displayTracks: MediaStreamTrack[]
   videoTracks: MediaStreamTrack[]
@@ -60,7 +66,7 @@ export function PreviewSection(
     onRemoveDisplayTrack,
     onRemoveVideoTrack,
     onRemoveAudioTrack
-  }: PreviewSectionProps
+  }: Readonly<PreviewSectionProps>
 ) {
   const video_preview_card = (track: MediaStreamTrack, label: string, onRemove: (track: MediaStreamTrack) => void) =>
     <PreviewCard

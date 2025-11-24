@@ -43,6 +43,15 @@ interface RecorderControlsProps {
   onStopRecording: () => void
 }
 
+/**
+ * The controls on top of the main page.
+ * 
+ * This allows adding new streams (removing happens through the preview cards), starting/stopping recordings
+ * and setting the lecture title and lecturer email (if a server backend is configured) for postprocessing
+ * notifications.
+ * 
+ * Controls are disabled (except for the "stop recording" button) while a recording is underway.
+ */
 export function RecorderControls(
   {
     lectureTitle,
@@ -58,16 +67,27 @@ export function RecorderControls(
     onAddAudioTracks,
     onStartRecording,
     onStopRecording
-  }: RecorderControlsProps
+  }: Readonly<RecorderControlsProps>
 ) {
+  // The controls include menus of available video and audio devices. We obtain these asynchronously
+  // and store them here for display.
   const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([])
   const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([])
   const [ hasPermissions, setHasPermissions ] = useState(false);
 
+  // For hotplugging, the device list needs to be refreshed whenever a device menu is opened, so we
+  // need to be able to call this more than once. There is as yet no way to just ask for permission
+  // to enumerate the available devices, so we ask for the default user media streams, and if the
+  // user grants that permission we can also enumerate devices. After that we close the streams again
+  // because we only want to have streams open if they're selected for recording.
+  // 
+  // There's a caveat here that we can only ask for permissions in this way once without the risk
+  // of closing streams that are in use. This becomes relevant if a user grants permission and then
+  // revokes it again, in which case we don't ask for permission again and the whole app will fail
+  // to work. In this case the user has to reload the page, which seems acceptable.
   const refreshUserMediaDevices = async () => {
     if(!hasPermissions) {
       try {
-        // Request permissions, needs to happen before devices can be enumerated
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         stream.getTracks().forEach(t => t.stop());
         setHasPermissions(true);

@@ -14,6 +14,9 @@ export interface VideoPreviewProps {
   onToggleOverlay: (isSelected: boolean) => void
 }
 
+/**
+ * Preview for a video track. Shows the video and switches to mark it as main display or overlay.
+ */
 export function VideoPreview(
   {
     track,
@@ -24,10 +27,12 @@ export function VideoPreview(
     switchesDisabled,
     onToggleMainDisplay,
     onToggleOverlay
-  }: VideoPreviewProps
+  }: Readonly<VideoPreviewProps>
 ): ReactNode {
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // React doesn't currently allow setting the srcObject property directly through JSX,
+  // so we have to do it with a useEffect hook.
   useEffect(() => {
     const currentVideo = videoRef.current;
 
@@ -35,7 +40,7 @@ export function VideoPreview(
       const trackStream = track ? new MediaStream([track]) : null;
       currentVideo.srcObject = trackStream;
     }
-  }, [videoRef, track])
+  }, [track])
 
   return (
     <Flex direction="column" gap="size-100">

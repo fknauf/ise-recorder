@@ -6,6 +6,13 @@ import Download from '@spectrum-icons/workflow/Download';
 import { readRecordingFile, deleteRecording, RecordingFileList } from "../utils/filesystem";
 
 async function downloadFile(dir: string, filename: string) {
+  // This is a bit hacky, but I haven't been able to come up with a cleaner
+  // way. Read file, create an object url for it, temporarly append a link
+  // to the document, click it programmatically and remove it again.
+  //
+  // It might be prudent to switch this to the File System Access API once
+  // that is widely available.
+
   const file = await readRecordingFile(dir, filename);
   const url = URL.createObjectURL(file);
 
@@ -31,8 +38,13 @@ interface SavedRecordingsCardProps {
   onRemoved: () => void
 }
 
+/**
+ * Card showing a saved recording with download and delete buttons.
+ * 
+ * Buttons are disabled if the recording it shows is currently being recorded.
+ */
 function SavedRecordingsCard(
-  { recording, isBeingRecorded, onRemoved }: SavedRecordingsCardProps
+  { recording, isBeingRecorded, onRemoved }: Readonly<SavedRecordingsCardProps>
 ) {
   const formatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -75,8 +87,11 @@ export interface SavedRecordingsSectionProps {
   onRemoved: () => void
 }
 
+/**
+ * Section on the main page showing all saved recordings.
+ */
 export const SavedRecordingsSection = (
-  { recordings, activeRecordingName, onRemoved }: SavedRecordingsSectionProps
+  { recordings, activeRecordingName, onRemoved }: Readonly<SavedRecordingsSectionProps>
 ) =>
   <Flex direction="row" gap="size-100" wrap>
     {

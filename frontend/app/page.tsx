@@ -28,8 +28,6 @@ export default function Home() {
   const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
   const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
 
-  //const { data: serverEnv } = useSWR('env', clientGetPublicServerEnvironment)
-
   const serverEnv = useServerEnv();
 
   useEffect(() => {
@@ -37,6 +35,8 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
+    // warn user when trying to close the tab/window while a recording is active
+
     if(activeRecording !== null) {
       const handleBeforeUnload = (e: BeforeUnloadEvent) => {
         e.preventDefault();
@@ -63,7 +63,6 @@ export default function Home() {
     // should only ever be one video track, but let's just grab all just in case. user can
     // still remove them manually if there happen to be more.
     setDisplayTracks(prev => [ ...prev, ...tracks ]);
-
     if(!mainDisplay) {
       setMainDisplay(tracks.at(0) ?? null)
     }
@@ -71,7 +70,6 @@ export default function Home() {
 
   const addVideoTracks = async (tracks: MediaStreamTrack[]) => {
     setVideoTracks(prev => [ ...prev, ...tracks ])
-
     if(!overlay) {
       setOverlay(tracks.at(0) ?? null);
     }
@@ -85,7 +83,6 @@ export default function Home() {
     if(mainDisplay === track) {
       setMainDisplay(null);
     }
-
     if(overlay === track) {
       setOverlay(null);
     }

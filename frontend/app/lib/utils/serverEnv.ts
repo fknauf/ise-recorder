@@ -32,6 +32,8 @@ export interface ServerEnv {
 let runtimeEnvironment: ServerEnv | undefined;
 
 export async function getServerEnv(): Promise<ServerEnv> {
+  // ensure dynamic rendering whenever the server environment is requested,
+  // so that the runtime environment is used rather than the build environment.
   await connection();
 
   if(runtimeEnvironment === undefined) {

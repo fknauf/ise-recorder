@@ -11,6 +11,11 @@ declare module '@adobe/react-spectrum' {
   }
 }
 
+/**
+ * Provider for react-spectrum components, setting theme, locale, and routing.
+ * 
+ * Adapted from https://react-spectrum.adobe.com/react-spectrum/routing.html
+ */
 export function SpectrumProvider(
   { children }: Readonly<{children: React.ReactNode}>
 ) {

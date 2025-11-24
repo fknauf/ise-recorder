@@ -74,6 +74,19 @@ const recordTracks = (
   };
 };
 
+/**
+ * Record a lecture with the given tracks.
+ * 
+ * The main display and first audio track are combined into one recording stream called "stream",
+ * the overlay track (if any) is recorded into the "overlay" stream, and any remaining video or audio
+ * tracks are recorded into their own streams named "video-N" or "audio-N".
+ * 
+ * The recording name is generated from the lecture title (if any) and the current timestamp.
+ * 
+ * Storage behavior is handled through the onChunkAvailable callback to separate recording logic from
+ * storage logic. The onStarted and onFinished callbacks are called at the start and end of the overall
+ * recording to enable UI updates and postprocessing.
+ */
 export const recordLecture = async (
   displayTracks: MediaStreamTrack[],
   videoTracks: MediaStreamTrack[],

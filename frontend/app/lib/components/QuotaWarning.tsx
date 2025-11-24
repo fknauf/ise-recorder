@@ -12,7 +12,15 @@ function formatMib(x: number | undefined) {
   }
 }
 
-export function QuotaWarning({ usage, quota }: { usage?: number, quota?: number}) {
+export interface QuotaWarningProps {
+  usage?: number,
+  quota?: number
+}
+
+/**
+ * Shows a warning message iff the browser's OPFS quota is almost used up.
+ */
+export function QuotaWarning({ usage, quota }: Readonly<QuotaWarningProps>) {
   const quotaCritical = quota !== undefined && usage !== undefined && quota - usage < 2 ** 30;
 
   if(quotaCritical) {
