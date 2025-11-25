@@ -1,4 +1,4 @@
-import { showError } from "./errors";
+import { showError } from "./notifications";
 
 export async function sendChunkToServer(
   apiUrl: string | undefined,

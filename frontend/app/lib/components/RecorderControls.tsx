@@ -9,7 +9,7 @@ import Stop from '@spectrum-icons/workflow/Stop';
 import { Key, useState } from "react";
 import isEmail from 'validator/es/lib/isEmail';
 import { unsafeTitleCharacters } from "../utils/recording";
-import { showError } from "../utils/errors";
+import { showError } from "../utils/notifications";
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
@@ -45,11 +45,11 @@ interface RecorderControlsProps {
 
 /**
  * The controls on top of the main page.
- * 
+ *
  * This allows adding new streams (removing happens through the preview cards), starting/stopping recordings
  * and setting the lecture title and lecturer email (if a server backend is configured) for postprocessing
  * notifications.
- * 
+ *
  * Controls are disabled (except for the "stop recording" button) while a recording is underway.
  */
 export function RecorderControls(
@@ -80,7 +80,7 @@ export function RecorderControls(
   // to enumerate the available devices, so we ask for the default user media streams, and if the
   // user grants that permission we can also enumerate devices. After that we close the streams again
   // because we only want to have streams open if they're selected for recording.
-  // 
+  //
   // There's a caveat here that we can only ask for permissions in this way once without the risk
   // of closing streams that are in use. This becomes relevant if a user grants permission and then
   // revokes it again, in which case we don't ask for permission again and the whole app will fail

@@ -7,9 +7,10 @@ import { RecorderControls } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
 import { appendToRecordingFile, RecordingsState, getRecordingsState } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
-import { recordLecture, stopLectureRecording, RecordingJobs } from "./lib/utils/recording";
+import { recordLecture, stopLectureRecording, RecordingJobs, RecordingBackgroundTask } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
+import { showSuccess } from "./lib/utils/notifications";
 
 export default function Home() {
   ////////////////
@@ -106,18 +107,23 @@ export default function Home() {
   }
 
   const startRecording = () => {
-    const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => {
+    const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string): Promise<RecordingBackgroundTask> => {
       // No need to await: we support sending chunks to server out of order and/or concurrently.
-      sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
+      const backgroundPromise = sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
 
       // For local file storage on the other hand, it's important that chunks to the same file
       // are not written concurrently and that filesystem state updates are correctly ordered.
       await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
       await updateSavedRecordingsList();
+
+      return { promise: backgroundPromise };
     };
 
     const onFinished = async (recordingName: string) => {
-      schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+      await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+      if(apiUrl !== undefined) {
+        showSuccess(`Recording "${recordingName}" finished; postprocessing scheduled.`);
+      }
     }
 
     recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);

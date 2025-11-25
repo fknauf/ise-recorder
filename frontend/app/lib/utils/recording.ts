@@ -11,10 +11,19 @@ export interface RecordingJobs {
   recorders: MediaRecorder[]
 }
 
+// Our chunk handler has a quasi-synchronous part (writing to OPFS) and a fully asynchronous
+// part (uploading to server). In JS/TS terms, both of these are async, but we want to await
+// them at different points. What we conceptually need for that is a Promise<Promise<void>>,
+// but Javascript quirks make it difficult to get those from an async function. So we do it
+// with a Promise<RecordingBackgroundTask> instead.
+export interface RecordingBackgroundTask {
+  promise: Promise<void>
+}
+
 const recordTracks = (
   tracks: MediaStreamTrack[],
   options: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, chunkNum: number) => Promise<void> | void,
+  onChunkAvailable: (chunk: Blob, chunkNum: number) => Promise<RecordingBackgroundTask>
 ): RecordingJob => {
   const recordedStream = new MediaStream(tracks);
   const newRecorder = new MediaRecorder(recordedStream, options);
@@ -44,29 +53,33 @@ const recordTracks = (
   }
   newRecorder.onstop = () => chunkSignalResolve(true);
   newRecorder.onerror = () => chunkSignalResolve(true);
+  newRecorder.start(5000);
 
-  const finishedPromise = new Promise<void>(resolve => {
-    (async () => {
-      let finished = false;
-      let chunkNum = 0;
+  const processChunks = async () => {
+    let finished = false;
+    let chunkNum = 0;
+    const chunkPromises: RecordingBackgroundTask[] = [];
 
-      while(!finished) {
-        finished = await chunkSignalPromise;
+    while(!finished) {
+      finished = await chunkSignalPromise;
 
-        while(chunkQueue.length > 0) {
-          const chunk = chunkQueue.shift();
-          if(chunk) {
-            await onChunkAvailable(chunk, chunkNum);
-            ++chunkNum;
-          }
+      while(chunkQueue.length > 0) {
+        const chunk = chunkQueue.shift();
+        if(chunk) {
+          // Wait for the quasi-synchronous part to conclude before processing the
+          // next chunk, to avoid concurrent writes on the OPFS
+          chunkPromises.push(await onChunkAvailable(chunk, chunkNum));
+          ++chunkNum;
         }
       }
+    }
 
-      resolve();
-    })();
-  })
+    // Wait for the fully asynchronous parts (the uploads to the server) to finish
+    // before scheduling the postprocessing job.
+    await Promise.all(chunkPromises.map(job => job.promise));
+  };
 
-  newRecorder.start(5000);
+  const finishedPromise = processChunks();
 
   return {
     recorder: newRecorder,
@@ -76,13 +89,13 @@ const recordTracks = (
 
 /**
  * Record a lecture with the given tracks.
- * 
+ *
  * The main display and first audio track are combined into one recording stream called "stream",
  * the overlay track (if any) is recorded into the "overlay" stream, and any remaining video or audio
  * tracks are recorded into their own streams named "video-N" or "audio-N".
- * 
+ *
  * The recording name is generated from the lecture title (if any) and the current timestamp.
- * 
+ *
  * Storage behavior is handled through the onChunkAvailable callback to separate recording logic from
  * storage logic. The onStarted and onFinished callbacks are called at the start and end of the overall
  * recording to enable UI updates and postprocessing.
@@ -94,7 +107,7 @@ export const recordLecture = async (
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
   lectureTitle: string,
-  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => Promise<void> | void,
+  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => Promise<RecordingBackgroundTask>,
   onStarted: (jobs: RecordingJobs) => void,
   onFinished: (recordingName: string) => void
 ) => {
