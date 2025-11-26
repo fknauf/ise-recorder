@@ -32,8 +32,8 @@ interface RecorderControlsProps {
   lecturerEmail: string
   hasEmailField: boolean
   isRecording: boolean
-  currentVideoTracks: MediaStreamTrack[],
-  currentAudioTracks: MediaStreamTrack[],
+  currentVideoTracks: readonly MediaStreamTrack[],
+  currentAudioTracks: readonly MediaStreamTrack[],
   onLectureTitleChanged: (lectureTitle: string) => void
   onLecturerEmailChanged: (lectureTitle: string) => void
   onAddDisplayTracks: (tracks: MediaStreamTrack[]) => void

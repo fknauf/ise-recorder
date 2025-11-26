@@ -10,7 +10,7 @@ export interface AudioPreviewProps {
 
 /**
  * Preview canvas for an audio stream. Paints the FFT spectrum as a histogram.
- * 
+ *
  * This is mostly meant to give visual feedback that the microphone is working and
  * whether its volume setting is okay.
  */

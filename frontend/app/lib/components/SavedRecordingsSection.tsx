@@ -40,7 +40,7 @@ interface SavedRecordingsCardProps {
 
 /**
  * Card showing a saved recording with download and delete buttons.
- * 
+ *
  * Buttons are disabled if the recording it shows is currently being recorded.
  */
 function SavedRecordingsCard(

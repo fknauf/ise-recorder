@@ -36,9 +36,9 @@ const PreviewCard = (
  * Previews section on the main page, basically a collection of preview cards for all active streams.
  */
 interface PreviewSectionProps {
-  displayTracks: MediaStreamTrack[]
-  videoTracks: MediaStreamTrack[]
-  audioTracks: MediaStreamTrack[]
+  displayTracks: readonly MediaStreamTrack[]
+  videoTracks: readonly MediaStreamTrack[]
+  audioTracks: readonly MediaStreamTrack[]
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
   canvasWidth: number,
