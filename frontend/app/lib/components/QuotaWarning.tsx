@@ -12,6 +12,19 @@ function formatMib(x: number | undefined) {
   }
 }
 
+function formatQuotaWarning(usage: number | undefined, quota: number | undefined): string | undefined {
+  if(quota === undefined || usage === undefined) {
+    return "Quota information not available. This browser may be unable to save recordings locally.";
+  }
+
+  const quotaCritical = quota - usage < 2 ** 30;
+
+  if(quotaCritical) {
+    return `Browser storage running low: ${formatMib(usage)} of ${formatMib(quota)} used. Please consider removing some old recordings.`;
+  }
+}
+
+
 export interface QuotaWarningProps {
   usage?: number,
   quota?: number
@@ -21,20 +34,20 @@ export interface QuotaWarningProps {
  * Shows a warning message iff the browser's OPFS quota is almost used up.
  */
 export function QuotaWarning({ usage, quota }: Readonly<QuotaWarningProps>) {
-  const quotaCritical = quota !== undefined && usage !== undefined && quota - usage < 2 ** 30;
+  const message = formatQuotaWarning(usage, quota);
 
-  if(quotaCritical) {
-    return (
-        <Flex direction="row" justifyContent="center" marginTop="size-200">
-          <InlineAlert variant="notice">
-            <Heading>Quota warning</Heading>
-            <Content>
-              Browser storage running low: {formatMib(usage)} of {formatMib(quota)} used. Please consider removing some old recordings.
-            </Content>
-          </InlineAlert>
-        </Flex>
-      );
-  } else {
+  if(message === undefined) {
     return <></>
   }
+
+  return (
+    <Flex direction="row" justifyContent="center" marginTop="size-200">
+      <InlineAlert variant="notice">
+        <Heading>Quota warning</Heading>
+        <Content>
+          {message}
+        </Content>
+      </InlineAlert>
+    </Flex>
+  );
 }

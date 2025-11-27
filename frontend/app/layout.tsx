@@ -9,11 +9,9 @@ export const metadata: Metadata = {
   description: "ISE Lecture Recorder",
 };
 
-export default async function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default async function RootLayout(
+  { children }: Readonly<{ children: React.ReactNode }>
+) {
   'use server';
 
   const env = await getServerEnv();

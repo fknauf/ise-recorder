@@ -9,7 +9,7 @@ interface PreviewCardProps {
   label: string | undefined,
   hasDisabledButtons: boolean,
   onRemove: () => void,
-  children: Readonly<ReactNode>
+  children: ReactNode
 }
 
 /**
@@ -18,10 +18,10 @@ interface PreviewCardProps {
  */
 const PreviewCard = (
   {
-      label,
-      hasDisabledButtons,
-      onRemove,
-      children
+    label,
+    hasDisabledButtons,
+    onRemove,
+    children
   }: Readonly<PreviewCardProps>
 ) =>
   <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
