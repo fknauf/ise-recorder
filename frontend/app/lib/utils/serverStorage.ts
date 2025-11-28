@@ -1,5 +1,37 @@
 import { showError } from "./notifications";
 
+async function fetchWithRetries(
+  url: string | URL | Request,
+  request: RequestInit | undefined,
+  retries: number,
+  intervalMillis: number,
+  errorPrefix: string
+) {
+  for(let attempt = 0; attempt <= retries; ++attempt) {
+    let errMsg: string;
+
+    try {
+      const response = await fetch(url, request);
+
+      if(response.ok) {
+        break;
+      }
+
+      errMsg = `server responded ${response.status}, ${await response.text()}`;
+    } catch(e) {
+      console.log(e);
+      errMsg = e instanceof Error ? e.message : 'unknown error';
+    }
+
+    if(attempt == retries) {
+      showError(`${errorPrefix}: ${errMsg}`);
+      break;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, intervalMillis));
+  }
+}
+
 export async function sendChunkToServer(
   apiUrl: string | undefined,
   chunk: Blob,
@@ -23,23 +55,12 @@ export async function sendChunkToServer(
   data.append('index', index.toFixed(0));
   data.append('chunk', chunk);
 
-  for(let attempt = 0; attempt < retries; ++attempt) {
-    try {
-      await fetch(chunkUrl, {
-        method: "POST",
-        body: data
-      });
-      break;
-    } catch(e) {
-      console.log(e);
-
-      if(attempt == retries) {
-        showError(`Failed to upload chunk ${index}.`, e);
-      } else {
-        await new Promise(resolve => setTimeout(resolve, intervalMillis));
-      }
-    }
+  const request: RequestInit = {
+    method: "POST",
+    body: data
   }
+
+  await fetchWithRetries(chunkUrl, request, retries, intervalMillis, `Failed to upload ${track} chunk ${index}`);
 }
 
 export async function schedulePostprocessing(
@@ -53,21 +74,21 @@ export async function schedulePostprocessing(
 
   const jobUrl = `${apiUrl}/api/jobs`;
 
-  try {
-    const data = {
-      recording,
-      recipient
-    };
+  const retries = 5;
+  const intervalMillis = 1000;
 
-    await fetch(jobUrl, {
-      method: "POST",
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data)
-    });
-  } catch(e) {
-    console.log(e);
-    showError('Failed to schedule postprocessing', e);
-  }
+  const data = {
+    recording,
+    recipient
+  };
+
+  const request: RequestInit = {
+    method: "POST",
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data)
+  };
+
+  await fetchWithRetries(jobUrl, request, retries, intervalMillis, 'Failed to schedule postprocessing');
 }

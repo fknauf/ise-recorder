@@ -20,6 +20,7 @@ services:
       - 127.0.0.1:8000:8000
     volumes:
       - ./data:/app/data
+    command: --log-level debug
 #    environment:
 #      - ISE_RECORD_DESTDIR=/app/data
 #      - ISE_RECORD_SMTP_SERVER=mail.example.com
