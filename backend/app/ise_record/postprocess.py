@@ -9,7 +9,6 @@ import json
 import logging
 from pathlib import Path
 from subprocess import run, CalledProcessError, PIPE
-import sys
 from typing import NamedTuple, List, Tuple
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,6 @@ def _log_error(err: CalledProcessError) -> None:
                  "stdout\n------\n%s\n\n" \
                  "stderr\n------\n%s\n",
                  err.returncode, err.cmd, err.stdout, err.stderr)
-
 
 def video_properties(path: Path) -> VideoProperties:
     """
@@ -311,7 +309,3 @@ def postprocess_recording(recording_path: Path) -> Result | None:
 
     logging.info("No overlay present, index-only postprocessing for %s", recording_path)
     return postprocess_index(stream_dir, audio_dirs, output_path)
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    print(postprocess_recording(Path(sys.argv[1])))

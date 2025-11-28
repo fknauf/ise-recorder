@@ -17,7 +17,8 @@ from email_validator import validate_email, EmailNotValidError
 from flask import Flask, request
 from flask_cors import CORS
 
-from ise_record import postprocess_recording, send_report, SmtpSink
+from ise_record.postprocess import postprocess_recording
+from ise_record.reporting import send_report, SmtpSink
 
 app = Flask(__name__)
 
