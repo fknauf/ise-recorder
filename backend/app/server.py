@@ -113,13 +113,19 @@ def upload_chunk():
     chunk = request.files.get('chunk')
 
     if not _is_safe_name(recording) or not _is_safe_name(track):
+        app.logger.warning("invalid recording/track name %s/%s", recording, track)
         return f'invalid track {recording}, {track}', 400
+
     if index is None or not index.isdigit():
+        app.logger.warning("invalid chunk index %s in upload for %s/%s", index, recording, track)
         return f'invalid index "{index}"', 400
+
     if chunk is None:
+        app.logger.warning("no chunk data in upload for %s/%s", recording, track)
         return 'no chunk supplied', 400
 
     filepath = _create_track_path(recording, track) / f'chunk.{index.zfill(4)}'
+    app.logger.debug("saving %s", filepath)
     chunk.save(filepath)
 
     return '', 201
@@ -130,12 +136,14 @@ def schedule_job():
 
     job_json = request.json
     if job_json is None:
+        app.logger.warning("Bad postprocessing request: body is not valid JSON")
         return 'Bad Request', 400
 
     recording = job_json.get('recording')
     recipient = job_json.get('recipient')
 
     if not _recording_exists(recording):
+        app.logger.warning("Bad postprocessing request: Recording %s does not exist", recording)
         return 'Bad Request', 400
 
     thread = threading.Thread(
@@ -154,5 +162,7 @@ if __name__ == '__main__':
     app.run(debug=True)
 else:
     gunicorn_logger = logging.getLogger('gunicorn.error')
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)
+
+    logging.basicConfig(
+        level=gunicorn_logger.level,
+        handlers=gunicorn_logger.handlers)

@@ -36,7 +36,6 @@ class VideoProperties(NamedTuple):
     """ Properties of a video stream that we need for postprocessing """
     width: int
     height: int
-    has_audio: bool
     crop: Rectangle
 
     def needs_cropping(self) -> bool:
@@ -72,13 +71,15 @@ def video_properties(path: Path) -> VideoProperties:
                                      'lavfi.cropdetect.x2,lavfi.cropdetect.y2'
     ]
 
+    logger.info("Analyzing %s...", path)
+    logger.debug("Probe command = %s", probe_command)
+
     probe_result = run(probe_command, stdout=PIPE, stderr=PIPE, check=True, text=True)
 
     info = json.loads(probe_result.stdout)
 
     # frontend can only generate files with one video stream
     video_stream = next(s for s in info['streams'] if s['codec_type'] == 'video')
-    has_audio = next((s for s in info['streams'] if s['codec_type'] == 'audio'), None) is not None
 
     width = int(video_stream['width'])
     height = int(video_stream['height'])
@@ -90,10 +91,12 @@ def video_properties(path: Path) -> VideoProperties:
     crop_right  = max((int(p['tags']['lavfi.cropdetect.x2']) for p in packets), default=width)
     crop_bottom = max((int(p['tags']['lavfi.cropdetect.y2']) for p in packets), default=height)
 
+    logger.debug('%s: size=%dx%d, crop=%d,%d-%d,%d',
+                 path, width, height, crop_left, crop_top, crop_right, crop_bottom)
+
     return VideoProperties(
         width = width,
         height = height,
-        has_audio = has_audio,
         crop = Rectangle(
             width = (crop_right - crop_left + 1),
             height = (crop_bottom - crop_top + 1),
@@ -221,7 +224,10 @@ def postprocess_picture_in_picture(
             str(output_path)
         ]
 
+        logger.info("Rendering %s...", output_path)
+        logger.debug("Render command = %s", render_command)
         run(render_command, stdout=PIPE, stderr=PIPE, check=True, text=True)
+        logger.info("Render completed")
 
         return Result(output_file=output_path, reason=ResultReason.SUCCESS)
     except CalledProcessError as err:
@@ -257,7 +263,7 @@ def postprocess_index(
 
         command = [
             'ffmpeg',
-            '-i', stream_path
+            '-i', str(stream_path)
         ] + audio_input + [
             '-map', '0'
         ] + audio_map + [
@@ -265,8 +271,10 @@ def postprocess_index(
             output_path
         ]
 
-        print(command)
+        logger.info("Indexing %s...", output_path)
+        logger.debug("Render command = %s", command)
         run(command, stdout=PIPE, stderr=PIPE, text=True, check=True)
+        logger.info("Render completed")
 
         return Result(output_file=output_path, reason=ResultReason.SUCCESS)
     except CalledProcessError as err:
@@ -294,12 +302,16 @@ def postprocess_recording(recording_path: Path) -> Result | None:
     output_path = recording_path / 'presentation.webm'
 
     if not stream_dir.is_dir():
-        # audio only, nothing to do.
+        logging.info("%s has no main display stream, nothing to do.", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     if overlay_dir.is_dir():
+        logging.info("Picture-in-picture postprocessing for %s", recording_path)
         return postprocess_picture_in_picture(stream_dir, overlay_dir, audio_dirs, output_path)
+
+    logging.info("No overlay present, index-only postprocessing for %s", recording_path)
     return postprocess_index(stream_dir, audio_dirs, output_path)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     print(postprocess_recording(Path(sys.argv[1])))
