@@ -64,13 +64,21 @@ def send_report(
     msg["Subject"] = subject
     msg.set_content(content)
 
-    logger.info(msg)
+    logger.debug("Report generated: \n%s", msg)
 
-    if smtp_sink.server is None or sender is None or recipient is None or recipient.strip() == "":
+    if smtp_sink.server is None or sender is None:
+        logger.debug("Not sending report: incomplete SMTP configuration.")
+        return
+    if recipient is None or recipient.strip() == "":
+        logger.info("Not sending report: no recipient specified.")
         return
 
+    logger.info("Sending report, result = %s", result.reason.name)
+    logger.debug("SMTP through %s:%d as %s",
+                 smtp_sink.server, smtp_sink.port, smtp_sink.local_hostname)
+
     with smtplib.SMTP(
-        host = smtp_sink.server,
+        host=smtp_sink.server,
         port=smtp_sink.port,
         local_hostname=smtp_sink.local_hostname
     ) as smtp:
