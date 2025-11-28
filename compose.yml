@@ -1,6 +1,6 @@
 services:
   frontend:
-    image: code.rinderher.de/library/ise-recorder:latest
+    image: code.rinderher.de/library/ise-recorder:${ISE_RECORD_TAG:-latest}
     build: frontend
     container_name: ise-recorder-frontend
     restart: unless-stopped
@@ -10,7 +10,7 @@ services:
       - ISE_RECORD_API_URL=http://localhost:8000
 
   backend:
-    image: code.rinderher.de/library/ise-recorder-backend:latest
+    image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}
     build: backend
     container_name: ise-recorder-backend
     init: true
