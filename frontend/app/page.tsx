@@ -11,6 +11,10 @@ import { recordLecture, stopLectureRecording, RecordingJobs, RecordingBackground
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
 
+const preventClosing = (e: BeforeUnloadEvent) => {
+  e.preventDefault();
+}
+
 export default function Home() {
   ////////////////
   // hooks
@@ -33,22 +37,6 @@ export default function Home() {
   useEffect(() => {
     getRecordingsState().then(setSavedRecordingsState);
   }, [])
-
-  useEffect(() => {
-    // warn user when trying to close the tab/window while a recording is active
-
-    if(activeRecording !== null) {
-      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        e.preventDefault();
-      }
-
-      window.addEventListener('beforeunload', handleBeforeUnload);
-
-      return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-      };
-    }
-  }, [ activeRecording ]);
 
   ////////////////
   // logic
@@ -105,6 +93,16 @@ export default function Home() {
     setDisplayTracks(prev => prev.filter(t => t !== track));
   }
 
+  const registerActiveRecording = (recording: RecordingJobs) => {
+    window.addEventListener('beforeunload', preventClosing);
+    setActiveRecording(recording);
+  }
+
+  const unregisterActiveRecording = () => {
+    window.removeEventListener('beforeunload', preventClosing);
+    setActiveRecording(null);
+  }
+
   const startRecording = () => {
     const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string): Promise<RecordingBackgroundTask> => {
       // No need to await: we support sending chunks to server out of order and/or concurrently.
@@ -120,12 +118,12 @@ export default function Home() {
 
     const onFinished = (recordingName: string) => schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
 
-    recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);
+    recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, registerActiveRecording, onFinished);
   };
 
   const stopRecording = () => {
     stopLectureRecording(activeRecording);
-    setActiveRecording(null);
+    unregisterActiveRecording();
   };
 
   ////////////////
