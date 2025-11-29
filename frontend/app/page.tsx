@@ -119,12 +119,7 @@ export default function Home() {
       return { promise: backgroundPromise };
     };
 
-    const onFinished = async (recordingName: string) => {
-      await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
-      if(apiUrl !== undefined) {
-        showSuccess(`Recording "${recordingName}" finished; postprocessing scheduled.`);
-      }
-    }
+    const onFinished = (recordingName: string) => schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
 
     recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, setActiveRecording, onFinished);
   };

@@ -1,34 +1,40 @@
-import { showError } from "./notifications";
+import { showError, showSuccess } from "./notifications";
 
-async function fetchWithRetries(
-  url: string | URL | Request,
-  request: RequestInit | undefined,
+interface CallResult {
+  ok: boolean
+  errorMessage?: string
+}
+
+async function callWithRetries(
+  fn: () => Promise<CallResult> | CallResult,
   retries: number,
-  intervalMillis: number,
-  errorPrefix: string
-) {
-  for(let attempt = 0; attempt <= retries; ++attempt) {
-    let errMsg: string;
+  intervalMillis: number
+): Promise<CallResult> {
+  let result = await fn();
 
-    try {
-      const response = await fetch(url, request);
-
-      if(response.ok) {
-        break;
-      }
-
-      errMsg = `server responded ${response.status}, ${await response.text()}`;
-    } catch(e) {
-      console.log(e);
-      errMsg = e instanceof Error ? e.message : 'unknown error';
-    }
-
-    if(attempt == retries) {
-      showError(`${errorPrefix}: ${errMsg}`);
-      break;
-    }
-
+  for(let attempt = 0; !result.ok && attempt < retries; ++attempt) {
     await new Promise(resolve => setTimeout(resolve, intervalMillis));
+    result = await fn();
+  }
+
+  return result;
+}
+
+async function sendRequest(
+  url: string | URL | Request,
+  request?: RequestInit
+): Promise<CallResult> {
+  try {
+    const response = await fetch(url, request);
+
+    if(response.ok) {
+      return { ok: true }
+    }
+
+    return { ok: false, errorMessage: `server responded ${response.status}, ${await response.text()}` };
+  } catch(e) {
+    console.warn('Error occurred when fetching', url, e);
+    return { ok: false, errorMessage: e instanceof Error ? e.message : 'unknown error' };
   }
 }
 
@@ -44,12 +50,10 @@ export async function sendChunkToServer(
   }
 
   const chunkUrl = `${apiUrl}/api/chunks`;
-
   const retries = 10;
   const intervalMillis = 2000;
 
   const data = new FormData();
-
   data.append('recording', recording);
   data.append('track', track);
   data.append('index', index.toFixed(0));
@@ -60,7 +64,11 @@ export async function sendChunkToServer(
     body: data
   }
 
-  await fetchWithRetries(chunkUrl, request, retries, intervalMillis, `Failed to upload ${track} chunk ${index}`);
+  const result = await callWithRetries(() => sendRequest(chunkUrl, request), retries, intervalMillis);
+
+  if(!result.ok) {
+    showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`)
+  }
 }
 
 export async function schedulePostprocessing(
@@ -73,7 +81,6 @@ export async function schedulePostprocessing(
   }
 
   const jobUrl = `${apiUrl}/api/jobs`;
-
   const retries = 5;
   const intervalMillis = 1000;
 
@@ -90,5 +97,11 @@ export async function schedulePostprocessing(
     body: JSON.stringify(data)
   };
 
-  await fetchWithRetries(jobUrl, request, retries, intervalMillis, 'Failed to schedule postprocessing');
+  const result = await callWithRetries(() => sendRequest(jobUrl, request), retries, intervalMillis);
+
+  if(result.ok) {
+    showSuccess(`Recording "${recording}" finished; postprocessing scheduled.`);
+  } else {
+    showError(`Failed to schedule postprocessing: ${result.errorMessage}`);
+  }
 }

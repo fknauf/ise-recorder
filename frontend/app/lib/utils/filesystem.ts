@@ -1,10 +1,10 @@
 /**
  * Helper functions to organize access to the recordings stored in the OPFS.
- * 
+ *
  * All recordings are stored in the "recordings" directory in the OPFS root. Each recording
  * gets its own subdirectory named after the recording. Each file in the recording is stored
  * as a separate file in that directory.
- * 
+ *
  * The functions here will always access files by recording name and filename, so the
  * application code doesn't have to know the details of the directory structure.
  */
@@ -63,7 +63,7 @@ async function getRecordingsList() {
         const file = await fileHandle.getFile();
         size = file.size
       } catch(e) {
-        console.log(e);
+        console.warn('Unable to get file size for', filename, e);
       }
 
       return <RecordingFileInfo>{
@@ -111,7 +111,7 @@ export async function appendToRecordingFile(recordingName: string, filename: str
   } catch(e) {
     // If writing to the OPFS fails, it's probably because the quota is exceeded. In that case we
     // still have the server-side chunks, so don't fail and just log the error.
-    console.log(e);
+    console.warn('Unable to append to', filename, e);
   }
 }
 

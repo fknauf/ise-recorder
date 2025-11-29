@@ -20,7 +20,7 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
   if(isURL(apiUrl, urlOptions)) {
     return apiUrl;
   } else {
-    console.log(`Malformed API_URL: ${apiUrl}`);
+    console.error('Malformed API_URL:', apiUrl);
     return undefined;
   }
 }

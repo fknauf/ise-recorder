@@ -92,7 +92,6 @@ export function RecorderControls(
         stream.getTracks().forEach(t => t.stop());
         setHasPermissions(true);
       } catch(e) {
-        console.log(e);
         showError('Could not obtain user media permissions', e);
       }
     }
@@ -103,7 +102,6 @@ export function RecorderControls(
       setVideoDevices(devs.filter(dev => dev.kind === 'videoinput'));
       setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
     } catch(e) {
-      console.log(e);
       showError('Could not enumerate devices', e);
     }
   };
@@ -113,7 +111,6 @@ export function RecorderControls(
       const screenStream = await navigator.mediaDevices.getDisplayMedia();
       onAddDisplayTracks(screenStream.getVideoTracks());
     } catch(e) {
-      console.log(e);
       showError('Could not obtain display stream', e);
     }
   };
@@ -128,7 +125,6 @@ export function RecorderControls(
       const stream = await navigator.mediaDevices.getUserMedia({ video: createDeviceConstraints(groupId, deviceId), audio: false });
       onAddVideoTracks(stream.getVideoTracks());
     } catch(e) {
-      console.log(e);
       showError('Could not obtain video stream', e);
     }
   }
@@ -143,7 +139,6 @@ export function RecorderControls(
       const stream = await navigator.mediaDevices.getUserMedia({ audio: createDeviceConstraints(groupId, deviceId), video: false });
       onAddAudioTracks(stream.getAudioTracks());
     } catch(e) {
-      console.log(e);
       showError('Could not obtain audio stream', e);
     }
   }
