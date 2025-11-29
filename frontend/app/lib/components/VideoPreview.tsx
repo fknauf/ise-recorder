@@ -1,7 +1,7 @@
 'use client';
 
 import { Flex, Switch } from "@adobe/react-spectrum";
-import { useRef, ReactNode, useEffect } from "react";
+import { ReactNode } from "react";
 
 export interface VideoPreviewProps {
   track: MediaStreamTrack | undefined,
@@ -29,23 +29,16 @@ export function VideoPreview(
     onToggleOverlay
   }: Readonly<VideoPreviewProps>
 ): ReactNode {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  // React doesn't currently allow setting the srcObject property directly through JSX,
-  // so we have to do it with a useEffect hook.
-  useEffect(() => {
-    const currentVideo = videoRef.current;
-
-    if(currentVideo !== null) {
-      const trackStream = track ? new MediaStream([track]) : null;
-      currentVideo.srcObject = trackStream;
+  const attachStream = (ref: HTMLVideoElement | null) => {
+    if(ref != null) {
+      ref.srcObject = track ? new MediaStream([track]) : null;
     }
-  }, [track])
+  };
 
   return (
     <Flex direction="column" gap="size-100">
       <video
-        ref={videoRef}
+        ref={attachStream}
         autoPlay
         muted
         width={width}
