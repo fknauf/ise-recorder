@@ -10,7 +10,6 @@ import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverSto
 import { recordLecture, stopLectureRecording, RecordingJobs, RecordingBackgroundTask } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
-import { showSuccess } from "./lib/utils/notifications";
 
 export default function Home() {
   ////////////////
