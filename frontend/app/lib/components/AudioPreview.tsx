@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, ReactNode, useEffect } from "react";
+import { ReactNode } from "react";
 
 export interface AudioPreviewProps {
   track: MediaStreamTrack | undefined
@@ -17,10 +17,8 @@ export interface AudioPreviewProps {
 export function AudioPreview(
   { track, width, height }: Readonly<AudioPreviewProps>
 ): ReactNode {
-  const canvasElement = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    if(!track) {
+  const attachRenderLoop = (canvas: HTMLCanvasElement | null) => {
+    if(track === undefined || canvas == null) {
       return;
     }
 
@@ -44,10 +42,9 @@ export function AudioPreview(
     const renderFunction = () => {
       timerId = requestAnimationFrame(renderFunction);
 
-      const canvas = canvasElement.current;
-      const ctx = canvas?.getContext('2d');
+      const ctx = canvas.getContext('2d');
 
-      if(!canvas || !ctx) {
+      if(ctx == null) {
         return;
       }
 
@@ -73,12 +70,12 @@ export function AudioPreview(
 
     timerId = requestAnimationFrame(renderFunction);
     return () => cancelAnimationFrame(timerId);
-  }, [track]);
+  };
 
   return (
     <div>
       <canvas
-        ref={canvasElement}
+        ref={attachRenderLoop}
         width={width}
         height={height}
       />
