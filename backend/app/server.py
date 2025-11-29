@@ -20,6 +20,9 @@ from flask_cors import CORS
 from ise_record.postprocess import postprocess_recording
 from ise_record.reporting import send_report, SmtpSink
 
+# Number of digits in the chunk file suffix, e.g. chunk.0000 to chunk.9999 if CHUNK_DIGITS=4
+CHUNK_FILE_DIGITS = 4
+
 app = Flask(__name__)
 
 app.config.update(
@@ -117,7 +120,7 @@ def upload_chunk():
         app.logger.warning("invalid recording/track name %s/%s", recording, track)
         return f'invalid track {recording}, {track}', 400
 
-    if index is None or not index.isdigit():
+    if index is None or not index.isdigit() or len(index) > CHUNK_FILE_DIGITS:
         app.logger.warning("invalid chunk index %s in upload for %s/%s", index, recording, track)
         return f'invalid index "{index}"', 400
 
@@ -125,7 +128,7 @@ def upload_chunk():
         app.logger.warning("no chunk data in upload for %s/%s", recording, track)
         return 'no chunk supplied', 400
 
-    filepath = _create_track_path(recording, track) / f'chunk.{index.zfill(4)}'
+    filepath = _create_track_path(recording, track) / f'chunk.{index.zfill(CHUNK_FILE_DIGITS)}'
     app.logger.debug("saving %s", filepath)
     chunk.save(filepath)
 
