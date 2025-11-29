@@ -3,39 +3,13 @@
 import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import Delete from '@spectrum-icons/workflow/Delete';
 import Download from '@spectrum-icons/workflow/Download';
-import { readRecordingFile, deleteRecording, RecordingFileList } from "../utils/filesystem";
-
-async function downloadFile(dir: string, filename: string) {
-  // This is a bit hacky, but I haven't been able to come up with a cleaner
-  // way. Read file, create an object url for it, temporarly append a link
-  // to the document, click it programmatically and remove it again.
-  //
-  // It might be prudent to switch this to the File System Access API once
-  // that is widely available.
-
-  const file = await readRecordingFile(dir, filename);
-  const url = URL.createObjectURL(file);
-
-  try {
-    const link = document.createElement('a');
-
-    link.href = url;
-    link.download = filename;
-    link.rel = "noopener"
-    link.hidden = true;
-
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+import { RecordingFileList } from "../utils/filesystem";
 
 interface SavedRecordingsCardProps {
   recording: RecordingFileList,
   isBeingRecorded: boolean,
-  onRemoved: () => void
+  onRemoved: () => void,
+  onDownload: (filename: string) => void
 }
 
 /**
@@ -44,7 +18,7 @@ interface SavedRecordingsCardProps {
  * Buttons are disabled if the recording it shows is currently being recorded.
  */
 function SavedRecordingsCard(
-  { recording, isBeingRecorded, onRemoved }: Readonly<SavedRecordingsCardProps>
+  { recording, isBeingRecorded, onRemoved, onDownload }: Readonly<SavedRecordingsCardProps>
 ) {
   const formatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -62,7 +36,7 @@ function SavedRecordingsCard(
             <ActionButton
             key={`download-${filename}`}
             isDisabled={isBeingRecorded}
-            onPress={() => downloadFile(recording.name, filename)}
+            onPress={() => onDownload(filename)}
           >
               <Download/>
               <Text>Download {filename} {size !== undefined && `(${formatter.format(size / 2 ** 20)} MiB)`}</Text>
@@ -71,7 +45,7 @@ function SavedRecordingsCard(
         }
         <ActionButton
           isDisabled={isBeingRecorded}
-          onPress={() => { deleteRecording(recording.name).then(() => onRemoved()) }}
+          onPress={onRemoved}
         >
           <Delete/>
           <Text>Remove</Text>
@@ -84,14 +58,15 @@ function SavedRecordingsCard(
 export interface SavedRecordingsSectionProps {
   recordings: RecordingFileList[],
   activeRecordingName?: string,
-  onRemoved: () => void
+  onRemoved: (recording: string) => void,
+  onDownload: (recording: string, filename: string) => void
 }
 
 /**
  * Section on the main page showing all saved recordings.
  */
 export const SavedRecordingsSection = (
-  { recordings, activeRecordingName, onRemoved }: Readonly<SavedRecordingsSectionProps>
+  { recordings, activeRecordingName, onRemoved, onDownload }: Readonly<SavedRecordingsSectionProps>
 ) =>
   <Flex direction="row" gap="size-100" wrap>
     {
@@ -100,7 +75,8 @@ export const SavedRecordingsSection = (
           key={`saved-recording-${r.name}`}
           recording={r}
           isBeingRecorded={r.name === activeRecordingName}
-          onRemoved={onRemoved}
+          onRemoved={() => onRemoved(r.name)}
+          onDownload={filename => onDownload(r.name, filename)}
         />
       )
     }

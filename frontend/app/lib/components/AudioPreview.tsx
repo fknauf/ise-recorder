@@ -3,7 +3,7 @@
 import { ReactNode } from "react";
 
 export interface AudioPreviewProps {
-  track: MediaStreamTrack | undefined
+  track: MediaStreamTrack
   width: number
   height: number
 }
@@ -18,7 +18,7 @@ export function AudioPreview(
   { track, width, height }: Readonly<AudioPreviewProps>
 ): ReactNode {
   const attachRenderLoop = (canvas: HTMLCanvasElement | null) => {
-    if(track === undefined || canvas == null) {
+    if(canvas == null) {
       return;
     }
 

@@ -3,13 +3,19 @@
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
-import { RecorderControls } from "./lib/components/RecorderControls";
+import { RecorderControls, RecorderState } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
-import { appendToRecordingFile, RecordingsState, getRecordingsState } from "./lib/utils/filesystem";
+import { appendToRecordingFile, RecordingsState, getRecordingsState, deleteRecording, downloadFile } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
-import { recordLecture, stopLectureRecording, RecordingJobs, RecordingBackgroundTask } from "./lib/utils/recording";
+import { recordLecture, RecordingBackgroundTask } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
+
+type ActiveRecording = {
+  state: RecorderState
+  name?: string
+  recorders?: readonly MediaRecorder[]
+}
 
 const preventClosing = (e: BeforeUnloadEvent) => {
   e.preventDefault();
@@ -20,17 +26,17 @@ export default function Home() {
   // hooks
   ////////////////
 
-  const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
-  const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
-  const [ displayTracks, setDisplayTracks ]= useState<MediaStreamTrack[]>([]);
-
-  const [ activeRecording, setActiveRecording ] = useState<RecordingJobs | null>(null);
-  const [ savedRecordingsState, setSavedRecordingsState ] = useState<RecordingsState>({ recordings: [] });
   const [ lectureTitle, setLectureTitle ] = useState("")
   const [ lecturerEmail, setLecturerEmail ] = useState("")
 
+  const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
+  const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
+  const [ displayTracks, setDisplayTracks ]= useState<MediaStreamTrack[]>([]);
   const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
   const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
+
+  const [ activeRecording, setActiveRecording ] = useState<ActiveRecording>({ state: "idle" });
+  const [ savedRecordingsState, setSavedRecordingsState ] = useState<RecordingsState>({ recordings: [] });
 
   const serverEnv = useServerEnv();
 
@@ -42,7 +48,6 @@ export default function Home() {
   // logic
   ////////////////
 
-  const isRecording = activeRecording !== null;
   const apiUrl = serverEnv?.apiUrl;
 
   const updateSavedRecordingsList = () => getRecordingsState().then(setSavedRecordingsState);
@@ -93,16 +98,6 @@ export default function Home() {
     setDisplayTracks(prev => prev.filter(t => t !== track));
   }
 
-  const registerActiveRecording = (recording: RecordingJobs) => {
-    window.addEventListener('beforeunload', preventClosing);
-    setActiveRecording(recording);
-  }
-
-  const unregisterActiveRecording = () => {
-    window.removeEventListener('beforeunload', preventClosing);
-    setActiveRecording(null);
-  }
-
   const startRecording = () => {
     const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string): Promise<RecordingBackgroundTask> => {
       // No need to await: we support sending chunks to server out of order and/or concurrently.
@@ -116,15 +111,40 @@ export default function Home() {
       return { promise: backgroundPromise };
     };
 
-    const onFinished = (recordingName: string) => schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+    const onStarted = (recordingName: string, recorders: MediaRecorder[]) => {
+      window.addEventListener('beforeunload', preventClosing);
+      setActiveRecording({ state: "recording", name: recordingName, recorders })
+    };
 
-    recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, registerActiveRecording, onFinished);
+    const onFinished = async (recordingName: string) => {
+      await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+      window.removeEventListener('beforeunload', preventClosing);
+      setActiveRecording({ state: "idle" })
+    }
+
+    recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, onStarted, onFinished);
   };
 
   const stopRecording = () => {
-    stopLectureRecording(activeRecording);
-    unregisterActiveRecording();
-  };
+    // This way stopRecording does not depend on activeRecording, so the React compiler can better optimize it.
+    setActiveRecording(prev =>
+      {
+        // should not happen, this is purely defensive coding.
+        if(prev.state !== "recording") {
+          console.warn("attempted to stop recording while recorder wasn't recording")
+          return prev;
+        }
+
+        prev.recorders?.forEach(rec => rec.stop());
+        return { ...prev, state: "stopping" };
+      }
+    );
+  }
+
+  const removeRecording = async (recording: string) => {
+    await deleteRecording(recording);
+    await updateSavedRecordingsList();
+  }
 
   ////////////////
   // view
@@ -136,7 +156,7 @@ export default function Home() {
         lectureTitle={lectureTitle}
         lecturerEmail={lecturerEmail}
         hasEmailField={apiUrl !== undefined}
-        isRecording={isRecording}
+        recorderState={activeRecording.state}
         currentVideoTracks={videoTracks}
         currentAudioTracks={audioTracks}
         onLectureTitleChanged={setLectureTitle}
@@ -161,7 +181,7 @@ export default function Home() {
         overlay={overlay}
         canvasWidth={384}
         canvasHeight={216}
-        hasDisabledButtons={isRecording}
+        hasDisabledButtons={activeRecording.state !== "idle"}
         onMainDisplayChanged={setMainDisplay}
         onOverlayChanged={setOverlay}
         onRemoveDisplayTrack={removeDisplayTrack}
@@ -171,8 +191,9 @@ export default function Home() {
 
       <SavedRecordingsSection
         recordings={savedRecordingsState.recordings}
-        activeRecordingName={activeRecording?.name}
-        onRemoved={updateSavedRecordingsList}
+        activeRecordingName={activeRecording.name}
+        onRemoved={removeRecording}
+        onDownload={downloadFile}
       />
 
       <ToastContainer/>

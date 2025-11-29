@@ -4,7 +4,7 @@ import { Flex, Switch } from "@adobe/react-spectrum";
 import { ReactNode } from "react";
 
 export interface VideoPreviewProps {
-  track: MediaStreamTrack | undefined,
+  track: MediaStreamTrack,
   width: number
   height: number
   isMainDisplay: boolean,
@@ -31,7 +31,7 @@ export function VideoPreview(
 ): ReactNode {
   const attachStream = (ref: HTMLVideoElement | null) => {
     if(ref != null) {
-      ref.srcObject = track ? new MediaStream([track]) : null;
+      ref.srcObject = new MediaStream([track]);
     }
   };
 

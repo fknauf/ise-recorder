@@ -1,6 +1,6 @@
 'use client';
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField } from "@adobe/react-spectrum";
+import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
 import CallCenter from '@spectrum-icons/workflow/CallCenter';
 import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';
@@ -10,6 +10,8 @@ import { Key, useState } from "react";
 import isEmail from 'validator/es/lib/isEmail';
 import { unsafeTitleCharacters } from "../utils/recording";
 import { showError } from "../utils/notifications";
+
+export type RecorderState = "idle" | "recording" | "stopping";
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
@@ -31,7 +33,7 @@ interface RecorderControlsProps {
   lectureTitle: string
   lecturerEmail: string
   hasEmailField: boolean
-  isRecording: boolean
+  recorderState: RecorderState
   currentVideoTracks: readonly MediaStreamTrack[],
   currentAudioTracks: readonly MediaStreamTrack[],
   onLectureTitleChanged: (lectureTitle: string) => void
@@ -57,7 +59,7 @@ export function RecorderControls(
     lectureTitle,
     lecturerEmail,
     hasEmailField,
-    isRecording,
+    recorderState,
     currentVideoTracks,
     currentAudioTracks,
     onLectureTitleChanged,
@@ -143,13 +145,15 @@ export function RecorderControls(
     }
   }
 
+  const hasDisabledTrackControls = recorderState !== "idle";
+
   return (
     <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
       <TextField
         label="Lecture Title"
         value={lectureTitle}
-        isReadOnly={isRecording}
-        isDisabled={isRecording}
+        isReadOnly={hasDisabledTrackControls}
+        isDisabled={hasDisabledTrackControls}
         validate={validateLectureTitle}
         onChange={onLectureTitleChanged}
       />
@@ -159,8 +163,8 @@ export function RecorderControls(
           <TextField
             label="e-Mail"
             value={lecturerEmail}
-            isReadOnly={isRecording}
-            isDisabled={isRecording}
+            isReadOnly={hasDisabledTrackControls}
+            isDisabled={hasDisabledTrackControls}
             validate={validateEmail}
             onChange={onLecturerEmailChanged}
           />
@@ -169,13 +173,13 @@ export function RecorderControls(
       <Flex direction="row" justifyContent="center" alignSelf="end" gap="size-100" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={isRecording} alignSelf="end">
+        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls} alignSelf="end">
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
 
         <MenuTrigger onOpenChange={refreshUserMediaDevices}>
-          <ActionButton isDisabled={isRecording} alignSelf="end">
+          <ActionButton isDisabled={hasDisabledTrackControls} alignSelf="end">
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
@@ -185,7 +189,7 @@ export function RecorderControls(
         </MenuTrigger>
 
         <MenuTrigger onOpenChange={refreshUserMediaDevices}>
-          <ActionButton isDisabled={isRecording} alignSelf="end">
+          <ActionButton isDisabled={hasDisabledTrackControls} alignSelf="end">
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
@@ -197,9 +201,19 @@ export function RecorderControls(
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
         {
-          isRecording
-          ? <ActionButton alignSelf="end" onPress={onStopRecording}><Stop/> <Text>Stop Recording</Text></ActionButton>
-          : <ActionButton alignSelf="end" onPress={onStartRecording}><Circle/> <Text>Start Recording</Text></ActionButton>
+          recorderState !== "idle"
+          ? <ActionButton alignSelf="end" onPress={onStopRecording} isDisabled={recorderState === "stopping"}>
+              {
+                recorderState === "stopping"
+                ? <View paddingX="size-100"><ProgressCircle size="S" isIndeterminate/></View>
+                : <Stop/>
+              }
+              <Text>Stop Recording</Text>
+            </ActionButton>
+          : <ActionButton alignSelf="end" onPress={onStartRecording}>
+              <Circle/>
+              <Text>Start Recording</Text>
+            </ActionButton>
         }
       </Flex>
     </Flex>

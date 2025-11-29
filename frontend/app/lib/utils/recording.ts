@@ -1,14 +1,9 @@
 // used to remove characters from the recording name that would trip up ffmpeg in post.
 export const unsafeTitleCharacters = /[^A-Za-z0-9_.-]/g;
 
-export interface RecordingJob {
+interface RecordingJob {
   recorder: MediaRecorder
   finished: Promise<void>
-}
-
-export interface RecordingJobs {
-  name: string,
-  recorders: MediaRecorder[]
 }
 
 // Our chunk handler has a quasi-synchronous part (writing to OPFS) and a fully asynchronous
@@ -108,7 +103,7 @@ export const recordLecture = async (
   overlay: MediaStreamTrack | null,
   lectureTitle: string,
   onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => Promise<RecordingBackgroundTask>,
-  onStarted: (jobs: RecordingJobs) => void,
+  onStarted: (recordingName: string, recorders: MediaRecorder[]) => void,
   onFinished: (recordingName: string) => void
 ) => {
   if(displayTracks.length === 0 && videoTracks.length === 0 && audioTracks.length === 0) {
@@ -150,16 +145,9 @@ export const recordLecture = async (
   jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `video-${i}`)));
   jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `display-${i}`)));
 
-  onStarted({
-    name: recordingName,
-    recorders: jobs.map(job => job.recorder)
-  });
+  onStarted(recordingName, jobs.map(job => job.recorder));
 
   await Promise.all(jobs.map(job => job.finished));
 
   onFinished(recordingName);
-};
-
-export const stopLectureRecording = (activeRecording: RecordingJobs | null) => {
-  activeRecording?.recorders.forEach(r => r.stop());
 };

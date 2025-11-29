@@ -115,12 +115,39 @@ export async function appendToRecordingFile(recordingName: string, filename: str
   }
 }
 
-export async function readRecordingFile(recordingName: string, filename: string) {
+export async function deleteRecording(recordingName: string) {
+  const recordingsDir = await getRecordingsDirectory();
+  await recordingsDir.removeEntry(recordingName, { recursive: true });
+}
+
+async function readRecordingFile(recordingName: string, filename: string) {
   const file = await getRecordingFile(recordingName, filename);
   return await file.getFile();
 }
 
-export async function deleteRecording(recordingName: string) {
-  const recordingsDir = await getRecordingsDirectory();
-  await recordingsDir.removeEntry(recordingName, { recursive: true });
+export async function downloadFile(recordingName: string, filename: string) {
+  // This is a bit hacky, but I haven't been able to come up with a cleaner
+  // way. Read file, create an object url for it, temporarly append a link
+  // to the document, click it programmatically and remove it again.
+  //
+  // It might be prudent to switch this to the File System Access API once
+  // that is widely available.
+
+  const file = await readRecordingFile(recordingName, filename);
+  const url = URL.createObjectURL(file);
+
+  try {
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = filename;
+    link.rel = "noopener"
+    link.hidden = true;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
