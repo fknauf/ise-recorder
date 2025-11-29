@@ -22,8 +22,8 @@ export function AudioPreview(
       return;
     }
 
-    // Hook up the audio track to an analyzer node to get the FFT spectrum and the time domain
-    // values for clipping detection
+    // Hook up the audio track to an analyzer node to get the FFT spectrum for animation
+    // and the time domain values for clipping detection
     const audioContext = new AudioContext();
     const audioAnalyzer = audioContext.createAnalyser();
     const audioSource = audioContext.createMediaStreamSource(new MediaStream([track]))
@@ -35,13 +35,7 @@ export function AudioPreview(
     const freqData = new Uint8Array(audioAnalyzer.frequencyBinCount);
     const timeData = new Uint8Array(audioAnalyzer.fftSize);
 
-    // Animation is done through a rendering function that schedules itself again and again until
-    // the component is unmounted.
-    let timerId: number;
-
     const renderFunction = () => {
-      timerId = requestAnimationFrame(renderFunction);
-
       const ctx = canvas.getContext('2d');
 
       if(ctx == null) {
@@ -54,7 +48,7 @@ export function AudioPreview(
       const space = canvas.width / freqData.length;
       const isClipping = timeData.some(v => v <= 5 || v >= 250);
 
-      // paint spectum as a histrogram. Use the warning color iff audio is clipping.
+      // paint spectrum as a histrogram. Use the warning color iff audio is clipping.
       ctx.lineWidth = Math.ceil(space);
       ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isClipping ? '--warning' : '--foreground');
 
@@ -68,8 +62,10 @@ export function AudioPreview(
       }
     };
 
-    timerId = requestAnimationFrame(renderFunction);
-    return () => cancelAnimationFrame(timerId);
+    // refresh at 30 fps. We don't need ultrafluent animation for an audio spectrum;
+    // it just looks jittery and wastes CPU cycles.
+    const timer = setInterval(renderFunction, 1000 / 30);
+    return () => clearInterval(timer);
   };
 
   return (
