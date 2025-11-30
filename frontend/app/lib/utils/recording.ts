@@ -1,8 +1,13 @@
 // used to remove characters from the recording name that would trip up ffmpeg in post.
 export const unsafeTitleCharacters = /[^A-Za-z0-9_.-]/g;
 
-interface RecordingJob {
-  recorder: MediaRecorder
+export interface RecordingTask {
+  trackTitle: string,
+  stop: () => void
+}
+
+interface PreparedRecordingTask extends RecordingTask {
+  start: () => void
   finished: Promise<void>
 }
 
@@ -15,11 +20,12 @@ export interface RecordingBackgroundTask {
   promise: Promise<void>
 }
 
-const recordTracks = (
+const prepareRecordingTask = (
+  trackTitle: string,
   tracks: MediaStreamTrack[],
   options: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, chunkNum: number) => Promise<RecordingBackgroundTask>
-): RecordingJob => {
+  onChunkAvailable: (trackTitle: string, chunk: Blob, chunkNum: number) => Promise<RecordingBackgroundTask>
+): PreparedRecordingTask => {
   const recordedStream = new MediaStream(tracks);
   const newRecorder = new MediaRecorder(recordedStream, options);
 
@@ -48,7 +54,6 @@ const recordTracks = (
   }
   newRecorder.onstop = () => chunkSignalResolve(true);
   newRecorder.onerror = () => chunkSignalResolve(true);
-  newRecorder.start(5000);
 
   const processChunks = async () => {
     let finished = false;
@@ -63,7 +68,7 @@ const recordTracks = (
         if(chunk) {
           // Wait for the quasi-synchronous part to conclude before processing the
           // next chunk, to avoid concurrent writes on the OPFS
-          chunkPromises.push(await onChunkAvailable(chunk, chunkNum));
+          chunkPromises.push(await onChunkAvailable(trackTitle, chunk, chunkNum));
           ++chunkNum;
         }
       }
@@ -77,7 +82,9 @@ const recordTracks = (
   const finishedPromise = processChunks();
 
   return {
-    recorder: newRecorder,
+    trackTitle,
+    start: () => newRecorder.start(5000),
+    stop: () => newRecorder.stop(),
     finished: finishedPromise
   };
 };
@@ -102,8 +109,10 @@ export const recordLecture = async (
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
   lectureTitle: string,
-  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string) => Promise<RecordingBackgroundTask>,
-  onStarted: (recordingName: string, recorders: MediaRecorder[]) => void,
+  videoOptions: MediaRecorderOptions,
+  audioOptions: MediaRecorderOptions,
+  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>,
+  onStarting: (recordingName: string, tasks: RecordingTask[]) => Promise<void> | void,
   onFinished: (recordingName: string) => void
 ) => {
   if(displayTracks.length === 0 && videoTracks.length === 0 && audioTracks.length === 0) {
@@ -114,12 +123,12 @@ export const recordLecture = async (
   const lecturePrefix = lectureTitle ? `${lectureTitle}_` : '';
   const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeTitleCharacters, '');
 
-  const onChunkFn = (trackTitle: string) => (chunk: Blob, chunkIndex: number) => onChunkAvailable(chunk, recordingName, trackTitle, chunkIndex, 'webm');
+  const onChunkFn = (trackTitle: string, chunk: Blob, chunkIndex: number) => onChunkAvailable(chunk, recordingName, trackTitle, chunkIndex);
 
-  const recordVideo = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, { mimeType: 'video/webm' }, onChunkFn(trackTitle));
-  const recordAudio = (tracks: MediaStreamTrack[], trackTitle: string) => recordTracks(tracks, { mimeType: 'audio/webm' }, onChunkFn(trackTitle));
+  const recordVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareRecordingTask(trackTitle, tracks, videoOptions, onChunkFn);
+  const recordAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareRecordingTask(trackTitle, tracks, audioOptions, onChunkFn);
 
-  const jobs: RecordingJob[] = [];
+  const jobs: PreparedRecordingTask[] = [];
 
   // if no main display is selected, guess a sensible default: first captured display if there
   // are display streams, first video input otherwise, but don't use the overlay track.
@@ -145,9 +154,13 @@ export const recordLecture = async (
   jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `video-${i}`)));
   jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `display-${i}`)));
 
-  onStarted(recordingName, jobs.map(job => job.recorder));
+  await onStarting(recordingName, jobs);
 
-  await Promise.all(jobs.map(job => job.finished));
+  for(const task of jobs) {
+    task.start();
+  }
+
+  await Promise.all(jobs.map(task => task.finished));
 
   onFinished(recordingName);
 };

@@ -7,14 +7,19 @@ import { RecorderControls, RecorderState } from "./lib/components/RecorderContro
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
 import { RecordingsState, getRecordingsState, deleteRecording, downloadFile, openRecordingFileStream } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
-import { recordLecture, RecordingBackgroundTask } from "./lib/utils/recording";
+import { recordLecture, RecordingBackgroundTask, RecordingTask } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
 
-type ActiveRecording = {
+interface RecordingSink {
+  outputStream: FileSystemWritableFileStream
+  writtenBytes: number
+};
+
+interface ActiveRecording {
   state: RecorderState
   name?: string
-  recorders?: readonly MediaRecorder[]
+  stop?: () => void
 }
 
 const preventClosing = (e: BeforeUnloadEvent) => {
@@ -107,25 +112,49 @@ export default function Home() {
   }
 
   const startRecording = () => {
-    interface RecordingSink {
-      outputStream: FileSystemWritableFileStream
-      writtenBytes: number
-    };
+    if(activeRecording.state !== "idle") {
+      return;
+    }
 
+    const videoOptions: MediaRecorderOptions = { mimeType: "video/webm" };
+    const audioOptions: MediaRecorderOptions = { mimeType: "audio/webm" }
+    const formatFilename = (trackTitle: string) => `${trackTitle}.webm`;
+
+    // Map of filename to output stream and associated information. This map is captured
+    // and shared by the callback functions we pass to recordLecture below.
     const sinks = new Map<string, RecordingSink>();
 
-    const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string): Promise<RecordingBackgroundTask> => {
-      const filename = `${trackTitle}.${fileExtension}`;
+    const onStarting = async (recordingName: string, tasks: RecordingTask[]) => {
+      // set active recording first so the UI responds immediately. This should prevent
+      // duplicate recording starts -- opening the streams below can sometimes take a noticeable
+      // fraction of a second, at least in Firefox.
+      setActiveRecording({
+        state: "recording",
+        name: recordingName,
+        stop: () => tasks.forEach(t => t.stop())
+      })
 
-      if(chunkIndex === 0) {
-        sinks.set(filename, { outputStream: await openRecordingFileStream(recordingName, filename), writtenBytes: 0 });
+      // Prevent accidental closing of the tab while recording
+      window.addEventListener('beforeunload', preventClosing);
+
+      for(const task of tasks) {
+        const filename = formatFilename(task.trackTitle);
+        const outputStream = await openRecordingFileStream(recordingName, filename)
+
+        sinks.set(filename, { outputStream, writtenBytes: 0 });
       }
 
+      // have the new recording show up immediately in the list.
+      updateSavedRecordingsList();
+    };
+
+    const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
       // No need to await: we support sending chunks to server out of order and/or concurrently.
       const backgroundPromise = sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
 
       // For local file storage on the other hand, it's important that chunks to the same file
       // are not written concurrently and that filesystem state updates are correctly ordered.
+      const filename = formatFilename(trackTitle);
       const sink = sinks.get(filename);
 
       if(sink !== undefined) {
@@ -133,22 +162,20 @@ export default function Home() {
           await sink.outputStream.write(chunk);
           sink.writtenBytes += chunk.size;
         } catch(e) {
+          // If this happens, it's probably because the browser quota is exhausted.
           console.warn(`Could not write to ${filename}`, e);
           await sink.outputStream.close();
-          sinks.delete(filename);
+          sinks.delete(trackTitle);
         }
       }
 
       await updateSavedRecordingsList(
         state => {
-          const activeRecordingState = state.recordings.find(rec => rec.name == recordingName);
-
           // uncommitted data don't show up in the OPFS file sizes yet, so attach them manually.
-          if(activeRecordingState !== undefined) {
-            for(const fileinfo of activeRecordingState.fileinfos) {
-              fileinfo.size = sinks.get(fileinfo.filename)?.writtenBytes ?? fileinfo.size ?? 0
-            }
-          }
+          const activeRecordingDir = state.recordings.find(rec => rec.name == recordingName);
+          activeRecordingDir?.fileinfos?.forEach(fileinfo =>
+            fileinfo.size = sinks.get(fileinfo.filename)?.writtenBytes ?? fileinfo.size
+          );
 
           return state;
         }
@@ -157,20 +184,21 @@ export default function Home() {
       return { promise: backgroundPromise };
     };
 
-    const onStarted = (recordingName: string, recorders: MediaRecorder[]) => {
-      window.addEventListener('beforeunload', preventClosing);
-      setActiveRecording({ state: "recording", name: recordingName, recorders })
-    };
-
     const onFinished = async (recordingName: string) => {
       await Promise.all(sinks.values().map(sink => sink.outputStream.close()));
       await updateSavedRecordingsList();
       await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+
       window.removeEventListener('beforeunload', preventClosing);
       setActiveRecording({ state: "idle" })
     }
 
-    recordLecture(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, lectureTitle, onChunkAvailable, onStarted, onFinished);
+    recordLecture(
+      displayTracks, videoTracks, audioTracks,
+      mainDisplay, overlay,
+      lectureTitle,
+      videoOptions, audioOptions,
+      onChunkAvailable, onStarting, onFinished);
   };
 
   const stopRecording = () => {
@@ -183,7 +211,10 @@ export default function Home() {
           return prev;
         }
 
-        prev.recorders?.forEach(rec => rec.stop());
+        if(prev.stop !== undefined) {
+          prev.stop()
+        }
+
         return { ...prev, state: "stopping" };
       }
     );
