@@ -40,6 +40,11 @@ async function getRecordingFile(recordingName: string, filename: string, options
   return await recordingDir.getFileHandle(filename, options);
 }
 
+export async function openRecordingFileStream(recordingName: string, filename: string) {
+  const file = await getRecordingFile(recordingName, filename, { create: true });
+  return file.createWritable();
+}
+
 /**
  * Get the list of recordings, including file names and sizes.
  */
@@ -95,34 +100,9 @@ export async function getRecordingsState(): Promise<RecordingsState> {
   }
 }
 
-export async function appendToRecordingFile(recordingName: string, filename: string, data: Blob) {
-  try {
-    const file = await getRecordingFile(recordingName, filename, { create: true });
-    const fd = await file.getFile()
-    const stream = await file.createWritable({ keepExistingData: true });
-
-    await stream.write({
-      type: "write",
-      data: data,
-      position: fd.size
-    });
-
-    await stream.close();
-  } catch(e) {
-    // If writing to the OPFS fails, it's probably because the quota is exceeded. In that case we
-    // still have the server-side chunks, so don't fail and just log the error.
-    console.warn('Unable to append to', filename, e);
-  }
-}
-
 export async function deleteRecording(recordingName: string) {
   const recordingsDir = await getRecordingsDirectory();
   await recordingsDir.removeEntry(recordingName, { recursive: true });
-}
-
-async function readRecordingFile(recordingName: string, filename: string) {
-  const file = await getRecordingFile(recordingName, filename);
-  return await file.getFile();
 }
 
 export async function downloadFile(recordingName: string, filename: string) {
@@ -133,8 +113,9 @@ export async function downloadFile(recordingName: string, filename: string) {
   // It might be prudent to switch this to the File System Access API once
   // that is widely available.
 
-  const file = await readRecordingFile(recordingName, filename);
-  const url = URL.createObjectURL(file);
+  const fileHandle = await getRecordingFile(recordingName, filename);
+  const fileContents = await fileHandle.getFile();
+  const url = URL.createObjectURL(fileContents);
 
   try {
     const link = document.createElement('a');

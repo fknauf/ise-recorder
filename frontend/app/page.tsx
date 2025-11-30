@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
 import { RecorderControls, RecorderState } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
-import { appendToRecordingFile, RecordingsState, getRecordingsState, deleteRecording, downloadFile } from "./lib/utils/filesystem";
+import { RecordingsState, getRecordingsState, deleteRecording, downloadFile, openRecordingFileStream } from "./lib/utils/filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./lib/utils/serverStorage";
 import { recordLecture, RecordingBackgroundTask } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
@@ -50,7 +50,15 @@ export default function Home() {
 
   const apiUrl = serverEnv?.apiUrl;
 
-  const updateSavedRecordingsList = () => getRecordingsState().then(setSavedRecordingsState);
+  const updateSavedRecordingsList = async (fudgeFn?: (state: RecordingsState) => RecordingsState) => {
+    let state = await getRecordingsState();
+
+    if(fudgeFn !== undefined) {
+      state = fudgeFn(state);
+    }
+
+    setSavedRecordingsState(state);
+  }
 
   const addDisplayTracks = async (tracks: MediaStreamTrack[]) => {
     // should only ever be one video track, but let's just grab all just in case. user can
@@ -99,14 +107,52 @@ export default function Home() {
   }
 
   const startRecording = () => {
+    interface RecordingSink {
+      outputStream: FileSystemWritableFileStream
+      writtenBytes: number
+    };
+
+    const sinks = new Map<string, RecordingSink>();
+
     const onChunkAvailable = async (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number, fileExtension: string): Promise<RecordingBackgroundTask> => {
+      const filename = `${trackTitle}.${fileExtension}`;
+
+      if(chunkIndex === 0) {
+        sinks.set(filename, { outputStream: await openRecordingFileStream(recordingName, filename), writtenBytes: 0 });
+      }
+
       // No need to await: we support sending chunks to server out of order and/or concurrently.
       const backgroundPromise = sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
 
       // For local file storage on the other hand, it's important that chunks to the same file
       // are not written concurrently and that filesystem state updates are correctly ordered.
-      await appendToRecordingFile(recordingName, `${trackTitle}.${fileExtension}`, chunk);
-      await updateSavedRecordingsList();
+      const sink = sinks.get(filename);
+
+      if(sink !== undefined) {
+        try {
+          await sink.outputStream.write(chunk);
+          sink.writtenBytes += chunk.size;
+        } catch(e) {
+          console.warn(`Could not write to ${filename}`, e);
+          await sink.outputStream.close();
+          sinks.delete(filename);
+        }
+      }
+
+      await updateSavedRecordingsList(
+        state => {
+          const activeRecordingState = state.recordings.find(rec => rec.name == recordingName);
+
+          // uncommitted data don't show up in the OPFS file sizes yet, so attach them manually.
+          if(activeRecordingState !== undefined) {
+            for(const fileinfo of activeRecordingState.fileinfos) {
+              fileinfo.size = sinks.get(fileinfo.filename)?.writtenBytes ?? fileinfo.size ?? 0
+            }
+          }
+
+          return state;
+        }
+      );
 
       return { promise: backgroundPromise };
     };
@@ -117,6 +163,8 @@ export default function Home() {
     };
 
     const onFinished = async (recordingName: string) => {
+      await Promise.all(sinks.values().map(sink => sink.outputStream.close()));
+      await updateSavedRecordingsList();
       await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
       window.removeEventListener('beforeunload', preventClosing);
       setActiveRecording({ state: "idle" })
