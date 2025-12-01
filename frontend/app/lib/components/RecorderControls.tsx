@@ -11,7 +11,7 @@ import isEmail from 'validator/es/lib/isEmail';
 import { unsafeTitleCharacters } from "../utils/recording";
 import { showError } from "../utils/notifications";
 
-export type RecorderState = "idle" | "recording" | "stopping";
+export type RecorderState = "idle" | "starting" | "recording" | "stopping";
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
@@ -201,19 +201,14 @@ export function RecorderControls(
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
         {
-          recorderState !== "idle"
-          ? <ActionButton alignSelf="end" onPress={onStopRecording} isDisabled={recorderState === "stopping"}>
-              {
-                recorderState === "stopping"
-                ? <View paddingX="size-100"><ProgressCircle size="S" isIndeterminate/></View>
-                : <Stop/>
-              }
-              <Text>Stop Recording</Text>
-            </ActionButton>
-          : <ActionButton alignSelf="end" onPress={onStartRecording}>
-              <Circle/>
-              <Text>Start Recording</Text>
-            </ActionButton>
+          (() => {
+            switch(recorderState) {
+              case "idle": return <ActionButton alignSelf="end" onPress={onStartRecording}><Circle/><Text>Start Recording</Text></ActionButton>;
+              case "starting": return <ActionButton alignSelf="end" isDisabled><View paddingX="size-100"><ProgressCircle size="S" isIndeterminate/></View><Text>Start Recording</Text></ActionButton>;
+              case "recording": return <ActionButton alignSelf="end" onPress={onStopRecording}><Stop/><Text>Stop Recording</Text></ActionButton>;
+              case "stopping": return <ActionButton alignSelf="end" isDisabled><View paddingX="size-100"><ProgressCircle size="S" isIndeterminate/></View><Text>Stop Recording</Text></ActionButton>;
+            }
+          })()
         }
       </Flex>
     </Flex>

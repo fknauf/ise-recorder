@@ -1,12 +1,12 @@
+import { openRecordingFileStream } from "./filesystem";
+import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
+
 // used to remove characters from the recording name that would trip up ffmpeg in post.
 export const unsafeTitleCharacters = /[^A-Za-z0-9_.-]/g;
 
 export interface RecordingTask {
   trackTitle: string,
   stop: () => void
-}
-
-interface PreparedRecordingTask extends RecordingTask {
   start: () => void
   finished: Promise<void>
 }
@@ -20,12 +20,12 @@ export interface RecordingBackgroundTask {
   promise: Promise<void>
 }
 
-const prepareRecordingTask = (
+const prepareTrackRecording = (
   trackTitle: string,
   tracks: MediaStreamTrack[],
   options: MediaRecorderOptions,
-  onChunkAvailable: (trackTitle: string, chunk: Blob, chunkNum: number) => Promise<RecordingBackgroundTask>
-): PreparedRecordingTask => {
+  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkNum: number) => Promise<RecordingBackgroundTask>
+): RecordingTask => {
   const recordedStream = new MediaStream(tracks);
   const newRecorder = new MediaRecorder(recordedStream, options);
 
@@ -68,7 +68,7 @@ const prepareRecordingTask = (
         if(chunk) {
           // Wait for the quasi-synchronous part to conclude before processing the
           // next chunk, to avoid concurrent writes on the OPFS
-          chunkPromises.push(await onChunkAvailable(trackTitle, chunk, chunkNum));
+          chunkPromises.push(await onChunkAvailable(chunk, trackTitle, chunkNum));
           ++chunkNum;
         }
       }
@@ -90,77 +90,137 @@ const prepareRecordingTask = (
 };
 
 /**
- * Record a lecture with the given tracks.
+ * Prepare the recording jobs for a lecture recording with the given tracks.
  *
  * The main display and first audio track are combined into one recording stream called "stream",
  * the overlay track (if any) is recorded into the "overlay" stream, and any remaining video or audio
  * tracks are recorded into their own streams named "video-N" or "audio-N".
  *
- * The recording name is generated from the lecture title (if any) and the current timestamp.
- *
  * Storage behavior is handled through the onChunkAvailable callback to separate recording logic from
- * storage logic. The onStarted and onFinished callbacks are called at the start and end of the overall
- * recording to enable UI updates and postprocessing.
+ * storage logic.
  */
-export const recordLecture = async (
+export const prepareRecording = async (
+  displayTracks: MediaStreamTrack[],
+  videoTracks: MediaStreamTrack[],
+  audioTracks: MediaStreamTrack[],
+  mainDisplay: MediaStreamTrack | null,
+  overlay: MediaStreamTrack | null,
+  videoOptions: MediaRecorderOptions,
+  audioOptions: MediaRecorderOptions,
+  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>,
+) => {
+  const jobs: RecordingTask[] = [];
+
+  if(displayTracks.length > 0 || videoTracks.length > 0 || audioTracks.length > 0) {
+    const onChunkFn = (chunk: Blob, trackTitle: string, chunkIndex: number) => onChunkAvailable(chunk, trackTitle, chunkIndex);
+
+    const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(trackTitle, tracks, videoOptions, onChunkFn);
+    const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(trackTitle, tracks, audioOptions, onChunkFn);
+
+    // if no main display is selected, guess a sensible default: first captured display if there
+    // are display streams, first video input otherwise, but don't use the overlay track.
+    const effectiveMainDisplay = mainDisplay ?? displayTracks.filter(t => t !== overlay).at(0) ?? videoTracks.filter(t => t !== overlay).at(0)
+
+    if(effectiveMainDisplay) {
+      // attach first audio stream to main display if available, record the rest into individual files.
+      // This is because at time of writing MediaRecorder on FF and Chrome does not support multiple
+      // audio tracks (nor multiple video tracks, for that matter).
+      jobs.push(prepareVideo([ effectiveMainDisplay, ...audioTracks.slice(0, 1) ], 'stream'));
+      jobs.push(...audioTracks.slice(1).map((track, index) => prepareAudio([track], `audio-${index}`)));
+    } else {
+      // if no video streams are available, record each audio track into its own file
+      jobs.push(...audioTracks.map((track, index) => prepareAudio([track], `audio-${index}`)));
+    }
+
+    if(overlay != null) {
+      jobs.push(prepareVideo([ overlay ], 'overlay'));
+    }
+
+    // If there are more video tracks than main and overlay, record each into its own file for manual postprocessing.
+    const notYetHandled = (track: MediaStreamTrack) => track !== effectiveMainDisplay && track !== overlay;
+    jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => prepareVideo([track], `video-${i}`)));
+    jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => prepareVideo([track], `display-${i}`)));
+  }
+
+  return jobs;
+};
+
+/**
+ * Record a lecture from the given display, video and audio tracks. mainDisplay and overlay must be an element
+ * of either displayTracks or videoTracks. Tracks are combined as described above prepareRecording(...), the
+ * output is webm using the browser's default codecs.
+ *
+ * The onStarting, onStarted, onChunkWritten and onFinished callbacks are meant to provide UI hooks, e.g.
+ * disabling the recording button when a recording is started or updating the list of saved recordings after
+ * a chunk was written.
+ */
+export async function recordLecture(
   displayTracks: MediaStreamTrack[],
   videoTracks: MediaStreamTrack[],
   audioTracks: MediaStreamTrack[],
   mainDisplay: MediaStreamTrack | null,
   overlay: MediaStreamTrack | null,
   lectureTitle: string,
-  videoOptions: MediaRecorderOptions,
-  audioOptions: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, recordingName: string, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>,
-  onStarting: (recordingName: string, tasks: RecordingTask[]) => Promise<void> | void,
-  onFinished: (recordingName: string) => void
-) => {
-  if(displayTracks.length === 0 && videoTracks.length === 0 && audioTracks.length === 0) {
-    return;
-  }
-
+  lecturerEmail: string,
+  apiUrl: string | undefined,
+  onStarting: (recordingName: string) => Promise<void> | void,
+  onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,
+  onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
+  onFinished: (recordingName: string) => Promise<void> | void
+) {
   const timestamp = new Date();
   const lecturePrefix = lectureTitle ? `${lectureTitle}_` : '';
   const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeTitleCharacters, '');
 
-  const onChunkFn = (trackTitle: string, chunk: Blob, chunkIndex: number) => onChunkAvailable(chunk, recordingName, trackTitle, chunkIndex);
+  const videoOptions: MediaRecorderOptions = { mimeType: "video/webm" };
+  const audioOptions: MediaRecorderOptions = { mimeType: "audio/webm" }
+  const formatFilename = (trackTitle: string) => `${trackTitle}.webm`;
 
-  const recordVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareRecordingTask(trackTitle, tracks, videoOptions, onChunkFn);
-  const recordAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareRecordingTask(trackTitle, tracks, audioOptions, onChunkFn);
+  // Map of filename to output stream and associated information. This map is captured
+  // and shared by the callback function we pass to the recording jobs below.
+  const streams = new Map<string, FileSystemWritableFileStream>();
 
-  const jobs: PreparedRecordingTask[] = [];
+  const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
+    // No need to await: we support sending chunks to server out of order and/or concurrently.
+    const backgroundPromise = sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
 
-  // if no main display is selected, guess a sensible default: first captured display if there
-  // are display streams, first video input otherwise, but don't use the overlay track.
-  const effectiveMainDisplay = mainDisplay ?? displayTracks.filter(t => t !== overlay).at(0) ?? videoTracks.filter(t => t !== overlay).at(0)
+    // For local file storage on the other hand, it's important that chunks to the same file
+    // are not written concurrently and that filesystem state updates are correctly ordered.
+    const filename = formatFilename(trackTitle);
+    const stream = streams.get(filename);
 
-  if(effectiveMainDisplay) {
-    // attach first audio stream to main display if available, record the rest into individual files.
-    // This is because at time of writing MediaRecorder on FF and Chrome does not support multiple
-    // audio tracks (nor multiple video tracks, for that matter).
-    jobs.push(recordVideo([ effectiveMainDisplay, ...audioTracks.slice(0, 1) ], 'stream'));
-    jobs.push(...audioTracks.slice(1).map((track, index) => recordAudio([track], `audio-${index}`)));
-  } else {
-    // if no video streams are available, record each audio track into its own file
-    jobs.push(...audioTracks.map((track, index) => recordAudio([track], `audio-${index}`)));
+    if(stream !== undefined) {
+      try {
+        await stream.write(chunk);
+      } catch(e) {
+        // If this happens, it's probably because the browser quota is exhausted.
+        console.warn(`Could not write to ${filename}`, e);
+        await stream.close();
+        streams.delete(filename);
+      }
+    }
+
+    await onChunkWritten(recordingName, filename, chunk.size);
+
+    return { promise: backgroundPromise };
+  };
+
+  const jobs = await prepareRecording(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, videoOptions, audioOptions, onChunkAvailable);
+
+  if(jobs.length > 0) {
+    await onStarting(recordingName);
+
+    for(const job of jobs) {
+      const filename = formatFilename(job.trackTitle);
+      const outputStream = await openRecordingFileStream(recordingName, filename)
+      streams.set(filename, outputStream);
+      job.start();
+    }
+
+    await onStarted(recordingName, () => jobs.forEach(job => job.stop()));
+    await Promise.all(jobs.map(job => job.finished));
+    await Promise.all(streams.values().map(stream => stream.close()));
+    await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+    await onFinished(recordingName);
   }
-
-  if(overlay != null) {
-    jobs.push(recordVideo([ overlay ], 'overlay'));
-  }
-
-  // If there are more video tracks than main and overlay, record each into its own file for manual postprocessing.
-  const notYetHandled = (track: MediaStreamTrack) => track !== effectiveMainDisplay && track !== overlay;
-  jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `video-${i}`)));
-  jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => recordVideo([track], `display-${i}`)));
-
-  await onStarting(recordingName, jobs);
-
-  for(const task of jobs) {
-    task.start();
-  }
-
-  await Promise.all(jobs.map(task => task.finished));
-
-  onFinished(recordingName);
-};
+}
