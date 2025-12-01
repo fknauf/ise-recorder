@@ -217,8 +217,10 @@ export async function recordLecture(
 
     await onStarted(recordingName, () => jobs.forEach(job => job.stop()));
     await Promise.all(jobs.map(job => job.finished));
-    await Promise.all(streams.values().map(stream => stream.close()));
-    await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+    await Promise.all([
+      ...streams.values().map(stream => stream.close()),
+      schedulePostprocessing(apiUrl, recordingName, lecturerEmail)
+    ]);
     await onFinished(recordingName);
   }
 }
