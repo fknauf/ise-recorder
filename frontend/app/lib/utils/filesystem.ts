@@ -40,14 +40,21 @@ async function getRecordingFile(recordingName: string, filename: string, options
   return await recordingDir.getFileHandle(filename, options);
 }
 
+/**
+ * Create and open a new recording track file for writing. If the file already exists, it
+ * is truncated; this should never happen but would at least guarantee that the file ends up
+ * containing a valid video/audio stream.
+ */
 export async function openRecordingFileStream(recordingName: string, filename: string) {
   const file = await getRecordingFile(recordingName, filename, { create: true });
   return file.createWritable();
 }
 
+/**
+ * Try to obtain file size, but don't fail if we can't. It's just to
+ * show the file size on the download buttons, not critical information.
+ */
 async function getFileSize(dir: FileSystemDirectoryHandle, filename: string) {
-  // Try to obtain file size, but don't fail if we can't. It's just to
-  // show the file size on the download buttons, not critical information.
   try {
     const fileHandle = await dir.getFileHandle(filename);
     const file = await fileHandle.getFile();
@@ -69,15 +76,13 @@ async function getRecordingsList() {
   const getRecordingStats = async (recordingName: string): Promise<RecordingFileList> => {
     const dir = await recordingsDir.getDirectoryHandle(recordingName);
     const allFilenames = await Array.fromAsync(dir.keys());
-    // Chrome sets up filename.crswap when you open a file for writing. They're a browser
-    // implementation detail that we don't want to show in our listing, so filter it here.
+    // Filter Chromium's .crswap temp files from the list, since we don't want to show them to the user.
     const filenames = allFilenames.filter(name => !name.endsWith('.crswap')).sort();
 
     const getFileInfo = async (filename: string) => <RecordingFileInfo>({
       name: filename,
       size: await getFileSize(dir, filename)
     });
-
     const fileInfos = await Promise.all(filenames.map(getFileInfo));
 
     return { name: recordingName, files: fileInfos };
