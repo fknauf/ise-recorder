@@ -38,8 +38,16 @@ class VideoProperties(NamedTuple):
     crop: Rectangle
 
     def needs_cropping(self) -> bool:
-        """ determines if this video stream needs to be cropped """
-        return self.width != self.crop.width or self.height != self.crop.height
+        """
+        determines if this video stream needs to be cropped.
+        
+        True if more than one percent of width or height would be cut off, otherwise there is no
+        need to bother.
+        """
+        width_slack = self.width - self.crop.width
+        height_slack = self.height - self.crop.height
+
+        return width_slack * 100 > self.width or height_slack * 100 > self.height
 
 def _log_error(err: CalledProcessError) -> None:
     logger.error("Failed with return code %d.\n" \
