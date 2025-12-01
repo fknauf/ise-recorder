@@ -54,7 +54,7 @@ export default function Home() {
     setSavedRecordingsState(state);
   }
 
-  const addDisplayTracks = async (tracks: MediaStreamTrack[]) => {
+  const addDisplayTracks = (tracks: MediaStreamTrack[]) => {
     // should only ever be one video track, but let's just grab all just in case. user can
     // still remove them manually if there happen to be more.
     setDisplayTracks(prev => [ ...prev, ...tracks ]);
@@ -63,14 +63,14 @@ export default function Home() {
     }
   };
 
-  const addVideoTracks = async (tracks: MediaStreamTrack[]) => {
+  const addVideoTracks = (tracks: MediaStreamTrack[]) => {
     setVideoTracks(prev => [ ...prev, ...tracks ])
     if(!overlay) {
       setOverlay(tracks.at(0) ?? null);
     }
   }
 
-  const addAudioTracks = async (tracks: MediaStreamTrack[]) => {
+  const addAudioTracks = (tracks: MediaStreamTrack[]) => {
     setAudioTracks(prev => [ ...prev, ...tracks ])
   }
 
@@ -105,7 +105,7 @@ export default function Home() {
       return;
     }
 
-    const onStarting = async (recordingName: string) => {
+    const onStarting = (recordingName: string) => {
       setActiveRecording({ state: "starting", name: recordingName })
       // Prevent accidental closing of the tab while recording
       window.addEventListener('beforeunload', preventClosing);
@@ -127,8 +127,8 @@ export default function Home() {
       setSavedRecordingsState(
         prevState => {
           const nextState = structuredClone(prevState);
-          const recordingDirectory = nextState.recordings.find(rec => rec.name == recordingName);
-          const fileinfo = recordingDirectory?.fileinfos.find(info => info.filename == filename);
+          const recording = nextState.recordings.find(rec => rec.name == recordingName);
+          const fileinfo = recording?.files.find(info => info.name == filename);
 
           if(fileinfo !== undefined) {
             fileinfo.size = filesize;

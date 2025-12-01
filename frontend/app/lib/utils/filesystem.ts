@@ -10,13 +10,13 @@
  */
 
 export interface RecordingFileInfo {
-  filename: string
+  name: string
   size?: number
 }
 
 export interface RecordingFileList {
   name: string,
-  fileinfos: RecordingFileInfo[]
+  files: RecordingFileInfo[]
 }
 
 export interface RecordingsState {
@@ -31,8 +31,8 @@ async function getRecordingsDirectory() {
 }
 
 async function getRecordingDirectory(name: string, options?: FileSystemGetDirectoryOptions) {
-  const recordingDir = await getRecordingsDirectory();
-  return await recordingDir.getDirectoryHandle(name, options);
+  const recordingsDir = await getRecordingsDirectory();
+  return await recordingsDir.getDirectoryHandle(name, options);
 }
 
 async function getRecordingFile(recordingName: string, filename: string, options?: FileSystemGetFileOptions) {
@@ -45,6 +45,20 @@ export async function openRecordingFileStream(recordingName: string, filename: s
   return file.createWritable();
 }
 
+async function getFileSize(dir: FileSystemDirectoryHandle, filename: string) {
+  // Try to obtain file size, but don't fail if we can't. It's just to
+  // show the file size on the download buttons, not critical information.
+  try {
+    const fileHandle = await dir.getFileHandle(filename);
+    const file = await fileHandle.getFile();
+    return file.size
+  } catch(e) {
+    console.warn('Unable to get file size for', filename, e);
+  }
+
+  return undefined;
+}
+
 /**
  * Get the list of recordings, including file names and sizes.
  */
@@ -52,41 +66,24 @@ async function getRecordingsList() {
   const recordingsDir = await getRecordingsDirectory();
   const recordingNames = await Array.fromAsync(recordingsDir.keys())
 
-  const result: RecordingFileList[] = [];
-
-  for(const rname of recordingNames.sort()) {
-    const dir = await recordingsDir.getDirectoryHandle(rname);
+  const getRecordingStats = async (recordingName: string): Promise<RecordingFileList> => {
+    const dir = await recordingsDir.getDirectoryHandle(recordingName);
     const allFilenames = await Array.fromAsync(dir.keys());
     // Chrome sets up filename.crswap when you open a file for writing. They're a browser
     // implementation detail that we don't want to show in our listing, so filter it here.
     const filenames = allFilenames.filter(name => !name.endsWith('.crswap')).sort();
 
-    const getFileInfo = async (filename: string) => {
-      let size: number | undefined
+    const getFileInfo = async (filename: string) => <RecordingFileInfo>({
+      name: filename,
+      size: await getFileSize(dir, filename)
+    });
 
-      // Try to obtain file size, but don't fail if we can't. It's just to
-      // show the file size on the download buttons, not critical information.
-      try {
-        const fileHandle = await dir.getFileHandle(filename);
-        const file = await fileHandle.getFile();
-        size = file.size
-      } catch(e) {
-        console.warn('Unable to get file size for', filename, e);
-      }
+    const fileInfos = await Promise.all(filenames.map(getFileInfo));
 
-      return <RecordingFileInfo>{
-        filename: filename,
-        size: size
-      }
-    }
-
-    result.push({
-      name: rname,
-      fileinfos: await Promise.all(filenames.map(getFileInfo))
-    })
+    return { name: recordingName, files: fileInfos };
   }
 
-  return result;
+  return Promise.all(recordingNames.map(getRecordingStats));
 }
 
 /**

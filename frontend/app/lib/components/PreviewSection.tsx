@@ -35,7 +35,7 @@ const PreviewCard = (
 /**
  * Previews section on the main page, basically a collection of preview cards for all active streams.
  */
-interface PreviewSectionProps {
+export interface PreviewSectionProps {
   displayTracks: readonly MediaStreamTrack[]
   videoTracks: readonly MediaStreamTrack[]
   audioTracks: readonly MediaStreamTrack[]

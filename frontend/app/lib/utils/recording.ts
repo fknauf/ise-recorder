@@ -4,7 +4,7 @@ import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
 // used to remove characters from the recording name that would trip up ffmpeg in post.
 export const unsafeTitleCharacters = /[^A-Za-z0-9_.-]/g;
 
-export interface RecordingTask {
+interface RecordingTask {
   trackTitle: string,
   stop: () => void
   start: () => void
@@ -16,16 +16,16 @@ export interface RecordingTask {
 // them at different points. What we conceptually need for that is a Promise<Promise<void>>,
 // but Javascript quirks make it difficult to get those from an async function. So we do it
 // with a Promise<RecordingBackgroundTask> instead.
-export interface RecordingBackgroundTask {
+interface RecordingBackgroundTask {
   promise: Promise<void>
 }
 
-const prepareTrackRecording = (
-  trackTitle: string,
+function prepareTrackRecording (
   tracks: MediaStreamTrack[],
+  trackTitle: string,
   options: MediaRecorderOptions,
   onChunkAvailable: (chunk: Blob, trackTitle: string, chunkNum: number) => Promise<RecordingBackgroundTask>
-): RecordingTask => {
+): RecordingTask {
   const recordedStream = new MediaStream(tracks);
   const newRecorder = new MediaRecorder(recordedStream, options);
 
@@ -99,7 +99,7 @@ const prepareTrackRecording = (
  * Storage behavior is handled through the onChunkAvailable callback to separate recording logic from
  * storage logic.
  */
-export const prepareRecording = async (
+function prepareRecording (
   displayTracks: MediaStreamTrack[],
   videoTracks: MediaStreamTrack[],
   audioTracks: MediaStreamTrack[],
@@ -108,14 +108,12 @@ export const prepareRecording = async (
   videoOptions: MediaRecorderOptions,
   audioOptions: MediaRecorderOptions,
   onChunkAvailable: (chunk: Blob, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>,
-) => {
+) {
   const jobs: RecordingTask[] = [];
 
   if(displayTracks.length > 0 || videoTracks.length > 0 || audioTracks.length > 0) {
-    const onChunkFn = (chunk: Blob, trackTitle: string, chunkIndex: number) => onChunkAvailable(chunk, trackTitle, chunkIndex);
-
-    const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(trackTitle, tracks, videoOptions, onChunkFn);
-    const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(trackTitle, tracks, audioOptions, onChunkFn);
+    const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, videoOptions, onChunkAvailable);
+    const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, audioOptions, onChunkAvailable);
 
     // if no main display is selected, guess a sensible default: first captured display if there
     // are display streams, first video input otherwise, but don't use the overlay track.
@@ -205,7 +203,7 @@ export async function recordLecture(
     return { promise: backgroundPromise };
   };
 
-  const jobs = await prepareRecording(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, videoOptions, audioOptions, onChunkAvailable);
+  const jobs = prepareRecording(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, videoOptions, audioOptions, onChunkAvailable);
 
   if(jobs.length > 0) {
     await onStarting(recordingName);

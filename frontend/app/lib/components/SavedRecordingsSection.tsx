@@ -32,7 +32,7 @@ function SavedRecordingsCard(
       <Flex direction="column" justifyContent="center" gap="size-100">
         <Text>{recording.name}</Text>
         {
-          recording.fileinfos.map(({ filename, size }) =>
+          recording.files.map(({ name: filename, size }) =>
             <ActionButton
             key={`download-${filename}`}
             isDisabled={isBeingRecorded}

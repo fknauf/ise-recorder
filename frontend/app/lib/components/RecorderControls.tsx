@@ -1,12 +1,12 @@
 'use client';
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
+import { ActionButton, Divider, Flex, Item, Text, Key, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
 import CallCenter from '@spectrum-icons/workflow/CallCenter';
 import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
 import Circle from '@spectrum-icons/workflow/Circle';
 import DeviceDesktop from '@spectrum-icons/workflow/DeviceDesktop';
 import Stop from '@spectrum-icons/workflow/Stop';
-import { Key, useState } from "react";
+import { useState } from "react";
 import isEmail from 'validator/es/lib/isEmail';
 import { unsafeTitleCharacters } from "../utils/recording";
 import { showError } from "../utils/notifications";
@@ -29,7 +29,56 @@ const createDeviceConstraints = (groupId: string, deviceId: string): MediaTrackC
 const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || 'unsafe character in lecture title';
 const validateEmail = (email: string) => email.trim() === '' || isEmail(email) || 'invalid e-mail address';
 
-interface RecorderControlsProps {
+interface RecordButtonProps {
+  recorderState: RecorderState
+  onStartRecording: () => void
+  onStopRecording: () => void
+}
+
+function RecordButton(
+  { recorderState, onStartRecording, onStopRecording }: Readonly<RecordButtonProps>
+) {
+  // The design is very human.
+  //
+  // We're trying to give sensible cues to the user here. That is, a visible "I'm working" signal is given during stopping to
+  // pacify the user for a few seconds if we still have to retry sending a chunk, but not while starting because when we switch
+  // to the "Stop recording" button the "I'm working" signal disappears even though the user just told the system to start working.
+  // So in that case we just disable the button to prevent stop signals from being sent before we're in a state to process them.
+  switch(recorderState) {
+    case "idle":
+      return (
+        <ActionButton onPress={onStartRecording}>
+          <Circle/>
+          <Text>Start Recording</Text>
+        </ActionButton>
+      );
+    case "starting":
+      return (
+        <ActionButton isDisabled>
+          <Stop/>
+          <Text>Stop Recording</Text>
+        </ActionButton>
+      );
+    case "recording":
+      return (
+        <ActionButton onPress={onStopRecording}>
+          <Stop/>
+          <Text>Stop Recording</Text>
+        </ActionButton>
+      );
+    case "stopping":
+      return (
+        <ActionButton isDisabled>
+          <View paddingX="size-100">
+            <ProgressCircle size="S" isIndeterminate/>
+          </View>
+          <Text>Stop Recording</Text>
+        </ActionButton>
+      );
+  }
+}
+
+export interface RecorderControlsProps {
   lectureTitle: string
   lecturerEmail: string
   hasEmailField: boolean
@@ -170,16 +219,16 @@ export function RecorderControls(
           />
       }
 
-      <Flex direction="row" justifyContent="center" alignSelf="end" gap="size-100" wrap>
+      <Flex direction="row" alignContent="end" gap="size-100" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls} alignSelf="end">
+        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls}>
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
 
         <MenuTrigger onOpenChange={refreshUserMediaDevices}>
-          <ActionButton isDisabled={hasDisabledTrackControls} alignSelf="end">
+          <ActionButton isDisabled={hasDisabledTrackControls}>
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
@@ -189,7 +238,7 @@ export function RecorderControls(
         </MenuTrigger>
 
         <MenuTrigger onOpenChange={refreshUserMediaDevices}>
-          <ActionButton isDisabled={hasDisabledTrackControls} alignSelf="end">
+          <ActionButton isDisabled={hasDisabledTrackControls}>
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
@@ -200,16 +249,11 @@ export function RecorderControls(
 
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        {
-          (() => {
-            switch(recorderState) {
-              case "idle": return <ActionButton alignSelf="end" onPress={onStartRecording}><Circle/><Text>Start Recording</Text></ActionButton>;
-              case "starting": return <ActionButton alignSelf="end" isDisabled><View paddingX="size-100"><ProgressCircle size="S" isIndeterminate/></View><Text>Start Recording</Text></ActionButton>;
-              case "recording": return <ActionButton alignSelf="end" onPress={onStopRecording}><Stop/><Text>Stop Recording</Text></ActionButton>;
-              case "stopping": return <ActionButton alignSelf="end" isDisabled><View paddingX="size-100"><ProgressCircle size="S" isIndeterminate/></View><Text>Stop Recording</Text></ActionButton>;
-            }
-          })()
-        }
+        <RecordButton
+          recorderState={recorderState}
+          onStartRecording={onStartRecording}
+          onStopRecording={onStopRecording}
+        />
       </Flex>
     </Flex>
   );
