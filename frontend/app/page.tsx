@@ -9,6 +9,7 @@ import { RecordingsState, getRecordingsState, deleteRecording, downloadFile } fr
 import { recordLecture } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
+import useLocalStorageState from "use-local-storage-state";
 
 interface ActiveRecording {
   state: RecorderState
@@ -25,8 +26,8 @@ export default function Home() {
   // hooks
   ////////////////
 
-  const [ lectureTitle, setLectureTitle ] = useState("")
-  const [ lecturerEmail, setLecturerEmail ] = useState("")
+  const [ lectureTitle, setLectureTitle ] = useLocalStorageState<string>("lecture-title", { defaultValue: "" });
+  const [ lecturerEmail, setLecturerEmail ] = useLocalStorageState<string>("lecturer-email", { defaultValue: "" });
 
   const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
   const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
