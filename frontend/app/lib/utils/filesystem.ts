@@ -56,7 +56,10 @@ async function getRecordingsList() {
 
   for(const rname of recordingNames.sort()) {
     const dir = await recordingsDir.getDirectoryHandle(rname);
-    const fnames = (await Array.fromAsync(dir.keys())).sort();
+    const allFilenames = await Array.fromAsync(dir.keys());
+    // Chrome sets up filename.crswap when you open a file for writing. They're a browser
+    // implementation detail that we don't want to show in our listing, so filter it here.
+    const filenames = allFilenames.filter(name => !name.endsWith('.crswap')).sort();
 
     const getFileInfo = async (filename: string) => {
       let size: number | undefined
@@ -79,7 +82,7 @@ async function getRecordingsList() {
 
     result.push({
       name: rname,
-      fileinfos: await Promise.all(fnames.map(getFileInfo))
+      fileinfos: await Promise.all(filenames.map(getFileInfo))
     })
   }
 
