@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { ReactNode } from "react";
 
@@ -26,7 +26,7 @@ export function AudioPreview(
     // and the time domain values for clipping detection
     const audioContext = new AudioContext();
     const audioAnalyzer = audioContext.createAnalyser();
-    const audioSource = audioContext.createMediaStreamSource(new MediaStream([track]))
+    const audioSource = audioContext.createMediaStreamSource(new MediaStream([track]));
 
     audioAnalyzer.fftSize = 512;
     audioAnalyzer.maxDecibels = 0;
@@ -36,7 +36,7 @@ export function AudioPreview(
     const timeData = new Uint8Array(audioAnalyzer.fftSize);
 
     const renderFunction = () => {
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d");
 
       if(ctx == null) {
         return;
@@ -50,14 +50,14 @@ export function AudioPreview(
 
       // paint spectrum as a histrogram. Use the warning color iff audio is clipping.
       ctx.lineWidth = Math.ceil(space);
-      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isClipping ? '--warning' : '--foreground');
+      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isClipping ? "--warning" : "--foreground");
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       for(const [ i, value ] of freqData.entries()) {
         ctx.beginPath();
         ctx.moveTo(space * i, canvas.height);
-        ctx.lineTo(space * i, canvas.height - (value * canvas.height / 255));
+        ctx.lineTo(space * i, canvas.height - value * canvas.height / 255);
         ctx.stroke();
       }
     };

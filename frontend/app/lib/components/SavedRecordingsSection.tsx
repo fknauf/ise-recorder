@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
 import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
-import Delete from '@spectrum-icons/workflow/Delete';
-import Download from '@spectrum-icons/workflow/Download';
+import Delete from "@spectrum-icons/workflow/Delete";
+import Download from "@spectrum-icons/workflow/Download";
 import { RecordingFileList } from "../utils/filesystem";
 
 interface SavedRecordingsCardProps {
-  recording: RecordingFileList,
-  isBeingRecorded: boolean,
-  onRemoved: () => void,
+  recording: RecordingFileList
+  isBeingRecorded: boolean
+  onRemoved: () => void
   onDownload: (filename: string) => void
 }
 
@@ -20,7 +20,7 @@ interface SavedRecordingsCardProps {
 function SavedRecordingsCard(
   { recording, isBeingRecorded, onRemoved, onDownload }: Readonly<SavedRecordingsCardProps>
 ) {
-  const formatter = new Intl.NumberFormat('en-us', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatter = new Intl.NumberFormat("en-us", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <View
@@ -34,10 +34,10 @@ function SavedRecordingsCard(
         {
           recording.files.map(({ name: filename, size }) =>
             <ActionButton
-            key={`download-${filename}`}
-            isDisabled={isBeingRecorded}
-            onPress={() => onDownload(filename)}
-          >
+              key={`download-${filename}`}
+              isDisabled={isBeingRecorded}
+              onPress={() => onDownload(filename)}
+            >
               <Download/>
               <Text>Download {filename} {size !== undefined && `(${formatter.format(size / 2 ** 20)} MiB)`}</Text>
             </ActionButton>
@@ -56,9 +56,9 @@ function SavedRecordingsCard(
 }
 
 export interface SavedRecordingsSectionProps {
-  recordings: RecordingFileList[],
-  activeRecordingName?: string,
-  onRemoved: (recording: string) => void,
+  recordings: RecordingFileList[]
+  activeRecordingName?: string
+  onRemoved: (recording: string) => void
   onDownload: (recording: string, filename: string) => void
 }
 
@@ -80,4 +80,4 @@ export const SavedRecordingsSection = (
         />
       )
     }
-  </Flex>
+  </Flex>;

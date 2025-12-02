@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
 import { Flex, Switch } from "@adobe/react-spectrum";
 import { ReactNode } from "react";
 
 export interface VideoPreviewProps {
-  track: MediaStreamTrack,
+  track: MediaStreamTrack
   width: number
   height: number
-  isMainDisplay: boolean,
-  isOverlay: boolean,
-  switchesDisabled: boolean,
-  onToggleMainDisplay: (isSelected: boolean) => void,
+  isMainDisplay: boolean
+  isOverlay: boolean
+  switchesDisabled: boolean
+  onToggleMainDisplay: (isSelected: boolean) => void
   onToggleOverlay: (isSelected: boolean) => void
 }
 

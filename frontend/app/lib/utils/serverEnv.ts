@@ -1,4 +1,4 @@
-'use server';
+"use server";
 
 import { connection } from "next/server";
 import isURL, { IsURLOptions } from "validator/es/lib/isURL";
@@ -9,7 +9,7 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
   }
 
   const urlOptions: IsURLOptions = {
-    protocols: [ 'http', 'https' ],
+    protocols: [ "http", "https" ],
     require_protocol: true,
     require_tld: false, // allow localhost and enable intranet deployments
     allow_fragments: false,
@@ -20,7 +20,7 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
   if(isURL(apiUrl, urlOptions)) {
     return apiUrl;
   } else {
-    console.error('Malformed API_URL:', apiUrl);
+    console.error("Malformed API_URL:", apiUrl);
     return undefined;
   }
 }

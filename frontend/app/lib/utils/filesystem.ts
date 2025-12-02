@@ -15,7 +15,7 @@ export interface RecordingFileInfo {
 }
 
 export interface RecordingFileList {
-  name: string,
+  name: string
   files: RecordingFileInfo[]
 }
 
@@ -58,9 +58,9 @@ async function getFileSize(dir: FileSystemDirectoryHandle, filename: string) {
   try {
     const fileHandle = await dir.getFileHandle(filename);
     const file = await fileHandle.getFile();
-    return file.size
+    return file.size;
   } catch(e) {
-    console.warn('Unable to get file size for', filename, e);
+    console.warn("Unable to get file size for", filename, e);
   }
 
   return undefined;
@@ -71,13 +71,13 @@ async function getFileSize(dir: FileSystemDirectoryHandle, filename: string) {
  */
 async function getRecordingsList() {
   const recordingsDir = await getRecordingsDirectory();
-  const recordingNames = await Array.fromAsync(recordingsDir.keys())
+  const recordingNames = await Array.fromAsync(recordingsDir.keys());
 
   const getRecordingStats = async (recordingName: string): Promise<RecordingFileList> => {
     const dir = await recordingsDir.getDirectoryHandle(recordingName);
     const allFilenames = await Array.fromAsync(dir.keys());
     // Filter Chromium's .crswap temp files from the list, since we don't want to show them to the user.
-    const filenames = allFilenames.filter(name => !name.endsWith('.crswap')).sort();
+    const filenames = allFilenames.filter(name => !name.endsWith(".crswap")).sort();
 
     const getFileInfo = async (filename: string) => <RecordingFileInfo>({
       name: filename,
@@ -86,7 +86,7 @@ async function getRecordingsList() {
     const fileInfos = await Promise.all(filenames.map(getFileInfo));
 
     return { name: recordingName, files: fileInfos };
-  }
+  };
 
   return Promise.all(recordingNames.map(getRecordingStats));
 }
@@ -102,7 +102,7 @@ export async function getRecordingsState(): Promise<RecordingsState> {
     quota: fs.quota,
     usage: fs.usage,
     recordings
-  }
+  };
 }
 
 export async function deleteRecording(recordingName: string) {
@@ -123,11 +123,11 @@ export async function downloadFile(recordingName: string, filename: string) {
   const url = URL.createObjectURL(fileContents);
 
   try {
-    const link = document.createElement('a');
+    const link = document.createElement("a");
 
     link.href = url;
     link.download = filename;
-    link.rel = "noopener"
+    link.rel = "noopener";
     link.hidden = true;
 
     document.body.appendChild(link);

@@ -1,20 +1,20 @@
-'use client';
+"use client";
 
 import { ActionButton, Divider, Flex, Item, Text, Key, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
-import CallCenter from '@spectrum-icons/workflow/CallCenter';
-import MovieCamera from '@spectrum-icons/workflow/MovieCamera';
-import Circle from '@spectrum-icons/workflow/Circle';
-import DeviceDesktop from '@spectrum-icons/workflow/DeviceDesktop';
-import Stop from '@spectrum-icons/workflow/Stop';
+import CallCenter from "@spectrum-icons/workflow/CallCenter";
+import MovieCamera from "@spectrum-icons/workflow/MovieCamera";
+import Circle from "@spectrum-icons/workflow/Circle";
+import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
+import Stop from "@spectrum-icons/workflow/Stop";
 import { useState } from "react";
-import isEmail from 'validator/es/lib/isEmail';
+import isEmail from "validator/es/lib/isEmail";
 import { unsafeTitleCharacters } from "../utils/recording";
 import { showError } from "../utils/notifications";
 
 export type RecorderState = "idle" | "starting" | "recording" | "stopping";
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
-const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ])
+const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ]);
 const splitDeviceUniqueId = (devUid: string): [ string, string ] => JSON.parse(devUid);
 
 const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
@@ -26,8 +26,8 @@ const createDeviceConstraints = (groupId: string, deviceId: string): MediaTrackC
     deviceId: { exact: deviceId }
   });
 
-const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || 'unsafe character in lecture title';
-const validateEmail = (email: string) => email.trim() === '' || isEmail(email) || 'invalid e-mail address';
+const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || "unsafe character in lecture title";
+const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
 
 interface RecordButtonProps {
   recorderState: RecorderState
@@ -83,8 +83,8 @@ export interface RecorderControlsProps {
   lecturerEmail: string
   hasEmailField: boolean
   recorderState: RecorderState
-  currentVideoTracks: readonly MediaStreamTrack[],
-  currentAudioTracks: readonly MediaStreamTrack[],
+  currentVideoTracks: readonly MediaStreamTrack[]
+  currentAudioTracks: readonly MediaStreamTrack[]
   onLectureTitleChanged: (lectureTitle: string) => void
   onLecturerEmailChanged: (lectureTitle: string) => void
   onAddDisplayTracks: (tracks: MediaStreamTrack[]) => void
@@ -122,8 +122,8 @@ export function RecorderControls(
 ) {
   // The controls include menus of available video and audio devices. We obtain these asynchronously
   // and store them here for display.
-  const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([])
-  const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([])
+  const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([]);
+  const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([]);
   const [ hasPermissions, setHasPermissions ] = useState(false);
 
   // For hotplugging, the device list needs to be refreshed whenever a device menu is opened, so we
@@ -143,17 +143,17 @@ export function RecorderControls(
         stream.getTracks().forEach(t => t.stop());
         setHasPermissions(true);
       } catch(e) {
-        showError('Could not obtain user media permissions', e);
+        showError("Could not obtain user media permissions", e);
       }
     }
 
     try {
       const devs = await navigator.mediaDevices.enumerateDevices();
 
-      setVideoDevices(devs.filter(dev => dev.kind === 'videoinput'));
+      setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
       setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
     } catch(e) {
-      showError('Could not enumerate devices', e);
+      showError("Could not enumerate devices", e);
     }
   };
 
@@ -162,37 +162,37 @@ export function RecorderControls(
       const screenStream = await navigator.mediaDevices.getDisplayMedia();
       onAddDisplayTracks(screenStream.getVideoTracks());
     } catch(e) {
-      showError('Could not obtain display stream', e);
+      showError("Could not obtain display stream", e);
     }
   };
 
   const addVideoDevice = async (devUid: Key) => {
     const [ groupId, deviceId ] = splitDeviceUniqueId(devUid as string);
     if(currentVideoTracks.some(track => trackIsFromDevice(track, groupId, deviceId))) {
-        return;
+      return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: createDeviceConstraints(groupId, deviceId), audio: false });
       onAddVideoTracks(stream.getVideoTracks());
     } catch(e) {
-      showError('Could not obtain video stream', e);
+      showError("Could not obtain video stream", e);
     }
-  }
+  };
 
   const addAudioDevice = async (devUid: Key) => {
     const [ groupId, deviceId ] = splitDeviceUniqueId(devUid as string);
     if(currentAudioTracks.some(track => trackIsFromDevice(track, groupId, deviceId))) {
-        return;
+      return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: createDeviceConstraints(groupId, deviceId), video: false });
       onAddAudioTracks(stream.getAudioTracks());
     } catch(e) {
-      showError('Could not obtain audio stream', e);
+      showError("Could not obtain audio stream", e);
     }
-  }
+  };
 
   const hasDisabledTrackControls = recorderState !== "idle";
 

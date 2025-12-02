@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
 import { ReactNode } from "react";
-import { ActionButton, Flex, Text, View } from '@adobe/react-spectrum';
+import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
 
 interface PreviewCardProps {
-  label: string | undefined,
-  hasDisabledButtons: boolean,
-  onRemove: () => void,
+  label: string | undefined
+  hasDisabledButtons: boolean
+  onRemove: () => void
   children: ReactNode
 }
 
@@ -28,7 +28,7 @@ const PreviewCard = (
     <Flex direction="column" justifyContent="center" gap="size-100" height="100%">
       <Text>{label}</Text>
       {children}
-      <ActionButton  marginTop="auto" onPress={onRemove} isDisabled={hasDisabledButtons}>Remove</ActionButton>
+      <ActionButton marginTop="auto" onPress={onRemove} isDisabled={hasDisabledButtons}>Remove</ActionButton>
     </Flex>
   </View>;
 
@@ -39,13 +39,13 @@ export interface PreviewSectionProps {
   displayTracks: readonly MediaStreamTrack[]
   videoTracks: readonly MediaStreamTrack[]
   audioTracks: readonly MediaStreamTrack[]
-  mainDisplay: MediaStreamTrack | null,
-  overlay: MediaStreamTrack | null,
-  canvasWidth: number,
-  canvasHeight: number,
-  hasDisabledButtons: boolean,
-  onMainDisplayChanged: (track: MediaStreamTrack | null) => void,
-  onOverlayChanged: (track: MediaStreamTrack | null) => void,
+  mainDisplay: MediaStreamTrack | null
+  overlay: MediaStreamTrack | null
+  canvasWidth: number
+  canvasHeight: number
+  hasDisabledButtons: boolean
+  onMainDisplayChanged: (track: MediaStreamTrack | null) => void
+  onOverlayChanged: (track: MediaStreamTrack | null) => void
   onRemoveDisplayTrack: (track: MediaStreamTrack) => void
   onRemoveVideoTrack: (track: MediaStreamTrack) => void
   onRemoveAudioTrack: (track: MediaStreamTrack) => void
@@ -82,8 +82,8 @@ export function PreviewSection(
         switchesDisabled={hasDisabledButtons}
         isMainDisplay={mainDisplay === track}
         isOverlay={overlay === track}
-        onToggleMainDisplay={isSelected => onMainDisplayChanged(isSelected ? track : null) }
-        onToggleOverlay={isSelected => onOverlayChanged(isSelected ? track : null) }
+        onToggleMainDisplay={isSelected => onMainDisplayChanged(isSelected ? track : null)}
+        onToggleOverlay={isSelected => onOverlayChanged(isSelected ? track : null)}
       />
     </PreviewCard>;
 

@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import {defaultTheme, Provider} from '@adobe/react-spectrum';
-import {useRouter} from 'next/navigation';
+import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { useRouter } from "next/navigation";
 
-declare module '@adobe/react-spectrum' {
+declare module "@adobe/react-spectrum" {
   interface RouterConfig {
     routerOptions: NonNullable<
-      Parameters<ReturnType<typeof useRouter>['push']>[1]
-    >;
+      Parameters<ReturnType<typeof useRouter>["push"]>[1]
+    >
   }
 }
 
@@ -24,10 +24,10 @@ export function SpectrumProvider(
   return (
     <Provider
       theme={defaultTheme}
-      defaultColorScheme='dark'
-      locale='en-US'
-      router={{ navigate: router.push }
-    }>
+      defaultColorScheme="dark"
+      locale="en-US"
+      router={{ navigate: router.push }}
+    >
       {children}
     </Provider>
   );

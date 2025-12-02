@@ -28,13 +28,13 @@ async function sendRequest(
     const response = await fetch(url, request);
 
     if(response.ok) {
-      return { ok: true }
+      return { ok: true };
     }
 
     return { ok: false, errorMessage: `server responded ${response.status}, ${await response.text()}` };
   } catch(e) {
-    console.warn('Error occurred when fetching', url, e);
-    return { ok: false, errorMessage: e instanceof Error ? e.message : 'unknown error' };
+    console.warn("Error occurred when fetching", url, e);
+    return { ok: false, errorMessage: e instanceof Error ? e.message : "unknown error" };
   }
 }
 
@@ -54,20 +54,20 @@ export async function sendChunkToServer(
   const intervalMillis = 2000;
 
   const data = new FormData();
-  data.append('recording', recording);
-  data.append('track', track);
-  data.append('index', index.toFixed(0));
-  data.append('chunk', chunk);
+  data.append("recording", recording);
+  data.append("track", track);
+  data.append("index", index.toFixed(0));
+  data.append("chunk", chunk);
 
   const request: RequestInit = {
     method: "POST",
     body: data
-  }
+  };
 
   const result = await callWithRetries(() => sendRequest(chunkUrl, request), retries, intervalMillis);
 
   if(!result.ok) {
-    showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`)
+    showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`);
   }
 }
 
@@ -92,7 +92,7 @@ export async function schedulePostprocessing(
   const request: RequestInit = {
     method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json"
     },
     body: JSON.stringify(data)
   };

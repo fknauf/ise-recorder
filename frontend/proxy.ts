@@ -1,13 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from "next/server";
 
 // Adapted from https://nextjs.org/docs/app/guides/content-security-policy
 
 export function proxy(request: NextRequest) {
-  const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
 
-  const isDev = process.env.NODE_ENV === 'development';
+  const isDev = process.env.NODE_ENV === "development";
   const apiUrl = process.env.ISE_RECORD_API_URL;
-  const connectSrc = apiUrl ? apiUrl + (apiUrl.endsWith('/') ? '' : '/')  : '';
+  const connectSrc = apiUrl ? apiUrl + (apiUrl.endsWith("/") ? "" : "/") : "";
 
   // would like to use ${isDev ? "'unsafe-eval'" : `nonce-${nonce}`}; instead of unsafe-inline for
   // style-src, but react spectrum requires inline styles and doesn't apply nonces at the moment.
@@ -24,24 +24,24 @@ export function proxy(request: NextRequest) {
     frame-ancestors 'none';
     connect-src 'self' ${connectSrc};
     upgrade-insecure-requests;
-`
+`;
   // Replace newline characters and spaces
   const contentSecurityPolicyHeaderValue = cspHeader
-    .replace(/\s{2,}/g, ' ')
-    .trim()
+    .replace(/\s{2,}/g, " ")
+    .trim();
 
-  const requestHeaders = new Headers(request.headers)
-  requestHeaders.set('x-nonce', nonce)
-  requestHeaders.set('Content-Security-Policy', contentSecurityPolicyHeaderValue)
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
 
   const response = NextResponse.next({
     request: {
-      headers: requestHeaders,
-    },
-  })
-  response.headers.set('Content-Security-Policy', contentSecurityPolicyHeaderValue)
+      headers: requestHeaders
+    }
+  });
+  response.headers.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
 
-  return response
+  return response;
 }
 
 export const config = {
@@ -54,11 +54,11 @@ export const config = {
      * - favicon.ico (favicon file)
      */
     {
-      source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
+      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
       missing: [
-        { type: 'header', key: 'next-router-prefetch' },
-        { type: 'header', key: 'purpose', value: 'prefetch' },
-      ],
-    },
-  ],
-}
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" }
+      ]
+    }
+  ]
+};

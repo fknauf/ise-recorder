@@ -6,13 +6,13 @@ import { getServerEnv } from "./lib/utils/serverEnv";
 
 export const metadata: Metadata = {
   title: "ISE-Recorder",
-  description: "ISE Lecture Recorder",
+  description: "ISE Lecture Recorder"
 };
 
 export default async function RootLayout(
   { children }: Readonly<{ children: React.ReactNode }>
 ) {
-  'use server';
+  "use server";
 
   const env = await getServerEnv();
 

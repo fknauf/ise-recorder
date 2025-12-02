@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";
@@ -19,7 +19,7 @@ interface ActiveRecording {
 
 const preventClosing = (e: BeforeUnloadEvent) => {
   e.preventDefault();
-}
+};
 
 export default function Home() {
   ////////////////
@@ -31,7 +31,7 @@ export default function Home() {
 
   const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
   const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
-  const [ displayTracks, setDisplayTracks ]= useState<MediaStreamTrack[]>([]);
+  const [ displayTracks, setDisplayTracks ] = useState<MediaStreamTrack[]>([]);
   const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
   const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
 
@@ -42,7 +42,7 @@ export default function Home() {
 
   useEffect(() => {
     getRecordingsState().then(setSavedRecordingsState);
-  }, [])
+  }, []);
 
   ////////////////
   // logic
@@ -53,27 +53,27 @@ export default function Home() {
   const updateSavedRecordingsList = async () => {
     const state = await getRecordingsState();
     setSavedRecordingsState(state);
-  }
+  };
 
   const addDisplayTracks = (tracks: MediaStreamTrack[]) => {
     // should only ever be one video track, but let's just grab all just in case. user can
     // still remove them manually if there happen to be more.
     setDisplayTracks(prev => [ ...prev, ...tracks ]);
     if(!mainDisplay) {
-      setMainDisplay(tracks.at(0) ?? null)
+      setMainDisplay(tracks.at(0) ?? null);
     }
   };
 
   const addVideoTracks = (tracks: MediaStreamTrack[]) => {
-    setVideoTracks(prev => [ ...prev, ...tracks ])
+    setVideoTracks(prev => [ ...prev, ...tracks ]);
     if(!overlay) {
       setOverlay(tracks.at(0) ?? null);
     }
-  }
+  };
 
   const addAudioTracks = (tracks: MediaStreamTrack[]) => {
-    setAudioTracks(prev => [ ...prev, ...tracks ])
-  }
+    setAudioTracks(prev => [ ...prev, ...tracks ]);
+  };
 
   const removeTrackFromPostprocessing = (track: MediaStreamTrack) => {
     if(mainDisplay === track) {
@@ -82,24 +82,24 @@ export default function Home() {
     if(overlay === track) {
       setOverlay(null);
     }
-  }
+  };
 
   const removeVideoTrack = (track: MediaStreamTrack) => {
     removeTrackFromPostprocessing(track);
     track.stop();
     setVideoTracks(prev => prev.filter(t => t !== track));
-  }
+  };
 
   const removeAudioTrack = (track: MediaStreamTrack) => {
     track.stop();
     setAudioTracks(prev => prev.filter(t => t !== track));
-  }
+  };
 
   const removeDisplayTrack = (track: MediaStreamTrack) => {
     removeTrackFromPostprocessing(track);
     track.stop();
     setDisplayTracks(prev => prev.filter(t => t !== track));
-  }
+  };
 
   const startRecording = () => {
     if(activeRecording.state !== "idle") {
@@ -107,9 +107,9 @@ export default function Home() {
     }
 
     const onStarting = (recordingName: string) => {
-      setActiveRecording({ state: "starting", name: recordingName })
+      setActiveRecording({ state: "starting", name: recordingName });
       // Prevent accidental closing of the tab while recording
-      window.addEventListener('beforeunload', preventClosing);
+      window.addEventListener("beforeunload", preventClosing);
     };
 
     const onStarted = (recordingName: string, stopFunction: () => void) => {
@@ -120,7 +120,7 @@ export default function Home() {
     const calculatedFileSizes = new Map<string, number>();
 
     const onChunkWritten = (recordingName: string, filename: string, chunkSize: number) => {
-      const filesize = (calculatedFileSizes.get(filename) ?? 0) + chunkSize
+      const filesize = (calculatedFileSizes.get(filename) ?? 0) + chunkSize;
 
       calculatedFileSizes.set(filename, filesize);
 
@@ -143,9 +143,9 @@ export default function Home() {
 
     const onFinished = async () => {
       await updateSavedRecordingsList();
-      window.removeEventListener('beforeunload', preventClosing);
-      setActiveRecording({ state: "idle" })
-    }
+      window.removeEventListener("beforeunload", preventClosing);
+      setActiveRecording({ state: "idle" });
+    };
 
     recordLecture(
       displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
@@ -156,27 +156,25 @@ export default function Home() {
 
   const stopRecording = () => {
     // This way stopRecording does not depend on activeRecording, so the React compiler can better optimize it.
-    setActiveRecording(prev =>
-      {
-        // should not happen, this is purely defensive coding.
-        if(prev.state !== "recording") {
-          console.warn("attempted to stop recording while recorder wasn't recording")
-          return prev;
-        }
-
-        if(prev.stop !== undefined) {
-          prev.stop()
-        }
-
-        return { state: "stopping", name: prev.name };
+    setActiveRecording(prev => {
+      // should not happen, this is purely defensive coding.
+      if(prev.state !== "recording") {
+        console.warn("attempted to stop recording while recorder wasn't recording");
+        return prev;
       }
-    );
-  }
+
+      if(prev.stop !== undefined) {
+        prev.stop();
+      }
+
+      return { state: "stopping", name: prev.name };
+    });
+  };
 
   const removeRecording = async (recording: string) => {
     await deleteRecording(recording);
     await updateSavedRecordingsList();
-  }
+  };
 
   ////////////////
   // view
