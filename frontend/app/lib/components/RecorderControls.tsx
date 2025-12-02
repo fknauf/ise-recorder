@@ -211,6 +211,7 @@ export function RecorderControls(
         isDisabled={hasDisabledTrackControls}
         validate={validateLectureTitle}
         onChange={onLectureTitleChanged}
+        autoFocus
       />
 
       {
@@ -225,7 +226,7 @@ export function RecorderControls(
           />
       }
 
-      <Flex direction="row" alignContent="end" gap="size-100" wrap>
+      <Flex direction="row" alignContent="start" marginTop="size-300" gap="size-100" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
         <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls}>
