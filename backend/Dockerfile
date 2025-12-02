@@ -2,7 +2,7 @@ FROM python:3.14-slim
 
 RUN apt-get update \
     && apt-get -y upgrade \
-    && apt-get -y install ffmpeg \
+    && apt-get -y install --no-install-recommends ffmpeg \
     && apt-get clean \
     && rm -rf /var/cache/apt/archives /var/lib/apt/lists/*
 
