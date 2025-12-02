@@ -26,8 +26,8 @@ export default function Home() {
   // hooks
   ////////////////
 
-  const [ lectureTitle, setLectureTitle ] = useLocalStorageState<string>("lecture-title", { defaultValue: "" });
-  const [ lecturerEmail, setLecturerEmail ] = useLocalStorageState<string>("lecturer-email", { defaultValue: "" });
+  const [ lectureTitle, setLectureTitle ] = useLocalStorageState<string>("lecture-title", { defaultValue: "", storageSync: false });
+  const [ lecturerEmail, setLecturerEmail ] = useLocalStorageState<string>("lecturer-email", { defaultValue: "", storageSync: false });
 
   const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
   const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
