@@ -124,32 +124,43 @@ export function RecorderControls(
   // and store them here for display.
   const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([]);
   const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([]);
-  const [ hasAskedPermission, setHasAskedPermission ] = useState(false);
+  const [ canEnumerate, setCanEnumerate ] = useState(false);
 
   // For hotplugging, the device list needs to be refreshed whenever a device menu is opened, so we
   // need to be able to call this more than once. There is as yet no way to just ask for permission
   // to enumerate the available devices, so we ask for the default user media streams, and if the
   // user grants that permission we can also enumerate devices.
   const refreshUserMediaDevices = async () => {
-    // Check if the user revoked the permissions. We can't use this as the only check because FF reports
-    // permissions as granted before we asked for the first time (but then denies the device enumeration).
-    const cameraPermissions = await navigator.permissions.query({ name: "camera" });
-    const microphonePermissions = await navigator.permissions.query({ name: "microphone" });
+    // This is unreliable on Firefox 145; there we sometimes get "granted" even if the permission is actually "prompt".
+    // I suspect it depends on whether the user has given temporary permission to the site before, but it's hard
+    // to be sure. When Firefix misinforms us, we'll ask for permissions as normal but not realize that the user
+    // chose devices, so in that case we'll close the streams and the user has to pick from the menu.
+    const cameraPermissions = await navigator.permissions.query({name: "camera"}).then(p => p.state);
+    const microphonePermissions = await navigator.permissions.query({name: "microphone"}).then(p => p.state);
+    const userInteractionExpected = cameraPermissions == "prompt" || microphonePermissions == "prompt";
 
-    if(!hasAskedPermission || cameraPermissions.state !== "granted" || microphonePermissions.state !== "granted") {
+    if(!canEnumerate || userInteractionExpected) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: cameraPermissions !== "denied",
+          audio: microphonePermissions !== "denied"
+        });
 
-        // Technically the user clicked on "add video" or "add audio", but the first time around they
-        // most likely want both. FF and Chrome show a dialog allowing the user to select a camera and
-        // microphone, and my user study with N = 1 suggests that users always forget about the menu
-        // when the dialog pops up and are then confused why the camera and microphone they just
-        // selected don't show up in the UI. Long story short, this is POLA compliance, believe it or not.
-        onAddVideoTracks(stream.getVideoTracks());
-        onAddAudioTracks(stream.getAudioTracks());
-        setHasAskedPermission(true);
+        if(userInteractionExpected) {
+          // User just saw the "please grant permissions" dialog and forgot about clicking our menu,
+          // so in this case we just add the streams he just selected.
+          onAddVideoTracks(stream.getVideoTracks());
+          onAddAudioTracks(stream.getAudioTracks());
+        } else {
+          // Here we had the permissions when the site was loaded, so the user didn't select any
+          // device for us to get this stream. In this case close the streams and let the user pick
+          // from the menu.
+          stream.getTracks().forEach(t => t.stop());
+        }
+
+        setCanEnumerate(true);
       } catch(e) {
-        showError("Could not obtain user media permissions", e);
+        showError("Could not obtain device permissions", e);
       }
     }
 
