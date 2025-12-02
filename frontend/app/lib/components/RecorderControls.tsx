@@ -124,7 +124,7 @@ export function RecorderControls(
   // and store them here for display.
   const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([]);
   const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([]);
-  const [ hasPermissions, setHasPermissions ] = useState(false);
+  const [ hasAskedPermission, setHasAskedPermission ] = useState(false);
 
   // For hotplugging, the device list needs to be refreshed whenever a device menu is opened, so we
   // need to be able to call this more than once. There is as yet no way to just ask for permission
@@ -136,7 +136,7 @@ export function RecorderControls(
     const cameraPermissions = await navigator.permissions.query({ name: "camera" });
     const microphonePermissions = await navigator.permissions.query({ name: "microphone" });
 
-    if(!hasPermissions || cameraPermissions.state !== "granted" || microphonePermissions.state !== "granted") {
+    if(!hasAskedPermission || cameraPermissions.state !== "granted" || microphonePermissions.state !== "granted") {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
 
@@ -147,7 +147,7 @@ export function RecorderControls(
         // selected don't show up in the UI. Long story short, this is POLA compliance, believe it or not.
         onAddVideoTracks(stream.getVideoTracks());
         onAddAudioTracks(stream.getAudioTracks());
-        setHasPermissions(true);
+        setHasAskedPermission(true);
       } catch(e) {
         showError("Could not obtain user media permissions", e);
       }

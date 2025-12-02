@@ -46,9 +46,7 @@ export interface PreviewSectionProps {
   hasDisabledButtons: boolean
   onMainDisplayChanged: (track: MediaStreamTrack | null) => void
   onOverlayChanged: (track: MediaStreamTrack | null) => void
-  onRemoveDisplayTrack: (track: MediaStreamTrack) => void
-  onRemoveVideoTrack: (track: MediaStreamTrack) => void
-  onRemoveAudioTrack: (track: MediaStreamTrack) => void
+  onRemoveTrack: (track: MediaStreamTrack) => void
 }
 
 export function PreviewSection(
@@ -63,9 +61,7 @@ export function PreviewSection(
     hasDisabledButtons,
     onMainDisplayChanged,
     onOverlayChanged,
-    onRemoveDisplayTrack,
-    onRemoveVideoTrack,
-    onRemoveAudioTrack
+    onRemoveTrack
   }: Readonly<PreviewSectionProps>
 ) {
   const video_preview_card = (track: MediaStreamTrack, label: string, onRemove: (track: MediaStreamTrack) => void) =>
@@ -90,10 +86,10 @@ export function PreviewSection(
   return (
     <Flex direction="row" gap="size-100" justifyContent="center" wrap>
       {
-        displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`, onRemoveDisplayTrack))
+        displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`, onRemoveTrack))
       }
       {
-        videoTracks.map(track => video_preview_card(track, track.label, onRemoveVideoTrack))
+        videoTracks.map(track => video_preview_card(track, track.label, onRemoveTrack))
       }
       {
         audioTracks.map(track =>
@@ -101,7 +97,7 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={track.label}
             hasDisabledButtons={hasDisabledButtons}
-            onRemove={() => onRemoveAudioTrack(track)}
+            onRemove={() => onRemoveTrack(track)}
           >
             <AudioPreview
               track={track}

@@ -1,7 +1,7 @@
 "use client";
 
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
-import { useEffect, useState } from "react";
+import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
 import { RecorderControls, RecorderState } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
@@ -55,50 +55,48 @@ export default function Home() {
     setSavedRecordingsState(state);
   };
 
+  // should only ever be one video track, but let's just grab all just in case. user can
+  // still remove them manually if there happen to be more.
+  const addGenericTracks = (
+    tracks: MediaStreamTrack[],
+    setTracks: Dispatch<SetStateAction<MediaStreamTrack[]>>
+  ) => {
+    setTracks(prev => [ ...prev, ...tracks ]);
+
+    for(const track of tracks) {
+      // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
+      track.onended = () => {
+        if(mainDisplay === track) setMainDisplay(null);
+        if(overlay === track) setOverlay(null);
+        setTracks(prev => prev.filter(t => t !== track));
+      };
+    }
+  };
+
   const addDisplayTracks = (tracks: MediaStreamTrack[]) => {
-    // should only ever be one video track, but let's just grab all just in case. user can
-    // still remove them manually if there happen to be more.
-    setDisplayTracks(prev => [ ...prev, ...tracks ]);
-    if(!mainDisplay) {
+    addGenericTracks(tracks, setDisplayTracks);
+    // Usually the first/only captured screen is supposed to be the main display
+    if(mainDisplay === null) {
       setMainDisplay(tracks.at(0) ?? null);
     }
   };
 
   const addVideoTracks = (tracks: MediaStreamTrack[]) => {
-    setVideoTracks(prev => [ ...prev, ...tracks ]);
-    if(!overlay) {
+    addGenericTracks(tracks, setVideoTracks);
+    // usually the first/only captured camera is supposed to be the overlay
+    if(overlay === null) {
       setOverlay(tracks.at(0) ?? null);
     }
   };
 
   const addAudioTracks = (tracks: MediaStreamTrack[]) => {
-    setAudioTracks(prev => [ ...prev, ...tracks ]);
+    addGenericTracks(tracks, setAudioTracks);
   };
 
-  const removeTrackFromPostprocessing = (track: MediaStreamTrack) => {
-    if(mainDisplay === track) {
-      setMainDisplay(null);
-    }
-    if(overlay === track) {
-      setOverlay(null);
-    }
-  };
-
-  const removeVideoTrack = (track: MediaStreamTrack) => {
-    removeTrackFromPostprocessing(track);
+  const removeTrack = (track: MediaStreamTrack) => {
+    // Track is removed on the "ended" event. The event doesn't fire automatically when we stop the stream ourselves, so we fire it manually.
     track.stop();
-    setVideoTracks(prev => prev.filter(t => t !== track));
-  };
-
-  const removeAudioTrack = (track: MediaStreamTrack) => {
-    track.stop();
-    setAudioTracks(prev => prev.filter(t => t !== track));
-  };
-
-  const removeDisplayTrack = (track: MediaStreamTrack) => {
-    removeTrackFromPostprocessing(track);
-    track.stop();
-    setDisplayTracks(prev => prev.filter(t => t !== track));
+    track.dispatchEvent(new Event("ended"));
   };
 
   const startRecording = () => {
@@ -214,9 +212,7 @@ export default function Home() {
         hasDisabledButtons={activeRecording.state !== "idle"}
         onMainDisplayChanged={setMainDisplay}
         onOverlayChanged={setOverlay}
-        onRemoveDisplayTrack={removeDisplayTrack}
-        onRemoveVideoTrack={removeVideoTrack}
-        onRemoveAudioTrack={removeAudioTrack}
+        onRemoveTrack={removeTrack}
       />
 
       <SavedRecordingsSection
