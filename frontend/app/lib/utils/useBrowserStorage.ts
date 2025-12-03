@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useSyncExternalStore } from "react";
 import { gatherBrowserStorageInfo, BrowserStorage } from "./browserStorage";
 
@@ -11,7 +13,7 @@ let currentBrowserStorageInfo: BrowserStorage = { recordings: [] };
  * In the future this should probably use https://developer.mozilla.org/en-US/docs/Web/API/FileSystemObserver,
  * but at the moment that is experimental and only available in chromium.
  */
-export async function updateBrowserStorageInfo() {
+export async function updateBrowserStorageHook() {
   currentBrowserStorageInfo = await gatherBrowserStorageInfo();
 
   for(const callback of browserStorageObservers) {
@@ -32,7 +34,7 @@ const getCurrentBrowserStorageInfo = () => currentBrowserStorageInfo;
 export function useBrowserStorage() {
   // gather browser storage info on first client-side render
   useEffect(() => {
-    updateBrowserStorageInfo();
+    updateBrowserStorageHook();
   }, []);
 
   return useSyncExternalStore(subscribeToBrowserStorage, getCurrentBrowserStorageInfo, getCurrentBrowserStorageInfo);

@@ -70,7 +70,7 @@ function RecordButton(
       return (
         <ActionButton isDisabled>
           <View paddingX="size-100">
-            <ProgressCircle size="S" isIndeterminate/>
+            <ProgressCircle size="S" isIndeterminate aria-label="stopping..."/>
           </View>
           <Text>Stop Recording</Text>
         </ActionButton>

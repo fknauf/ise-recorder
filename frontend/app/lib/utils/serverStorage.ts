@@ -1,3 +1,5 @@
+"use client";
+
 import { showError, showSuccess } from "./notifications";
 
 interface CallResult {

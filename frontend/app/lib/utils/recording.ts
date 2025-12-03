@@ -1,3 +1,5 @@
+"use client";
+
 import { openRecordingFileStream, RecordingFileStream } from "./browserStorage";
 import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
 
@@ -209,7 +211,12 @@ export async function recordLecture(
       const filename = formatFilename(job.trackTitle);
       const outputStream = await openRecordingFileStream(recordingName, filename);
       streams.set(filename, outputStream);
-      job.start();
+
+      try {
+        job.start();
+      } catch(e) {
+        console.log(job.trackTitle, e);
+      }
     }
 
     await onStarted(recordingName, () => jobs.forEach(job => job.stop()));

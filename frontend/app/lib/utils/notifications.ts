@@ -1,3 +1,5 @@
+"use client";
+
 import { ToastQueue } from "@adobe/react-spectrum";
 
 export function showError(description: string, err?: unknown) {

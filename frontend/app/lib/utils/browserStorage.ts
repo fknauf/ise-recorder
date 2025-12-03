@@ -11,7 +11,7 @@
  * application code doesn't have to know the details of the directory structure.
  */
 
-import { updateBrowserStorageInfo } from "./useBrowserStorage";
+import { updateBrowserStorageHook } from "./useBrowserStorage";
 
 export interface RecordingFileInfo {
   name: string
@@ -122,13 +122,13 @@ export class RecordingFileStream {
     await this.output.write(chunk);
     this.writtenBytes += chunk.size;
     fileSizeOverrides.set(this.overrideKey, this.writtenBytes);
-    await updateBrowserStorageInfo();
+    await updateBrowserStorageHook();
   }
 
   async close(this: RecordingFileStream) {
     await this.output.close();
     fileSizeOverrides.delete(this.overrideKey);
-    await updateBrowserStorageInfo();
+    await updateBrowserStorageHook();
   }
 }
 
@@ -140,14 +140,14 @@ export class RecordingFileStream {
 export async function openRecordingFileStream(recordingName: string, filename: string) {
   const file = await getRecordingFile(recordingName, filename, { create: true });
   const stream = await file.createWritable();
-  updateBrowserStorageInfo();
+  updateBrowserStorageHook();
   return new RecordingFileStream(stream, `${recordingName}/${filename}`);
 }
 
 export async function deleteRecording(recordingName: string) {
   const recordingsDir = await getRecordingsDirectory();
   await recordingsDir.removeEntry(recordingName, { recursive: true });
-  await updateBrowserStorageInfo();
+  await updateBrowserStorageHook();
 }
 
 export async function downloadFile(recordingName: string, filename: string) {
@@ -177,4 +177,3 @@ export async function downloadFile(recordingName: string, filename: string) {
     URL.revokeObjectURL(url);
   }
 }
-

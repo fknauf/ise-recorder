@@ -56,14 +56,14 @@ export default function Home() {
     tracks: MediaStreamTrack[],
     setTracks: Dispatch<SetStateAction<MediaStreamTrack[]>>
   ) => {
-    setTracks(prev => [ ...prev, ...tracks ]);
+    setTracks(prevTracks => [ ...prevTracks, ...tracks ]);
 
     for(const track of tracks) {
       // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
       track.onended = () => {
-        if(mainDisplay === track) setMainDisplay(null);
-        if(overlay === track) setOverlay(null);
-        setTracks(prev => prev.filter(t => t !== track));
+        setMainDisplay(prevMain => prevMain === track ? null : prevMain);
+        setOverlay(prevOverlay => prevOverlay === track ? null : prevOverlay);
+        setTracks(prevTracks => prevTracks.filter(t => t !== track));
       };
     }
   };
@@ -71,17 +71,13 @@ export default function Home() {
   const addDisplayTracks = (tracks: MediaStreamTrack[]) => {
     addGenericTracks(tracks, setDisplayTracks);
     // Usually the first/only captured screen is supposed to be the main display
-    if(mainDisplay === null) {
-      setMainDisplay(tracks.at(0) ?? null);
-    }
+    setMainDisplay(prevMain => prevMain === null ? tracks.at(0) ?? null : prevMain);
   };
 
   const addVideoTracks = (tracks: MediaStreamTrack[]) => {
     addGenericTracks(tracks, setVideoTracks);
     // usually the first/only captured camera is supposed to be the overlay
-    if(overlay === null) {
-      setOverlay(tracks.at(0) ?? null);
-    }
+    setOverlay(prevOverlay => prevOverlay === null ? tracks.at(0) ?? null : prevOverlay);
   };
 
   const addAudioTracks = (tracks: MediaStreamTrack[]) => {
