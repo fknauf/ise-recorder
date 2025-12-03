@@ -91,7 +91,7 @@ async function gatherRecordingsList() {
     return { name: recordingName, files: fileInfos };
   };
 
-  return Promise.all(recordingNames.map(getRecordingStats));
+  return Promise.all(recordingNames.sort().map(getRecordingStats));
 }
 
 /**
