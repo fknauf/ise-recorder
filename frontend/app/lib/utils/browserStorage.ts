@@ -11,7 +11,7 @@
  * application code doesn't have to know the details of the directory structure.
  */
 
-import { updateBrowserStorageHook } from "./useBrowserStorage";
+import { updateBrowserStorageHook } from "../hooks/useBrowserStorage";
 
 export interface RecordingFileInfo {
   name: string

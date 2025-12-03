@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
-import { gatherBrowserStorageInfo, BrowserStorage } from "./browserStorage";
+import { gatherBrowserStorageInfo, BrowserStorage } from "../utils/browserStorage";
 
 const browserStorageObservers = new Set<() => void>();
 let currentBrowserStorageInfo: BrowserStorage = { recordings: [] };

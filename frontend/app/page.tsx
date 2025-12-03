@@ -10,7 +10,7 @@ import { recordLecture } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
 import useLocalStorageState from "use-local-storage-state";
-import { useBrowserStorage } from "./lib/utils/useBrowserStorage";
+import { useBrowserStorage } from "./lib/hooks/useBrowserStorage";
 
 type ActiveRecording = {
   state: "idle"
