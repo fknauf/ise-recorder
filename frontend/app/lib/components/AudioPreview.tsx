@@ -18,7 +18,7 @@ export function AudioPreview(
   { track, width, height }: Readonly<AudioPreviewProps>
 ): ReactNode {
   const attachRenderLoop = (canvas: HTMLCanvasElement | null) => {
-    if(canvas == null) {
+    if(canvas === null) {
       return;
     }
 
@@ -38,7 +38,7 @@ export function AudioPreview(
     const renderFunction = () => {
       const ctx = canvas.getContext("2d");
 
-      if(ctx == null) {
+      if(ctx === null) {
         return;
       }
 

@@ -18,7 +18,7 @@ const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.grou
 const splitDeviceUniqueId = (devUid: string): [ string, string ] => JSON.parse(devUid);
 
 const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
-  track.getSettings().groupId === groupId && track.getSettings().deviceId == deviceId;
+  track.getSettings().groupId === groupId && track.getSettings().deviceId === deviceId;
 
 const createDeviceConstraints = (groupId: string, deviceId: string): MediaTrackConstraints =>
   ({
@@ -137,7 +137,7 @@ export function RecorderControls(
     // chose devices, so in that case we'll close the streams and the user has to pick from the menu.
     const cameraPermissions = await navigator.permissions.query({ name: "camera" }).then(p => p.state);
     const microphonePermissions = await navigator.permissions.query({ name: "microphone" }).then(p => p.state);
-    const userInteractionExpected = cameraPermissions == "prompt" || microphonePermissions == "prompt";
+    const userInteractionExpected = cameraPermissions === "prompt" || microphonePermissions === "prompt";
 
     if(!canEnumerate || userInteractionExpected) {
       try {

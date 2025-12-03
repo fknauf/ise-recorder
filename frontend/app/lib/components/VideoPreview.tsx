@@ -30,7 +30,7 @@ export function VideoPreview(
   }: Readonly<VideoPreviewProps>
 ): ReactNode {
   const attachStream = (ref: HTMLVideoElement | null) => {
-    if(ref != null) {
+    if(ref !== null) {
       ref.srcObject = new MediaStream([track]);
     }
   };

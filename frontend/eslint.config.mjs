@@ -20,6 +20,7 @@ const eslintConfig = defineConfig([
     },
     rules: {
       "arrow-body-style": "warn",
+      "eqeqeq": "error",
       "@stylistic/array-bracket-newline": [ "warn", { multiline: true } ],
       "@stylistic/arrow-parens": [ "warn", "as-needed" ],
       "@stylistic/block-spacing": "warn",
@@ -93,7 +94,7 @@ const eslintConfig = defineConfig([
       "@stylistic/new-parens": "warn",
       "@stylistic/newline-per-chained-call": "warn",
       "@stylistic/no-confusing-arrow": "warn",
-      "@stylistic/no-extra-parens": "warn",
+      "@stylistic/no-extra-parens": [ "warn", "all", { ignoredNodes: ["ArrowFunctionExpression[body.type=ConditionalExpression]"] }],
       "@stylistic/no-extra-semi": "warn",
       "@stylistic/no-floating-decimal": "warn",
       "@stylistic/no-mixed-spaces-and-tabs": "warn",
