@@ -117,11 +117,27 @@ function prepareRecording(
     const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, videoOptions, onChunkAvailable);
     const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, audioOptions, onChunkAvailable);
 
+    // If there's no bug in the rest of the program, this check should not be necessary, but I've janked the
+    // mainDisplay/overlay resetting mechanic on stream removal before. So this is a useful canary.
+    const isSaneVideoStream = (track: MediaStreamTrack, label: string) => {
+      if(displayTracks.includes(track) || videoTracks.includes(track)) {
+        return true;
+      }
+
+      console.error(`insane ${label} track`, track);
+      return false;
+    };
+
     // if no main display is selected, guess a sensible default: first captured display if there
     // are display streams, first video input otherwise, but don't use the overlay track.
-    const effectiveMainDisplay = mainDisplay ?? displayTracks.filter(t => t !== overlay).at(0) ?? videoTracks.filter(t => t !== overlay).at(0);
+    const mainDisplayCandidates = [
+      mainDisplay !== null && isSaneVideoStream(mainDisplay, "main") ? mainDisplay : undefined,
+      displayTracks.find(t => t !== overlay),
+      videoTracks.find(t => t !== overlay)
+    ];
+    const effectiveMainDisplay = mainDisplayCandidates.find(candidate => candidate !== undefined);
 
-    if(effectiveMainDisplay) {
+    if(effectiveMainDisplay !== undefined) {
       // attach first audio stream to main display if available, record the rest into individual files.
       // This is because at time of writing MediaRecorder on FF and Chrome does not support multiple
       // audio tracks (nor multiple video tracks, for that matter).
@@ -132,7 +148,7 @@ function prepareRecording(
       jobs.push(...audioTracks.map((track, index) => prepareAudio([track], `audio-${index}`)));
     }
 
-    if(overlay != null) {
+    if(overlay !== null && isSaneVideoStream(overlay, "overlay")) {
       jobs.push(prepareVideo([ overlay ], "overlay"));
     }
 
@@ -215,7 +231,7 @@ export async function recordLecture(
       try {
         job.start();
       } catch(e) {
-        console.log(job.trackTitle, e);
+        console.error(job.trackTitle, e);
       }
     }
 
