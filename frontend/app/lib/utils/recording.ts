@@ -1,4 +1,4 @@
-import { openRecordingFileStream, RecordingFileStream } from "./filesystem";
+import { openRecordingFileStream, RecordingFileStream } from "./browserStorage";
 import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
 
 // used to remove characters from the recording name that would trip up ffmpeg in post.

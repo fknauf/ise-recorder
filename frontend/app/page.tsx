@@ -5,7 +5,7 @@ import { Dispatch, SetStateAction, useState } from "react";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
 import { RecorderControls, RecorderState } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
-import { deleteRecording, downloadFile } from "./lib/utils/filesystem";
+import { deleteRecording, downloadFile } from "./lib/utils/browserStorage";
 import { recordLecture } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";

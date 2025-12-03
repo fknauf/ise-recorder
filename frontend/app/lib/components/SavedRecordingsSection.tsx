@@ -3,7 +3,7 @@
 import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
-import { RecordingFileList } from "../utils/filesystem";
+import { RecordingFileList } from "../utils/browserStorage";
 
 interface SavedRecordingsCardProps {
   recording: RecordingFileList
