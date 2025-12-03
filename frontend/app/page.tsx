@@ -3,7 +3,7 @@
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
 import { Dispatch, SetStateAction, useState } from "react";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
-import { RecorderControls, RecorderState } from "./lib/components/RecorderControls";
+import { RecorderControls } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
 import { deleteRecording, downloadFile } from "./lib/utils/browserStorage";
 import { recordLecture } from "./lib/utils/recording";
@@ -12,15 +12,19 @@ import { useServerEnv } from "./lib/components/ServerEnvProvider";
 import useLocalStorageState from "use-local-storage-state";
 import { useBrowserStorage } from "./lib/utils/useBrowserStorage";
 
-interface ActiveRecording {
-  state: RecorderState
-  name?: string
-  stop?: () => void
-}
-
-const preventClosing = (e: BeforeUnloadEvent) => {
-  e.preventDefault();
+type ActiveRecording = {
+  state: "idle"
+  name?: undefined
+} | {
+  state: "starting" | "stopping"
+  name: string
+} | {
+  state: "recording"
+  name: string
+  stop: () => void
 };
+
+const preventClosing = (e: BeforeUnloadEvent) => e.preventDefault();
 
 export default function Home() {
   ////////////////
@@ -120,16 +124,12 @@ export default function Home() {
   const stopRecording = () => {
     // This way stopRecording does not depend on activeRecording, so the React compiler can better optimize it.
     setActiveRecording(prev => {
-      // should not happen, this is purely defensive coding.
       if(prev.state !== "recording") {
         console.warn("attempted to stop recording while recorder wasn't recording");
         return prev;
       }
 
-      if(prev.stop !== undefined) {
-        prev.stop();
-      }
-
+      prev.stop();
       return { state: "stopping", name: prev.name };
     });
   };
