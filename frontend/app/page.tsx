@@ -1,15 +1,16 @@
 "use client";
 
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
 import { RecorderControls, RecorderState } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
-import { RecordingsState, getRecordingsState, deleteRecording, downloadFile } from "./lib/utils/filesystem";
+import { deleteRecording, downloadFile } from "./lib/utils/filesystem";
 import { recordLecture } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/components/ServerEnvProvider";
 import useLocalStorageState from "use-local-storage-state";
+import { useBrowserStorage } from "./lib/utils/useBrowserStorage";
 
 interface ActiveRecording {
   state: RecorderState
@@ -36,24 +37,14 @@ export default function Home() {
   const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
 
   const [ activeRecording, setActiveRecording ] = useState<ActiveRecording>({ state: "idle" });
-  const [ savedRecordingsState, setSavedRecordingsState ] = useState<RecordingsState>({ recordings: [] });
-
+  const browserStorage = useBrowserStorage();
   const serverEnv = useServerEnv();
-
-  useEffect(() => {
-    getRecordingsState().then(setSavedRecordingsState);
-  }, []);
 
   ////////////////
   // logic
   ////////////////
 
   const apiUrl = serverEnv?.apiUrl;
-
-  const updateSavedRecordingsList = async () => {
-    const state = await getRecordingsState();
-    setSavedRecordingsState(state);
-  };
 
   // should only ever be one video track, but let's just grab all just in case. user can
   // still remove them manually if there happen to be more.
@@ -111,36 +102,10 @@ export default function Home() {
     };
 
     const onStarted = (recordingName: string, stopFunction: () => void) => {
-      updateSavedRecordingsList();
       setActiveRecording({ state: "recording", name: recordingName, stop: stopFunction });
     };
 
-    const calculatedFileSizes = new Map<string, number>();
-
-    const onChunkWritten = (recordingName: string, filename: string, chunkSize: number) => {
-      const filesize = (calculatedFileSizes.get(filename) ?? 0) + chunkSize;
-
-      calculatedFileSizes.set(filename, filesize);
-
-      // uncommitted data don't show up in the OPFS file sizes yet, so attach them manually.
-      setSavedRecordingsState(
-        prevState => {
-          const nextState = structuredClone(prevState);
-          const recording = nextState.recordings.find(rec => rec.name == recordingName);
-          const fileinfo = recording?.files.find(info => info.name == filename);
-
-          if(fileinfo !== undefined) {
-            fileinfo.size = filesize;
-            return nextState;
-          } else {
-            return prevState;
-          }
-        }
-      );
-    };
-
     const onFinished = async () => {
-      await updateSavedRecordingsList();
       window.removeEventListener("beforeunload", preventClosing);
       setActiveRecording({ state: "idle" });
     };
@@ -148,7 +113,7 @@ export default function Home() {
     recordLecture(
       displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
       lectureTitle, lecturerEmail, apiUrl,
-      onStarting, onStarted, onChunkWritten, onFinished
+      onStarting, onStarted, onFinished
     );
   };
 
@@ -167,11 +132,6 @@ export default function Home() {
 
       return { state: "stopping", name: prev.name };
     });
-  };
-
-  const removeRecording = async (recording: string) => {
-    await deleteRecording(recording);
-    await updateSavedRecordingsList();
   };
 
   ////////////////
@@ -197,8 +157,8 @@ export default function Home() {
       />
 
       <QuotaWarning
-        usage={savedRecordingsState.usage}
-        quota={savedRecordingsState.quota}
+        usage={browserStorage.usage}
+        quota={browserStorage.quota}
       />
 
       <PreviewSection
@@ -216,9 +176,9 @@ export default function Home() {
       />
 
       <SavedRecordingsSection
-        recordings={savedRecordingsState.recordings}
+        recordings={browserStorage.recordings}
         activeRecordingName={activeRecording.name}
-        onRemoved={removeRecording}
+        onRemoved={deleteRecording}
         onDownload={downloadFile}
       />
 

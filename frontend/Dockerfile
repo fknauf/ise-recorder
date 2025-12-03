@@ -1,7 +1,7 @@
 FROM node:lts-alpine AS base
 
 FROM base AS deps
-RUN apk add --no-cache libc6-compat
+RUN apk update && apk add --no-cache libc6-compat
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -16,6 +16,8 @@ COPY . .
 RUN npm run build
 
 FROM base AS runner
+
+RUN apk update && apk upgrade --no-cache
 
 WORKDIR /app
 

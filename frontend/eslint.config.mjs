@@ -70,7 +70,15 @@ const eslintConfig = defineConfig([
         }
       ],
       "@stylistic/linebreak-style": [ "warn", "unix" ],
-      "@stylistic/lines-between-class-members": "warn",
+      "@stylistic/lines-between-class-members": [
+        "warn",
+        {
+          enforce: [
+            { blankLine: "always", prev: "method", next: "*" },
+            { blankLine: "always", prev: "*", next: "method" }
+          ]
+        }
+      ],
       "@stylistic/max-statements-per-line": "warn",
       "@stylistic/member-delimiter-style": [
         "warn",

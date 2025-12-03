@@ -1,4 +1,4 @@
-import { openRecordingFileStream } from "./filesystem";
+import { openRecordingFileStream, RecordingFileStream } from "./filesystem";
 import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
 
 // used to remove characters from the recording name that would trip up ffmpeg in post.
@@ -163,7 +163,6 @@ export async function recordLecture(
   apiUrl: string | undefined,
   onStarting: (recordingName: string) => Promise<void> | void,
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,
-  onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
   onFinished: (recordingName: string) => Promise<void> | void
 ) {
   const timestamp = new Date();
@@ -176,7 +175,7 @@ export async function recordLecture(
 
   // Map of filename to output stream and associated information. This map is captured
   // and shared by the callback function we pass to the recording jobs below.
-  const streams = new Map<string, FileSystemWritableFileStream>();
+  const streams = new Map<string, RecordingFileStream>();
 
   const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
     // No need to await: we support sending chunks to server out of order and/or concurrently.
@@ -197,8 +196,6 @@ export async function recordLecture(
         streams.delete(filename);
       }
     }
-
-    await onChunkWritten(recordingName, filename, chunk.size);
 
     return { promise: backgroundPromise };
   };

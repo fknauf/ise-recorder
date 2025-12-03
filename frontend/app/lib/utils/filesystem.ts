@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Helper functions to organize access to the recordings stored in the OPFS.
  *
@@ -9,6 +11,8 @@
  * application code doesn't have to know the details of the directory structure.
  */
 
+import { updateBrowserStorageInfo } from "./useBrowserStorage";
+
 export interface RecordingFileInfo {
   name: string
   size?: number
@@ -19,7 +23,7 @@ export interface RecordingFileList {
   files: RecordingFileInfo[]
 }
 
-export interface RecordingsState {
+export interface BrowserStorage {
   quota?: number
   usage?: number
   recordings: RecordingFileList[]
@@ -40,15 +44,9 @@ async function getRecordingFile(recordingName: string, filename: string, options
   return await recordingDir.getFileHandle(filename, options);
 }
 
-/**
- * Create and open a new recording track file for writing. If the file already exists, it
- * is truncated; this should never happen but would at least guarantee that the file ends up
- * containing a valid video/audio stream.
- */
-export async function openRecordingFileStream(recordingName: string, filename: string) {
-  const file = await getRecordingFile(recordingName, filename, { create: true });
-  return file.createWritable();
-}
+// Map for calculated sizes of files that are currently being recorded, since those show up in the
+// file system listing as size 0 until they're closed.
+const fileSizeOverrides = new Map<string, number>();
 
 /**
  * Try to obtain file size, but don't fail if we can't. It's just to
@@ -56,6 +54,11 @@ export async function openRecordingFileStream(recordingName: string, filename: s
  */
 async function getFileSize(dir: FileSystemDirectoryHandle, filename: string) {
   try {
+    const override = fileSizeOverrides.get(`${dir.name}/${filename}`);
+    if(override !== undefined) {
+      return override;
+    }
+
     const fileHandle = await dir.getFileHandle(filename);
     const file = await fileHandle.getFile();
     return file.size;
@@ -69,7 +72,7 @@ async function getFileSize(dir: FileSystemDirectoryHandle, filename: string) {
 /**
  * Get the list of recordings, including file names and sizes.
  */
-async function getRecordingsList() {
+async function gatherRecordingsList() {
   const recordingsDir = await getRecordingsDirectory();
   const recordingNames = await Array.fromAsync(recordingsDir.keys());
 
@@ -94,8 +97,8 @@ async function getRecordingsList() {
 /**
  * Get the full metadata state of the recordings storage, i.e. the list of recordings, quota, and used space.
  */
-export async function getRecordingsState(): Promise<RecordingsState> {
-  const recordings = await getRecordingsList();
+export async function gatherBrowserStorageInfo(): Promise<BrowserStorage> {
+  const recordings = await gatherRecordingsList();
   const fs = await navigator.storage.estimate();
 
   return {
@@ -105,9 +108,46 @@ export async function getRecordingsState(): Promise<RecordingsState> {
   };
 }
 
+export class RecordingFileStream {
+  private output: FileSystemWritableFileStream;
+  private overrideKey: string;
+  private writtenBytes = 0;
+
+  constructor(output: FileSystemWritableFileStream, overrideKey: string) {
+    this.output = output;
+    this.overrideKey = overrideKey;
+  }
+
+  async write(this: RecordingFileStream, chunk: Blob) {
+    await this.output.write(chunk);
+    this.writtenBytes += chunk.size;
+    fileSizeOverrides.set(this.overrideKey, this.writtenBytes);
+    await updateBrowserStorageInfo();
+  }
+
+  async close(this: RecordingFileStream) {
+    await this.output.close();
+    fileSizeOverrides.delete(this.overrideKey);
+    await updateBrowserStorageInfo();
+  }
+}
+
+/**
+ * Create and open a new recording track file for writing. If the file already exists, it
+ * is truncated; this should never happen but would at least guarantee that the file ends up
+ * containing a valid video/audio stream.
+ */
+export async function openRecordingFileStream(recordingName: string, filename: string) {
+  const file = await getRecordingFile(recordingName, filename, { create: true });
+  const stream = await file.createWritable();
+  updateBrowserStorageInfo();
+  return new RecordingFileStream(stream, `${recordingName}/${filename}`);
+}
+
 export async function deleteRecording(recordingName: string) {
   const recordingsDir = await getRecordingsDirectory();
   await recordingsDir.removeEntry(recordingName, { recursive: true });
+  await updateBrowserStorageInfo();
 }
 
 export async function downloadFile(recordingName: string, filename: string) {
@@ -137,3 +177,4 @@ export async function downloadFile(recordingName: string, filename: string) {
     URL.revokeObjectURL(url);
   }
 }
+

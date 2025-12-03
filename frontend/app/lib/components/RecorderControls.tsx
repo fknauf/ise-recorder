@@ -135,8 +135,8 @@ export function RecorderControls(
     // I suspect it depends on whether the user has given temporary permission to the site before, but it's hard
     // to be sure. When Firefix misinforms us, we'll ask for permissions as normal but not realize that the user
     // chose devices, so in that case we'll close the streams and the user has to pick from the menu.
-    const cameraPermissions = await navigator.permissions.query({name: "camera"}).then(p => p.state);
-    const microphonePermissions = await navigator.permissions.query({name: "microphone"}).then(p => p.state);
+    const cameraPermissions = await navigator.permissions.query({ name: "camera" }).then(p => p.state);
+    const microphonePermissions = await navigator.permissions.query({ name: "microphone" }).then(p => p.state);
     const userInteractionExpected = cameraPermissions == "prompt" || microphonePermissions == "prompt";
 
     if(!canEnumerate || userInteractionExpected) {

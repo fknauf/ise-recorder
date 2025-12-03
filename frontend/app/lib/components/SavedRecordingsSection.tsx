@@ -7,7 +7,7 @@ import { RecordingFileList } from "../utils/filesystem";
 
 interface SavedRecordingsCardProps {
   recording: RecordingFileList
-  isBeingRecorded: boolean
+  isDisabled: boolean
   onRemoved: () => void
   onDownload: (filename: string) => void
 }
@@ -18,7 +18,7 @@ interface SavedRecordingsCardProps {
  * Buttons are disabled if the recording it shows is currently being recorded.
  */
 function SavedRecordingsCard(
-  { recording, isBeingRecorded, onRemoved, onDownload }: Readonly<SavedRecordingsCardProps>
+  { recording, isDisabled, onRemoved, onDownload }: Readonly<SavedRecordingsCardProps>
 ) {
   const formatter = new Intl.NumberFormat("en-us", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -35,7 +35,7 @@ function SavedRecordingsCard(
           recording.files.map(({ name: filename, size }) =>
             <ActionButton
               key={`download-${filename}`}
-              isDisabled={isBeingRecorded}
+              isDisabled={isDisabled}
               onPress={() => onDownload(filename)}
             >
               <Download/>
@@ -44,7 +44,7 @@ function SavedRecordingsCard(
           )
         }
         <ActionButton
-          isDisabled={isBeingRecorded}
+          isDisabled={isDisabled}
           onPress={onRemoved}
         >
           <Delete/>
@@ -74,7 +74,7 @@ export const SavedRecordingsSection = (
         <SavedRecordingsCard
           key={`saved-recording-${r.name}`}
           recording={r}
-          isBeingRecorded={r.name === activeRecordingName}
+          isDisabled={r.name === activeRecordingName}
           onRemoved={() => onRemoved(r.name)}
           onDownload={filename => onDownload(r.name, filename)}
         />
