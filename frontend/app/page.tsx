@@ -24,7 +24,15 @@ type ActiveRecording = {
   stop: () => void
 };
 
-const preventClosing = (e: BeforeUnloadEvent) => e.preventDefault();
+function preventClosing(e: BeforeUnloadEvent) {
+  e.preventDefault();
+}
+
+function removeTrack(track: MediaStreamTrack) {
+  // Track is removed on the "ended" event. The event doesn't fire automatically when we stop the stream ourselves, so we fire it manually.
+  track.stop();
+  track.dispatchEvent(new Event("ended"));
+}
 
 export default function Home() {
   ////////////////
@@ -37,8 +45,8 @@ export default function Home() {
   const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
   const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
   const [ displayTracks, setDisplayTracks ] = useState<MediaStreamTrack[]>([]);
-  const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack | null>(null);
-  const [ overlay, setOverlay ] = useState<MediaStreamTrack | null>(null);
+  const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack>();
+  const [ overlay, setOverlay ] = useState<MediaStreamTrack>();
 
   const [ activeRecording, setActiveRecording ] = useState<ActiveRecording>({ state: "idle" });
   const browserStorage = useBrowserStorage();
@@ -61,8 +69,8 @@ export default function Home() {
     for(const track of tracks) {
       // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
       track.onended = () => {
-        setMainDisplay(prevMain => (prevMain === track ? null : prevMain));
-        setOverlay(prevOverlay => (prevOverlay === track ? null : prevOverlay));
+        setMainDisplay(prevMain => (prevMain === track ? undefined : prevMain));
+        setOverlay(prevOverlay => (prevOverlay === track ? undefined : prevOverlay));
         setTracks(prevTracks => prevTracks.filter(t => t !== track));
       };
     }
@@ -71,23 +79,17 @@ export default function Home() {
   const addDisplayTracks = (tracks: MediaStreamTrack[]) => {
     addGenericTracks(tracks, setDisplayTracks);
     // Usually the first/only captured screen is supposed to be the main display
-    setMainDisplay(prevMain => (prevMain === null ? tracks.at(0) ?? null : prevMain));
+    setMainDisplay(prevMain => prevMain ?? tracks[0]);
   };
 
   const addVideoTracks = (tracks: MediaStreamTrack[]) => {
     addGenericTracks(tracks, setVideoTracks);
     // usually the first/only captured camera is supposed to be the overlay
-    setOverlay(prevOverlay => (prevOverlay === null ? tracks.at(0) ?? null : prevOverlay));
+    setOverlay(prevOverlay => prevOverlay ?? tracks[0]);
   };
 
   const addAudioTracks = (tracks: MediaStreamTrack[]) => {
     addGenericTracks(tracks, setAudioTracks);
-  };
-
-  const removeTrack = (track: MediaStreamTrack) => {
-    // Track is removed on the "ended" event. The event doesn't fire automatically when we stop the stream ourselves, so we fire it manually.
-    track.stop();
-    track.dispatchEvent(new Event("ended"));
   };
 
   const startRecording = () => {

@@ -39,13 +39,13 @@ export interface PreviewSectionProps {
   displayTracks: readonly MediaStreamTrack[]
   videoTracks: readonly MediaStreamTrack[]
   audioTracks: readonly MediaStreamTrack[]
-  mainDisplay: MediaStreamTrack | null
-  overlay: MediaStreamTrack | null
+  mainDisplay: MediaStreamTrack | undefined
+  overlay: MediaStreamTrack | undefined
   canvasWidth: number
   canvasHeight: number
   hasDisabledButtons: boolean
-  onMainDisplayChanged: (track: MediaStreamTrack | null) => void
-  onOverlayChanged: (track: MediaStreamTrack | null) => void
+  onMainDisplayChanged: (track: MediaStreamTrack | undefined) => void
+  onOverlayChanged: (track: MediaStreamTrack | undefined) => void
   onRemoveTrack: (track: MediaStreamTrack) => void
 }
 
@@ -64,12 +64,12 @@ export function PreviewSection(
     onRemoveTrack
   }: Readonly<PreviewSectionProps>
 ) {
-  const video_preview_card = (track: MediaStreamTrack, label: string, onRemove: (track: MediaStreamTrack) => void) =>
+  const video_preview_card = (track: MediaStreamTrack, label: string) =>
     <PreviewCard
       key={`preview-card-${track.id}`}
       label={label}
       hasDisabledButtons={hasDisabledButtons}
-      onRemove={() => onRemove(track)}
+      onRemove={() => onRemoveTrack(track)}
     >
       <VideoPreview
         track={track}
@@ -78,18 +78,18 @@ export function PreviewSection(
         switchesDisabled={hasDisabledButtons}
         isMainDisplay={mainDisplay === track}
         isOverlay={overlay === track}
-        onToggleMainDisplay={isSelected => onMainDisplayChanged(isSelected ? track : null)}
-        onToggleOverlay={isSelected => onOverlayChanged(isSelected ? track : null)}
+        onToggleMainDisplay={isSelected => onMainDisplayChanged(isSelected ? track : undefined)}
+        onToggleOverlay={isSelected => onOverlayChanged(isSelected ? track : undefined)}
       />
     </PreviewCard>;
 
   return (
     <Flex direction="row" gap="size-100" justifyContent="center" wrap>
       {
-        displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`, onRemoveTrack))
+        displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`))
       }
       {
-        videoTracks.map(track => video_preview_card(track, track.label, onRemoveTrack))
+        videoTracks.map(track => video_preview_card(track, track.label))
       }
       {
         audioTracks.map(track =>

@@ -105,8 +105,8 @@ function prepareRecording(
   displayTracks: MediaStreamTrack[],
   videoTracks: MediaStreamTrack[],
   audioTracks: MediaStreamTrack[],
-  mainDisplay: MediaStreamTrack | null,
-  overlay: MediaStreamTrack | null,
+  mainDisplay: MediaStreamTrack | undefined,
+  overlay: MediaStreamTrack | undefined,
   videoOptions: MediaRecorderOptions,
   audioOptions: MediaRecorderOptions,
   onChunkAvailable: (chunk: Blob, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>
@@ -131,7 +131,7 @@ function prepareRecording(
     // if no main display is selected, guess a sensible default: first captured display if there
     // are display streams, first video input otherwise, but don't use the overlay track.
     const mainDisplayCandidates = [
-      mainDisplay !== null && isSaneVideoStream(mainDisplay, "main") ? mainDisplay : undefined,
+      mainDisplay !== undefined && isSaneVideoStream(mainDisplay, "main") ? mainDisplay : undefined,
       displayTracks.find(t => t !== overlay),
       videoTracks.find(t => t !== overlay)
     ];
@@ -148,7 +148,7 @@ function prepareRecording(
       jobs.push(...audioTracks.map((track, index) => prepareAudio([track], `audio-${index}`)));
     }
 
-    if(overlay !== null && isSaneVideoStream(overlay, "overlay")) {
+    if(overlay !== undefined && isSaneVideoStream(overlay, "overlay")) {
       jobs.push(prepareVideo([ overlay ], "overlay"));
     }
 
@@ -174,8 +174,8 @@ export async function recordLecture(
   displayTracks: MediaStreamTrack[],
   videoTracks: MediaStreamTrack[],
   audioTracks: MediaStreamTrack[],
-  mainDisplay: MediaStreamTrack | null,
-  overlay: MediaStreamTrack | null,
+  mainDisplay: MediaStreamTrack | undefined,
+  overlay: MediaStreamTrack | undefined,
   lectureTitle: string,
   lecturerEmail: string,
   apiUrl: string | undefined,
