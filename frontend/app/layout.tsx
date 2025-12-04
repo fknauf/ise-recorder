@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { SpectrumProvider } from "./lib/components/SpectrumProvider";
-import { ServerEnvProvider } from "./lib/components/ServerEnvProvider";
+import { ServerEnvProvider } from "./lib/hooks/useServerEnv";
 import { getServerEnv } from "./lib/utils/serverEnv";
 
 export const metadata: Metadata = {

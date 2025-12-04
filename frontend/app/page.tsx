@@ -8,7 +8,7 @@ import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection"
 import { deleteRecording, downloadFile } from "./lib/utils/browserStorage";
 import { recordLecture } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
-import { useServerEnv } from "./lib/components/ServerEnvProvider";
+import { useServerEnv } from "./lib/hooks/useServerEnv";
 import useLocalStorageState from "use-local-storage-state";
 import { useBrowserStorage } from "./lib/hooks/useBrowserStorage";
 

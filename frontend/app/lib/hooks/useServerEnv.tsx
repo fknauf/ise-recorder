@@ -12,9 +12,12 @@ export interface ServerEnvProviderProps {
 
 /**
  * Client-side component to make the server-side environment available on the client side.
+ * 
+ * Any page that wants to use the useServerEnv hook needs to wrap itself in a ServerEnvProvider
+ * in a server component (e.g. the layout).
  *
- * This requires the main page to be dynamically rendered, which we have to do anyway to
- * attach the nonce for the Content-Security-Policy header.
+ * In our case this requires the main page to be dynamically rendered, which we have to do
+ * anyway to attach the nonce for the Content-Security-Policy header.
  */
 export function ServerEnvProvider(
   { env, children }: Readonly<ServerEnvProviderProps>
