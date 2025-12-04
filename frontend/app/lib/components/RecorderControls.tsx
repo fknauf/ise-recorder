@@ -190,7 +190,11 @@ export function RecorderControls(
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: createDeviceConstraints(groupId, deviceId), audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: createDeviceConstraints(groupId, deviceId),
+        audio: false
+      });
+
       onAddVideoTracks(stream.getVideoTracks());
     } catch(e) {
       showError("Could not obtain video stream", e);
@@ -204,7 +208,11 @@ export function RecorderControls(
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: createDeviceConstraints(groupId, deviceId), video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: createDeviceConstraints(groupId, deviceId)
+      });
+
       onAddAudioTracks(stream.getAudioTracks());
     } catch(e) {
       showError("Could not obtain audio stream", e);
@@ -237,7 +245,7 @@ export function RecorderControls(
           />
       }
 
-      <Flex direction="row" alignContent="start" marginTop="size-300" gap="size-100" wrap>
+      <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
         <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls}>

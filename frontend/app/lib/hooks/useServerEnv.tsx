@@ -12,7 +12,7 @@ export interface ServerEnvProviderProps {
 
 /**
  * Client-side component to make the server-side environment available on the client side.
- * 
+ *
  * Any page that wants to use the useServerEnv hook needs to wrap itself in a ServerEnvProvider
  * in a server component (e.g. the layout).
  *
