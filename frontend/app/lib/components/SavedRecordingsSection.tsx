@@ -8,7 +8,7 @@ import { RecordingFileList } from "../utils/browserStorage";
 interface SavedRecordingsCardProps {
   recording: RecordingFileList
   isDisabled: boolean
-  onRemoved: () => void
+  onRemove: () => void
   onDownload: (filename: string) => void
 }
 
@@ -18,7 +18,7 @@ interface SavedRecordingsCardProps {
  * Buttons are disabled if the recording it shows is currently being recorded.
  */
 function SavedRecordingsCard(
-  { recording, isDisabled, onRemoved, onDownload }: Readonly<SavedRecordingsCardProps>
+  { recording, isDisabled, onRemove, onDownload }: Readonly<SavedRecordingsCardProps>
 ) {
   const formatter = new Intl.NumberFormat("en-us", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -45,7 +45,7 @@ function SavedRecordingsCard(
         }
         <ActionButton
           isDisabled={isDisabled}
-          onPress={onRemoved}
+          onPress={onRemove}
         >
           <Delete/>
           <Text>Remove</Text>
@@ -58,7 +58,7 @@ function SavedRecordingsCard(
 export interface SavedRecordingsSectionProps {
   recordings: RecordingFileList[]
   activeRecordingName?: string
-  onRemoved: (recording: string) => void
+  onRemove: (recording: string) => void
   onDownload: (recording: string, filename: string) => void
 }
 
@@ -66,7 +66,7 @@ export interface SavedRecordingsSectionProps {
  * Section on the main page showing all saved recordings.
  */
 export const SavedRecordingsSection = (
-  { recordings, activeRecordingName, onRemoved, onDownload }: Readonly<SavedRecordingsSectionProps>
+  { recordings, activeRecordingName, onRemove, onDownload }: Readonly<SavedRecordingsSectionProps>
 ) =>
   <Flex direction="row" gap="size-100" wrap>
     {
@@ -75,7 +75,7 @@ export const SavedRecordingsSection = (
           key={`saved-recording-${r.name}`}
           recording={r}
           isDisabled={r.name === activeRecordingName}
-          onRemoved={() => onRemoved(r.name)}
+          onRemove={() => onRemove(r.name)}
           onDownload={filename => onDownload(r.name, filename)}
         />
       )

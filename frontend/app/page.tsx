@@ -176,7 +176,7 @@ export default function Home() {
       <SavedRecordingsSection
         recordings={browserStorage.recordings}
         activeRecordingName={activeRecording.name}
-        onRemoved={deleteRecording}
+        onRemove={deleteRecording}
         onDownload={downloadFile}
       />
 
