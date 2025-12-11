@@ -28,6 +28,7 @@ function SavedRecordingsCard(
       borderColor="light"
       borderRadius="medium"
       padding="size-100"
+      data-testid="sr-card"
     >
       <Flex direction="column" justifyContent="center" gap="size-100">
         <Text>{recording.name}</Text>
