@@ -44,6 +44,7 @@ export function VideoPreview(
         width={width}
         height={height}
         className="video-preview"
+        role="img"
       />
 
       <Flex direction="row" justifyContent="space-between">
@@ -51,6 +52,7 @@ export function VideoPreview(
           isDisabled={switchesDisabled}
           isSelected={isMainDisplay}
           onChange={onToggleMainDisplay}
+          data-testid="vp-toggle-main"
         >
           Main Display
         </Switch>
@@ -58,6 +60,7 @@ export function VideoPreview(
           isDisabled={switchesDisabled}
           isSelected={isOverlay}
           onChange={onToggleOverlay}
+          data-testid="vp-toggle-overlay"
         >
           Overlay
         </Switch>
