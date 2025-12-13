@@ -1,38 +1,17 @@
 "use client";
 
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
-import { Dispatch, SetStateAction, useState } from "react";
 import { QuotaWarning } from "./lib/components/QuotaWarning";
 import { RecorderControls } from "./lib/components/RecorderControls";
 import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
 import { deleteRecording, downloadFile } from "./lib/utils/browserStorage";
-import { recordLecture } from "./lib/utils/recording";
 import { PreviewSection } from "./lib/components/PreviewSection";
 import { useServerEnv } from "./lib/hooks/useServerEnv";
 import useLocalStorageState from "use-local-storage-state";
 import { useBrowserStorage } from "./lib/hooks/useBrowserStorage";
-
-type ActiveRecording = {
-  state: "idle"
-  name?: undefined
-} | {
-  state: "starting" | "stopping"
-  name: string
-} | {
-  state: "recording"
-  name: string
-  stop: () => void
-};
-
-function preventClosing(e: BeforeUnloadEvent) {
-  e.preventDefault();
-}
-
-function removeTrack(track: MediaStreamTrack) {
-  // Track is removed on the "ended" event. The event doesn't fire automatically when we stop the stream ourselves, so we fire it manually.
-  track.stop();
-  track.dispatchEvent(new Event("ended"));
-}
+import { useMediaStreams } from "./lib/hooks/useMediaStreams";
+import { useShallow } from "zustand/shallow";
+import { useActiveRecording } from "./lib/hooks/useActiveRecording";
 
 export default function Home() {
   ////////////////
@@ -42,95 +21,32 @@ export default function Home() {
   const [ lectureTitle, setLectureTitle ] = useLocalStorageState<string>("lecture-title", { defaultValue: "", storageSync: false });
   const [ lecturerEmail, setLecturerEmail ] = useLocalStorageState<string>("lecturer-email", { defaultValue: "", storageSync: false });
 
-  const [ videoTracks, setVideoTracks ] = useState<MediaStreamTrack[]>([]);
-  const [ audioTracks, setAudioTracks ] = useState<MediaStreamTrack[]>([]);
-  const [ displayTracks, setDisplayTracks ] = useState<MediaStreamTrack[]>([]);
-  const [ mainDisplay, setMainDisplay ] = useState<MediaStreamTrack>();
-  const [ overlay, setOverlay ] = useState<MediaStreamTrack>();
+  const [ activeRecording, startRecording, stopRecording ] = useActiveRecording();
 
-  const [ activeRecording, setActiveRecording ] = useState<ActiveRecording>({ state: "idle" });
   const browserStorage = useBrowserStorage();
   const serverEnv = useServerEnv();
+
+  const videoDevices = useMediaStreams(useShallow(state => state.videoDevices));
+  const audioDevices = useMediaStreams(useShallow(state => state.audioDevices));
+  const displayTracks = useMediaStreams(useShallow(state => state.displayTracks));
+  const videoTracks = useMediaStreams(useShallow(state => state.videoTracks));
+  const audioTracks = useMediaStreams(useShallow(state => state.audioTracks));
+  const mainDisplay = useMediaStreams(useShallow(state => state.mainDisplay));
+  const overlay = useMediaStreams(useShallow(state => state.overlay));
+
+  const refreshMediaDevices = useMediaStreams(useShallow(state => state.refreshMediaDevices));
+  const openDisplayStream = useMediaStreams(useShallow(state => state.openDisplayStream));
+  const openVideoStream = useMediaStreams(useShallow(state => state.openVideoStream));
+  const openAudioStream = useMediaStreams(useShallow(state => state.openAudioStream));
+  const selectMainDisplay = useMediaStreams(useShallow(state => state.selectMainDisplay));
+  const selectOverlay = useMediaStreams(useShallow(state => state.selectOverlay));
+  const removeTrack = useMediaStreams(useShallow(state => state.removeTrack));
 
   ////////////////
   // logic
   ////////////////
 
   const apiUrl = serverEnv?.apiUrl;
-
-  // should only ever be one video track, but let's just grab all just in case. user can
-  // still remove them manually if there happen to be more.
-  const addGenericTracks = (
-    tracks: MediaStreamTrack[],
-    setTracks: Dispatch<SetStateAction<MediaStreamTrack[]>>
-  ) => {
-    setTracks(prevTracks => [ ...prevTracks, ...tracks ]);
-
-    for(const track of tracks) {
-      // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
-      track.onended = () => {
-        setMainDisplay(prevMain => (prevMain === track ? undefined : prevMain));
-        setOverlay(prevOverlay => (prevOverlay === track ? undefined : prevOverlay));
-        setTracks(prevTracks => prevTracks.filter(t => t !== track));
-      };
-    }
-  };
-
-  const addDisplayTracks = (tracks: MediaStreamTrack[]) => {
-    addGenericTracks(tracks, setDisplayTracks);
-    // Usually the first/only captured screen is supposed to be the main display
-    setMainDisplay(prevMain => prevMain ?? tracks[0]);
-  };
-
-  const addVideoTracks = (tracks: MediaStreamTrack[]) => {
-    addGenericTracks(tracks, setVideoTracks);
-    // usually the first/only captured camera is supposed to be the overlay
-    setOverlay(prevOverlay => prevOverlay ?? tracks[0]);
-  };
-
-  const addAudioTracks = (tracks: MediaStreamTrack[]) => {
-    addGenericTracks(tracks, setAudioTracks);
-  };
-
-  const startRecording = () => {
-    if(activeRecording.state !== "idle") {
-      return;
-    }
-
-    const onStarting = (recordingName: string) => {
-      setActiveRecording({ state: "starting", name: recordingName });
-      // Prevent accidental closing of the tab while recording
-      window.addEventListener("beforeunload", preventClosing);
-    };
-
-    const onStarted = (recordingName: string, stopFunction: () => void) => {
-      setActiveRecording({ state: "recording", name: recordingName, stop: stopFunction });
-    };
-
-    const onFinished = async () => {
-      window.removeEventListener("beforeunload", preventClosing);
-      setActiveRecording({ state: "idle" });
-    };
-
-    recordLecture(
-      displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
-      lectureTitle, lecturerEmail, apiUrl,
-      onStarting, onStarted, onFinished
-    );
-  };
-
-  const stopRecording = () => {
-    // This way stopRecording does not depend on activeRecording, so the React compiler can better optimize it.
-    setActiveRecording(prev => {
-      if(prev.state !== "recording") {
-        console.warn("attempted to stop recording while recorder wasn't recording");
-        return prev;
-      }
-
-      prev.stop();
-      return { state: "stopping", name: prev.name };
-    });
-  };
 
   ////////////////
   // view
@@ -143,13 +59,14 @@ export default function Home() {
         lecturerEmail={lecturerEmail}
         hasEmailField={apiUrl !== undefined}
         recorderState={activeRecording.state}
-        currentVideoTracks={videoTracks}
-        currentAudioTracks={audioTracks}
+        videoDevices={videoDevices}
+        audioDevices={audioDevices}
         onLectureTitleChanged={setLectureTitle}
         onLecturerEmailChanged={setLecturerEmail}
-        onAddDisplayTracks={addDisplayTracks}
-        onAddVideoTracks={addVideoTracks}
-        onAddAudioTracks={addAudioTracks}
+        onOpenDeviceMenu={refreshMediaDevices}
+        onAddDisplayTrack={openDisplayStream}
+        onAddVideoTrack={openVideoStream}
+        onAddAudioTrack={openAudioStream}
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
       />
@@ -168,8 +85,8 @@ export default function Home() {
         canvasWidth={384}
         canvasHeight={216}
         hasDisabledButtons={activeRecording.state !== "idle"}
-        onMainDisplayChanged={setMainDisplay}
-        onOverlayChanged={setOverlay}
+        onMainDisplayChanged={selectMainDisplay}
+        onOverlayChanged={selectOverlay}
         onRemoveTrack={removeTrack}
       />
 

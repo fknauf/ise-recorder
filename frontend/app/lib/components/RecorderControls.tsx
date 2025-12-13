@@ -1,38 +1,24 @@
 "use client";
 
-import { ActionButton, Divider, Flex, Item, Text, Key, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
+import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
 import CallCenter from "@spectrum-icons/workflow/CallCenter";
 import MovieCamera from "@spectrum-icons/workflow/MovieCamera";
 import Circle from "@spectrum-icons/workflow/Circle";
 import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
 import Stop from "@spectrum-icons/workflow/Stop";
-import { useState } from "react";
 import isEmail from "validator/es/lib/isEmail";
 import { unsafeTitleCharacters } from "../utils/recording";
-import { showError } from "../utils/notifications";
+import { createDeviceUniqueId } from "../hooks/useMediaStreams";
 
 export type RecorderState = "idle" | "starting" | "recording" | "stopping";
-
-// This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
-const createDeviceUniqueId = (dev: MediaDeviceInfo) => JSON.stringify([ dev.groupId, dev.deviceId ]);
-const splitDeviceUniqueId = (devUid: string): [ string, string ] => JSON.parse(devUid);
-
-const trackIsFromDevice = (track: MediaStreamTrack, groupId: string, deviceId: string) =>
-  track.getSettings().groupId === groupId && track.getSettings().deviceId === deviceId;
-
-const createDeviceConstraints = (groupId: string, deviceId: string): MediaTrackConstraints =>
-  ({
-    groupId: { exact: groupId },
-    deviceId: { exact: deviceId }
-  });
 
 const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || "unsafe character in lecture title";
 const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
 
 interface RecordButtonProps {
   recorderState: RecorderState
-  onStartRecording: () => void
-  onStopRecording: () => void
+  onStartRecording?: () => void
+  onStopRecording?: () => void
 }
 
 function RecordButton(
@@ -83,15 +69,16 @@ export interface RecorderControlsProps {
   lecturerEmail: string
   hasEmailField: boolean
   recorderState: RecorderState
-  currentVideoTracks: readonly MediaStreamTrack[]
-  currentAudioTracks: readonly MediaStreamTrack[]
-  onLectureTitleChanged: (lectureTitle: string) => void
-  onLecturerEmailChanged: (lectureTitle: string) => void
-  onAddDisplayTracks: (tracks: MediaStreamTrack[]) => void
-  onAddVideoTracks: (tracks: MediaStreamTrack[]) => void
-  onAddAudioTracks: (tracks: MediaStreamTrack[]) => void
-  onStartRecording: () => void
-  onStopRecording: () => void
+  videoDevices: readonly MediaDeviceInfo[]
+  audioDevices: readonly MediaDeviceInfo[]
+  onLectureTitleChanged?: (lectureTitle: string) => void
+  onLecturerEmailChanged?: (lectureTitle: string) => void
+  onOpenDeviceMenu?: () => void
+  onAddDisplayTrack?: () => void
+  onAddVideoTrack?: (devUid: string) => void
+  onAddAudioTrack?: (devUid: string) => void
+  onStartRecording?: () => void
+  onStopRecording?: () => void
 }
 
 /**
@@ -109,116 +96,18 @@ export function RecorderControls(
     lecturerEmail,
     hasEmailField,
     recorderState,
-    currentVideoTracks,
-    currentAudioTracks,
+    videoDevices,
+    audioDevices,
     onLectureTitleChanged,
     onLecturerEmailChanged,
-    onAddDisplayTracks,
-    onAddVideoTracks,
-    onAddAudioTracks,
+    onOpenDeviceMenu,
+    onAddDisplayTrack,
+    onAddVideoTrack,
+    onAddAudioTrack,
     onStartRecording,
     onStopRecording
   }: Readonly<RecorderControlsProps>
 ) {
-  // The controls include menus of available video and audio devices. We obtain these asynchronously
-  // and store them here for display.
-  const [ videoDevices, setVideoDevices ] = useState<MediaDeviceInfo[]>([]);
-  const [ audioDevices, setAudioDevices ] = useState<MediaDeviceInfo[]>([]);
-  const [ canEnumerate, setCanEnumerate ] = useState(false);
-
-  // For hotplugging, the device list needs to be refreshed whenever a device menu is opened, so we
-  // need to be able to call this more than once. There is as yet no way to just ask for permission
-  // to enumerate the available devices, so we ask for the default user media streams, and if the
-  // user grants that permission we can also enumerate devices.
-  const refreshUserMediaDevices = async () => {
-    // This is unreliable on Firefox 145; there we sometimes get "granted" even if the permission is actually "prompt".
-    // I suspect it depends on whether the user has given temporary permission to the site before, but it's hard
-    // to be sure. When Firefix misinforms us, we'll ask for permissions as normal but not realize that the user
-    // chose devices, so in that case we'll close the streams and the user has to pick from the menu.
-    const cameraPermissions = await navigator.permissions.query({ name: "camera" }).then(p => p.state);
-    const microphonePermissions = await navigator.permissions.query({ name: "microphone" }).then(p => p.state);
-    const userInteractionExpected = cameraPermissions === "prompt" || microphonePermissions === "prompt";
-
-    if(!canEnumerate || userInteractionExpected) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: cameraPermissions !== "denied",
-          audio: microphonePermissions !== "denied"
-        });
-
-        if(userInteractionExpected) {
-          // User just saw the "please grant permissions" dialog and forgot about clicking our menu,
-          // so in this case we just add the streams he just selected.
-          onAddVideoTracks(stream.getVideoTracks());
-          onAddAudioTracks(stream.getAudioTracks());
-        } else {
-          // Here we had the permissions when the site was loaded, so the user didn't select any
-          // device for us to get this stream. In this case close the streams and let the user pick
-          // from the menu.
-          stream.getTracks().forEach(t => t.stop());
-        }
-
-        setCanEnumerate(true);
-      } catch(e) {
-        showError("Could not obtain device permissions", e);
-      }
-    }
-
-    try {
-      const devs = await navigator.mediaDevices.enumerateDevices();
-
-      setVideoDevices(devs.filter(dev => dev.kind === "videoinput"));
-      setAudioDevices(devs.filter(dev => dev.kind === "audioinput"));
-    } catch(e) {
-      showError("Could not enumerate devices", e);
-    }
-  };
-
-  const openDisplayStream = async () => {
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia();
-      onAddDisplayTracks(screenStream.getVideoTracks());
-    } catch(e) {
-      showError("Could not obtain display stream", e);
-    }
-  };
-
-  const addVideoDevice = async (devUid: Key) => {
-    const [ groupId, deviceId ] = splitDeviceUniqueId(devUid as string);
-    if(currentVideoTracks.some(track => trackIsFromDevice(track, groupId, deviceId))) {
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: createDeviceConstraints(groupId, deviceId),
-        audio: false
-      });
-
-      onAddVideoTracks(stream.getVideoTracks());
-    } catch(e) {
-      showError("Could not obtain video stream", e);
-    }
-  };
-
-  const addAudioDevice = async (devUid: Key) => {
-    const [ groupId, deviceId ] = splitDeviceUniqueId(devUid as string);
-    if(currentAudioTracks.some(track => trackIsFromDevice(track, groupId, deviceId))) {
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: false,
-        audio: createDeviceConstraints(groupId, deviceId)
-      });
-
-      onAddAudioTracks(stream.getAudioTracks());
-    } catch(e) {
-      showError("Could not obtain audio stream", e);
-    }
-  };
-
   const hasDisabledTrackControls = recorderState !== "idle";
 
   return (
@@ -248,27 +137,27 @@ export function RecorderControls(
       <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls}>
+        <ActionButton onPress={onAddDisplayTrack} isDisabled={hasDisabledTrackControls}>
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
 
-        <MenuTrigger onOpenChange={refreshUserMediaDevices}>
+        <MenuTrigger onOpenChange={onOpenDeviceMenu}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
-          <Menu onAction={addVideoDevice}>
+          <Menu onAction={devUid => onAddVideoTrack?.(devUid as string)}>
             { videoDevices.map(dev => <Item key={createDeviceUniqueId(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
 
-        <MenuTrigger onOpenChange={refreshUserMediaDevices}>
+        <MenuTrigger onOpenChange={onOpenDeviceMenu}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
-          <Menu onAction={addAudioDevice}>
+          <Menu onAction={devUid => onAddAudioTrack?.(devUid as string)}>
             { audioDevices.map(dev => <Item key={createDeviceUniqueId(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>

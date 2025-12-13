@@ -102,9 +102,9 @@ function prepareTrackRecording(
  * storage logic.
  */
 function prepareRecording(
-  displayTracks: MediaStreamTrack[],
-  videoTracks: MediaStreamTrack[],
-  audioTracks: MediaStreamTrack[],
+  displayTracks: readonly MediaStreamTrack[],
+  videoTracks: readonly MediaStreamTrack[],
+  audioTracks: readonly MediaStreamTrack[],
   mainDisplay: MediaStreamTrack | undefined,
   overlay: MediaStreamTrack | undefined,
   videoOptions: MediaRecorderOptions,
@@ -171,9 +171,9 @@ function prepareRecording(
  * a chunk was written.
  */
 export async function recordLecture(
-  displayTracks: MediaStreamTrack[],
-  videoTracks: MediaStreamTrack[],
-  audioTracks: MediaStreamTrack[],
+  displayTracks: readonly MediaStreamTrack[],
+  videoTracks: readonly MediaStreamTrack[],
+  audioTracks: readonly MediaStreamTrack[],
   mainDisplay: MediaStreamTrack | undefined,
   overlay: MediaStreamTrack | undefined,
   lectureTitle: string,

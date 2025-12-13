@@ -6,18 +6,11 @@ import { RecorderControls } from "@/app/lib/components/RecorderControls";
 test("RecorderControls renders controls correctly when idle", async () => {
   render(
     <RecorderControls
-      currentAudioTracks={[]}
-      currentVideoTracks={[]}
+      audioDevices={[]}
+      videoDevices={[]}
       hasEmailField={true}
       lectureTitle="PSU"
       lecturerEmail="lecturer@vss.uni-hannover.de"
-      onAddAudioTracks={() => {}}
-      onAddDisplayTracks={() => {}}
-      onAddVideoTracks={() => {}}
-      onLectureTitleChanged={() => {}}
-      onLecturerEmailChanged={() => {}}
-      onStartRecording={() => {}}
-      onStopRecording={() => {}}
       recorderState="idle"
     />
   );
@@ -49,18 +42,11 @@ test("RecorderControls renders controls correctly when idle", async () => {
 test("RecorderControls renders controls correctly when recording", async () => {
   render(
     <RecorderControls
-      currentAudioTracks={[]}
-      currentVideoTracks={[]}
+      audioDevices={[]}
+      videoDevices={[]}
       hasEmailField={true}
       lectureTitle="PSU"
       lecturerEmail="lecturer@vss.uni-hannover.de"
-      onAddAudioTracks={() => {}}
-      onAddDisplayTracks={() => {}}
-      onAddVideoTracks={() => {}}
-      onLectureTitleChanged={() => {}}
-      onLecturerEmailChanged={() => {}}
-      onStartRecording={() => {}}
-      onStopRecording={() => {}}
       recorderState="recording"
     />
   );
@@ -92,18 +78,11 @@ test("RecorderControls renders controls correctly when recording", async () => {
 test("RecorderControls renders controls correctly when starting a recording", async () => {
   render(
     <RecorderControls
-      currentAudioTracks={[]}
-      currentVideoTracks={[]}
+      audioDevices={[]}
+      videoDevices={[]}
       hasEmailField={true}
       lectureTitle="PSU"
       lecturerEmail="lecturer@vss.uni-hannover.de"
-      onAddAudioTracks={() => {}}
-      onAddDisplayTracks={() => {}}
-      onAddVideoTracks={() => {}}
-      onLectureTitleChanged={() => {}}
-      onLecturerEmailChanged={() => {}}
-      onStartRecording={() => {}}
-      onStopRecording={() => {}}
       recorderState="starting"
     />
   );
@@ -135,18 +114,11 @@ test("RecorderControls renders controls correctly when starting a recording", as
 test("RecorderControls renders controls correctly when stopping a recording", async () => {
   render(
     <RecorderControls
-      currentAudioTracks={[]}
-      currentVideoTracks={[]}
+      audioDevices={[]}
+      videoDevices={[]}
       hasEmailField={true}
       lectureTitle="PSU"
       lecturerEmail="lecturer@vss.uni-hannover.de"
-      onAddAudioTracks={() => {}}
-      onAddDisplayTracks={() => {}}
-      onAddVideoTracks={() => {}}
-      onLectureTitleChanged={() => {}}
-      onLecturerEmailChanged={() => {}}
-      onStartRecording={() => {}}
-      onStopRecording={() => {}}
       recorderState="starting"
     />
   );
@@ -178,18 +150,11 @@ test("RecorderControls renders controls correctly when stopping a recording", as
 test("RecorderControls hides the e-mail field when specified", async () => {
   render(
     <RecorderControls
-      currentAudioTracks={[]}
-      currentVideoTracks={[]}
+      audioDevices={[]}
+      videoDevices={[]}
       hasEmailField={false}
       lectureTitle="PSU"
       lecturerEmail="lecturer@vss.uni-hannover.de"
-      onAddAudioTracks={() => {}}
-      onAddDisplayTracks={() => {}}
-      onAddVideoTracks={() => {}}
-      onLectureTitleChanged={() => {}}
-      onLecturerEmailChanged={() => {}}
-      onStartRecording={() => {}}
-      onStopRecording={() => {}}
       recorderState="idle"
     />
   );
@@ -206,16 +171,17 @@ test("RecorderControls handles the start recording button properly", async () =>
 
   render(
     <RecorderControls
-      currentAudioTracks={[]}
-      currentVideoTracks={[]}
+      audioDevices={[]}
+      videoDevices={[]}
       hasEmailField={true}
       lectureTitle="PSU"
       lecturerEmail="lecturer@vss.uni-hannover.de"
-      onAddAudioTracks={onDummy}
-      onAddDisplayTracks={onDummy}
-      onAddVideoTracks={onDummy}
       onLectureTitleChanged={onDummy}
       onLecturerEmailChanged={onDummy}
+      onOpenDeviceMenu={onDummy}
+      onAddDisplayTrack={onDummy}
+      onAddVideoTrack={onDummy}
+      onAddAudioTrack={onDummy}
       onStartRecording={onStartRecording}
       onStopRecording={onDummy}
       recorderState="idle"
@@ -238,16 +204,17 @@ test("RecorderControls handles the stop recording button properly", async () => 
 
   render(
     <RecorderControls
-      currentAudioTracks={[]}
-      currentVideoTracks={[]}
+      audioDevices={[]}
+      videoDevices={[]}
       hasEmailField={true}
       lectureTitle="PSU"
       lecturerEmail="lecturer@vss.uni-hannover.de"
-      onAddAudioTracks={onDummy}
-      onAddDisplayTracks={onDummy}
-      onAddVideoTracks={onDummy}
       onLectureTitleChanged={onDummy}
       onLecturerEmailChanged={onDummy}
+      onOpenDeviceMenu={onDummy}
+      onAddDisplayTrack={onDummy}
+      onAddVideoTrack={onDummy}
+      onAddAudioTrack={onDummy}
       onStartRecording={onDummy}
       onStopRecording={onStopRecording}
       recorderState="recording"
