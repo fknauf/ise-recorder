@@ -12,6 +12,7 @@ export default defineConfig({
     browser: {
       provider: playwright(),
       enabled: true,
+      headless: true,
       // force viewport size to landscape mode for the VideoPreview tests, otherwise @eatsjobs/media-mock
       // switches width and height on us with unhelpful results. At the moment the whole project makes no
       // sense on mobile anyway, so limiting tests this way should be fine.
@@ -32,6 +33,7 @@ export default defineConfig({
         }
       ]
     },
+    mockReset: true,
     environment: "jsdom",
     include: [ "__tests__/**/*.test.{ts,tsx}" ],
     setupFiles: [ "__tests__/setup.ts" ],
