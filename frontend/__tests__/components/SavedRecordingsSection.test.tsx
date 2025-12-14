@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import { SavedRecordingsSection } from "@/app/lib/components/SavedRecordingsSection";
 import { RecordingFileList } from "@/app/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
+import { defaultTheme, Provider } from "@adobe/react-spectrum";
 
 test("SavedRecordingsSection displays recordings and reacts to clicks", async () => {
   const MiB = 2 ** 20;
@@ -41,11 +42,13 @@ test("SavedRecordingsSection displays recordings and reacts to clicks", async ()
   const onDownload = vi.fn();
 
   render(
-    <SavedRecordingsSection
-      recordings={recordings}
-      onRemove={onRemove}
-      onDownload={onDownload}
-    />
+    <Provider theme={defaultTheme}>
+      <SavedRecordingsSection
+        recordings={recordings}
+        onRemove={onRemove}
+        onDownload={onDownload}
+      />
+    </Provider>
   );
 
   const srCards = await screen.findAllByTestId("sr-card");
@@ -84,11 +87,13 @@ test("SavedRecordingsSection displays recordings and reacts to clicks", async ()
 
 test("SavedRecordingsSection is empty when there are no recordings", async () => {
   render(
-    <SavedRecordingsSection
-      recordings={[]}
-      onRemove={()=>{}}
-      onDownload={() => {}}
-    />
+    <Provider theme={defaultTheme}>
+      <SavedRecordingsSection
+        recordings={[]}
+        onRemove={()=>{}}
+        onDownload={() => {}}
+      />
+    </Provider>
   );
 
   const srCards = await screen.queryAllByTestId("sr-card");

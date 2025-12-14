@@ -15,6 +15,10 @@ import { useServerEnv } from "./lib/hooks/useServerEnv";
 
 export default function Home() {
   const {
+    apiUrl
+  } = useServerEnv();
+
+  const {
     lectureTitle,
     lecturerEmail,
     setLectureTitle,
@@ -33,10 +37,6 @@ export default function Home() {
     savedRecordings,
     removeSavedRecording
   } = useBrowserStorage();
-
-  const {
-    apiUrl
-  } = useServerEnv();
 
   const {
     videoDevices,

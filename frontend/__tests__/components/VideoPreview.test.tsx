@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { VideoPreview } from "@/app/lib/components/VideoPreview";
 import { MediaMock, devices } from "@eatsjobs/media-mock";
 import userEvent from "@testing-library/user-event";
+import { defaultTheme, Provider } from "@adobe/react-spectrum";
 
 test("VideoPreview displays video track", async () => {
   const width = 640;
@@ -27,7 +28,7 @@ test("VideoPreview displays video track", async () => {
   expect(track.getSettings().width).toBe(width);
 
   render(
-    <>
+    <Provider theme={defaultTheme}>
       <VideoPreview
         track={track}
         width={width}
@@ -53,7 +54,7 @@ test("VideoPreview displays video track", async () => {
         height={height}
         data-testid="test-img-srcimage-extractor"
       />
-    </>
+    </Provider>
   );
 
   const display = await screen.findByRole("img") as HTMLVideoElement;
@@ -101,16 +102,18 @@ test("VideoPreview handles user input", async () => {
   const user = userEvent.setup();
 
   render(
-    <VideoPreview
-      track={track}
-      width={384}
-      height={216}
-      isMainDisplay={true}
-      isOverlay={false}
-      switchesDisabled={false}
-      onToggleMainDisplay={onToggleMainDisplay}
-      onToggleOverlay={onToggleOverlay}
-    />
+    <Provider theme={defaultTheme}>
+      <VideoPreview
+        track={track}
+        width={384}
+        height={216}
+        isMainDisplay={true}
+        isOverlay={false}
+        switchesDisabled={false}
+        onToggleMainDisplay={onToggleMainDisplay}
+        onToggleOverlay={onToggleOverlay}
+      />
+    </Provider>
   );
 
   const mainToggleSwitch = await screen.findByTestId("vp-toggle-main");
@@ -138,16 +141,18 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
   const user = userEvent.setup();
 
   render(
-    <VideoPreview
-      track={track}
-      width={384}
-      height={216}
-      isMainDisplay={true}
-      isOverlay={false}
-      switchesDisabled={true}
-      onToggleMainDisplay={onToggleMainDisplay}
-      onToggleOverlay={onToggleOverlay}
-    />
+    <Provider theme={defaultTheme}>
+      <VideoPreview
+        track={track}
+        width={384}
+        height={216}
+        isMainDisplay={true}
+        isOverlay={false}
+        switchesDisabled={true}
+        onToggleMainDisplay={onToggleMainDisplay}
+        onToggleOverlay={onToggleOverlay}
+      />
+    </Provider>
   );
 
   const mainToggleSwitch = await screen.findByTestId("vp-toggle-main");

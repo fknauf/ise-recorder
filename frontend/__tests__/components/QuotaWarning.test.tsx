@@ -1,13 +1,18 @@
 import { expect, test } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QuotaWarning } from "@/app/lib/components/QuotaWarning";
+import { defaultTheme, Provider } from "@adobe/react-spectrum";
 
 test("QuotaWarning shows up if quota is critical", async () => {
   const GiB = 2 ** 30;
   const quota = 10 * GiB;
   const usage = 9 * GiB + 1;
 
-  render(<QuotaWarning usage={usage} quota={quota}/>);
+  render(
+    <Provider theme={defaultTheme}>
+      <QuotaWarning usage={usage} quota={quota}/>
+    </Provider>
+  );
 
   await screen.findByRole("alert");
 
@@ -19,7 +24,11 @@ test("QuotaWarning doesn't show up if quota is not critical", async () => {
   const quota = 10 * GiB;
   const usage = 9 * GiB;
 
-  render(<QuotaWarning usage={usage} quota={quota}/>);
+  render(
+    <Provider theme={defaultTheme}>
+      <QuotaWarning usage={usage} quota={quota}/>
+    </Provider>
+  );
 
   const quotaWarning = screen.queryByRole("alert");
   expect(quotaWarning).toBeNull();
@@ -29,7 +38,11 @@ test("QuotaWarning doesn't show up if quota is unknown", async () => {
   // this happens on first render or if OPFS is not supported. It's important that it doesn't
   // appear on first render because otherwise the user sees a flashing warning that's gone before
   // he can read it.
-  render(<QuotaWarning/>);
+  render(
+    <Provider theme={defaultTheme}>
+      <QuotaWarning/>
+    </Provider>
+  );
 
   const quotaWarning = screen.queryByRole("alert");
   expect(quotaWarning).toBeNull();
