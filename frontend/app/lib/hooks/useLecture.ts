@@ -1,8 +1,10 @@
-import useLocalStorageState from "use-local-storage-state";
+import { useAppStore } from "./useAppStore";
 
 export function useLecture() {
-  const [ lectureTitle, setLectureTitle ] = useLocalStorageState<string>("lecture-title", { defaultValue: "", storageSync: false });
-  const [ lecturerEmail, setLecturerEmail ] = useLocalStorageState<string>("lecturer-email", { defaultValue: "", storageSync: false });
+  const lectureTitle = useAppStore(state => state.lectureTitle);
+  const lecturerEmail = useAppStore(state => state.lecturerEmail);
+  const setLectureTitle = useAppStore(state => state.setLectureTitle);
+  const setLecturerEmail = useAppStore(state => state.setLecturerEmail);
 
   return {
     lectureTitle,

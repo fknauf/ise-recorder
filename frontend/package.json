@@ -15,7 +15,6 @@
     "next": "^16.0.10",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "use-local-storage-state": "^19.5.0",
     "validator": "^13.15.23",
     "zustand": "^5.0.9"
   },
