@@ -1,3 +1,5 @@
+"use client";
+
 import { useAppStore } from "./useAppStore";
 
 export function useLecture() {

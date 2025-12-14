@@ -1,3 +1,5 @@
+"use client";
+
 import { useAppStore } from "./useAppStore";
 import { recordLecture } from "../utils/recording";
 import { useLecture } from "./useLecture";

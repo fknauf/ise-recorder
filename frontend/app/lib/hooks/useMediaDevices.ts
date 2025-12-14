@@ -1,3 +1,5 @@
+"use client";
+
 import { MediaDeviceUid } from "../store/mediaDevicesSlice";
 import { showError } from "../utils/notifications";
 import { useAppStore } from "./useAppStore";
