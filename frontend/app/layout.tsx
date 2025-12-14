@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { SpectrumProvider } from "./lib/components/SpectrumProvider";
-import { ServerEnvProvider } from "./lib/hooks/useServerEnv";
+import { AppStoreProvider } from "./lib/hooks/useAppStore";
 import { getServerEnv } from "./lib/utils/serverEnv";
 
 export const metadata: Metadata = {
@@ -20,9 +20,9 @@ export default async function RootLayout(
     <html lang="en">
       <body>
         <SpectrumProvider>
-          <ServerEnvProvider env={env}>
+          <AppStoreProvider serverEnv={env}>
             {children}
-          </ServerEnvProvider>
+          </AppStoreProvider>
         </SpectrumProvider>
       </body>
     </html>

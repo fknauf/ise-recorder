@@ -1,65 +1,84 @@
-import { useState } from "react";
-import { useMediaStreams } from "./useMediaStreams";
-import { useServerEnv } from "./useServerEnv";
-import { useShallow } from "zustand/shallow";
-import useLocalStorageState from "use-local-storage-state";
+import { useAppStore } from "./useAppStore";
 import { recordLecture } from "../utils/recording";
-
-type ActiveRecording = {
-  state: "idle"
-  name?: undefined
-} | {
-  state: "starting" | "stopping"
-  name: string
-} | {
-  state: "recording"
-  name: string
-  stop: () => void
-};
+import { useLecture } from "./useLecture";
+import { useServerEnv } from "./useServerEnv";
+import { useMediaTracks } from "./useMediaTracks";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
 }
 
-export function useActiveRecording(): [ ActiveRecording, () => void, () => void ] {
-  const [ activeRecording, setActiveRecording ] = useState<ActiveRecording>({ state: "idle" });
+export function useActiveRecording() {
+  const activeRecording = useAppStore(state => state.activeRecording);
+  const setActiveRecording = useAppStore(state => state.setActiveRecording);
+  const resetFileSizeOverrides = useAppStore(state => state.resetFileSizeOverrides);
+  const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
+  const updateQuotaInformation = useAppStore(state => state.updateQuotaInformation);
+  const registerChunk = useAppStore(state => state.registerChunk);
 
-  const [ lectureTitle ] = useLocalStorageState<string>("lecture-title", { defaultValue: "", storageSync: false });
-  const [ lecturerEmail ] = useLocalStorageState<string>("lecturer-email", { defaultValue: "", storageSync: false });
+  const {
+    lectureTitle,
+    lecturerEmail
+  } = useLecture();
 
-  const displayTracks = useMediaStreams(useShallow(state => state.displayTracks));
-  const videoTracks = useMediaStreams(useShallow(state => state.videoTracks));
-  const audioTracks = useMediaStreams(useShallow(state => state.audioTracks));
-  const mainDisplay = useMediaStreams(useShallow(state => state.mainDisplay));
-  const overlay = useMediaStreams(useShallow(state => state.overlay));
+  const {
+    displayTracks,
+    videoTracks,
+    audioTracks,
+    mainDisplay,
+    overlay
+  } = useMediaTracks();
 
-  const serverEnv = useServerEnv();
+  const {
+    apiUrl
+  } = useServerEnv();
 
   const startRecording = () => {
+    if(activeRecording.state !== "idle") {
+      return;
+    }
+
     const onStarting = (recordingName: string) => {
-      setActiveRecording({ state: "starting", name: recordingName });
+      setActiveRecording({
+        state: "starting",
+        name: recordingName
+      });
       // Prevent accidental closing of the tab while recording
       window.addEventListener("beforeunload", preventClosing);
     };
 
-    const onStarted = (recordingName: string, stopFunction: () => void) => {
-      setActiveRecording({ state: "recording", name: recordingName, stop: stopFunction });
+    const onStarted = async (recordingName: string, stopFunction: () => void) => {
+      setActiveRecording({
+        state: "recording",
+        name: recordingName,
+        stop: stopFunction
+      });
+
+      await updateBrowserStorage();
+    };
+
+    const onChunkWritten = (recordingName: string, filename: string, chunkSize: number) => {
+      registerChunk(recordingName, filename, chunkSize);
+      // no need to await, we can continue before the quota warning updates
+      updateQuotaInformation();
     };
 
     const onFinished = async () => {
       window.removeEventListener("beforeunload", preventClosing);
       setActiveRecording({ state: "idle" });
+      // make sure the new file sizes are there before throwing away the overrides
+      await updateBrowserStorage();
+      resetFileSizeOverrides();
     };
 
     recordLecture(
       displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
-      lectureTitle, lecturerEmail, serverEnv?.apiUrl,
-      onStarting, onStarted, onFinished
+      lectureTitle, lecturerEmail, apiUrl,
+      onStarting, onStarted, onChunkWritten, onFinished
     );
   };
 
   const stopRecording = () => {
-    // This way stopRecording does not depend on activeRecording, so the React compiler can better optimize it.
     setActiveRecording(prev => {
       if(prev.state !== "recording") {
         console.warn("attempted to stop recording while recorder wasn't recording");
@@ -67,13 +86,16 @@ export function useActiveRecording(): [ ActiveRecording, () => void, () => void 
       }
 
       prev.stop();
-      return { state: "stopping", name: prev.name };
+      return {
+        ...prev,
+        state: "stopping"
+      };
     });
   };
 
-  return [
+  return {
     activeRecording,
-    activeRecording.state === "idle" ? startRecording : () => {},
+    startRecording,
     stopRecording
-  ];
+  };
 }

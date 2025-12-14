@@ -57,7 +57,7 @@ function SavedRecordingsCard(
 }
 
 export interface SavedRecordingsSectionProps {
-  recordings: RecordingFileList[]
+  recordings: readonly RecordingFileList[]
   activeRecordingName?: string
   onRemove: (recording: string) => void
   onDownload: (recording: string, filename: string) => void

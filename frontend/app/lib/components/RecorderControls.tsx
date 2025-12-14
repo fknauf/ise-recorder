@@ -1,6 +1,6 @@
 "use client";
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
+import { ActionButton, Divider, Flex, Item, Key, Text, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
 import CallCenter from "@spectrum-icons/workflow/CallCenter";
 import MovieCamera from "@spectrum-icons/workflow/MovieCamera";
 import Circle from "@spectrum-icons/workflow/Circle";
@@ -8,9 +8,14 @@ import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
 import Stop from "@spectrum-icons/workflow/Stop";
 import isEmail from "validator/es/lib/isEmail";
 import { unsafeTitleCharacters } from "../utils/recording";
-import { createDeviceUniqueId } from "../hooks/useMediaStreams";
+import { MediaDeviceUid } from "../store/mediaDevicesSlice";
 
 export type RecorderState = "idle" | "starting" | "recording" | "stopping";
+
+const createDeviceKey = (dev: MediaDeviceInfo) =>
+  JSON.stringify({ groupId: dev.groupId, deviceId: dev.deviceId } as MediaDeviceUid);
+const parseDeviceKey = (devUid: Key): MediaDeviceUid =>
+  JSON.parse(devUid as string);
 
 const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || "unsafe character in lecture title";
 const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
@@ -75,8 +80,8 @@ export interface RecorderControlsProps {
   onLecturerEmailChanged?: (lectureTitle: string) => void
   onOpenDeviceMenu?: () => void
   onAddDisplayTrack?: () => void
-  onAddVideoTrack?: (devUid: string) => void
-  onAddAudioTrack?: (devUid: string) => void
+  onAddVideoTrack?: (devUid: MediaDeviceUid) => void
+  onAddAudioTrack?: (devUid: MediaDeviceUid) => void
   onStartRecording?: () => void
   onStopRecording?: () => void
 }
@@ -147,8 +152,8 @@ export function RecorderControls(
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => onAddVideoTrack?.(devUid as string)}>
-            { videoDevices.map(dev => <Item key={createDeviceUniqueId(dev)}>{dev.label}</Item>) }
+          <Menu onAction={devUid => onAddVideoTrack?.(parseDeviceKey(devUid))}>
+            { videoDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
 
@@ -157,8 +162,8 @@ export function RecorderControls(
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => onAddAudioTrack?.(devUid as string)}>
-            { audioDevices.map(dev => <Item key={createDeviceUniqueId(dev)}>{dev.label}</Item>) }
+          <Menu onAction={devUid => onAddAudioTrack?.(parseDeviceKey(devUid))}>
+            { audioDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
 

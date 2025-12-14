@@ -1,41 +1,45 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
-import { gatherBrowserStorageInfo, BrowserStorage } from "../utils/browserStorage";
-
-const browserStorageObservers = new Set<() => void>();
-let currentBrowserStorageInfo: BrowserStorage = { recordings: [] };
-
-/**
- * Every file system operation that changes the result of gatherBrowserStorageInfo needs to call this to
- * update all subscribed components.
- *
- * In the future this should probably use https://developer.mozilla.org/en-US/docs/Web/API/FileSystemObserver,
- * but at the moment that is experimental and only available in chromium.
- */
-export async function updateBrowserStorageHook() {
-  currentBrowserStorageInfo = await gatherBrowserStorageInfo();
-
-  for(const callback of browserStorageObservers) {
-    callback();
-  }
-}
-
-function subscribeToBrowserStorage(onStoreChange: () => void) {
-  browserStorageObservers.add(onStoreChange);
-  return () => browserStorageObservers.delete(onStoreChange);
-}
-
-const getCurrentBrowserStorageInfo = () => currentBrowserStorageInfo;
+import { useEffect } from "react";
+import { deleteRecording, RecordingFileInfo, RecordingFileList } from "../utils/browserStorage";
+import { useAppStore } from "./useAppStore";
+import { fileSizeOverrideKey } from "../store/activeRecordingSlice";
 
 /**
  * UI hook to get the current browser storage information and be re-rendered when it changes.
  */
 export function useBrowserStorage() {
-  // gather browser storage info on first client-side render
-  useEffect(() => {
-    updateBrowserStorageHook();
-  }, []);
+  const quota = useAppStore(state => state.quota);
+  const usage = useAppStore(state => state.usage);
+  const savedRecordings = useAppStore(state => state.savedRecordings);
+  const fileSizeOverrides = useAppStore(state => state.fileSizeOverrides);
 
-  return useSyncExternalStore(subscribeToBrowserStorage, getCurrentBrowserStorageInfo, getCurrentBrowserStorageInfo);
+  const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
+
+  useEffect(() => {
+    // gather browser storage info on first client-side render
+    updateBrowserStorage();
+  }, [ updateBrowserStorage ]);
+
+  // Replace sizes for files that are currently being written to with our own byte count; OPFS
+  // only reports their size after the corresponding stream is closed.
+  const adjustedRecordings = savedRecordings.map(rec => <RecordingFileList> {
+    ...rec,
+    files: rec.files.map(file => <RecordingFileInfo> {
+      ...file,
+      size: fileSizeOverrides.get(fileSizeOverrideKey(rec.name, file.name)) ?? file.size
+    })
+  });
+
+  const removeSavedRecording = (recordingName: string) => {
+    deleteRecording(recordingName);
+    updateBrowserStorage();
+  };
+
+  return {
+    quota,
+    usage,
+    savedRecordings: adjustedRecordings,
+    removeSavedRecording
+  };
 }
