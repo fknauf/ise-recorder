@@ -16,7 +16,7 @@ export function useActiveRecording() {
   const resetFileSizeOverrides = useAppStore(state => state.resetFileSizeOverrides);
   const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
   const updateQuotaInformation = useAppStore(state => state.updateQuotaInformation);
-  const registerChunk = useAppStore(state => state.registerChunk);
+  const overrideFileSize = useAppStore(state => state.overrideFileSize);
 
   const {
     lectureTitle,
@@ -60,7 +60,7 @@ export function useActiveRecording() {
     };
 
     const onChunkWritten = (recordingName: string, filename: string, chunkSize: number) => {
-      registerChunk(recordingName, filename, chunkSize);
+      overrideFileSize(recordingName, filename, oldSize => oldSize + chunkSize);
       // no need to await, we can continue before the quota warning updates
       updateQuotaInformation();
     };

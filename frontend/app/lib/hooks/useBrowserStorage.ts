@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { deleteRecording, RecordingFileInfo, RecordingFileList } from "../utils/browserStorage";
 import { useAppStore } from "./useAppStore";
-import { fileSizeOverrideKey } from "../store/activeRecordingSlice";
+import { fileSizeOverrideKey } from "../store/store";
 
 /**
  * UI hook to get the current browser storage information and be re-rendered when it changes.

@@ -8,7 +8,7 @@ import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
 import Stop from "@spectrum-icons/workflow/Stop";
 import isEmail from "validator/es/lib/isEmail";
 import { unsafeTitleCharacters } from "../utils/recording";
-import { MediaDeviceUid } from "../store/mediaDevicesSlice";
+import { MediaDeviceUid } from "../store/store";
 
 export type RecorderState = "idle" | "starting" | "recording" | "stopping";
 
