@@ -9,6 +9,10 @@ import Stop from "@spectrum-icons/workflow/Stop";
 import isEmail from "validator/es/lib/isEmail";
 import { unsafeTitleCharacters } from "../utils/recording";
 import { MediaDeviceUid } from "../store/store";
+import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
+import { useMediaDevices } from "../hooks/useMediaDevices";
+import { useLecture } from "../hooks/useLecture";
+import { useServerEnv } from "../hooks/useServerEnv";
 
 export type RecorderState = "idle" | "starting" | "recording" | "stopping";
 
@@ -20,25 +24,24 @@ const parseDeviceKey = (devUid: Key): MediaDeviceUid =>
 const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || "unsafe character in lecture title";
 const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
 
-interface RecordButtonProps {
-  recorderState: RecorderState
-  onStartRecording?: () => void
-  onStopRecording?: () => void
-}
-
-function RecordButton(
-  { recorderState, onStartRecording, onStopRecording }: Readonly<RecordButtonProps>
-) {
+function RecordButton() {
   // The design is very human.
   //
   // We're trying to give sensible cues to the user here. That is, a visible "I'm working" signal is given during stopping to
   // pacify the user for a few seconds if we still have to retry sending a chunk, but not while starting because when we switch
   // to the "Stop recording" button the "I'm working" signal disappears even though the user just told the system to start working.
   // So in that case we just disable the button to prevent stop signals from being sent before we're in a state to process them.
-  switch(recorderState) {
+  const activeRecording = useActiveRecording();
+
+  const {
+    startRecording,
+    stopRecording
+  } = useStartStopRecording();
+
+  switch(activeRecording.state) {
     case "idle":
       return (
-        <ActionButton onPress={onStartRecording}>
+        <ActionButton onPress={startRecording}>
           <Circle/>
           <Text>Start Recording</Text>
         </ActionButton>
@@ -52,7 +55,7 @@ function RecordButton(
       );
     case "recording":
       return (
-        <ActionButton onPress={onStopRecording}>
+        <ActionButton onPress={stopRecording}>
           <Stop/>
           <Text>Stop Recording</Text>
         </ActionButton>
@@ -69,23 +72,6 @@ function RecordButton(
   }
 }
 
-export interface RecorderControlsProps {
-  lectureTitle: string
-  lecturerEmail: string
-  hasEmailField: boolean
-  recorderState: RecorderState
-  videoDevices: readonly MediaDeviceInfo[]
-  audioDevices: readonly MediaDeviceInfo[]
-  onLectureTitleChanged?: (lectureTitle: string) => void
-  onLecturerEmailChanged?: (lectureTitle: string) => void
-  onOpenDeviceMenu?: () => void
-  onAddDisplayTrack?: () => void
-  onAddVideoTrack?: (devUid: MediaDeviceUid) => void
-  onAddAudioTrack?: (devUid: MediaDeviceUid) => void
-  onStartRecording?: () => void
-  onStopRecording?: () => void
-}
-
 /**
  * The controls on top of the main page.
  *
@@ -95,25 +81,31 @@ export interface RecorderControlsProps {
  *
  * Controls are disabled (except for the "stop recording" button) while a recording is underway.
  */
-export function RecorderControls(
-  {
+export function RecorderControls() {
+  const {
+    apiUrl
+  } = useServerEnv();
+
+  const {
     lectureTitle,
     lecturerEmail,
-    hasEmailField,
-    recorderState,
+    setLectureTitle,
+    setLecturerEmail
+  } = useLecture();
+
+  const activeRecording = useActiveRecording();
+
+  const {
     videoDevices,
     audioDevices,
-    onLectureTitleChanged,
-    onLecturerEmailChanged,
-    onOpenDeviceMenu,
-    onAddDisplayTrack,
-    onAddVideoTrack,
-    onAddAudioTrack,
-    onStartRecording,
-    onStopRecording
-  }: Readonly<RecorderControlsProps>
-) {
-  const hasDisabledTrackControls = recorderState !== "idle";
+    openDisplayStream,
+    openVideoStream,
+    openAudioStream,
+    refreshMediaDevices
+  } = useMediaDevices();
+
+  const hasEmailField = apiUrl !== undefined;
+  const hasDisabledTrackControls = activeRecording.state !== "idle";
 
   return (
     <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
@@ -123,7 +115,7 @@ export function RecorderControls(
         isReadOnly={hasDisabledTrackControls}
         isDisabled={hasDisabledTrackControls}
         validate={validateLectureTitle}
-        onChange={onLectureTitleChanged}
+        onChange={setLectureTitle}
         autoFocus
       />
 
@@ -135,45 +127,41 @@ export function RecorderControls(
             isReadOnly={hasDisabledTrackControls}
             isDisabled={hasDisabledTrackControls}
             validate={validateEmail}
-            onChange={onLecturerEmailChanged}
+            onChange={setLecturerEmail}
           />
       }
 
       <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        <ActionButton onPress={onAddDisplayTrack} isDisabled={hasDisabledTrackControls}>
+        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls}>
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
 
-        <MenuTrigger onOpenChange={onOpenDeviceMenu}>
+        <MenuTrigger onOpenChange={refreshMediaDevices}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => onAddVideoTrack?.(parseDeviceKey(devUid))}>
+          <Menu onAction={devUid => openVideoStream(parseDeviceKey(devUid))}>
             { videoDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
 
-        <MenuTrigger onOpenChange={onOpenDeviceMenu}>
+        <MenuTrigger onOpenChange={refreshMediaDevices}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => onAddAudioTrack?.(parseDeviceKey(devUid))}>
+          <Menu onAction={devUid => openAudioStream(parseDeviceKey(devUid))}>
             { audioDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
 
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        <RecordButton
-          recorderState={recorderState}
-          onStartRecording={onStartRecording}
-          onStopRecording={onStopRecording}
-        />
+        <RecordButton/>
       </Flex>
     </Flex>
   );

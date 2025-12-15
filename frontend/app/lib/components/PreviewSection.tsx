@@ -4,6 +4,8 @@ import { ReactNode } from "react";
 import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
+import { useMediaTracks } from "../hooks/useMediaTracks";
+import { useActiveRecording } from "../hooks/useActiveRecording";
 
 interface PreviewCardProps {
   label: string | undefined
@@ -36,40 +38,37 @@ const PreviewCard = (
  * Previews section on the main page, basically a collection of preview cards for all active streams.
  */
 export interface PreviewSectionProps {
-  displayTracks: readonly MediaStreamTrack[]
-  videoTracks: readonly MediaStreamTrack[]
-  audioTracks: readonly MediaStreamTrack[]
-  mainDisplay: MediaStreamTrack | undefined
-  overlay: MediaStreamTrack | undefined
   canvasWidth: number
   canvasHeight: number
-  hasDisabledButtons: boolean
-  onMainDisplayChanged: (track: MediaStreamTrack | undefined) => void
-  onOverlayChanged: (track: MediaStreamTrack | undefined) => void
-  onRemoveTrack: (track: MediaStreamTrack) => void
 }
 
 export function PreviewSection(
   {
+    canvasWidth,
+    canvasHeight
+  }: Readonly<PreviewSectionProps>
+) {
+  const {
     displayTracks,
     videoTracks,
     audioTracks,
     mainDisplay,
     overlay,
-    canvasWidth,
-    canvasHeight,
-    hasDisabledButtons,
-    onMainDisplayChanged,
-    onOverlayChanged,
-    onRemoveTrack
-  }: Readonly<PreviewSectionProps>
-) {
+    selectMainDisplay,
+    selectOverlay,
+    removeTrack
+  } = useMediaTracks();
+
+  const activeRecording = useActiveRecording();
+
+  const hasDisabledButtons = activeRecording.state !== "idle";
+
   const video_preview_card = (track: MediaStreamTrack, label: string) =>
     <PreviewCard
       key={`preview-card-${track.id}`}
       label={label}
       hasDisabledButtons={hasDisabledButtons}
-      onRemove={() => onRemoveTrack(track)}
+      onRemove={() => removeTrack(track)}
     >
       <VideoPreview
         track={track}
@@ -78,8 +77,8 @@ export function PreviewSection(
         switchesDisabled={hasDisabledButtons}
         isMainDisplay={mainDisplay === track}
         isOverlay={overlay === track}
-        onToggleMainDisplay={isSelected => onMainDisplayChanged(isSelected ? track : undefined)}
-        onToggleOverlay={isSelected => onOverlayChanged(isSelected ? track : undefined)}
+        onToggleMainDisplay={isSelected => selectMainDisplay(isSelected ? track : undefined)}
+        onToggleOverlay={isSelected => selectOverlay(isSelected ? track : undefined)}
       />
     </PreviewCard>;
 
@@ -97,7 +96,7 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={track.label}
             hasDisabledButtons={hasDisabledButtons}
-            onRemove={() => onRemoveTrack(track)}
+            onRemove={() => removeTrack(track)}
           >
             <AudioPreview
               track={track}

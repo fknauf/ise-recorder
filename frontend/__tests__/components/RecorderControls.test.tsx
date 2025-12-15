@@ -3,18 +3,86 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RecorderControls } from "@/app/lib/components/RecorderControls";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { useServerEnv } from "@/app/lib/hooks/useServerEnv";
+import { useLecture } from "@/app/lib/hooks/useLecture";
+import { useActiveRecording, useStartStopRecording } from "@/app/lib/hooks/useActiveRecording";
+import { useMediaDevices } from "@/app/lib/hooks/useMediaDevices";
+import { ActiveRecording } from "@/app/lib/store/store";
+
+vi.mock("@/app/lib/hooks/useServerEnv");
+vi.mock("@/app/lib/hooks/useLecture");
+vi.mock("@/app/lib/hooks/useActiveRecording");
+vi.mock("@/app/lib/hooks/useMediaDevices");
+
+function setupMockHooks(
+  apiUrl: string | undefined,
+  lectureTitle: string,
+  lecturerEmail: string,
+  videoDevices: MediaDeviceInfo[],
+  audioDevices: MediaDeviceInfo[],
+  activeRecording: ActiveRecording
+) {
+  const setLectureTitle = vi.fn();
+  const setLecturerEmail = vi.fn();
+  const startRecording = vi.fn();
+  const stopRecording = vi.fn();
+  const refreshMediaDevices = vi.fn();
+  const openDisplayStream = vi.fn();
+  const openVideoStream = vi.fn();
+  const openAudioStream = vi.fn();
+
+  vi.mocked(useServerEnv).mockReturnValue({
+    apiUrl: apiUrl
+  });
+
+  vi.mocked(useLecture).mockReturnValue({
+    lectureTitle,
+    lecturerEmail,
+    setLectureTitle,
+    setLecturerEmail
+  });
+
+  vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
+
+  vi.mocked(useStartStopRecording).mockReturnValue({
+    startRecording,
+    stopRecording
+  });
+
+  vi.mocked(useMediaDevices).mockReturnValue({
+    videoDevices,
+    audioDevices,
+    refreshMediaDevices,
+    openDisplayStream,
+    openVideoStream,
+    openAudioStream
+  });
+
+  return {
+    setLectureTitle,
+    setLecturerEmail,
+    startRecording,
+    stopRecording,
+    refreshMediaDevices,
+    openDisplayStream,
+    openVideoStream,
+    openAudioStream
+  };
+}
 
 test("RecorderControls renders controls correctly when idle", async () => {
+  setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "idle" }
+  );
+
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="idle"
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -43,16 +111,18 @@ test("RecorderControls renders controls correctly when idle", async () => {
 });
 
 test("RecorderControls renders controls correctly when recording", async () => {
+  setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "recording", name: "PSU_TIMESTAMP", stop: vi.fn() }
+  );
+
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="recording"
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -81,16 +151,18 @@ test("RecorderControls renders controls correctly when recording", async () => {
 });
 
 test("RecorderControls renders controls correctly when starting a recording", async () => {
+  setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "starting", name: "PSU_TIMESTAMP" }
+  );
+
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="starting"
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -119,16 +191,18 @@ test("RecorderControls renders controls correctly when starting a recording", as
 });
 
 test("RecorderControls renders controls correctly when stopping a recording", async () => {
+  setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "stopping", name: "PSU_TIMESTAMP" }
+  );
+
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="starting"
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -156,17 +230,19 @@ test("RecorderControls renders controls correctly when stopping a recording", as
   expect(buttons[3]).toBeDisabled();
 });
 
-test("RecorderControls hides the e-mail field when specified", async () => {
+test("RecorderControls hides the e-mail field when apiUrl is undefined", async () => {
+  setupMockHooks(
+    undefined,
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "idle" }
+  );
+
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={false}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="idle"
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -177,27 +253,18 @@ test("RecorderControls hides the e-mail field when specified", async () => {
 });
 
 test("RecorderControls handles the start recording button properly", async () => {
-  const onStartRecording = vi.fn();
-  const onDummy = vi.fn();
+  const callbacks = setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "idle" }
+  );
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        onLectureTitleChanged={onDummy}
-        onLecturerEmailChanged={onDummy}
-        onOpenDeviceMenu={onDummy}
-        onAddDisplayTrack={onDummy}
-        onAddVideoTrack={onDummy}
-        onAddAudioTrack={onDummy}
-        onStartRecording={onStartRecording}
-        onStopRecording={onDummy}
-        recorderState="idle"
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -207,32 +274,30 @@ test("RecorderControls handles the start recording button properly", async () =>
   expect(buttons[3]).toHaveTextContent("Start Recording");
   await user.click(buttons[3]);
 
-  expect(onStartRecording).toHaveBeenCalled();
-  expect(onDummy).not.toHaveBeenCalled();
+  expect(callbacks.startRecording).toHaveBeenCalled();
+  expect(callbacks.stopRecording).not.toHaveBeenCalled();
+
+  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
+  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
+  expect(callbacks.refreshMediaDevices).not.toHaveBeenCalled();
+  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
+  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
+  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
 });
 
 test("RecorderControls handles the stop recording button properly", async () => {
-  const onStopRecording = vi.fn();
-  const onDummy = vi.fn();
+  const callbacks = setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "recording", name: "PSU_TIMESTAMP", stop: vi.fn() }
+  );
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        onLectureTitleChanged={onDummy}
-        onLecturerEmailChanged={onDummy}
-        onOpenDeviceMenu={onDummy}
-        onAddDisplayTrack={onDummy}
-        onAddVideoTrack={onDummy}
-        onAddAudioTrack={onDummy}
-        onStartRecording={onDummy}
-        onStopRecording={onStopRecording}
-        recorderState="recording"
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -242,8 +307,15 @@ test("RecorderControls handles the stop recording button properly", async () => 
   expect(buttons[3]).toHaveTextContent("Stop Recording");
   await user.click(buttons[3]);
 
-  expect(onStopRecording).toHaveBeenCalled();
-  expect(onDummy).not.toHaveBeenCalled();
+  expect(callbacks.stopRecording).toHaveBeenCalled();
+  expect(callbacks.startRecording).not.toHaveBeenCalled();
+
+  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
+  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
+  expect(callbacks.refreshMediaDevices).not.toHaveBeenCalled();
+  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
+  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
+  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
 });
 
 test("RecorderControls show video device menu", async () => {
@@ -257,35 +329,25 @@ test("RecorderControls show video device menu", async () => {
     makeDevice("c2", "2", "audioinput", "Camera 2")
   ];
 
-  const onOpenDeviceMenu = vi.fn();
-  const onAddVideoTrack = vi.fn();
-  const onDummy = vi.fn();
+  const callbacks = setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    videoDevices,
+    [],
+    { state: "idle" }
+  );
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={videoDevices}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="idle"
-        onOpenDeviceMenu={onOpenDeviceMenu}
-        onAddAudioTrack={onDummy}
-        onAddDisplayTrack={onDummy}
-        onAddVideoTrack={onAddVideoTrack}
-        onLectureTitleChanged={onDummy}
-        onLecturerEmailChanged={onDummy}
-        onStartRecording={onDummy}
-        onStopRecording={onDummy}
-      />
+      <RecorderControls/>
     </Provider>
   );
 
   const user = userEvent.setup();
 
   await user.click(tree.getByText("Add Video Source"));
-  expect(onOpenDeviceMenu).toHaveBeenCalledOnce();
+  expect(callbacks.refreshMediaDevices).toHaveBeenCalledOnce();
 
   const videoMenu = await screen.findAllByRole("menuitem");
   expect(videoMenu.length).toBe(2);
@@ -293,10 +355,16 @@ test("RecorderControls show video device menu", async () => {
   expect(videoMenu[1]).toHaveTextContent("Camera 2");
 
   await user.click(videoMenu[0]);
-  expect(onAddVideoTrack).toHaveBeenCalledExactlyOnceWith({ groupId: "1", deviceId: "c1" });
+  expect(callbacks.openVideoStream).toHaveBeenCalledExactlyOnceWith({ groupId: "1", deviceId: "c1" });
+  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
+  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
 
-  expect(onDummy).not.toHaveBeenCalled();
+  expect(callbacks.startRecording).not.toHaveBeenCalled();
+  expect(callbacks.stopRecording).not.toHaveBeenCalled();
+  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
+  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
 });
+
 
 test("RecorderControls show audio device menu", async () => {
   const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
@@ -310,35 +378,25 @@ test("RecorderControls show audio device menu", async () => {
     makeDevice("m3", "3", "audioinput", "Microphone 3")
   ];
 
-  const onOpenDeviceMenu = vi.fn();
-  const onAddAudioTrack = vi.fn();
-  const onDummy = vi.fn();
+  const callbacks = setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    audioDevices,
+    { state: "idle" }
+  );
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={audioDevices}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="idle"
-        onOpenDeviceMenu={onOpenDeviceMenu}
-        onAddAudioTrack={onAddAudioTrack}
-        onAddDisplayTrack={onDummy}
-        onAddVideoTrack={onDummy}
-        onLectureTitleChanged={onDummy}
-        onLecturerEmailChanged={onDummy}
-        onStartRecording={onDummy}
-        onStopRecording={onDummy}
-      />
+      <RecorderControls/>
     </Provider>
   );
 
   const user = userEvent.setup();
 
   await user.click(tree.getByText("Add Audio Source"));
-  expect(onOpenDeviceMenu).toHaveBeenCalledOnce();
+  expect(callbacks.refreshMediaDevices).toHaveBeenCalledOnce();
 
   const audioMenu = await screen.findAllByRole("menuitem");
   expect(audioMenu.length).toBe(3);
@@ -347,32 +405,29 @@ test("RecorderControls show audio device menu", async () => {
   expect(audioMenu[2]).toHaveTextContent("Microphone 3");
 
   await user.click(audioMenu[1]);
-  expect(onAddAudioTrack).toHaveBeenCalledExactlyOnceWith({ groupId: "2", deviceId: "m2" });
+  expect(callbacks.openAudioStream).toHaveBeenCalledExactlyOnceWith({ groupId: "2", deviceId: "m2" });
+  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
+  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
+
+  expect(callbacks.startRecording).not.toHaveBeenCalled();
+  expect(callbacks.stopRecording).not.toHaveBeenCalled();
+  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
+  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
 });
 
 test("RecorderControls handles lecture metadata", async () => {
-  const onLectureTitleChanged = vi.fn();
-  const onLecturerEmailChanged = vi.fn();
-  const onDummy = vi.fn();
+  const callbacks = setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "idle" }
+  );
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <RecorderControls
-        audioDevices={[]}
-        videoDevices={[]}
-        hasEmailField={true}
-        lectureTitle="PSU"
-        lecturerEmail="lecturer@vss.uni-hannover.de"
-        recorderState="idle"
-        onOpenDeviceMenu={onDummy}
-        onAddAudioTrack={onDummy}
-        onAddDisplayTrack={onDummy}
-        onAddVideoTrack={onDummy}
-        onLectureTitleChanged={onLectureTitleChanged}
-        onLecturerEmailChanged={onLecturerEmailChanged}
-        onStartRecording={onDummy}
-        onStopRecording={onDummy}
-      />
+      <RecorderControls/>
     </Provider>
   );
 
@@ -382,11 +437,16 @@ test("RecorderControls handles lecture metadata", async () => {
   // Hard to force rerenders here, though.
   await user.click(tree.getByLabelText("Lecture Title"));
   await user.type(tree.getByLabelText("Lecture Title"), "2");
-  expect(onLectureTitleChanged).toHaveBeenCalledExactlyOnceWith("PSU2");
+  expect(callbacks.setLectureTitle).toHaveBeenCalledExactlyOnceWith("PSU2");
 
   await user.click(tree.getByLabelText("e-Mail"));
   await user.type(tree.getByLabelText("e-Mail"), "2");
-  expect(onLecturerEmailChanged).toHaveBeenCalledExactlyOnceWith("lecturer@vss.uni-hannover.de2");
+  expect(callbacks.setLecturerEmail).toHaveBeenCalledExactlyOnceWith("lecturer@vss.uni-hannover.de2");
 
-  expect(onDummy).not.toHaveBeenCalled();
+  expect(callbacks.refreshMediaDevices).not.toHaveBeenCalled();
+  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
+  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
+  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
+  expect(callbacks.startRecording).not.toHaveBeenCalled();
+  expect(callbacks.stopRecording).not.toHaveBeenCalled();
 });

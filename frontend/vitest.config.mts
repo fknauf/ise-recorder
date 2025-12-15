@@ -40,7 +40,11 @@ export default defineConfig({
     globals: true,
     server: {
       deps: {
-        inline: [/@react-spectrum\/.*/, /@spectrum-icons\/.*/, /@adobe\/.*/]
+        inline: [
+          /@react-spectrum\/.*/,
+          /@spectrum-icons\/.*/,
+          /@adobe\/.*/
+        ]
       }
     }
   }

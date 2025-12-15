@@ -1,6 +1,7 @@
 "use client";
 
 import { Content, Flex, Heading, InlineAlert } from "@adobe/react-spectrum";
+import { useBrowserStorage } from "../hooks/useBrowserStorage";
 
 const mibFormatter = new Intl.NumberFormat("en-us", { minimumFractionDigits: 0, maximumFractionDigits: 0, useGrouping: false });
 
@@ -13,15 +14,16 @@ function formatMib(x: number | undefined) {
 }
 
 export interface QuotaWarningProps {
-  usage?: number
-  quota?: number
+  thresholdBytes: number
 }
 
 /**
  * Shows a warning message iff the browser's OPFS quota is almost used up.
  */
-export function QuotaWarning({ usage, quota }: Readonly<QuotaWarningProps>) {
-  const quotaCritical = quota !== undefined && usage !== undefined && quota - usage < 2 ** 30;
+export function QuotaWarning({ thresholdBytes }: Readonly<QuotaWarningProps>) {
+  const { quota, usage } = useBrowserStorage();
+
+  const quotaCritical = quota !== undefined && usage !== undefined && quota - usage < thresholdBytes;
 
   if(!quotaCritical) {
     return <></>;

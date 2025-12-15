@@ -10,8 +10,11 @@ function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
 }
 
-export function useActiveRecording() {
-  const activeRecording = useAppStore(state => state.activeRecording);
+export const useActiveRecording = () => useAppStore(state => state.activeRecording);
+
+export function useStartStopRecording() {
+  const activeRecording = useActiveRecording();
+
   const setActiveRecording = useAppStore(state => state.setActiveRecording);
   const resetFileSizeOverrides = useAppStore(state => state.resetFileSizeOverrides);
   const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
@@ -96,7 +99,6 @@ export function useActiveRecording() {
   };
 
   return {
-    activeRecording,
     startRecording,
     stopRecording
   };

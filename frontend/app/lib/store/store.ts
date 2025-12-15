@@ -3,7 +3,7 @@
 import { createStore } from "zustand/vanilla";
 import { persist } from "zustand/middleware";
 import { ServerEnv } from "../utils/serverEnv";
-import { gatherRecordingsList, RecordingFileList } from "../utils/browserStorage";
+import { gatherRecordingsList, RecordingFileInfo, RecordingFileList } from "../utils/browserStorage";
 import { StateCreator } from "zustand";
 
 export type ActiveRecording = {
@@ -40,8 +40,6 @@ export const createDeviceConstraints = (devUid: MediaDeviceUid): MediaTrackConst
     deviceId: { exact: devUid.deviceId }
   });
 
-export const fileSizeOverrideKey = (recordingName: string, filename: string) => `${recordingName}/${filename}`;
-
 type TrackSelection = MediaStreamTrack | undefined;
 
 export interface AppStoreState {
@@ -57,10 +55,10 @@ export interface AppStoreState {
   mainDisplay: MediaStreamTrack | undefined
   overlay: MediaStreamTrack | undefined
   activeRecording: ActiveRecording
-  fileSizeOverrides: Map<string, number>
   quota: number | undefined
   usage: number | undefined
   savedRecordings: readonly RecordingFileList[]
+  adjustedSavedRecordings: readonly RecordingFileList[]
 
   setLectureTitle: (lectureTitle: string) => void
   setLecturerEmail: (lecturerEmail: string) => void
@@ -98,6 +96,7 @@ const createRawAppStore = (
   quota: undefined,
   usage: undefined,
   savedRecordings: [],
+  adjustedSavedRecordings: [],
 
   setLectureTitle: lectureTitle => set({ lectureTitle }),
   setLecturerEmail: lecturerEmail => set({ lecturerEmail }),
@@ -164,18 +163,29 @@ const createRawAppStore = (
     set(state => ({ activeRecording: applyStateUpdate(state.activeRecording, newActiveRecording) })),
 
   overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) => {
-    set(state => {
-      const key = fileSizeOverrideKey(recordingName, filename);
-      const oldSize = state.fileSizeOverrides.get(key) ?? 0;
-      const newSize = applyStateUpdate(oldSize, newFileSize);
+    const overrideFile = (file: RecordingFileInfo) => (
+      file.name === filename
+        ? {
+          ...file,
+          size: applyStateUpdate(file.size ?? 0, newFileSize)
+        }
+        : file
+    );
 
-      return {
-        fileSizeOverrides: new Map(state.fileSizeOverrides).set(key, newSize)
-      };
-    });
+    const overrideRecording = (recording: RecordingFileList) => (
+      recording.name === recordingName
+        ? {
+          ...recording,
+          files: recording.files.map(overrideFile)
+        }
+        : recording
+    );
+
+    set(state => ({ adjustedSavedRecordings: state.adjustedSavedRecordings.map(overrideRecording) }));
   },
 
-  resetFileSizeOverrides: () => set({ fileSizeOverrides: new Map() }),
+  resetFileSizeOverrides: () =>
+    set(state => ({ adjustedSavedRecordings: state.savedRecordings })),
 
   updateQuotaInformation: async () => {
     const { quota, usage } = await navigator.storage.estimate();
