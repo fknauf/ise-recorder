@@ -3,7 +3,7 @@
 import { createStore } from "zustand/vanilla";
 import { persist } from "zustand/middleware";
 import { ServerEnv } from "../utils/serverEnv";
-import { gatherRecordingsList, RecordingFileInfo, RecordingFileList } from "../utils/browserStorage";
+import { gatherRecordingsList, RecordingFileList } from "../utils/browserStorage";
 import { StateCreator } from "zustand";
 
 export type ActiveRecording = {

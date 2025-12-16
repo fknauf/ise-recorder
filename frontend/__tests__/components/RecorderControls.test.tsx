@@ -325,8 +325,8 @@ test("RecorderControls show video device menu", async () => {
   });
 
   const videoDevices = [
-    makeDevice("c1", "1", "audioinput", "Camera 1"),
-    makeDevice("c2", "2", "audioinput", "Camera 2")
+    makeDevice("c1", "1", "videoinput", "Camera 1"),
+    makeDevice("c2", "2", "videoinput", "Camera 2")
   ];
 
   const callbacks = setupMockHooks(
