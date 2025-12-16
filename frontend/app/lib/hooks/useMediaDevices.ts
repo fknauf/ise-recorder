@@ -23,7 +23,7 @@ export function useMediaDevices() {
   const setObtainedDevicePermissions = useAppStore(state => state.setObtainedDevicePermissions);
   const setMediaDevices = useAppStore(state => state.setMediaDevices);
   const addDisplayTracks = useAppStore(state => state.addDisplayTracks);
-  const addVideoTracks = useAppStore(state => state.addDisplayTracks);
+  const addVideoTracks = useAppStore(state => state.addVideoTracks);
   const addAudioTracks = useAppStore(state => state.addAudioTracks);
   const selectMainDisplay = useAppStore(state => state.selectMainDisplay);
   const selectOverlay = useAppStore(state => state.selectOverlay);
@@ -60,13 +60,13 @@ export function useMediaDevices() {
       } catch(e) {
         showError("Could not obtain device permissions", e);
       }
+    }
 
-      try {
-        const devs = await navigator.mediaDevices.enumerateDevices();
-        setMediaDevices(devs);
-      } catch(e) {
-        showError("Could not enumerate devices", e);
-      }
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      setMediaDevices(devs);
+    } catch(e) {
+      showError("Could not enumerate devices", e);
     }
   };
 
