@@ -12,7 +12,7 @@ export const AppStoreContext = createContext<StoreApi<AppStoreState> | undefined
 
 interface AppStoreProviderProps {
   serverEnv: ServerEnv
-  children: ReactNode
+  children?: ReactNode
 }
 
 export function AppStoreProvider({ serverEnv, children }: Readonly<AppStoreProviderProps>) {

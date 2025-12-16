@@ -28,6 +28,21 @@ function applyStateUpdate<T>(oldValue: T, update: StateUpdate<T>) {
   }
 }
 
+const overrideKey = (recordingName: string, filename: string) => `${recordingName}/${filename}`;
+
+function applyOverrides(
+  savedRecordings: readonly RecordingFileList[],
+  fileSizeOverrides: Map<string, number>
+): readonly RecordingFileList[] {
+  return savedRecordings.map(rec => ({
+    ...rec,
+    files: rec.files.map(file => ({
+      ...file,
+      size: fileSizeOverrides.get(overrideKey(rec.name, file.name)) ?? file.size
+    }))
+  }));
+}
+
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 export interface MediaDeviceUid {
   groupId: string
@@ -55,6 +70,7 @@ export interface AppStoreState {
   mainDisplay: MediaStreamTrack | undefined
   overlay: MediaStreamTrack | undefined
   activeRecording: ActiveRecording
+  fileSizeOverrides: Map<string, number>
   quota: number | undefined
   usage: number | undefined
   savedRecordings: readonly RecordingFileList[]
@@ -162,30 +178,23 @@ const createRawAppStore = (
   setActiveRecording: newActiveRecording =>
     set(state => ({ activeRecording: applyStateUpdate(state.activeRecording, newActiveRecording) })),
 
-  overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) => {
-    const overrideFile = (file: RecordingFileInfo) => (
-      file.name === filename
-        ? {
-          ...file,
-          size: applyStateUpdate(file.size ?? 0, newFileSize)
-        }
-        : file
-    );
+  overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) =>
+    set(state => {
+      const key = overrideKey(recordingName, filename);
+      const oldFileSize = state.fileSizeOverrides.get(key) ?? 0;
+      const newOverrides = new Map(state.fileSizeOverrides).set(key, applyStateUpdate(oldFileSize, newFileSize));
 
-    const overrideRecording = (recording: RecordingFileList) => (
-      recording.name === recordingName
-        ? {
-          ...recording,
-          files: recording.files.map(overrideFile)
-        }
-        : recording
-    );
-
-    set(state => ({ adjustedSavedRecordings: state.adjustedSavedRecordings.map(overrideRecording) }));
-  },
+      return {
+        adjustedSavedRecordings: applyOverrides(state.savedRecordings, newOverrides),
+        fileSizeOverrides: newOverrides
+      };
+    }),
 
   resetFileSizeOverrides: () =>
-    set(state => ({ adjustedSavedRecordings: state.savedRecordings })),
+    set(state => ({
+      fileSizeOverrides: new Map(),
+      adjustedSavedRecordings: state.savedRecordings
+    })),
 
   updateQuotaInformation: async () => {
     const { quota, usage } = await navigator.storage.estimate();
@@ -198,11 +207,12 @@ const createRawAppStore = (
       gatherRecordingsList()
     ]);
 
-    set({
+    set(state => ({
       quota: fs.quota,
       usage: fs.usage,
-      savedRecordings: recordings
-    });
+      savedRecordings: recordings,
+      adjustedSavedRecordings: applyOverrides(recordings, state.fileSizeOverrides)
+    }));
   }
 });
 
