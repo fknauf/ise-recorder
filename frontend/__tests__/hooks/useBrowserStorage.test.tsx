@@ -1,8 +1,8 @@
 import { expect, test, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { AppStoreProvider } from "@/app/lib/hooks/useAppStore";
+import { AppStoreProvider, useAppStore } from "@/app/lib/hooks/useAppStore";
 import { useBrowserStorage } from "@/app/lib/hooks/useBrowserStorage";
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { gatherRecordingsList, RecordingFileList } from "@/app/lib/utils/browserStorage";
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
@@ -52,5 +52,38 @@ test("useBrowserStorage initializes at first render", async () => {
     expect(renderResult.result.current.savedRecordings).toStrictEqual(mockRecordings);
     expect(renderResult.result.current.quota).toBe(10 * 2 ** 30);
     expect(renderResult.result.current.usage).toBe(1234);
+  });
+});
+
+test("useBrowserStorage reacts to file size overrides", async () => {
+  vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
+  navigator.storage.estimate = vi.fn().mockImplementation(async () => ({
+    quota: 10 * 2 ** 30,
+    usage: 1234
+  }));
+
+  const renderResult = renderHook(() => {
+    const overrideFileSize = useAppStore(state => state.overrideFileSize);
+
+    useEffect(() => {
+      overrideFileSize("FOO", "stream.webm", 42);
+    }, [ overrideFileSize ]);
+
+    return useBrowserStorage();
+  }, { wrapper });
+
+  await waitFor(() => {
+    const adjustedMockRecordings = mockRecordings.map(rec => (
+      rec.name === "FOO"
+        ? {
+          ...rec,
+          files: rec.files.map(file => (
+            file.name === "stream.webm" ? { ...file, size: 42 } : file
+          ))
+        }
+        : rec
+    ));
+
+    expect(renderResult.result.current.savedRecordings).toStrictEqual(adjustedMockRecordings);
   });
 });
