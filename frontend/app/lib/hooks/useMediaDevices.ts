@@ -29,22 +29,32 @@ export function useMediaDevices() {
   const selectOverlay = useAppStore(state => state.selectOverlay);
 
   const refreshMediaDevices = async () => {
-    // This is unreliable on Firefox 145; there we sometimes get "granted" even if the permission is actually "prompt".
-    // I suspect it depends on whether the user has given temporary permission to the site before, but it's hard
-    // to be sure. When Firefix misinforms us, we'll ask for permissions as normal but not realize that the user
-    // chose devices, so in that case we'll close the streams and the user has to pick from the menu.
+    // This is unreliable on Firefox. If the user has granted temporary permission to a site before, then reloads
+    // the site or restarts the browser, the permissions API will report "granted" even though the browser is going
+    // to prompt. Mozilla's position is that this is in spec, and the spec is evidently written to cover this
+    // behavior, insane as it may seem.
     const cameraPermissions = await navigator.permissions.query({ name: "camera" }).then(p => p.state);
     const microphonePermissions = await navigator.permissions.query({ name: "microphone" }).then(p => p.state);
     const userInteractionExpected = cameraPermissions === "prompt" || microphonePermissions === "prompt";
 
     if(!obtainedDevicePermissions || userInteractionExpected) {
       try {
+        const before = new Date();
+
         const stream = await navigator.mediaDevices.getUserMedia({
           video: cameraPermissions !== "denied",
           audio: microphonePermissions !== "denied"
         });
 
-        if(userInteractionExpected) {
+        // Because the user interaction prediction above is unreliable in Firefox, we use a timing side
+        // channel on FF to determine whether user interaction has actually occurred. The idea is that 
+        // rerendering without user interaction should take less than 200 ms and interacting witht the
+        // permissions dialog should take longer.
+        const after = new Date();
+        const duration = after.getTime() - before.getTime();
+        const userInteractionDected = navigator.userAgent.includes("Firefox") && duration > 200;
+
+        if(userInteractionExpected || userInteractionDected) {
           // User just saw the "please grant permissions" dialog and forgot about clicking our menu,
           // so in this case we just add the streams he just selected.
           addVideoTracks(stream.getVideoTracks());
