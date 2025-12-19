@@ -5,6 +5,7 @@ import { ReactNode, useEffect } from "react";
 import { useMediaDevices } from "@/app/lib/hooks/useMediaDevices";
 import userEvent from "@testing-library/user-event";
 import { useMediaTracks } from "@/app/lib/hooks/useMediaTracks";
+import _ from "lodash";
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
   <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
@@ -241,4 +242,279 @@ test("useMediaDevices().refreshMediaDevices adds streams when user was prompted 
     const tracks = await screen.queryAllByTestId("trackitem");
     expect(tracks.length).toBe(2);
   });
+});
+
+test("useMediaDevices().openDisplayStream works", async () => {
+  const mockTrack = { label: "abc" };
+  const mockStream = { getVideoTracks: vi.fn().mockReturnValue([ mockTrack ]) };
+
+  navigator.mediaDevices.getDisplayMedia = vi.fn().mockResolvedValue(mockStream);
+
+  const TestComponent = () => {
+    const { openDisplayStream } = useMediaDevices();
+    const displayTracks = useAppStore(state => state.displayTracks);
+    const mainDisplay = useAppStore(state => state.mainDisplay);
+    const overlay = useAppStore(state => state.overlay);
+
+    return (
+      <>
+        <button onClick={openDisplayStream}>Click</button>
+        <ul>
+          {displayTracks.map((track, ix) => <li key={ix}>{track.label}</li>)}
+        </ul>
+        <div data-testid="main">
+          { mainDisplay?.label }
+        </div>
+        <div data-testid="overlay">
+          { overlay?.label }
+        </div>
+      </>
+    );
+  };
+
+  render(<TestComponent/>, { wrapper });
+
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button"));
+  const trackList = await screen.findAllByRole("listitem");
+
+  expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledExactlyOnceWith();
+  expect(Object.keys(mockTrack).includes("onended")).toBeTruthy();
+  expect(trackList.length).toBe(1);
+  expect(trackList[0]).toHaveTextContent(mockTrack.label);
+  expect(await screen.findByTestId("main")).toHaveTextContent(mockTrack.label);
+  expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
+
+  const mockTrack2 = { label: "def" };
+  const mockStream2 = { getVideoTracks: vi.fn().mockReturnValue([ mockTrack2 ]) };
+
+  navigator.mediaDevices.getDisplayMedia = vi.fn().mockResolvedValue(mockStream2);
+
+  await user.click(await screen.findByRole("button"));
+  const trackList2 = await screen.findAllByRole("listitem");
+
+  expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledExactlyOnceWith();
+  expect(Object.keys(mockTrack2).includes("onended")).toBeTruthy();
+  expect(trackList2.length).toBe(2);
+  expect(trackList2[0]).toHaveTextContent(mockTrack.label);
+  expect(trackList2[1]).toHaveTextContent(mockTrack2.label);
+  expect(await screen.findByTestId("main")).toHaveTextContent(mockTrack.label);
+  expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
+});
+
+test("useMediaDevices().openVideoStream works", async () => {
+  const mockTracks = [
+    {
+      label: "abc",
+      getSettings: (): MediaTrackSettings => ({
+        groupId: "g1",
+        deviceId: "d1"
+      })
+    },
+    {
+      label: "def",
+      getSettings: (): MediaTrackSettings => ({
+        groupId: "g2",
+        deviceId: "d2"
+      })
+    }
+  ];
+
+  const mockStreams = [
+    { getVideoTracks: vi.fn().mockReturnValue([ mockTracks[0] ]) },
+    { getVideoTracks: vi.fn().mockReturnValue([ mockTracks[1] ]) }
+  ];
+
+  navigator.mediaDevices.getUserMedia = vi.fn().mockImplementation(async (constraints: MediaStreamConstraints) => {
+    if(_.isEqual(constraints, {
+      video: {
+        groupId: { exact: "g1" },
+        deviceId: { exact: "d1" }
+      },
+      audio: false
+    })) {
+      return mockStreams[0];
+    }
+
+    if(_.isEqual(constraints, {
+      video: {
+        groupId: { exact: "g2" },
+        deviceId: { exact: "d2" }
+      },
+      audio: false
+    })) {
+      return mockStreams[1];
+    }
+
+    throw new OverconstrainedError("");
+  });
+
+  const TestComponent = () => {
+    const { openVideoStream } = useMediaDevices();
+    const videoTracks = useAppStore(state => state.videoTracks);
+    const mainDisplay = useAppStore(state => state.mainDisplay);
+    const overlay = useAppStore(state => state.overlay);
+
+    return (
+      <>
+        <button data-testid="btn1" onClick={() => openVideoStream({ groupId: "g1", deviceId: "d1" })}>Dev 1</button>
+        <button data-testid="btn2" onClick={() => openVideoStream({ groupId: "g2", deviceId: "d2" })}>Dev 2</button>
+        <ul>
+          {videoTracks.map((track, ix) => <li key={ix}>{track.label}</li>)}
+        </ul>
+        <div data-testid="main">
+          { mainDisplay?.label }
+        </div>
+        <div data-testid="overlay">
+          { overlay?.label }
+        </div>
+      </>
+    );
+  };
+
+  render(<TestComponent/>, { wrapper });
+
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByTestId("btn1"));
+
+  let trackList = await screen.findAllByRole("listitem");
+
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({
+    video: {
+      groupId: { exact: "g1" },
+      deviceId: { exact: "d1" }
+    },
+    audio: false
+  });
+  expect(Object.keys(mockTracks[0]).includes("onended")).toBeTruthy();
+  expect(trackList.length).toBe(1);
+  expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
+  expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
+  expect(await screen.findByTestId("overlay")).toHaveTextContent(mockTracks[0].label);
+
+  await user.click(await screen.findByTestId("btn1"));
+
+  trackList = await screen.findAllByRole("listitem");
+  expect(trackList.length).toBe(1);
+
+
+  await user.click(await screen.findByTestId("btn2"));
+
+  trackList = await screen.findAllByRole("listitem");
+  expect(trackList.length).toBe(2);
+  expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
+  expect(trackList[1]).toHaveTextContent(mockTracks[1].label);
+  expect(Object.keys(mockTracks[1]).includes("onended")).toBeTruthy();
+  expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
+  expect(await screen.findByTestId("overlay")).toHaveTextContent(mockTracks[0].label);
+});
+
+test("useMediaDevices().openAudioStream works", async () => {
+  const mockTracks = [
+    {
+      label: "abc",
+      getSettings: (): MediaTrackSettings => ({
+        groupId: "g1",
+        deviceId: "d1"
+      })
+    },
+    {
+      label: "def",
+      getSettings: (): MediaTrackSettings => ({
+        groupId: "g2",
+        deviceId: "d2"
+      })
+    }
+  ];
+
+  const mockStreams = [
+    { getAudioTracks: vi.fn().mockReturnValue([ mockTracks[0] ]) },
+    { getAudioTracks: vi.fn().mockReturnValue([ mockTracks[1] ]) }
+  ];
+
+  navigator.mediaDevices.getUserMedia = vi.fn().mockImplementation(async (constraints: MediaStreamConstraints) => {
+    if(_.isEqual(constraints, {
+      video: false,
+      audio: {
+        groupId: { exact: "g1" },
+        deviceId: { exact: "d1" }
+      }
+    })) {
+      return mockStreams[0];
+    }
+
+    if(_.isEqual(constraints, {
+      video: false,
+      audio: {
+        groupId: { exact: "g2" },
+        deviceId: { exact: "d2" }
+      }
+    })) {
+      return mockStreams[1];
+    }
+
+    throw new OverconstrainedError("");
+  });
+
+  const TestComponent = () => {
+    const { openAudioStream } = useMediaDevices();
+    const audioTracks = useAppStore(state => state.audioTracks);
+    const mainDisplay = useAppStore(state => state.mainDisplay);
+    const overlay = useAppStore(state => state.overlay);
+
+    return (
+      <>
+        <button data-testid="btn1" onClick={() => openAudioStream({ groupId: "g1", deviceId: "d1" })}>Dev 1</button>
+        <button data-testid="btn2" onClick={() => openAudioStream({ groupId: "g2", deviceId: "d2" })}>Dev 2</button>
+        <ul>
+          {audioTracks.map((track, ix) => <li key={ix}>{track.label}</li>)}
+        </ul>
+        <div data-testid="main">
+          { mainDisplay?.label }
+        </div>
+        <div data-testid="overlay">
+          { overlay?.label }
+        </div>
+      </>
+    );
+  };
+
+  render(<TestComponent/>, { wrapper });
+
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByTestId("btn1"));
+
+  let trackList = await screen.findAllByRole("listitem");
+
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({
+    video: false,
+    audio: {
+      groupId: { exact: "g1" },
+      deviceId: { exact: "d1" }
+    }
+  });
+  expect(Object.keys(mockTracks[0]).includes("onended")).toBeTruthy();
+  expect(trackList.length).toBe(1);
+  expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
+  expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
+  expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
+
+  await user.click(await screen.findByTestId("btn1"));
+
+  trackList = await screen.findAllByRole("listitem");
+  expect(trackList.length).toBe(1);
+
+
+  await user.click(await screen.findByTestId("btn2"));
+
+  trackList = await screen.findAllByRole("listitem");
+  expect(trackList.length).toBe(2);
+  expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
+  expect(trackList[1]).toHaveTextContent(mockTracks[1].label);
+  expect(Object.keys(mockTracks[1]).includes("onended")).toBeTruthy();
+  expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
+  expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
 });

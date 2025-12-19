@@ -47,7 +47,7 @@ export function useMediaDevices() {
         });
 
         // Because the user interaction prediction above is unreliable in Firefox, we use a timing side
-        // channel on FF to determine whether user interaction has actually occurred. The idea is that 
+        // channel on FF to determine whether user interaction has actually occurred. The idea is that
         // rerendering without user interaction should take less than 200 ms and interacting witht the
         // permissions dialog should take longer.
         const after = new Date();
