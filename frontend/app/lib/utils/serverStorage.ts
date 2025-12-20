@@ -7,10 +7,14 @@ interface CallResult {
   errorMessage?: string
 }
 
+interface RetryPolicy {
+  retries: number
+  intervalMillis: number
+}
+
 async function callWithRetries(
   fn: () => Promise<CallResult> | CallResult,
-  retries: number,
-  intervalMillis: number
+  { retries, intervalMillis }: RetryPolicy
 ): Promise<CallResult> {
   let result = await fn();
 
@@ -45,15 +49,14 @@ export async function sendChunkToServer(
   chunk: Blob,
   recording: string,
   track: string,
-  index: number
+  index: number,
+  retryPolicy: RetryPolicy = { retries: 10, intervalMillis: 2000 }
 ) {
   if(!apiUrl) {
     return;
   }
 
   const chunkUrl = `${apiUrl}/api/chunks`;
-  const retries = 10;
-  const intervalMillis = 2000;
 
   const data = new FormData();
   data.append("recording", recording);
@@ -66,7 +69,7 @@ export async function sendChunkToServer(
     body: data
   };
 
-  const result = await callWithRetries(() => sendRequest(chunkUrl, request), retries, intervalMillis);
+  const result = await callWithRetries(() => sendRequest(chunkUrl, request), retryPolicy);
 
   if(!result.ok) {
     showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`);
@@ -76,15 +79,14 @@ export async function sendChunkToServer(
 export async function schedulePostprocessing(
   apiUrl: string | undefined,
   recording: string,
-  recipient?: string
+  recipient?: string,
+  retryPolicy: RetryPolicy = { retries: 5, intervalMillis: 1000 }
 ) {
   if(!apiUrl) {
     return;
   }
 
   const jobUrl = `${apiUrl}/api/jobs`;
-  const retries = 5;
-  const intervalMillis = 1000;
 
   const data = {
     recording,
@@ -99,7 +101,7 @@ export async function schedulePostprocessing(
     body: JSON.stringify(data)
   };
 
-  const result = await callWithRetries(() => sendRequest(jobUrl, request), retries, intervalMillis);
+  const result = await callWithRetries(() => sendRequest(jobUrl, request), retryPolicy);
 
   if(result.ok) {
     showSuccess(`Recording "${recording}" finished; postprocessing scheduled.`);
