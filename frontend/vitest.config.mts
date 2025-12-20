@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { playwright } from "@vitest/browser-playwright";
+import { listenForFileDownload } from "./__tests__/command-download";
 
 export default defineConfig({
   plugins: [
@@ -13,6 +14,7 @@ export default defineConfig({
       provider: playwright(),
       enabled: true,
       headless: true,
+      ui: false,
       // force viewport size to landscape mode for the VideoPreview tests, otherwise @eatsjobs/media-mock
       // switches width and height on us with unhelpful results. At the moment the whole project makes no
       // sense on mobile anyway, so limiting tests this way should be fine.
@@ -31,7 +33,10 @@ export default defineConfig({
             height: 1080
           }
         }
-      ]
+      ],
+      commands: {
+        listenForFileDownload
+      }
     },
     mockReset: true,
     environment: "jsdom",

@@ -1,6 +1,7 @@
 
-import { deleteRecording, gatherRecordingsList, openRecordingFileStream } from "@/app/lib/utils/browserStorage";
+import { deleteRecording, downloadFile, gatherRecordingsList, openRecordingFileStream } from "@/app/lib/utils/browserStorage";
 import { expect, test, afterEach } from "vitest";
+import { commands } from "vitest/browser";
 
 afterEach(async () => {
   const rootDir = await navigator.storage.getDirectory();
@@ -78,4 +79,18 @@ test("deleting a recording works", async () => {
   const list = await gatherRecordingsList();
 
   expect(list).toStrictEqual([]);
+});
+
+test("file download works", async () => {
+  const fooStream = await openRecordingFileStream("FOO", "stream.webm");
+  await fooStream.write("1234");
+  await fooStream.close();
+
+  const [ download ] = await Promise.all([
+    commands.listenForFileDownload(),
+    downloadFile("FOO", "stream.webm")
+  ]);
+
+  expect(download.suggestedFilename).toBe("stream.webm");
+  expect(download.content).toBe("1234");
 });
