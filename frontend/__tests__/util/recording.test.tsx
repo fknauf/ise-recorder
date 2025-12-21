@@ -53,7 +53,7 @@ test("recordLecture records lectures", async () => {
       ctx.lineTo(x, 0);
       ctx.stroke();
 
-      ++x;
+      x = (x + 1) % canvas.width;
     };
 
     const timer = setInterval(renderFunction, 1000 / 30);

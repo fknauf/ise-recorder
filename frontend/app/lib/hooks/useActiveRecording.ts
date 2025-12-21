@@ -70,10 +70,10 @@ export function useStartStopRecording() {
 
     const onFinished = async () => {
       window.removeEventListener("beforeunload", preventClosing);
-      setActiveRecording({ state: "idle" });
       // make sure the new file sizes are there before throwing away the overrides
       await updateBrowserStorage();
       resetFileSizeOverrides();
+      setActiveRecording({ state: "idle" });
     };
 
     recordLecture(

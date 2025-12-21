@@ -131,7 +131,10 @@ test("e2e recording a stream works", async () => {
     expect(tree.getByText("Start Recording")).toBeInTheDocument();
   });
 
-  await act(() => new Promise(resolve => setTimeout(resolve, 2000)));
+  // workaround around test framework limitations: There's still some background stuff going on that needs to conclude before
+  // gatherRecordingsList can see the file contents on the non-browser side. This double-yield seems to reliably do the trick.
+  await act(() => new Promise(resolve => setTimeout(resolve)));
+  await act(() => new Promise(resolve => setTimeout(resolve)));
 
   const recordings = await gatherRecordingsList();
 
