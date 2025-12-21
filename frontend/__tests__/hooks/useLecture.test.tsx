@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { AppStoreProvider } from "@/app/lib/hooks/useAppStore";
 import { ReactNode, useEffect } from "react";
@@ -9,9 +9,8 @@ const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
     {children}
   </AppStoreProvider>;
 
-beforeEach(() => {
-  localStorage.clear();
-});
+beforeEach(() => localStorage.clear());
+afterEach(() => localStorage.clear());
 
 test("useLecture starts with empty data", () => {
   const renderResult = renderHook(() => useLecture(), { wrapper });
