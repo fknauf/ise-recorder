@@ -10,6 +10,13 @@ interface FetchRequest {
 
 vi.mock("@/app/lib/utils/notifications");
 
+test("sending chunk to server is nop if api url is undefined", async () => {
+  const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
+  window.fetch = vi.fn();
+  await sendChunkToServer(undefined, chunk, "FOO", "stream.webm", 0);
+  expect(window.fetch).not.toHaveBeenCalled();
+});
+
 test("sending chunk to server", async () => {
   const apiUrl = "http://record.example.com";
 
@@ -109,6 +116,12 @@ test("sending chunk to broken server", { timeout: 30000 }, async () => {
     expect(requestBody.get("index")).toStrictEqual("42");
     expect(await (requestBody.get("chunk") as File).text()).toStrictEqual(await chunk.text());
   }
+});
+
+test("schedule postprocessing is nop if api url is undefined", async () => {
+  window.fetch = vi.fn();
+  await schedulePostprocessing(undefined, "FOO", "lecturer@example.com");
+  expect(window.fetch).not.toHaveBeenCalled();
 });
 
 test("schedule postprocessing", async () => {
