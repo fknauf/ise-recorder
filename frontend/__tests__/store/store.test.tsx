@@ -62,14 +62,15 @@ test("addDisplayTracks rigs track to remove itself from storage when stopped", a
   const tracks = stream.getVideoTracks();
 
   store.getState().addDisplayTracks(tracks);
-  store.getState().selectMainDisplay(tracks[0]);
-  store.getState().selectOverlay(tracks[0]);
 
   expect(store.getState().displayTracks.length).toBe(1);
   expect(store.getState().displayTracks[0]).toBe(tracks[0]);
   expect(store.getState().mainDisplay).toBe(tracks[0]);
-  expect(store.getState().overlay).toBe(tracks[0]);
+  expect(store.getState().overlay).toBeUndefined();
   expect(tracks[0].onended).toBeInstanceOf(Function);
+
+  store.getState().selectOverlay(tracks[0]);
+  expect(store.getState().overlay).toBe(tracks[0]);
 
   store.getState().removeTrack(tracks[0]);
   await new Promise(resolve => setTimeout(resolve));
@@ -95,15 +96,15 @@ test("addVideoTracks rigs track to remove itself from storage when stopped", asy
   const tracks = stream.getVideoTracks();
 
   store.getState().addVideoTracks(tracks);
-  store.getState().selectMainDisplay(tracks[0]);
-  store.getState().selectOverlay(tracks[0]);
 
   expect(store.getState().videoTracks.length).toBe(1);
   expect(store.getState().videoTracks[0]).toBe(tracks[0]);
-  expect(store.getState().mainDisplay).toBe(tracks[0]);
+  expect(store.getState().mainDisplay).toBeUndefined();
   expect(store.getState().overlay).toBe(tracks[0]);
   expect(tracks[0].onended).toBeInstanceOf(Function);
 
+  store.getState().selectMainDisplay(tracks[0]);
+  expect(store.getState().mainDisplay).toBe(tracks[0]);
   store.getState().removeTrack(tracks[0]);
   await new Promise(resolve => setTimeout(resolve));
 

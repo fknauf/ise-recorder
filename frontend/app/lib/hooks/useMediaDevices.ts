@@ -86,8 +86,6 @@ export function useMediaDevices() {
       const tracks = screenStream.getVideoTracks();
 
       addDisplayTracks(tracks);
-      // Usually the first/only captured screen is supposed to be the main display
-      selectMainDisplay(old => old ?? tracks[0]);
     } catch(e) {
       showError("Could not obtain display stream", e);
     }
@@ -106,8 +104,6 @@ export function useMediaDevices() {
       const tracks = stream.getVideoTracks();
 
       addVideoTracks(tracks);
-      // Usually the first camera feed is supposed to be the overlay
-      selectOverlay(old => old ?? tracks[0]);
     } catch(e) {
       showError("Could not obtain video stream", e);
     }

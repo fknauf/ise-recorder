@@ -136,7 +136,11 @@ const createRawAppStore = (
       };
     }
 
-    set(state => ({ displayTracks: [ ...state.displayTracks, ...tracks ] }));
+    // Usually the first/only captured screen is supposed to be the main display
+    set(state => ({
+      displayTracks: [ ...state.displayTracks, ...tracks ],
+      mainDisplay: state.mainDisplay ?? tracks[0]
+    }));
   },
 
   addVideoTracks: tracks => {
@@ -150,7 +154,11 @@ const createRawAppStore = (
       };
     }
 
-    set(state => ({ videoTracks: [ ...state.videoTracks, ...tracks ] }));
+    // Usually the first camera feed is supposed to be the overlay
+    set(state => ({
+      videoTracks: [ ...state.videoTracks, ...tracks ],
+      overlay: state.overlay ?? tracks[0]
+    }));
   },
 
   addAudioTracks: tracks => {
