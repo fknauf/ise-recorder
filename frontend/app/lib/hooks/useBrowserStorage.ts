@@ -19,8 +19,8 @@ export function useBrowserStorage() {
     updateBrowserStorage();
   }, [ updateBrowserStorage ]);
 
-  const removeSavedRecording = (recordingName: string) => {
-    deleteRecording(recordingName);
+  const removeSavedRecording = async (recordingName: string) => {
+    await deleteRecording(recordingName);
     updateBrowserStorage();
   };
 
