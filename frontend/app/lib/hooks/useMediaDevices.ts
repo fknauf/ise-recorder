@@ -25,8 +25,6 @@ export function useMediaDevices() {
   const addDisplayTracks = useAppStore(state => state.addDisplayTracks);
   const addVideoTracks = useAppStore(state => state.addVideoTracks);
   const addAudioTracks = useAppStore(state => state.addAudioTracks);
-  const selectMainDisplay = useAppStore(state => state.selectMainDisplay);
-  const selectOverlay = useAppStore(state => state.selectOverlay);
 
   const refreshMediaDevices = async () => {
     // This is unreliable on Firefox. If the user has granted temporary permission to a site before, then reloads
