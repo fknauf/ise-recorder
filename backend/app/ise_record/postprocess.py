@@ -141,12 +141,11 @@ def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
 
     return candidates[-1]
 
-def pip_filter(stream: VideoProperties) -> str:
-    """ Assembles the picture-in-picture rendering filter for ffmpeg """
-    outer_width, outer_height = pick_target_geometry(stream.crop)
+def generate_scale_filters(crop: Rectangle, outer_width: int, outer_height: int) -> Tuple[str, str]:
+    """ Generate the scaling filters for the main stream and overlay """
 
-    scaling_x = outer_width / stream.crop.width
-    scaling_y = outer_height / stream.crop.height
+    scaling_x = outer_width / crop.width
+    scaling_y = outer_height / crop.height
 
     # Use the smaller scaling factor so the full display is always in the output.
     if scaling_y < scaling_x:
@@ -155,7 +154,7 @@ def pip_filter(stream: VideoProperties) -> str:
 
         # Slides will appear on the left, so the full slack_width is available for the
         # overlay. But make sure it's still at least visible.
-        slack = outer_width - int(scaling_y * stream.crop.width)
+        slack = outer_width - int(scaling_y * crop.width)
         overlay_width = max(slack, outer_width // 10)
         overlay_scale = f'scale={overlay_width}:-1'
     else:
@@ -164,14 +163,25 @@ def pip_filter(stream: VideoProperties) -> str:
 
         # slides will be vertically centered, so the overlay should ideally only use
         # the top half of the slack
-        slack = outer_height - int(scaling_x * stream.crop.height)
+        slack = outer_height - int(scaling_x * crop.height)
         overlay_height = max(slack // 2, outer_height // 10)
         overlay_scale = f'scale=-1:{overlay_height}'
+
+    return scale_filter, overlay_scale
+
+def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
+    """ Assembles the picture-in-picture rendering filter for ffmpeg """
+    outer_width, outer_height = pick_target_geometry(stream.crop)
 
     # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
     crop_filter = \
         f'crop={stream.crop.width}:{stream.crop.height}:{stream.crop.left}:{stream.crop.top},' \
         if stream.needs_cropping() else ''
+
+    scale_filter, overlay_scale = generate_scale_filters(stream.crop, outer_width, outer_height)
+
+    if not has_overlay:
+        return f'[0:v]{crop_filter}{scale_filter},fps=30:0'
 
     # pad to desired dimensions, place content left and vertically centered
     pad_filter = f'pad={outer_width}:{outer_height}:0:-1'
@@ -182,7 +192,7 @@ def pip_filter(stream: VideoProperties) -> str:
 
     return f'{stream_filter};{overlay_filter};{combine_filter}'
 
-def postprocess_picture_in_picture(
+def postprocess_tracks(
         stream_dir: Path,
         overlay_dir: Path,
         audio_dirs: List[Path],
@@ -203,26 +213,28 @@ def postprocess_picture_in_picture(
     overlay_path = None
     audio_paths = []
 
+    has_overlay = overlay_dir.is_dir()
+    logging.debug("Recording %s an overlay track", "has" if has_overlay else "doesn't have")
+
     try:
         stream_path = concat_chunks(stream_dir)
-        overlay_path = concat_chunks(overlay_dir)
+        overlay_path = concat_chunks(overlay_dir) if has_overlay else None
         audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
 
-        stream = video_properties(stream_path)
-        #overlay = video_properties(overlay_path)
-
-        ffmpeg_filter = pip_filter(stream)
+        overlay_input = [ '-i', str(overlay_path) ] if has_overlay else []
 
         # map all audio streams if there are any.
         # ffmpeg fails if we pass -map 1:a when there's no audio.
         audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
         audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + 2}:a' ] ]
 
+        stream = video_properties(stream_path)
+        ffmpeg_filter = generate_ffmpeg_filter(stream, has_overlay)
+
         render_command = [
             'ffmpeg',
-            '-i', str(stream_path),
-            '-i', str(overlay_path)
-        ] + audio_input + [
+            '-i', str(stream_path)
+        ] + overlay_input + audio_input + [
             '-filter_complex', ffmpeg_filter,
             '-map', '0:a?',
         ] + audio_map + [
@@ -247,51 +259,6 @@ def postprocess_picture_in_picture(
         for p in audio_paths:
             p.unlink()
 
-def postprocess_index(
-        stream_dir: Path,
-        audio_dirs: List[Path],
-        output_path: Path
-) -> Result:
-    """
-        Run when there aren't both a camera and display stream, so that picture-in-picture
-        makes no sense. In that case we just slap an index onto the video stream.
-
-        This will usually be a recording of slides with just a microphone but no camera.
-    """
-
-    audio_paths = []
-    stream_path = concat_chunks(stream_dir)
-
-    try:
-        audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
-        audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
-        audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + 1}:a' ] ]
-
-        command = [
-            'ffmpeg',
-            '-i', str(stream_path)
-        ] + audio_input + [
-            '-map', '0'
-        ] + audio_map + [
-            '-y',
-            output_path
-        ]
-
-        logger.info("Indexing %s...", output_path)
-        logger.debug("Render command = %s", command)
-        run(command, stdout=PIPE, stderr=PIPE, text=True, check=True)
-        logger.info("Render completed")
-
-        return Result(output_file=output_path, reason=ResultReason.SUCCESS)
-    except CalledProcessError as err:
-        _log_error(err)
-        return Result(output_file=None, reason=ResultReason.FAILURE)
-    finally:
-        stream_path.unlink()
-        for p in audio_paths:
-            p.unlink()
-
-
 def postprocess_recording(recording_path: Path) -> Result | None:
     """ Postprocess the chunks of a recording """
 
@@ -311,9 +278,5 @@ def postprocess_recording(recording_path: Path) -> Result | None:
         logging.info("%s has no main display stream, nothing to do.", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
-    if overlay_dir.is_dir():
-        logging.info("Picture-in-picture postprocessing for %s", recording_path)
-        return postprocess_picture_in_picture(stream_dir, overlay_dir, audio_dirs, output_path)
-
-    logging.info("No overlay present, index-only postprocessing for %s", recording_path)
-    return postprocess_index(stream_dir, audio_dirs, output_path)
+    logging.info("Postprocessing %s", recording_path)
+    return postprocess_tracks(stream_dir, overlay_dir, audio_dirs, output_path)
