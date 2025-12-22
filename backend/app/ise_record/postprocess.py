@@ -221,15 +221,13 @@ def postprocess_tracks(
         overlay_path = concat_chunks(overlay_dir) if has_overlay else None
         audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
 
-        overlay_input = [ '-i', str(overlay_path) ] if has_overlay else []
-
-        # map all audio streams if there are any.
-        # ffmpeg fails if we pass -map 1:a when there's no audio.
-        audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
-        audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + 2}:a' ] ]
-
         stream = video_properties(stream_path)
         ffmpeg_filter = generate_ffmpeg_filter(stream, has_overlay)
+        overlay_input = [ '-i', str(overlay_path) ] if has_overlay else []
+
+        audio_offset = 2 if has_overlay else 1
+        audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
+        audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + audio_offset}:a' ] ]
 
         render_command = [
             'ffmpeg',
