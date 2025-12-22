@@ -71,10 +71,10 @@ export interface AppStoreState {
   overlay: MediaStreamTrack | undefined
   activeRecording: ActiveRecording
   fileSizeOverrides: Map<string, number>
-  quota: number | undefined
-  usage: number | undefined
   savedRecordings: readonly RecordingFileList[]
   adjustedSavedRecordings: readonly RecordingFileList[]
+  quota: number | undefined
+  usage: number | undefined
 
   setLectureTitle: (lectureTitle: string) => void
   setLecturerEmail: (lecturerEmail: string) => void
@@ -109,10 +109,10 @@ const createRawAppStore = (
   overlay: undefined,
   activeRecording: { state: "idle" },
   fileSizeOverrides: new Map<string, number>(),
-  quota: undefined,
-  usage: undefined,
   savedRecordings: [],
   adjustedSavedRecordings: [],
+  quota: undefined,
+  usage: undefined,
 
   setLectureTitle: lectureTitle => set({ lectureTitle }),
   setLecturerEmail: lecturerEmail => set({ lecturerEmail }),
@@ -230,7 +230,7 @@ export const createAppStore = (
   persist(
     createRawAppStore(serverEnv),
     {
-      name: "ise-record-storage",
+      name: "app-store",
       partialize: state => ({
         lectureTitle: state.lectureTitle,
         lecturerEmail: state.lecturerEmail
