@@ -107,6 +107,12 @@ export function RecorderControls() {
   const hasEmailField = apiUrl !== undefined;
   const hasDisabledTrackControls = activeRecording.state !== "idle";
 
+  const onMenuOpenChange = (isOpen: boolean) => {
+    if(isOpen) {
+      refreshMediaDevices();
+    }
+  };
+
   return (
     <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
       <TextField
@@ -139,7 +145,7 @@ export function RecorderControls() {
           <Text>Add Screen/Window</Text>
         </ActionButton>
 
-        <MenuTrigger onOpenChange={refreshMediaDevices}>
+        <MenuTrigger onOpenChange={onMenuOpenChange}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <MovieCamera/>
             <Text>Add Video Source</Text>
@@ -149,7 +155,7 @@ export function RecorderControls() {
           </Menu>
         </MenuTrigger>
 
-        <MenuTrigger onOpenChange={refreshMediaDevices}>
+        <MenuTrigger onOpenChange={onMenuOpenChange}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <CallCenter/>
             <Text>Add Audio Source</Text>
