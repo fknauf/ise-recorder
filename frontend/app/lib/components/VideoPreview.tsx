@@ -44,6 +44,7 @@ export function VideoPreview(
         width={width}
         height={height}
         className="video-preview"
+        data-testid="preview-video"
         role="img"
       />
 

@@ -104,7 +104,7 @@ test("e2e recording a stream works", async () => {
   await user.click(tree.getByText("Add Screen/Window"));
   await user.click(tree.getByText("Add Video Source"));
 
-  const previews = await screen.findAllByRole("img");
+  const previews = await screen.findAllByTestId(/^preview-/);
 
   expect(previews.length).toBe(3);
   expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledTimes(1);

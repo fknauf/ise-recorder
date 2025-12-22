@@ -74,6 +74,7 @@ export function AudioPreview(
         ref={attachRenderLoop}
         width={width}
         height={height}
+        data-testid="preview-audio"
         role="img"
       />
     </div>
