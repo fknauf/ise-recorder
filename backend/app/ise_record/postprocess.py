@@ -9,7 +9,10 @@ import json
 import logging
 from pathlib import Path
 from subprocess import run, CalledProcessError, PIPE
-from typing import NamedTuple, List, Tuple
+from typing import NamedTuple, List, Tuple, Optional
+import whisper
+import whisper.utils
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +43,7 @@ class VideoProperties(NamedTuple):
     def needs_cropping(self) -> bool:
         """
         determines if this video stream needs to be cropped.
-        
+
         True if more than one percent of width or height would be cut off, otherwise there is no
         need to bother.
         """
@@ -192,6 +195,26 @@ def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
 
     return f'{stream_filter};{overlay_filter};{combine_filter}'
 
+def generate_subtitles(stream_path: Path) -> Optional[Path]:
+    """ (Try to) generate subtitles for the specified stream """
+
+    logger.info('Generating subtitles for %s', str(stream_path))
+
+    try:
+        output_path = stream_path.with_suffix(".srt")
+        model = whisper.load_model("turbo")
+        result = model.transcribe(str(stream_path), language="de")
+        del model
+        writer = whisper.utils.WriteSRT(stream_path.parent)
+
+        with open(output_path, "w", encoding="utf-8") as out:
+            writer.write_result(result, out)
+
+        return output_path
+    except torch.OutOfMemoryError as err:
+        logger.warning('unable to generate subtitles for %s: %s', stream_path, repr(err))
+        return None
+
 def postprocess_tracks(
         stream_dir: Path,
         overlay_dir: Path,
@@ -211,6 +234,7 @@ def postprocess_tracks(
 
     stream_path = None
     overlay_path = None
+    subtitles_path = None
     audio_paths = []
 
     has_overlay = overlay_dir.is_dir()
@@ -221,23 +245,31 @@ def postprocess_tracks(
         overlay_path = concat_chunks(overlay_dir) if has_overlay else None
         audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
 
-        stream = video_properties(stream_path)
-        ffmpeg_filter = generate_ffmpeg_filter(stream, has_overlay)
-        overlay_input = [ '-i', str(overlay_path) ] if has_overlay else []
+        ffmpeg_maps = [
+            '-filter_complex', generate_ffmpeg_filter(video_properties(stream_path), has_overlay),
+            '-map', '0:a?'
+        ]
+        inputs = [ stream_path ]
 
-        audio_offset = 2 if has_overlay else 1
-        audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
-        audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + audio_offset}:a' ] ]
+        if has_overlay:
+            inputs.append(str(overlay_path))
+
+        subtitles_path = generate_subtitles(stream_path)
+
+        if subtitles_path is not None:
+            ffmpeg_maps.extend([ '-map', f'{len(inputs)}:s' ])
+            inputs.append(subtitles_path)
+
+        for audio_path in audio_paths:
+            ffmpeg_maps.extend([ '-map', f'{len(inputs)}:a' ])
+            inputs.append(audio_path)
 
         render_command = [
-            'ffmpeg',
-            '-i', str(stream_path)
-        ] + overlay_input + audio_input + [
-            '-filter_complex', ffmpeg_filter,
-            '-map', '0:a?',
-        ] + audio_map + [
-            '-y',
-            str(output_path)
+            'ffmpeg'
+        ] + [
+            arg for path in inputs for arg in [ '-i', str(path) ]
+        ] + ffmpeg_maps + [
+            '-y', str(output_path)
         ]
 
         logger.info("Rendering %s...", output_path)
@@ -254,6 +286,8 @@ def postprocess_tracks(
             stream_path.unlink()
         if overlay_path is not None:
             overlay_path.unlink()
+        if subtitles_path is not None:
+            subtitles_path.unlink()
         for p in audio_paths:
             p.unlink()
 
