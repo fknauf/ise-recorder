@@ -147,23 +147,36 @@ def generate_scale_filters(crop: Rectangle, outer_width: int, outer_height: int)
     scaling_x = outer_width / crop.width
     scaling_y = outer_height / crop.height
 
+    # pad to desired dimensions, place content left and vertically centered
+    # this is added to the scale filter if necessary. We can't just add it all the time
+    # because ffmpeg complains if the padding dimensions are exactly the input dimensions.
+    pad_filter = f',pad={outer_width}:{outer_height}:0:-1'
+
     # Use the smaller scaling factor so the full display is always in the output.
     if scaling_y < scaling_x:
         # e.g. 4:3 slides to 16:9 output
+        scaled_width = round(scaling_y * crop.width)
+
         scale_filter = f'scale=-1:{outer_height}'
+        if scaled_width < outer_width:
+            scale_filter += pad_filter
 
         # Slides will appear on the left, so the full slack_width is available for the
         # overlay. But make sure it's still at least visible.
-        slack = outer_width - int(scaling_y * crop.width)
+        slack = outer_width - scaled_width
         overlay_width = max(slack, outer_width // 10)
         overlay_scale = f'scale={overlay_width}:-1'
     else:
         # e.g. 16:9 slides to 1280x800
+        scaled_height = round(scaling_x * crop.height)
+
         scale_filter = f'scale={outer_width}:-1'
+        if scaled_height >= outer_height:
+            scale_filter += pad_filter
 
         # slides will be vertically centered, so the overlay should ideally only use
         # the top half of the slack
-        slack = outer_height - int(scaling_x * crop.height)
+        slack = outer_height - scaled_height
         overlay_height = max(slack // 2, outer_height // 10)
         overlay_scale = f'scale=-1:{overlay_height}'
 
@@ -183,10 +196,7 @@ def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
     if not has_overlay:
         return f'[0:v]{crop_filter}{scale_filter},fps=30:0'
 
-    # pad to desired dimensions, place content left and vertically centered
-    pad_filter = f'pad={outer_width}:{outer_height}:0:-1'
-
-    stream_filter = f'[0:v]{crop_filter}{scale_filter},{pad_filter},fps=30[main]'
+    stream_filter = f'[0:v]{crop_filter}{scale_filter},fps=30[main]'
     overlay_filter = f'[1:v]{overlay_scale}[overlay]'
     combine_filter = '[main][overlay]overlay=(main_w-overlay_w):0'
 
@@ -220,24 +230,24 @@ def postprocess_tracks(
         stream_path = concat_chunks(stream_dir)
         overlay_path = concat_chunks(overlay_dir) if has_overlay else None
         audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
+        stream_props = video_properties(stream_path)
 
-        stream = video_properties(stream_path)
-        ffmpeg_filter = generate_ffmpeg_filter(stream, has_overlay)
-        overlay_input = [ '-i', str(overlay_path) ] if has_overlay else []
+        ffmpeg_maps = [
+            '-filter_complex', generate_ffmpeg_filter(stream_props, has_overlay),
+            '-map', '0:a?'
+        ]
+        inputs = [ stream_path, overlay_path ] if has_overlay else [ stream_path ]
 
-        audio_offset = 2 if has_overlay else 1
-        audio_input = [ token for path in audio_paths for token in [ '-i', str(path) ] ]
-        audio_map = [ arg for i in range(len(audio_paths)) for arg in [ '-map', f'{i + audio_offset}:a' ] ]
+        for audio_path in audio_paths:
+            ffmpeg_maps.extend([ '-map', f'{len(inputs)}:a' ])
+            inputs.append(audio_path)
 
         render_command = [
-            'ffmpeg',
-            '-i', str(stream_path)
-        ] + overlay_input + audio_input + [
-            '-filter_complex', ffmpeg_filter,
-            '-map', '0:a?',
-        ] + audio_map + [
-            '-y',
-            str(output_path)
+            'ffmpeg'
+        ] + [
+            arg for path in inputs for arg in [ '-i', str(path) ]
+        ] + ffmpeg_maps + [
+            '-y', str(output_path)
         ]
 
         logger.info("Rendering %s...", output_path)
