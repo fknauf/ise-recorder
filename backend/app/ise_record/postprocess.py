@@ -141,8 +141,39 @@ def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
 
     return candidates[-1]
 
-def generate_scale_filters(crop: Rectangle, outer_width: int, outer_height: int) -> Tuple[str, str]:
-    """ Generate the scaling filters for the main stream and overlay """
+def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int) -> str:
+    """ Generate the overlay scaling filter """
+
+    # Factor by which the cropped area of the main stream will be scaled up.
+    stream_scaling_factor = min(
+        outer_width / crop.width,
+        outer_height / crop.height
+    )
+
+    # width/height of inserted black bars. One of these is 0.
+    slack_width = outer_width - round(stream_scaling_factor * crop.width)
+    slack_height = outer_height - round(stream_scaling_factor * crop.height)
+
+    # if we're pillarboxed, the slides will appear on the left and we can use the full horizontal
+    # slack. If we're letterboxed, the slides are vertically centered and we'll use half the
+    # vertical slack (the upper black bar). We also make sure the overlay uses at least 1/10th of
+    # the screen width and height to be visible even if no or very small black bars are inserted.
+    #
+    # If one of these is more than the minimum 10%, the other one will underestimate the desired
+    # overlay size. This is resolved by force_original_aspect_ratio=increase in the filter.
+    overlay_width = max(slack_width, outer_width // 10)
+    overlay_height = max(slack_height // 2, outer_height // 10)
+
+    return f'scale={overlay_width}:{overlay_height}:force_original_aspect_ratio=increase'
+
+def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
+    """ Assembles the picture-in-picture rendering filter for ffmpeg """
+    outer_width, outer_height = pick_target_geometry(stream.crop)
+
+    # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
+    crop_filter = \
+        f'crop={stream.crop.width}:{stream.crop.height}:{stream.crop.left}:{stream.crop.top},' \
+        if stream.needs_cropping() else ''
 
     # scale to desired dimensions, but keep original aspect ratio by decreasing one side length if
     # necessary, then pad to desired dimensions by keeping the content left and vertically centered.
@@ -155,43 +186,10 @@ def generate_scale_filters(crop: Rectangle, outer_width: int, outer_height: int)
         f',pad={outer_width}:{outer_height}:0:-1'
     )
 
-    # determine overlay dimension depending on where black bars will be inserted. Use vertical
-    # slack if letterboxed and horizontal slack if pillarboxed.
-    scaling_x = outer_width / crop.width
-    scaling_y = outer_height / crop.height
-
-    if scaling_y < scaling_x:
-        # e.g. 4:3 slides to 16:9 output
-        # Slides will appear on the left, so the full slack_width is available for the
-        # overlay. But make sure it's still at least visible.
-        scaled_width = round(scaling_y * crop.width)
-        slack = outer_width - scaled_width
-        overlay_width = max(slack, outer_width // 10)
-        overlay_scale = f'scale={overlay_width}:-1'
-    else:
-        # e.g. 16:9 slides to 1280x800
-        # slides will be vertically centered, so the overlay should ideally only use
-        # the top half of the slack.
-        scaled_height = round(scaling_x * crop.height)
-        slack = outer_height - scaled_height
-        overlay_height = max(slack // 2, outer_height // 10)
-        overlay_scale = f'scale=-1:{overlay_height}'
-
-    return scale_filter, overlay_scale
-
-def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
-    """ Assembles the picture-in-picture rendering filter for ffmpeg """
-    outer_width, outer_height = pick_target_geometry(stream.crop)
-
-    # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
-    crop_filter = \
-        f'crop={stream.crop.width}:{stream.crop.height}:{stream.crop.left}:{stream.crop.top},' \
-        if stream.needs_cropping() else ''
-
-    scale_filter, overlay_scale = generate_scale_filters(stream.crop, outer_width, outer_height)
-
     if not has_overlay:
         return f'[0:v]{crop_filter}{scale_filter},fps=30:0'
+
+    overlay_scale = generate_overlay_scale(stream.crop, outer_width, outer_height)
 
     stream_filter = f'[0:v]{crop_filter}{scale_filter},fps=30[main]'
     overlay_filter = f'[1:v]{overlay_scale}[overlay]'
