@@ -5,7 +5,6 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { gatherRecordingsList } from "@/app/lib/utils/browserStorage";
-import { commands } from "vitest/browser";
 
 const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
   deviceId, groupId, kind, label,
