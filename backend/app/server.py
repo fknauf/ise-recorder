@@ -159,7 +159,7 @@ def schedule_job():
     )
     thread.start()
 
-    return '', 201
+    return '', 202
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
