@@ -144,38 +144,35 @@ def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
 def generate_scale_filters(crop: Rectangle, outer_width: int, outer_height: int) -> Tuple[str, str]:
     """ Generate the scaling filters for the main stream and overlay """
 
+    # scale to desired dimensions, but keep original aspect ratio by decreasing one side length if
+    # necessary, then pad to desired dimensions by keeping the content left and vertically centered.
+    # This forces the exact dimensions we want, whereas scaling with one dimension set to -1
+    # sometimes creates off-by-one errors if the dimensions almost scale up neatly. We had this with
+    # an 1198x749 input video that with scale=-1:800 yielded 1281x800 instead of 1280x800 and made
+    # the padding filter complain.
+    scale_filter = (
+        f'scale={outer_width}:{outer_height}:force_original_aspect_ratio=decrease'
+        f',pad={outer_width}:{outer_height}:0:-1'
+    )
+
+    # determine overlay dimension depending on where black bars will be inserted. Use vertical
+    # slack if letterboxed and horizontal slack if pillarboxed.
     scaling_x = outer_width / crop.width
     scaling_y = outer_height / crop.height
 
-    # pad to desired dimensions, place content left and vertically centered
-    # this is added to the scale filter if necessary. We can't just add it all the time
-    # because ffmpeg complains if the padding dimensions are exactly the input dimensions.
-    pad_filter = f',pad={outer_width}:{outer_height}:0:-1'
-
-    # Use the smaller scaling factor so the full display is always in the output.
     if scaling_y < scaling_x:
         # e.g. 4:3 slides to 16:9 output
-        scaled_width = round(scaling_y * crop.width)
-
-        scale_filter = f'scale=-1:{outer_height}'
-        if scaled_width < outer_width:
-            scale_filter += pad_filter
-
         # Slides will appear on the left, so the full slack_width is available for the
         # overlay. But make sure it's still at least visible.
+        scaled_width = round(scaling_y * crop.width)
         slack = outer_width - scaled_width
         overlay_width = max(slack, outer_width // 10)
         overlay_scale = f'scale={overlay_width}:-1'
     else:
         # e.g. 16:9 slides to 1280x800
-        scaled_height = round(scaling_x * crop.height)
-
-        scale_filter = f'scale={outer_width}:-1'
-        if scaled_height >= outer_height:
-            scale_filter += pad_filter
-
         # slides will be vertically centered, so the overlay should ideally only use
-        # the top half of the slack
+        # the top half of the slack.
+        scaled_height = round(scaling_x * crop.height)
         slack = outer_height - scaled_height
         overlay_height = max(slack // 2, outer_height // 10)
         overlay_scale = f'scale=-1:{overlay_height}'
