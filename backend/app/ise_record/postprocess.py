@@ -187,7 +187,7 @@ def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
     )
 
     if not has_overlay:
-        return f'[0:v]{crop_filter}{scale_filter},fps=30:0'
+        return f'[0:v]{crop_filter}{scale_filter},fps=30'
 
     overlay_scale = generate_overlay_scale(stream.crop, outer_width, outer_height)
 
