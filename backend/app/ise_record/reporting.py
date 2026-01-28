@@ -116,7 +116,7 @@ async def send_report(
     logger.debug("SMTP through %s:%d as %s",
                  smtp_sink.server, smtp_sink.port, smtp_sink.local_hostname)
 
-    try: 
+    try:
         await aiosmtplib.send(
             msg,
             hostname = smtp_sink.server,
