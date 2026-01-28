@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import asyncio
+
 """
 Program to rerender a recording from chunks on the ise-recorder backend server
 """
@@ -10,7 +12,7 @@ from pathlib import Path
 
 from ise_record.postprocess import postprocess_recording
 
-def main():
+async def main():
     """
     Main function. Parses command line, calls postprocessing and prints results.
     """
@@ -24,8 +26,8 @@ def main():
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log_level)
-    result = postprocess_recording(args.recording_directory)
+    result = await postprocess_recording(args.recording_directory)
     print(f"Result: {result.reason.name}, output = {result.output_file}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
