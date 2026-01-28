@@ -4,12 +4,15 @@
     (e.g. missing camera feed -> still produce slides with audio)
 """
 
+import asyncio
 from enum import Enum
 import json
 import logging
 from pathlib import Path
-from subprocess import run, CalledProcessError, PIPE
+from subprocess import CalledProcessError
 from typing import NamedTuple, List, Tuple
+
+import aiofiles
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +59,27 @@ def _log_error(err: CalledProcessError) -> None:
                  "stderr\n------\n%s\n",
                  err.returncode, err.cmd, err.stdout, err.stderr)
 
-def video_properties(path: Path) -> VideoProperties:
+async def _run_command(command: List[str]) -> str:
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+
+    out, err = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise CalledProcessError(
+            returncode = proc.returncode,
+            cmd = command,
+            output = out,
+            stderr = err
+        )
+
+    return out
+
+async def video_properties(path: Path) -> VideoProperties:
     """
         Extract the information required for postprocess_picture_in_picture from a video file
 
@@ -65,6 +88,9 @@ def video_properties(path: Path) -> VideoProperties:
         list of sensible crop dimensions for successive time slices in the video file. We just
         use the most expansive of these to be on the safe side. We really expect them all to be
         the same anyway.
+
+        :params path input video file
+        :returns properties of the input file
     """
 
     probe_command = [
@@ -80,9 +106,9 @@ def video_properties(path: Path) -> VideoProperties:
     logger.info("Analyzing %s...", path)
     logger.debug("Probe command = %s", probe_command)
 
-    probe_result = run(probe_command, stdout=PIPE, stderr=PIPE, check=True, text=True)
+    probe_stdout = await _run_command(probe_command)
 
-    info = json.loads(probe_result.stdout)
+    info = json.loads(probe_stdout)
 
     # frontend can only generate files with one video stream
     video_stream = next(s for s in info['streams'] if s['codec_type'] == 'video')
@@ -111,23 +137,29 @@ def video_properties(path: Path) -> VideoProperties:
         )
     )
 
-def concat_chunks(track_path: Path) -> Path:
+async def concat_chunks(track_path: Path) -> Path:
     """
-        Concatenates the chunk files supplied by frontend to get the full stream file that
+        Concatenates the chunk files supplied by the frontend to get the full stream file that
         we can feed to ffmpeg.
+
+        :params track_path directory that contains the input fragments
+        :returns path of the assembled stream file
     """
     target_path = track_path / "full.webm"
 
-    with open(target_path, 'wb') as dest:
+    async with aiofiles.open(target_path, 'wb') as dest:
         for src_path in sorted(track_path.glob('chunk.*')):
-            with open(src_path, 'rb') as src:
-                dest.write(src.read())
+            async with aiofiles.open(src_path, 'rb') as src:
+                await dest.write(await src.read())
 
     return target_path
 
 def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
     """
         Picks the most appropriate out of a list of standardized output geometries.
+
+        :param content area of the main stream that's going to be used
+        :returns target width and height 
     """
     candidates = [
         (1280, 720),  # 16:9
@@ -142,7 +174,18 @@ def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
     return candidates[-1]
 
 def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int) -> str:
-    """ Generate the overlay scaling filter """
+    """
+        Generate a scaling filter appropriate for the overlay stream.
+         
+        This is meant to make good use of inserted black bars around the main stream, if there are
+        any, and otherwise to keep the overlay usefully visible while not hiding important parts
+        of the slides.
+
+        :param crop rectangle to which the main stream will be cropped
+        :param outer_width target width of the combined output stream
+        :param outer_height target height of the combined output stream
+        :returns ffmpeg filter that scales the overlay stream appropriately
+    """
 
     # Factor by which the cropped area of the main stream will be scaled up.
     stream_scaling_factor = min(
@@ -167,10 +210,16 @@ def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int)
     return f'scale={overlay_width}:{overlay_height}:force_original_aspect_ratio=increase'
 
 def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
-    """ Assembles the picture-in-picture rendering filter for ffmpeg """
+    """
+        Assembles the picture-in-picture rendering filter for ffmpeg
+
+        :param stream properties of the main video stream
+        :param has_overlay whether there is an overlay stream
+        :return ffmpeg filter for use with -filter_complex
+    """
     outer_width, outer_height = pick_target_geometry(stream.crop)
 
-    # crop if display-0 is something like 4:3 slides captured on a 16:9 screen (or vice versa)
+    # crop if the main stream is something like 4:3 slides captured on a 16:9 screen (or vice versa)
     crop_filter = \
         f'crop={stream.crop.width}:{stream.crop.height}:{stream.crop.left}:{stream.crop.top},' \
         if stream.needs_cropping() else ''
@@ -197,7 +246,7 @@ def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
 
     return f'{stream_filter};{overlay_filter};{combine_filter}'
 
-def postprocess_tracks(
+async def postprocess_tracks(
         stream_dir: Path,
         overlay_dir: Path,
         audio_dirs: List[Path],
@@ -212,30 +261,34 @@ def postprocess_tracks(
         Most of the logic here is to figure out if and how to crop the display stream, how
         large the overlay should sensibly be, and to construct options that ffmpeg will
         accept. ffmpeg is a little finnicky at times, so this is a little involved.
+
+        :param stream_dir path of the main stream (usually slides + voice)
+        :param overlay_dir path of the overlay video stream (usually the speaker)
+        :param audio_dirs paths of additional audio streams, if available
+        :param output_path where to write the result
+        :returns whether the job succeeded, plus info for the e-mail report
     """
 
-    stream_path = None
-    overlay_path = None
-    audio_paths = []
+    inputs = []
 
     has_overlay = overlay_dir.is_dir()
     logging.debug("Recording %s an overlay track", "has" if has_overlay else "doesn't have")
 
     try:
-        stream_path = concat_chunks(stream_dir)
-        overlay_path = concat_chunks(overlay_dir) if has_overlay else None
-        audio_paths = [ concat_chunks(dir) for dir in audio_dirs ]
-        stream_props = video_properties(stream_path)
+        inputs.append(await concat_chunks(stream_dir))
+        stream_props = await video_properties(inputs[0])
 
         ffmpeg_maps = [
             '-filter_complex', generate_ffmpeg_filter(stream_props, has_overlay),
             '-map', '0:a?'
         ]
-        inputs = [ stream_path, overlay_path ] if has_overlay else [ stream_path ]
 
-        for audio_path in audio_paths:
+        if has_overlay:
+            inputs.append(await concat_chunks(overlay_dir))
+
+        for audio_dir in audio_dirs:
             ffmpeg_maps.extend([ '-map', f'{len(inputs)}:a' ])
-            inputs.append(audio_path)
+            inputs.append(await concat_chunks(audio_dir))
 
         render_command = [
             'ffmpeg'
@@ -247,7 +300,9 @@ def postprocess_tracks(
 
         logger.info("Rendering %s...", output_path)
         logger.debug("Render command = %s", render_command)
-        run(render_command, stdout=PIPE, stderr=PIPE, check=True, text=True)
+
+        await _run_command(render_command)
+
         logger.info("Render completed")
 
         return Result(output_file=output_path, reason=ResultReason.SUCCESS)
@@ -255,15 +310,16 @@ def postprocess_tracks(
         _log_error(err)
         return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
-        if stream_path is not None:
-            stream_path.unlink()
-        if overlay_path is not None:
-            overlay_path.unlink()
-        for p in audio_paths:
+        for p in inputs:
             p.unlink()
 
-def postprocess_recording(recording_path: Path) -> Result | None:
-    """ Postprocess the chunks of a recording """
+async def postprocess_recording(recording_path: Path) -> Result:
+    """
+        Postprocess the chunks of a recording. Output will be written to recording_path
+
+        :param recording_path directory that contains the input streams in chunks
+        :returns whether postprocessing succeeded and path of the result file
+    """
 
     if not recording_path.is_dir():
         return Result(
@@ -282,4 +338,4 @@ def postprocess_recording(recording_path: Path) -> Result | None:
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     logging.info("Postprocessing %s", recording_path)
-    return postprocess_tracks(stream_dir, overlay_dir, audio_dirs, output_path)
+    return await postprocess_tracks(stream_dir, overlay_dir, audio_dirs, output_path)

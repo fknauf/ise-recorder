@@ -1,3 +1,3 @@
 #!/bin/bash
 
-exec gunicorn --preload -w 3 -b ":${PORT:-8000}" "$@" server:app
+exec uvicorn --workers 3 --port "${PORT:-8000}" "$@" server:app

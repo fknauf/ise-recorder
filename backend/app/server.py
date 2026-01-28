@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 """
    ISE-Recorder backend service. Stores chunk files and does postprocessing.
 
@@ -9,164 +7,118 @@
 import logging
 import os
 from pathlib import Path
-import re
-import threading
-from typing import List
+from typing import Annotated, List, Optional
 
-from email_validator import validate_email, EmailNotValidError
-from flask import Flask, request
-from flask_cors import CORS
+import aiofiles
+from fastapi import BackgroundTasks, FastAPI, Form, File, HTTPException, UploadFile, status
+from pydantic import BaseModel, EmailStr, Field, IPvAnyAddress
+from pydantic_extra_types.domain import DomainStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ise_record.postprocess import postprocess_recording
-from ise_record.reporting import send_report, SmtpSink
+from ise_record.reporting import normalize_recipient, send_report, SmtpSink
 
-# Number of digits in the chunk file suffix, e.g. chunk.0000 to chunk.9999 if CHUNK_DIGITS=4
-CHUNK_FILE_DIGITS = 4
+class Settings(BaseSettings):
+    """
+        Configuration settings for the server. Options can be set through ISE_RECORD_VARNAME
+        environment variables at server startup.
+    """
 
-app = Flask(__name__)
+    destdir: Path = Path("./data")
 
-app.config.update(
-    DESTDIR = './data',
-    SMTP_SERVER = None,
-    SMTP_PORT = 0,
-    SMTP_LOCAL_HOSTNAME = None,
-    SMTP_USERNAME = None,
-    SMTP_PASSWORD = None,
-    SMTP_SENDER = None,
-    SMTP_STARTTLS = False,
-    SMTP_ALLOWED_DOMAINS = []
-)
+    smtp_server: Optional[str] = None
+    smtp_port: Annotated[int, Field(ge=0, lt=65536)] = 0
+    smtp_local_hostname: Optional[str] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_sender: Optional[EmailStr] = None
+    smtp_starttls: bool = False
+    smtp_allowed_domains: List[DomainStr] = []
 
-app.config.from_prefixed_env("ISE_RECORD")
+    chunk_file_digits: int = 4
+    safe_name_regex: str = '^[A-Za-z0-9_.-]+$'
 
-CORS(app, resources={r"/api/*": { "origins": "*" }})
+    model_config = SettingsConfigDict(env_prefix="ise_record_")
 
-def _create_track_path(recording: str, track: str) -> Path:
-    destdir = Path(app.config["DESTDIR"])
-    path = destdir / recording / track
-    os.makedirs(path, exist_ok=True)
-    return path
+settings = Settings()
+app = FastAPI()
 
-def _is_safe_name(name: str | None) -> bool:
-    return name is not None and re.fullmatch('^[A-Za-z0-9_.-]+$', name) is not None
+uvicorn_logger = logging.getLogger('uvicorn.error')
+logging.basicConfig(
+    level=uvicorn_logger.level,
+    handlers=uvicorn_logger.handlers)
 
-def _recording_exists(recording: str | None) -> bool:
-    if not _is_safe_name(recording):
-        return False
+logger = logging.getLogger(__name__)
 
-    destdir = Path(app.config["DESTDIR"])
-    return os.path.isdir(destdir / recording)
+@app.post('/api/chunks', status_code=status.HTTP_201_CREATED)
+async def upload_chunk(
+    recording: Annotated[str, Form(pattern=settings.safe_name_regex)],
+    track: Annotated[str, Form(pattern=settings.safe_name_regex)],
+    index: Annotated[int, Form(ge=0, lt=10 ** settings.chunk_file_digits)],
+    chunk: Annotated[UploadFile, File()]
+):
+    """ POST endpoint for the upload of chunk files """
 
-def _is_in_domain(domain: str, normalized_address: str):
-    return normalized_address.endswith(f'@{domain}') or normalized_address.endswith(f'.{domain}')
+    filename = f'chunk.{index:04d}'
 
-def _is_whitelisted(normalized_address: str):
-    whitelist: List[str] = app.config['SMTP_ALLOWED_DOMAINS']
+    track_path = settings.destdir / recording / track
+    filepath = track_path / filename
+    logger.debug("saving %s", filepath)
 
-    if whitelist == []:
-        return True
-    return next((True for d in whitelist if _is_in_domain(d, normalized_address)), False)
+    os.makedirs(track_path, exist_ok=True)
 
-def _validate_email(address: str | None) -> str | None:
-    if address is None or address.strip() == "":
-        return None
+    async with aiofiles.open(filepath, "wb") as out:
+        while content := await chunk.read(128 * 1024):
+            await out.write(content)
 
-    try:
-        validated = validate_email(address)
-        if _is_whitelisted(validated.normalized):
-            return validated.normalized
-    except EmailNotValidError:
-        logging.warning("Invalid or blacklisted recipient address: %s", address)
+    return {
+        "recording": recording,
+        "track": track,
+        "index": index,
+        "filename": filename
+    }
 
-    return None
+class PostProcessingJob(BaseModel):
+    """ DTO for a postprocessing job the client wants to schedule """
 
-def _postprocessing_task(
-        recording: str,
-        recipient: str | None
-) -> None:
-    recording_path = Path(app.config["DESTDIR"]) / recording
-    job_result = postprocess_recording(recording_path)
+    recording: Annotated[str, Field(pattern=settings.safe_name_regex)]
+    # backend will validate before sending email. We want the postprocessing to work
+    # even if someone has a typo in the mail address or doesn't specify a recipient
+    recipient: Optional[str] = None
 
-    normalized_recipient = _validate_email(recipient)
+async def _postprocessing_task(job: PostProcessingJob) -> None:
+    recording_path = settings.destdir / job.recording
+    job_result = await postprocess_recording(recording_path)
+
+    normalized_recipient = normalize_recipient(job.recipient, settings.smtp_allowed_domains)
 
     if normalized_recipient is not None:
         smtp_sink = SmtpSink(
-            server = app.config['SMTP_SERVER'],
-            port = int(app.config['SMTP_PORT']),
-            local_hostname = app.config['SMTP_LOCAL_HOSTNAME'],
-            starttls = bool(app.config['SMTP_STARTTLS']),
-            username = app.config['SMTP_USERNAME'],
-            password = app.config['SMTP_PASSWORD'])
+            server = settings.smtp_server,
+            port = settings.smtp_port,
+            local_hostname = settings.smtp_local_hostname,
+            starttls = settings.smtp_starttls,
+            username = settings.smtp_username,
+            password = settings.smtp_password)
 
-        sender = app.config['SMTP_SENDER']
-
-        send_report(
+        await send_report(
             smtp_sink=smtp_sink,
-            sender=sender,
+            sender=settings.smtp_sender,
             recipient=normalized_recipient,
-            job_title=recording,
+            job_title=job.recording,
             result=job_result)
 
-@app.route('/api/chunks', methods=['POST'])
-def upload_chunk():
-    """ POST endpoint for the upload of chunk files """
+@app.post('/api/jobs', status_code=status.HTTP_202_ACCEPTED)
+def schedule_job(
+    job: PostProcessingJob,
+    background_tasks: BackgroundTasks
+):
+    """ Endpoint for the scheduling of postprocessing jobs """
 
-    recording = request.form.get('recording')
-    track = request.form.get('track')
-    index = request.form.get('index')
-    chunk = request.files.get('chunk')
+    if not os.path.isdir(settings.destdir / job.recording):
+        logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
+        raise HTTPException(status_code=400, detail=f'Recording {job.recording} does not exist')
 
-    if not _is_safe_name(recording) or not _is_safe_name(track):
-        app.logger.warning("invalid recording/track name %s/%s", recording, track)
-        return f'invalid track {recording}, {track}', 400
+    background_tasks.add_task(_postprocessing_task, job)
 
-    if index is None or not index.isdigit() or len(index) > CHUNK_FILE_DIGITS:
-        app.logger.warning("invalid chunk index %s in upload for %s/%s", index, recording, track)
-        return f'invalid index "{index}"', 400
-
-    if chunk is None:
-        app.logger.warning("no chunk data in upload for %s/%s", recording, track)
-        return 'no chunk supplied', 400
-
-    filepath = _create_track_path(recording, track) / f'chunk.{index.zfill(CHUNK_FILE_DIGITS)}'
-    app.logger.debug("saving %s", filepath)
-    chunk.save(filepath)
-
-    return '', 201
-
-@app.route('/api/jobs', methods=['POST'])
-def schedule_job():
-    """ POST endpoint for the scheduling of postprocessing jobs """
-
-    job_json = request.json
-    if job_json is None:
-        app.logger.warning("Bad postprocessing request: body is not valid JSON")
-        return 'Bad Request', 400
-
-    recording = job_json.get('recording')
-    recipient = job_json.get('recipient')
-
-    if not _recording_exists(recording):
-        app.logger.warning("Bad postprocessing request: Recording %s does not exist", recording)
-        return 'Bad Request', 400
-
-    thread = threading.Thread(
-        target=_postprocessing_task,
-        args=(
-            recording,
-            recipient
-        )
-    )
-    thread.start()
-
-    return '', 202
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
-    app.run(debug=True)
-else:
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-
-    logging.basicConfig(
-        level=gunicorn_logger.level,
-        handlers=gunicorn_logger.handlers)
+    return job
