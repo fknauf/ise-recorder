@@ -56,23 +56,12 @@ def normalize_recipient(address: str | None, domain_whitelist: List[str]) -> str
 
     return None
 
-async def send_report(
-        smtp_sink: SmtpSink,
+def generate_report(
         sender: str | None,
         recipient: str | None,
         job_title: str,
         result: Result
-) -> None:
-    """
-       Sends a report about a finished job to the specified recipient.
-
-       :param smtp_sink SMTP endpoint to connect to for sending
-       :param sender sender address that should appear in the message
-       :param recipient address of the recipient
-       :param job_title job title to use in the subject line
-       :param result job result data to be formatted into the message
-    """
-
+) -> EmailMessage:
     subject = f'ise-record finished {job_title}'
 
     match result.reason:
@@ -103,6 +92,26 @@ async def send_report(
     msg["Subject"] = subject
     msg.set_content(content)
 
+    return msg
+
+async def send_report(
+        smtp_sink: SmtpSink,
+        sender: str | None,
+        recipient: str | None,
+        job_title: str,
+        result: Result
+) -> None:
+    """
+       Sends a report about a finished job to the specified recipient.
+
+       :param smtp_sink SMTP endpoint to connect to for sending
+       :param sender sender address that should appear in the message
+       :param recipient address of the recipient
+       :param job_title job title to use in the subject line
+       :param result job result data to be formatted into the message
+    """
+
+    msg = generate_report(sender, recipient, job_title, result)
     logger.debug("Report generated: \n%s", msg)
 
     if smtp_sink.server is None or sender is None:

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 
-import asyncio
-
 """
 Program to rerender a recording from chunks on the ise-recorder backend server
 """
 
+import asyncio
 from argparse import ArgumentParser
 import logging
 from pathlib import Path
@@ -23,10 +22,10 @@ async def main():
     )
     parser.add_argument('recording_directory', type=Path)
     parser.add_argument('-l', '--log-level', default="INFO")
-    args = parser.parse_args()
+    argv = parser.parse_args()
 
-    logging.basicConfig(level=args.log_level)
-    result = await postprocess_recording(args.recording_directory)
+    logging.basicConfig(level=argv.log_level)
+    result = await postprocess_recording(argv.recording_directory)
     print(f"Result: {result.reason.name}, output = {result.output_file}")
 
 if __name__ == "__main__":

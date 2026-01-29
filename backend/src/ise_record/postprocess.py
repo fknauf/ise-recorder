@@ -322,11 +322,7 @@ async def postprocess_recording(recording_path: Path) -> Result:
     """
 
     if not recording_path.is_dir():
-        return Result(
-            args=[],
-            returncode=255,
-            stdout='',
-            stderr="Requested postprocessing for recording that doesn't exist")
+        return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     stream_dir = recording_path / "stream"
     overlay_dir = recording_path / "overlay"

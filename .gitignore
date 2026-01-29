@@ -11,7 +11,7 @@ node_modules
 !.yarn/versions
 
 # testing
-/frontend//coverage
+/frontend/coverage
 
 # next.js
 /frontend/.next/
@@ -42,8 +42,10 @@ next-env.d.ts
 
 __screenshots__
 
+# backend pycache & stuff
 __pycache__
 .venv
+*.egg-info
+.pytest_cache
 /data
 /backend/data
-*.egg-info
