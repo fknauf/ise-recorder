@@ -46,4 +46,4 @@ __pycache__
 .venv
 /data
 /backend/data
-/backend/app/data
+*.egg-info
