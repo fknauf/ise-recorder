@@ -8,9 +8,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY app/requirements.txt ./
-RUN pip install --no-cache-dir --no-warn-script-location -r requirements.txt
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --no-warn-script-location .
 
-COPY app ./
+COPY src ./
 
 ENTRYPOINT [ "/app/run_server.sh" ]

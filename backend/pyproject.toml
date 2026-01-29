@@ -1,0 +1,17 @@
+[project]
+name = "ise-recorder-backend"
+version = "1.0.7"
+
+dependencies = [
+    "aiofiles~=25.1.0",
+    "aiosmtplib~=5.1.0",
+    "email-validator~=2.3.0",
+    "fastapi~=0.128.0",
+    "python-multipart~=0.0.22",
+    "pydantic-settings~=2.12.0",
+    "pydantic-extra-types~=2.11.0",
+    "uvicorn~=0.40.0"
+]
+
+[project.optional-dependencies]
+test = [ "pytest~=9.0.2" ]
