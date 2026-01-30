@@ -43,14 +43,8 @@ class VideoProperties(NamedTuple):
     def needs_cropping(self) -> bool:
         """
         determines if this video stream needs to be cropped.
-        
-        True if more than one percent of width or height would be cut off, otherwise there is no
-        need to bother.
         """
-        width_slack = self.width - self.crop.width
-        height_slack = self.height - self.crop.height
-
-        return width_slack * 100 > self.width or height_slack * 100 > self.height
+        return self.width > self.crop.width or self.height > self.crop.height
 
 def _log_error(err: CalledProcessError) -> None:
     logger.error("Failed with return code %d.\n" \
@@ -78,6 +72,33 @@ async def _run_command(command: List[str]) -> str:
         )
 
     return out
+
+def determine_crop_area(
+        stream_width: int,
+        stream_height: int,
+        raw_crop: Rectangle
+) -> Rectangle:
+    """ 
+        Determine the effective cropping area for a stream. Will select the full
+        stream rectangle if an insignificant area would be cropped.
+
+        :param stream_width width of the input stream
+        :param stream_height height of the input stream
+        :param crop_left x coordinate of the leftmost pixel in the detected cropping area
+        :param crop_right x coordinate of the rightmost pixel in the detected cropping area
+        :param crop_top y coordinate of the top pixel in the detected cropping area
+        :param crop_bottom y coordinate of the bottom pixel in the detected cropping area
+        :returns the effective cropping area
+    """
+
+    slack_width = stream_width - raw_crop.width
+    slack_height = stream_height - raw_crop.height
+
+    # less than one percent cropped on each side -> avoid cropping
+    if slack_width * 100 <= stream_width and slack_height * 100 <= stream_height:
+        return Rectangle(width=stream_width, height=stream_height, left=0, top=0)
+
+    return raw_crop
 
 async def video_properties(path: Path) -> VideoProperties:
     """
@@ -126,15 +147,21 @@ async def video_properties(path: Path) -> VideoProperties:
     logger.debug('%s: size=%dx%d, crop=%d,%d-%d,%d',
                  path, width, height, crop_left, crop_top, crop_right, crop_bottom)
 
-    return VideoProperties(
-        width = width,
-        height = height,
-        crop = Rectangle(
-            width = (crop_right - crop_left + 1),
-            height = (crop_bottom - crop_top + 1),
+    crop = determine_crop_area(
+        stream_width = width,
+        stream_height = height,
+        raw_crop = Rectangle(
+            width = crop_right - crop_left + 1,
+            height = crop_bottom - crop_top + 1,
             left = crop_left,
             top = crop_top
         )
+    )
+
+    return VideoProperties(
+        width = width,
+        height = height,
+        crop = crop
     )
 
 async def concat_chunks(track_path: Path) -> Path:
@@ -187,27 +214,33 @@ def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int)
         :returns ffmpeg filter that scales the overlay stream appropriately
     """
 
-    # Factor by which the cropped area of the main stream will be scaled up.
-    stream_scaling_factor = min(
-        outer_width / crop.width,
-        outer_height / crop.height
-    )
+    # note: if the input stream is not cropped, scaling_x == scaling_y == 1
+    scaling_x = outer_width / crop.width
+    scaling_y = outer_height / crop.height
 
-    # width/height of inserted black bars. One of these is 0.
-    slack_width = outer_width - round(stream_scaling_factor * crop.width)
-    slack_height = outer_height - round(stream_scaling_factor * crop.height)
+    if scaling_x <= scaling_y:
+        # letterboxed. Slides will be vertically centered, so we can use half the vertical slack.
+        # We will at least use 10% of the screen height, though, just to remain visible.
+        # width is cropped if the scaled overlay is wider than the main stream. This seems unlikely
+        # to ever happen, but I've run into stranger stuff and am thus overly paranoid.
+        #
+        # This is also the path for uncropped main streams because I think it's more important to
+        # control the height of the overlay than the width if the overlay is going to hide part of
+        # the slides. The reasoning is that the top of the slides never contains actual important
+        # content, but it might extend all the way to the right side. We'll see how it pans out in
+        # practice; most likely it won't make a difference.
+        slack_height = outer_height - round(scaling_x * crop.height)
+        overlay_height = max(slack_height // 2, outer_height // 10)
+        scale_filter = f'scale=-1:{overlay_height},crop=w=min(in_w\\,{outer_width})'
+    else:
+        # pillarboxed. Slides will appear on the left, so we can use the full horizontal slack.
+        # Again, we'll use at least 10% of the screen width, and height is cropped to at most main
+        # stream height.
+        slack_width = outer_width - round(scaling_y * crop.width)
+        overlay_width = max(slack_width, outer_width // 10)
+        scale_filter = f'scale={overlay_width}:-1,crop=h=min(in_h\\,{outer_height})'
 
-    # if we're pillarboxed, the slides will appear on the left and we can use the full horizontal
-    # slack. If we're letterboxed, the slides are vertically centered and we'll use half the
-    # vertical slack (the upper black bar). We also make sure the overlay uses at least 1/10th of
-    # the screen width and height to be visible even if no or very small black bars are inserted.
-    #
-    # If one of these is more than the minimum 10%, the other one will underestimate the desired
-    # overlay size. This is resolved by force_original_aspect_ratio=increase in the filter.
-    overlay_width = max(slack_width, outer_width // 10)
-    overlay_height = max(slack_height // 2, outer_height // 10)
-
-    return f'scale={overlay_width}:{overlay_height}:force_original_aspect_ratio=increase'
+    return scale_filter
 
 def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
     """

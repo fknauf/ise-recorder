@@ -17,6 +17,7 @@ import ise_record.postprocess
 from ise_record.postprocess import (
     _run_command,
     concat_chunks,
+    determine_crop_area,
     generate_overlay_scale,
     generate_ffmpeg_filter,
     pick_target_geometry,
@@ -43,6 +44,22 @@ async def test_run_command_error():
     assert ex.value.stderr == b""
     assert ex.value.cmd == [ "/bin/false", "foo", "bar" ]
     assert ex.value.returncode != 0
+
+def test_determine_crop_area():
+    width, height = 1920, 1080
+    crop_none = Rectangle(width = 1920, height = 1080, left = 0, top = 0)
+    crop_letter = Rectangle(width = 1920, height = 720, left = 0, top = 180)
+    crop_pillar = Rectangle(width = 1600, height = 1080, left = 160, top = 0)
+
+    crop_letter_insignificant = Rectangle(width = 1920, height = 1070, left = 0, top = 5)
+    crop_pillar_insignificant = Rectangle(width = 1901, height = 1080, left = 10, top = 0)
+
+    assert determine_crop_area(width, height, crop_none) == crop_none
+    assert determine_crop_area(width, height, crop_letter) == crop_letter
+    assert determine_crop_area(width, height, crop_pillar) == crop_pillar
+
+    assert determine_crop_area(width, height, crop_letter_insignificant) == crop_none
+    assert determine_crop_area(width, height, crop_pillar_insignificant) == crop_none
 
 @pytest.mark.asyncio
 async def test_video_properties():
@@ -99,33 +116,27 @@ def test_generate_overlay_scale():
     crop_none       = Rectangle(left=  0, top=  0, width=1920, height=1080)
     crop_pillar     = Rectangle(left=210, top=  0, width=1500, height=1080)
     crop_letter     = Rectangle(left=  0, top=140, width=1920, height= 800)
-    crop_negligible = Rectangle(left= 10, top= 10, width=1900, height=1060)
 
     filter_none       = generate_overlay_scale(crop_none,       1920, 1080)
     filter_pillar     = generate_overlay_scale(crop_pillar,     1920, 1080)
     filter_letter     = generate_overlay_scale(crop_letter,     1920, 1080)
-    filter_negligible = generate_overlay_scale(crop_negligible, 1920, 1080)
 
-    assert filter_none   == "scale=192:108:force_original_aspect_ratio=increase"
-    assert filter_pillar == "scale=420:108:force_original_aspect_ratio=increase"
-    assert filter_letter == "scale=192:140:force_original_aspect_ratio=increase"
-    assert filter_negligible == filter_none
+    assert filter_none   == "scale=-1:108,crop=w=min(in_w\\,1920)"
+    assert filter_pillar == "scale=420:-1,crop=h=min(in_h\\,1080)"
+    assert filter_letter == "scale=-1:140,crop=w=min(in_w\\,1920)"
 
 def test_generate_ffmpeg_filter():
     stream_nocrop     = VideoProperties(width=1440, height=810, crop=Rectangle(left=  0, top=  0, width=1440, height=810))
     stream_pillar     = VideoProperties(width=1440, height=810, crop=Rectangle(left=120, top=  0, width=1200, height=810))
     stream_letterbox  = VideoProperties(width=1440, height=810, crop=Rectangle(left=  0, top=105, width=1440, height=600))
-    stream_negligible = VideoProperties(width=1440, height=810, crop=Rectangle(left=  7, top=  4, width=1426, height=802))
 
     filter_nocrop     = generate_ffmpeg_filter(stream_nocrop,     True)
     filter_pillar     = generate_ffmpeg_filter(stream_pillar,     True)
     filter_letterbox  = generate_ffmpeg_filter(stream_letterbox,  True)
-    filter_negligible = generate_ffmpeg_filter(stream_negligible, True)
 
     filter_nocrop_nooverlay     = generate_ffmpeg_filter(stream_nocrop,     False)
     filter_pillar_nooverlay     = generate_ffmpeg_filter(stream_pillar,     False)
     filter_letterbox_nooverlay  = generate_ffmpeg_filter(stream_letterbox,  False)
-    filter_negligible_nooverlay = generate_ffmpeg_filter(stream_negligible, False)
 
     ovly_nocrop    = generate_overlay_scale(stream_nocrop.crop,    1920, 1080)
     ovly_pillar    = generate_overlay_scale(stream_pillar.crop,    1920, 1080)
@@ -134,12 +145,10 @@ def test_generate_ffmpeg_filter():
     assert filter_nocrop_nooverlay    == "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:0:-1,fps=30"
     assert filter_pillar_nooverlay    == "[0:v]crop=1200:810:120:0,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:0:-1,fps=30"
     assert filter_letterbox_nooverlay == "[0:v]crop=1440:600:0:105,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:0:-1,fps=30"
-    assert filter_negligible_nooverlay == filter_nocrop_nooverlay
 
     assert filter_nocrop    == f"{filter_nocrop_nooverlay   }[main];[1:v]{ovly_nocrop   }[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
     assert filter_pillar    == f"{filter_pillar_nooverlay   }[main];[1:v]{ovly_pillar   }[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
     assert filter_letterbox == f"{filter_letterbox_nooverlay}[main];[1:v]{ovly_letterbox}[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
-    assert filter_negligible == filter_nocrop
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks(mocker):

@@ -22,7 +22,8 @@ services:
     volumes:
       - ./data:/app/data
     command:
-      - --log-level debug
+      - --log-level
+      - debug
 #      - --no-access-log
     environment:
       - TZ=Europe/Berlin
