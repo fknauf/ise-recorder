@@ -21,7 +21,9 @@ services:
       - 127.0.0.1:8000:8000
     volumes:
       - ./data:/app/data
-    command: --log-level debug
+    command:
+      - --log-level debug
+#      - --no-access-log
     environment:
       - TZ=Europe/Berlin
 #      - ISE_RECORD_DESTDIR=/app/data
