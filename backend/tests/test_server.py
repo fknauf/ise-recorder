@@ -124,17 +124,60 @@ def test_schedule_postprocessing_error(mocker):
     os.path.isdir.assert_called_once_with(server.settings.destdir / "foo")
     fastapi.BackgroundTasks.add_task.assert_not_called()
 
+def test_schedule_postprocessing_input_validation(mocker):
+    mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    response = client.post(
+        "/api/jobs",
+        headers={ "Content-Type": "application/json" },
+        json = {
+            "recording": "AND 0 == 0; DROP TABLE important_data; --",
+            "recipient": "foo@bar.de"
+        }
+    )
+
+    assert response.status_code == 422
+    fastapi.BackgroundTasks.add_task.assert_not_called()
+
+
 def test_chunk_upload(mocker):
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
     sample_size = os.stat(sample_path).st_size
 
-    with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-        mocker.patch("server.settings.destdir", Path(tempdir))
+    for ix, fname in [
+        (   0, "chunk.0000"),
+        (  42, "chunk.0042"),
+        (9999, "chunk.9999")
+    ]:
+        with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
+            mocker.patch("server.settings.destdir", Path(tempdir))
 
+            response = client.post(
+                "/api/chunks",
+                data={
+                    "recording": "foo",
+                    "track": "stream",
+                    "index": ix
+                },
+                files={
+                    "chunk": sample
+                }
+            )
+
+            target_path = Path(tempdir) / "foo" / "stream" / fname
+
+            assert response.status_code == 201
+            assert os.path.isfile(target_path)
+            assert os.stat(target_path).st_size == sample_size
+
+def test_chunk_upload_input_validation():
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+
+    with open(sample_path, "rb") as sample:
         response = client.post(
             "/api/chunks",
             data={
-                "recording": "foo",
+                "recording": "AND 0 == 0; DROP TABLE important_data; --",
                 "track": "stream",
                 "index": 42
             },
@@ -143,8 +186,87 @@ def test_chunk_upload(mocker):
             }
         )
 
-        target_path = Path(tempdir) / "foo" / "stream" / "chunk.0042"
+        assert response.status_code == 422
 
-        assert response.status_code == 201
-        assert os.path.isfile(target_path)
-        assert os.stat(target_path).st_size == sample_size
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "foo",
+                "track": "AND 0 == 0; DROP TABLE important_data; --",
+                "index": 42
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        assert response.status_code == 422
+
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "foo",
+                "track": "stream",
+                "index": -1
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        assert response.status_code == 422
+
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "foo",
+                "track": "stream",
+                "index": 10000
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        assert response.status_code == 422
+
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "foo",
+                "track": "stream",
+                "index": 42
+            }
+        )
+
+        assert response.status_code == 422
+
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "AND 0 == 0; DROP TABLE important_data; --",
+                "track": "stream",
+                "index": 42,
+                "nonsense": "poppycock"
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        assert response.status_code == 422
+
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "AND 0 == 0; DROP TABLE important_data; --",
+                "track": "stream",
+                "index": 42
+            },
+            files={
+                "chunk": sample,
+                "nonsense": sample
+            }
+        )
+
+        assert response.status_code == 422
