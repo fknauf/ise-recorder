@@ -272,7 +272,7 @@ async def postprocess_tracks(
     inputs = []
 
     has_overlay = overlay_dir.is_dir()
-    logging.debug("Recording %s an overlay track", "has" if has_overlay else "doesn't have")
+    logger.debug("Recording %s an overlay track", "has" if has_overlay else "doesn't have")
 
     try:
         inputs.append(await concat_chunks(stream_dir))
@@ -322,7 +322,7 @@ async def postprocess_recording(recording_path: Path) -> Result:
     """
 
     if not recording_path.is_dir():
-        logging.info("Attempted to schedule postprocessing for non-existent recording %s", recording_path)
+        logger.warning("Scheduled postprocessing for non-existent recording %s", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     stream_dir = recording_path / "stream"
@@ -331,8 +331,8 @@ async def postprocess_recording(recording_path: Path) -> Result:
     output_path = recording_path / 'presentation.webm'
 
     if not stream_dir.is_dir():
-        logging.info("%s has no main display stream, nothing to do.", recording_path)
+        logger.info("%s has no main display stream, nothing to do.", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
-    logging.info("Postprocessing %s", recording_path)
+    logger.info("Postprocessing %s", recording_path)
     return await postprocess_tracks(stream_dir, overlay_dir, audio_dirs, output_path)

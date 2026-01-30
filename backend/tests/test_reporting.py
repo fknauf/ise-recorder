@@ -2,12 +2,15 @@
 # pylint: disable=missing-function-docstring
 # pylint: disable=missing-module-docstring
 # pylint: disable=too-many-locals
+# pylint: disable=protected-access
+# pylint: disable=no-member
 
 from pathlib import Path
 from unittest.mock import ANY
 
 import aiosmtplib
 import pytest
+
 from ise_record.postprocess import Result, ResultReason
 from ise_record.reporting import (
     generate_report,

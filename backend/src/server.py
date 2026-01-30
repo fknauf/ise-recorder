@@ -11,7 +11,7 @@ from typing import Annotated, List, Optional
 
 import aiofiles
 from fastapi import BackgroundTasks, FastAPI, Form, File, HTTPException, UploadFile, status
-from pydantic import BaseModel, EmailStr, Field, IPvAnyAddress
+from pydantic import BaseModel, EmailStr, Field
 from pydantic_extra_types.domain import DomainStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

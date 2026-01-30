@@ -52,7 +52,7 @@ def normalize_recipient(address: str | None, domain_whitelist: List[str]) -> str
         if _is_whitelisted(validated.normalized, domain_whitelist):
             return validated.normalized
     except EmailNotValidError:
-        logging.warning("Invalid or blacklisted recipient address: %s", address)
+        logger.warning("Invalid or blacklisted recipient address: %s", address)
 
     return None
 
@@ -62,6 +62,16 @@ def generate_report(
         job_title: str,
         result: Result
 ) -> EmailMessage:
+    """
+        Generate a report from a job result for e-mail sending 
+
+        :param sender e-mail address for the From header
+        :param recipient e-mail address for the To header
+        :param job_title name of the job to use in subject and body
+        :param result job result to describe in the report
+        :returns e-mail message, ready for sending
+    """
+
     subject = f'ise-record finished {job_title}'
 
     match result.reason:

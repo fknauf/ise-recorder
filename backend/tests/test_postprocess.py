@@ -2,6 +2,8 @@
 # pylint: disable=missing-function-docstring
 # pylint: disable=missing-module-docstring
 # pylint: disable=too-many-locals
+# pylint: disable=protected-access
+# pylint: disable=no-member
 
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ import tempfile
 from unittest.mock import AsyncMock, call
 
 import pytest
+
 import ise_record.postprocess
 from ise_record.postprocess import (
     _run_command,
@@ -140,9 +143,9 @@ def test_generate_ffmpeg_filter():
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks(mocker):
-    async def mock_concat(dir: Path):
-        return dir / "full.webm"
-    
+    async def mock_concat(p: Path):
+        return p / "full.webm"
+
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
     mocker.patch("ise_record.postprocess._run_command")
@@ -182,12 +185,12 @@ async def test_postprocess_tracks(mocker):
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_no_overlay(mocker):
-    async def mock_concat(dir: Path):
-        return dir / "full.webm"
-    
+    async def mock_concat(p: Path):
+        return p / "full.webm"
+
     def mock_isdir(self: Path):
         return self == Path("foo/stream")
-    
+
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
     mocker.patch("ise_record.postprocess._run_command")
@@ -219,9 +222,9 @@ async def test_postprocess_tracks_no_overlay(mocker):
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio(mocker):
-    async def mock_concat(dir: Path):
-        return dir / "full.webm"
-    
+    async def mock_concat(p: Path):
+        return p / "full.webm"
+
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
     mocker.patch("ise_record.postprocess._run_command")
@@ -277,12 +280,12 @@ async def test_postprocess_tracks_multi_audio(mocker):
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio_no_overlay(mocker):
-    async def mock_concat(dir: Path):
-        return dir / "full.webm"
-    
+    async def mock_concat(p: Path):
+        return p / "full.webm"
+
     def mock_isdir(self: Path):
         return self != Path("foo/overlay")
-    
+
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
     mocker.patch("ise_record.postprocess._run_command")
@@ -336,7 +339,7 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker):
 @pytest.mark.asyncio
 async def test_postprocess_recordings(mocker):
     rec_path = Path("foo")
-    audio_paths = [ 
+    audio_paths = [
         Path("foo/audio-0"),
         Path("foo/audio-1")
     ]
@@ -384,7 +387,7 @@ async def test_postprocess_recordings_nonexistent(mocker):
 @pytest.mark.asyncio
 async def test_postprocess_recordings_missing_main(mocker):
     rec_path = Path("foo")
-    audio_paths = [ 
+    audio_paths = [
         Path("foo/audio-0"),
         Path("foo/audio-1")
     ]

@@ -2,12 +2,15 @@
 # pylint: disable=missing-function-docstring
 # pylint: disable=missing-module-docstring
 # pylint: disable=too-many-locals
+# pylint: disable=protected-access
+# pylint: disable=no-member
 
 import logging
 from pathlib import Path
 
 import pytest
 import rerender
+
 from ise_record.postprocess import Result, ResultReason
 
 @pytest.mark.asyncio

@@ -1,3 +1,10 @@
+# pylint: disable=line-too-long
+# pylint: disable=missing-function-docstring
+# pylint: disable=missing-module-docstring
+# pylint: disable=too-many-locals
+# pylint: disable=protected-access
+# pylint: disable=no-member
+
 import os
 from pathlib import Path
 import tempfile
@@ -6,10 +13,10 @@ from unittest.mock import ANY
 import aiosmtplib
 import fastapi
 from fastapi.testclient import TestClient
-from ise_record.postprocess import Result, ResultReason
-from ise_record.reporting import SmtpSink
 import pytest
 import server
+
+from ise_record.postprocess import Result, ResultReason
 
 client = TestClient(server.app)
 
