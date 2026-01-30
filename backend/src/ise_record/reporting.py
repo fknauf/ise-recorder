@@ -66,7 +66,7 @@ def generate_report(
 
     match result.reason:
         case ResultReason.SUCCESS:
-            message = 'Encoding succeded. Enjoy your video file.'
+            message = 'Encoding succeeded. Enjoy your video file.'
         case ResultReason.FAILURE:
             message = 'Encoding failed. Check server logs.'
         case ResultReason.MAIN_STREAM_MISSING:

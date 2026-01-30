@@ -364,3 +364,43 @@ async def test_postprocess_recordings(mocker):
     ])
 
     Path.glob.assert_called_once_with(rec_path, "audio-*")
+
+@pytest.mark.asyncio
+async def test_postprocess_recordings_nonexistent(mocker):
+    rec_path = Path("foo")
+    expected_result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
+
+    mocker.patch("pathlib.Path.is_dir", return_value=False, autospec=True)
+    mocker.patch("pathlib.Path.glob", return_value=[], autospec=True)
+    mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
+
+    result = await postprocess_recording(rec_path)
+
+    assert result == expected_result
+
+    ise_record.postprocess.postprocess_tracks.assert_not_called()
+    Path.is_dir.assert_called_once_with(rec_path)
+
+@pytest.mark.asyncio
+async def test_postprocess_recordings_missing_main(mocker):
+    rec_path = Path("foo")
+    audio_paths = [ 
+        Path("foo/audio-0"),
+        Path("foo/audio-1")
+    ]
+
+    expected_result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
+
+    mocker.patch("pathlib.Path.is_dir", wraps=lambda p: p == rec_path, autospec=True)
+    mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
+    mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
+
+    result = await postprocess_recording(rec_path)
+
+    assert result == expected_result
+
+    ise_record.postprocess.postprocess_tracks.assert_not_called()
+    Path.is_dir.assert_has_calls([
+        call(rec_path),
+        call(rec_path / "stream")
+    ])

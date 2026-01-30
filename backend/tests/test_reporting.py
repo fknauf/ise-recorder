@@ -39,7 +39,35 @@ def test_generate_report():
     assert job_title in report["Subject"]
     assert job_title in report.get_payload()
     assert "foo/presentation.webm" in report.get_payload()
-    assert "Enjoy your video file" in report.get_payload()
+    assert "Encoding succeeded" in report.get_payload()
+
+def test_generate_report_failure():
+    sender = "render@example.de"
+    recipient = "lecturer@example.de"
+    job_title = "foo_1234"
+    result = Result(reason = ResultReason.FAILURE, output_file = None)
+
+    report = generate_report(sender, recipient, job_title, result)
+
+    assert report["From"] == sender
+    assert report["To"] == recipient
+    assert job_title in report["Subject"]
+    assert job_title in report.get_payload()
+    assert "Encoding failed" in report.get_payload()
+
+def test_generate_report_missing():
+    sender = "render@example.de"
+    recipient = "lecturer@example.de"
+    job_title = "foo_1234"
+    result = Result(reason = ResultReason.MAIN_STREAM_MISSING, output_file = None)
+
+    report = generate_report(sender, recipient, job_title, result)
+
+    assert report["From"] == sender
+    assert report["To"] == recipient
+    assert job_title in report["Subject"]
+    assert job_title in report.get_payload()
+    assert "Missing main display stream" in report.get_payload()
 
 @pytest.mark.asyncio
 async def test_send_report(mocker):

@@ -322,6 +322,7 @@ async def postprocess_recording(recording_path: Path) -> Result:
     """
 
     if not recording_path.is_dir():
+        logging.info("Attempted to schedule postprocessing for non-existent recording %s", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     stream_dir = recording_path / "stream"
