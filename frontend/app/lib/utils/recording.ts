@@ -4,7 +4,7 @@ import { openRecordingFileStream } from "./browserStorage";
 import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
 
 // used to remove characters from the recording name that would trip up ffmpeg in post.
-export const unsafeTitleCharacters = /[^A-Za-z0-9_.-]/g;
+export const unsafeTitleCharacters = /[^\w.-]/g;
 
 interface RecordingTask {
   trackTitle: string

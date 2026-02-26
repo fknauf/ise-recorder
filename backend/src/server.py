@@ -18,6 +18,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from ise_record.postprocess import postprocess_recording
 from ise_record.reporting import normalize_recipient, send_report, SmtpSink
 
+SAFE_NAME_REGEX = '^[\\w.-]+$'
+
 class Settings(BaseSettings):
     """
         Configuration settings for the server. Options can be set through ISE_RECORD_VARNAME
@@ -36,7 +38,6 @@ class Settings(BaseSettings):
     smtp_allowed_domains: List[DomainStr] = []
 
     chunk_file_digits: int = 4
-    safe_name_regex: str = '^[A-Za-z0-9_.-]+$'
 
     model_config = SettingsConfigDict(env_prefix="ise_record_")
 
@@ -52,13 +53,41 @@ logger = logging.getLogger(__name__)
 
 @app.post('/api/chunks', status_code=status.HTTP_201_CREATED)
 async def upload_chunk(
-    recording: Annotated[str, Form(pattern=settings.safe_name_regex)],
-    track: Annotated[str, Form(pattern=settings.safe_name_regex)],
-    index: Annotated[int, Form(ge=0, lt=10 ** settings.chunk_file_digits)],
-    chunk: Annotated[UploadFile, File()]
+    recording: Annotated[
+        str,
+        Form(
+            pattern=SAFE_NAME_REGEX,
+            description="Name of the recording. Usually consists of Lecture Title and Timestamp",
+            examples=["PSU_2026-02-13T164309.313"],
+        )
+    ],
+    track: Annotated[
+        str,
+        Form(
+            pattern=SAFE_NAME_REGEX,
+            description="Name of the track, e.g. stream, overlay, audio-0",
+            examples=["stream", "overlay", "audio-0"]
+        )
+    ],
+    index: Annotated[
+        int,
+        Form(
+            ge=0,
+            le=10 ** settings.chunk_file_digits - 1,
+            description="Running number of the chunk in the track. Start at 0.",
+            examples=[0]
+        )
+    ],
+    chunk: Annotated[
+        UploadFile,
+        File(
+            description="video/audio blob to store, as file"
+        )
+    ]
 ):
-    """ POST endpoint for the upload of chunk files """
-
+    """
+    POST endpoint for the upload of chunk files.
+    """
     filename = f'chunk.{index:04d}'
 
     track_path = settings.destdir / recording / track
@@ -81,10 +110,25 @@ async def upload_chunk(
 class PostProcessingJob(BaseModel):
     """ DTO for a postprocessing job the client wants to schedule """
 
-    recording: Annotated[str, Field(pattern=settings.safe_name_regex)]
-    # backend will validate before sending email. We want the postprocessing to work
-    # even if someone has a typo in the mail address or doesn't specify a recipient
-    recipient: Optional[str] = None
+    recording: Annotated[
+        str,
+        Field(
+            pattern=SAFE_NAME_REGEX,
+            description="Name of the recording. Usually consists of Lecture Title and Timestamp",
+            examples=["PSU_2026-02-13T164309.313"]
+        )
+    ]
+    # backend will validate before sending email. We want the postprocessing to work even if
+    # someone has a typo in the mail address or doesn't specify a recipient, so we don't reject
+    # a malformed recipient here (we just don't send mail later)
+    recipient: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            description="Recipient of the completion notification",
+            examples=["mustermann@vss.uni-hannover.de", None]
+        )
+    ]
 
 async def _postprocessing_task(job: PostProcessingJob) -> None:
     recording_path = settings.destdir / job.recording

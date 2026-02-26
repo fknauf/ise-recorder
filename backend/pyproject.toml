@@ -1,13 +1,13 @@
 [project]
 name = "ise-record-backend"
 version = "1.0.7"
-requires-python = ">=3.14.2"
+requires-python = ">=3.14"
 
 dependencies = [
     "aiofiles~=25.1.0",
     "aiosmtplib~=5.1.0",
     "email-validator~=2.3.0",
-    "fastapi~=0.133.0",
+    "fastapi~=0.133.1",
     "python-multipart~=0.0.22",
     "pydantic-settings~=2.13.1",
     "pydantic-extra-types~=2.11.0",
