@@ -107,6 +107,25 @@ def test_schedule_postprocessing(mocker):
         server.PostProcessingJob(recording="foo", recipient="foo@bar.de")
     )
 
+def test_schedule_postprocessing_recipient_omitted(mocker):
+    mocker.patch("os.path.isdir", return_value=True)
+    mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    response = client.post(
+        "/api/jobs",
+        headers={ "Content-Type": "application/json" },
+        json={
+            "recording": "foo"
+        }
+    )
+
+    assert response.status_code == 202
+    os.path.isdir.assert_called_once_with(server.settings.destdir / "foo")
+    fastapi.BackgroundTasks.add_task.assert_called_once_with(
+        server._postprocessing_task,
+        server.PostProcessingJob(recording="foo", recipient=None)
+    )
+
 def test_schedule_postprocessing_error(mocker):
     mocker.patch("os.path.isdir", return_value=False)
     mocker.patch("fastapi.BackgroundTasks.add_task")
@@ -138,6 +157,26 @@ def test_schedule_postprocessing_input_validation(mocker):
 
     assert response.status_code == 422
     fastapi.BackgroundTasks.add_task.assert_not_called()
+
+def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker):
+    mocker.patch("os.path.isdir", return_value=True)
+    mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    response = client.post(
+        "/api/jobs",
+        headers={ "Content-Type": "application/json" },
+        json={
+            "recording": "foo",
+            "recipient": "I made a lot of typos"
+        }
+    )
+
+    assert response.status_code == 202
+    os.path.isdir.assert_called_once_with(server.settings.destdir / "foo")
+    fastapi.BackgroundTasks.add_task.assert_called_once_with(
+        server._postprocessing_task,
+        server.PostProcessingJob(recording="foo", recipient="I made a lot of typos")
+    )
 
 
 def test_chunk_upload(mocker):
