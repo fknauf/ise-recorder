@@ -26,7 +26,7 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
 }
 
 export interface ServerEnv {
-  version: string,
+  version?: string,
   apiUrl?: string
 }
 
@@ -39,7 +39,7 @@ export async function getServerEnv(): Promise<ServerEnv> {
 
   if(runtimeEnvironment === undefined) {
     runtimeEnvironment = {
-      version: process.env.npm_package_version ?? "",
+      version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? process.env.npm_package_version : undefined,
       apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL)
     };
   }

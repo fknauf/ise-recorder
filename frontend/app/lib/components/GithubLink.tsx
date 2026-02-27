@@ -12,10 +12,14 @@ export function GithubLink() {
       variant="secondary"
       isQuiet
     >
-      <Flex direction="column" alignItems="center">
-        <GithubIcon/>
-        <Text>{env.version}</Text>
-      </Flex>
+      {
+        env.version !== undefined
+        ? <Flex direction="column" alignItems="center">
+            <GithubIcon/>
+            <Text>v{env.version}</Text>
+          </Flex>
+        : <GithubIcon/>
+      }
     </Link>
   )
 }

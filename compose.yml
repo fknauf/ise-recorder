@@ -9,6 +9,7 @@ services:
     environment:
       - TZ=Europe/Berlin
       - ISE_RECORD_API_URL=http://localhost:8000
+      - ISE_RECORD_SHOW_VERSION=true
 
   backend:
     image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}
