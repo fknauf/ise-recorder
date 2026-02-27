@@ -93,6 +93,12 @@ export interface AppStoreState {
   updateQuotaInformation: () => Promise<void>
 }
 
+const unselectTrack = (state: AppStoreState, track: MediaStreamTrack): Partial<AppStoreState> =>
+  ({
+    mainDisplay: state.mainDisplay === track ? undefined : state.mainDisplay,
+    overlay: state.overlay === track ? undefined : state.overlay
+  });
+
 const createRawAppStore = (
   serverEnv: ServerEnv
 ): StateCreator<AppStoreState, [], [], AppStoreState> => set => ({
@@ -127,11 +133,10 @@ const createRawAppStore = (
   addDisplayTracks: tracks => {
     for(const track of tracks) {
       // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
-      track.onended = () => {
+      track.onended = function (this) {
         set(state => ({
-          mainDisplay: state.mainDisplay === track ? undefined : state.mainDisplay,
-          overlay: state.overlay === track ? undefined : state.overlay,
-          displayTracks: state.displayTracks.filter(t => t !== track)
+          ...unselectTrack(state, this),
+          displayTracks: state.displayTracks.filter(t => t !== this)
         }));
       };
     }
@@ -145,11 +150,10 @@ const createRawAppStore = (
 
   addVideoTracks: tracks => {
     for(const track of tracks) {
-      track.onended = () => {
+      track.onended = function (this) {
         set(state => ({
-          mainDisplay: state.mainDisplay === track ? undefined : state.mainDisplay,
-          overlay: state.overlay === track ? undefined : state.overlay,
-          videoTracks: state.videoTracks.filter(t => t !== track)
+          ...unselectTrack(state, this),
+          videoTracks: state.videoTracks.filter(t => t !== this)
         }));
       };
     }
@@ -164,8 +168,10 @@ const createRawAppStore = (
   addAudioTracks: tracks => {
     for(const track of tracks) {
       // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
-      track.onended = () => {
-        set(state => ({ audioTracks: state.audioTracks.filter(t => t !== track) }));
+      track.onended = function (this) {
+        set(state => ({
+          audioTracks: state.audioTracks.filter(t => t !== this)
+        }));
       };
     }
 
