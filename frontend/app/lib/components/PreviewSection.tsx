@@ -66,6 +66,8 @@ export function PreviewSection(
   return (
     <Flex direction="row" gap="size-100" justifyContent="center" wrap>
       {
+        // Screen capture tracks have confusing labels in chromium, so for them we just show a
+        // generic label. Webcams provide the device name, which is useful to show to the user.
         [
           ...displayTracks.map((track, ix) => [ track, `Screen capture ${ix}` ] as const),
           ...videoTracks.map(track => [ track, track.label ] as const)
