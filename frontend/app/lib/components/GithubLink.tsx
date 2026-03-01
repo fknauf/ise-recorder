@@ -4,7 +4,7 @@ import { useServerEnv } from "../hooks/useServerEnv";
 
 export type GithubIconProps = Omit<IconProps, "children">;
 
-export const GithubIcon = (
+const GithubIcon = (
   props: Readonly<GithubIconProps>
 ) =>
   // This is the SVG from https://github.com/logos with an adjusted fill attribute.

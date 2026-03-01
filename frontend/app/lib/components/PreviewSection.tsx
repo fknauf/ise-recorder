@@ -63,32 +63,31 @@ export function PreviewSection(
 
   const hasDisabledButtons = activeRecording.state !== "idle";
 
-  const video_preview_card = (track: MediaStreamTrack, label: string) =>
-    <PreviewCard
-      key={`preview-card-${track.id}`}
-      label={label}
-      hasDisabledButtons={hasDisabledButtons}
-      onRemove={() => removeTrack(track)}
-    >
-      <VideoPreview
-        track={track}
-        width={canvasWidth}
-        height={canvasHeight}
-        switchesDisabled={hasDisabledButtons}
-        isMainDisplay={mainDisplay === track}
-        isOverlay={overlay === track}
-        onToggleMainDisplay={isSelected => selectMainDisplay(isSelected ? track : undefined)}
-        onToggleOverlay={isSelected => selectOverlay(isSelected ? track : undefined)}
-      />
-    </PreviewCard>;
-
   return (
     <Flex direction="row" gap="size-100" justifyContent="center" wrap>
       {
-        displayTracks.map((track, ix) => video_preview_card(track, `Screen capture ${ix}`))
-      }
-      {
-        videoTracks.map(track => video_preview_card(track, track.label))
+        [
+          ...displayTracks.map((track, ix) => [ track, `Screen capture ${ix}` ] as const),
+          ...videoTracks.map(track => [ track, track.label ] as const)
+        ].map(([ track, label ]) =>
+          <PreviewCard
+            key={`preview-card-${track.id}`}
+            label={label}
+            hasDisabledButtons={hasDisabledButtons}
+            onRemove={() => removeTrack(track)}
+          >
+            <VideoPreview
+              track={track}
+              width={canvasWidth}
+              height={canvasHeight}
+              switchesDisabled={hasDisabledButtons}
+              isMainDisplay={mainDisplay === track}
+              isOverlay={overlay === track}
+              onToggleMainDisplay={isSelected => selectMainDisplay(isSelected ? track : undefined)}
+              onToggleOverlay={isSelected => selectOverlay(isSelected ? track : undefined)}
+            />
+          </PreviewCard>
+        )
       }
       {
         audioTracks.map(track =>
