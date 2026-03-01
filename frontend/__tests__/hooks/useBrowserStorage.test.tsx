@@ -76,11 +76,11 @@ test("useBrowserStorage reacts to file size overrides", async () => {
     const adjustedMockRecordings = mockRecordings.map(rec => (
       rec.name === "FOO"
         ? {
-          ...rec,
-          files: rec.files.map(file => (
-            file.name === "stream.webm" ? { ...file, size: 42 } : file
-          ))
-        }
+            ...rec,
+            files: rec.files.map(file => (
+              file.name === "stream.webm" ? { ...file, size: 42 } : file
+            ))
+          }
         : rec
     ));
 

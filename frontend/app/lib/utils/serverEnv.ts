@@ -26,7 +26,7 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
 }
 
 export interface ServerEnv {
-  version?: string,
+  version?: string
   apiUrl?: string
 }
 

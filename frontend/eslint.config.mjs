@@ -33,7 +33,7 @@ const eslintConfig = defineConfig([
       "@stylistic/eol-last": "warn",
       "@stylistic/function-call-spacing": "warn",
       "@stylistic/generator-star-spacing": [ "warn", { before: false, after: true } ],
-      "@stylistic/indent": [ "warn", 2 ],
+      "@stylistic/indent": [ "warn", 2, { offsetTernaryExpressions: true } ],
       "@stylistic/jsx-child-element-spacing": "warn",
       "@stylistic/jsx-closing-bracket-location": "warn",
       "@stylistic/jsx-closing-tag-location": "warn",

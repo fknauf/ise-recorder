@@ -14,14 +14,14 @@ export function GithubLink() {
     >
       {
         env.version !== undefined
-        ? <Flex direction="column" alignItems="center">
-            <GithubIcon/>
-            <Text>v{env.version}</Text>
-          </Flex>
-        : <GithubIcon/>
+          ? <Flex direction="column" alignItems="center">
+              <GithubIcon/>
+              <Text>v{env.version}</Text>
+            </Flex>
+          : <GithubIcon/>
       }
     </Link>
-  )
+  );
 }
 
 export default GithubLink;
