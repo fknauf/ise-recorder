@@ -32,17 +32,17 @@ from ise_record.postprocess import (
 
 @pytest.mark.asyncio
 async def test_run_command():
-    res = await _run_command([ "/bin/echo", "Hello, world." ])
+    res = await _run_command([ "/usr/bin/env", "echo", "Hello, world." ])
     assert res == b"Hello, world.\n"
 
 @pytest.mark.asyncio
 async def test_run_command_error():
     with pytest.raises(CalledProcessError) as ex:
-        await _run_command([ "/bin/false", "foo", "bar" ])
+        await _run_command([ "/usr/bin/env", "false", "foo", "bar" ])
 
     assert ex.value.stdout == b""
     assert ex.value.stderr == b""
-    assert ex.value.cmd == [ "/bin/false", "foo", "bar" ]
+    assert ex.value.cmd == [ "/usr/bin/env", "false", "foo", "bar" ]
     assert ex.value.returncode != 0
 
 def test_determine_crop_area():
