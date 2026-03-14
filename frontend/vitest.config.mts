@@ -1,12 +1,13 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
-import tsconfigPaths from "vite-tsconfig-paths";
 import { playwright } from "@vitest/browser-playwright";
 import { listenForFileDownload } from "./__tests__/command-download";
 
 export default defineConfig({
+  resolve: {
+    tsconfigPaths: true
+  },
   plugins: [
-    tsconfigPaths(),
     react()
   ],
   test: {

@@ -1,2 +1,2 @@
 [MAIN]
-ignore=.venv,data
+ignore=.venv,build,data
