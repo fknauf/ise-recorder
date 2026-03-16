@@ -1,0 +1,25 @@
+name: NodeJS with Webpack
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+
+    - name: Test Backend
+      run: |
+        cd backend
+        pip install -e . --group dev
+        pytest
