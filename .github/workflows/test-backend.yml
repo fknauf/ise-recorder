@@ -18,8 +18,17 @@ jobs:
       with:
         python-version: '3.14'
 
-    - name: Test Backend
+    - name: Install ffmpeg
       run: |
-        cd backend
+        sudo apt-get update
+        sudo apt-get -y install ffmpeg
+
+    - name: Install python dependencies
+      working-directory: ${{ github.workspace }}/backend
+      run: |
         pip install -e . --group dev
+
+    - name: Test Backend
+      working-directory: ${{ github.workspace }}/backend
+      run: |
         pytest
