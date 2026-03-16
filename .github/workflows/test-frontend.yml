@@ -24,6 +24,12 @@ jobs:
         npm install
         npx playwright install
 
+    - name: Run linter
+      continue-on-error: true
+      working-directory: ${{ github.workspace }}/frontend
+      run: |
+        npm run lint
+
     - name: Test Frontend
       working-directory: ${{ github.workspace }}/frontend
       run: |

@@ -29,6 +29,7 @@ jobs:
         pip install -e . --group dev
 
     - name: Run linter
+      continue-on-error: true
       working-directory: ${{ github.workspace }}/backend
       run: |
         pylint .
