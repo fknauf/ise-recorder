@@ -28,6 +28,11 @@ jobs:
       run: |
         pip install -e . --group dev
 
+    - name: Run linter
+      working-directory: ${{ github.workspace }}/backend
+      run: |
+        pylint .
+
     - name: Test Backend
       working-directory: ${{ github.workspace }}/backend
       run: |
