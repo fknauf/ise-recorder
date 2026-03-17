@@ -7,9 +7,7 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true
   },
-  plugins: [
-    react()
-  ],
+  plugins: [ react() ],
   test: {
     browser: {
       provider: playwright(),
