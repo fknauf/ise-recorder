@@ -46,6 +46,29 @@ test("store splits media devices into video and audio", () => {
   expect(store.getState().audioDevices).toStrictEqual(devices.filter(dev => dev.kind === "audioinput"));
 });
 
+test("store filters out duplicate devices", () => {
+  // Work around FF149 bug where the lunar lake integrated webcam shows up twice in the device list
+  // with the same group and device ids but different label
+  const store = createAppStore({});
+
+  const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
+    deviceId, groupId, kind, label,
+    toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
+  });
+
+  const devices: MediaDeviceInfo[] = [
+    makeDevice("dev1", "g1", "videoinput", "Cam Integrated C"),
+    makeDevice("dev1", "g1", "videoinput", "Cam Integrated I"),
+    makeDevice("dev1", "g1", "audioinput", "Mic Integrated M"),
+    makeDevice("dev1", "g1", "audioinput", "Mic Integrated N")
+  ];
+  
+  store.getState().setMediaDevices(devices)
+
+  expect(store.getState().videoDevices).toStrictEqual(devices.slice(0, 1));
+  expect(store.getState().audioDevices).toStrictEqual(devices.slice(2, 3));
+});
+
 test("addDisplayTracks rigs track to remove itself from storage when stopped", async () => {
   const store = createAppStore({});
 

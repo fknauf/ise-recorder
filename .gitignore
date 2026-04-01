@@ -41,6 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 __screenshots__
+.vitest-attachments
 
 # backend pycache & stuff
 __pycache__

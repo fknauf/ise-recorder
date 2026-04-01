@@ -8,18 +8,13 @@ import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
 import Stop from "@spectrum-icons/workflow/Stop";
 import isEmail from "validator/es/lib/isEmail";
 import { unsafeTitleCharacters } from "../utils/recording";
-import { MediaDeviceUid } from "../store/store";
+import { createDeviceKey, parseDeviceKey } from "../store/store";
 import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { useLecture } from "../hooks/useLecture";
 import { useServerEnv } from "../hooks/useServerEnv";
 
 export type RecorderState = "idle" | "starting" | "recording" | "stopping";
-
-const createDeviceKey = (dev: MediaDeviceInfo) =>
-  JSON.stringify({ groupId: dev.groupId, deviceId: dev.deviceId } as MediaDeviceUid);
-const parseDeviceKey = (devUid: Key): MediaDeviceUid =>
-  JSON.parse(devUid as string);
 
 const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || "unsafe character in lecture title";
 const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
@@ -150,7 +145,7 @@ export function RecorderControls() {
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => openVideoStream(parseDeviceKey(devUid))}>
+          <Menu onAction={devUid => openVideoStream(parseDeviceKey(devUid as string))}>
             { videoDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>
@@ -160,7 +155,7 @@ export function RecorderControls() {
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => openAudioStream(parseDeviceKey(devUid))}>
+          <Menu onAction={devUid => openAudioStream(parseDeviceKey(devUid as string))}>
             { audioDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
           </Menu>
         </MenuTrigger>

@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2025",
     "lib": ["dom", "dom.iterable", "esnext", "DOM.AsyncIterable"],
     "allowJs": true,
     "skipLibCheck": true,
@@ -13,6 +13,7 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "stableTypeOrdering": true,
     "plugins": [
       {
         "name": "next"

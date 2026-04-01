@@ -20,6 +20,31 @@ export type ActiveRecording = {
 
 export type StateUpdate<T> = T | ((old: T) => T);
 
+export const createDeviceKey = (dev: MediaDeviceInfo) =>
+  JSON.stringify({ groupId: dev.groupId, deviceId: dev.deviceId } as MediaDeviceUid);
+export const parseDeviceKey = (devUid: string): MediaDeviceUid =>
+  JSON.parse(devUid as string);
+
+function filterDevices(devices: MediaDeviceInfo[], kind: string) {
+  var seen = new Set<string>();
+
+  return devices.filter(dev => {
+    if(dev.kind !== kind) {
+      return false;
+    }
+
+    // Filter out duplicate groupId/deviceID as seen with Lunar Lake built-in webcams on Firefox 149.
+    var key = createDeviceKey(dev);
+
+    if(seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
 function applyStateUpdate<T>(oldValue: T, update: StateUpdate<T>) {
   if(update instanceof Function) {
     return update(oldValue);
@@ -126,8 +151,8 @@ const createRawAppStore = (
 
   setMediaDevices: devs =>
     set({
-      videoDevices: devs.filter(dev => dev.kind === "videoinput"),
-      audioDevices: devs.filter(dev => dev.kind === "audioinput")
+      videoDevices: filterDevices(devs, "videoinput"),
+      audioDevices: filterDevices(devs, "audioinput")
     }),
 
   addDisplayTracks: tracks => {
