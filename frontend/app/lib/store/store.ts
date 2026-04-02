@@ -26,23 +26,20 @@ export const parseDeviceKey = (devUid: string): MediaDeviceUid =>
   JSON.parse(devUid as string);
 
 function filterDevices(devices: MediaDeviceInfo[], kind: string) {
-  var seen = new Set<string>();
-
-  return devices.filter(dev => {
-    if(dev.kind !== kind) {
-      return false;
-    }
-
+  return devices
+    .filter(dev => dev.kind === kind)
     // Filter out duplicate groupId/deviceID as seen with Lunar Lake built-in webcams on Firefox 149.
-    var key = createDeviceKey(dev);
-
-    if(seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
+    .reduce(
+      (acc, dev) => {
+        const [ list, seen ] = acc;
+        const key = createDeviceKey(dev);
+        return [
+          seen.has(key) ? list : [ ...list, dev ],
+          seen.add(key)
+        ] as const
+      },
+      [[] as MediaDeviceInfo[], new Set<string>()] as const
+    )[0];
 }
 
 function applyStateUpdate<T>(oldValue: T, update: StateUpdate<T>) {
