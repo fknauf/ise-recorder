@@ -1,5 +1,5 @@
 [project]
-name = "ise-record-backend"
+name = "ise-record"
 version = "1.0.8"
 requires-python = ">=3.14"
 
@@ -11,7 +11,7 @@ dependencies = [
     "pydantic-settings~=2.13.1",
     "pydantic-extra-types~=2.11.2",
     "python-multipart~=0.0.24",
-    "uvicorn~=0.43.0",
+    "uvicorn~=0.44.0",
 ]
 
 [dependency-groups]
@@ -27,6 +27,10 @@ dev = [
     "fastapi[standard]",
     "pylint~=4.0.5",
 ]
+
+[build-system]
+requires = ["setuptools >= 82.0.1"]
+build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 addopts = [
