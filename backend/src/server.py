@@ -44,6 +44,19 @@ class Settings(BaseSettings):
 settings = Settings()
 app = FastAPI()
 
+def health_check_filter(record: logging.LogRecord):
+    """ Filter out health checks done by the container itself """
+
+    remote_address = record.args[0]
+    request_method = record.args[1]
+    query_string = record.args[2]
+
+    return remote_address == "127.0.0.1" and request_method == 'GET' and not query_string in [
+        "/api/health",
+    ]
+
+logging.getLogger('uvicorn.access').addFilter(health_check_filter)
+
 uvicorn_logger = logging.getLogger('uvicorn.error')
 logging.basicConfig(
     level=uvicorn_logger.level,
@@ -169,4 +182,5 @@ def schedule_job(
 
 @app.get('/api/health')
 def health_check():
+    """ Endpoint for container health checks """
     return { "status": "healthy" }
