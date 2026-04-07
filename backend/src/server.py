@@ -15,6 +15,7 @@ from pydantic import BaseModel, EmailStr, Field
 from pydantic_extra_types.domain import DomainStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ise_record.logging import setup_logging
 from ise_record.postprocess import postprocess_recording
 from ise_record.reporting import normalize_recipient, send_report, SmtpSink
 
@@ -43,26 +44,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 app = FastAPI()
-
-def health_check_filter(record: logging.LogRecord):
-    """ Filter out health checks done by the container itself """
-
-    remote_address = record.args[0]
-    request_method = record.args[1]
-    query_string = record.args[2]
-
-    return (
-        not remote_address.startswith("127.0.0.1:")
-        or request_method != "GET"
-        or query_string != "/api/health"
-    )
-
-logging.getLogger('uvicorn.access').addFilter(health_check_filter)
-
-uvicorn_logger = logging.getLogger('uvicorn.error')
-logging.basicConfig(
-    level=uvicorn_logger.level,
-    handlers=uvicorn_logger.handlers)
+setup_logging()
 
 logger = logging.getLogger(__name__)
 
