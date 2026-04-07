@@ -166,3 +166,7 @@ def schedule_job(
     background_tasks.add_task(_postprocessing_task, job)
 
     return job
+
+@app.get('/api/health')
+def health_check():
+    return { "status": "healthy" }

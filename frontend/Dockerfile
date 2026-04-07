@@ -36,4 +36,10 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 ENV ISE_RECORD_API_URL=
 
+HEALTHCHECK \
+    --interval=5m \
+    --timeout=5s \
+    --start-period=5s \
+    CMD wget --spider --tries=1 "http://127.0.0.1:${PORT}"
+
 CMD [ "node", "server.js" ]
