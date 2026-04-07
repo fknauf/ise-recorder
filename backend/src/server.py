@@ -51,9 +51,11 @@ def health_check_filter(record: logging.LogRecord):
     request_method = record.args[1]
     query_string = record.args[2]
 
-    return remote_address == "127.0.0.1" and request_method == 'GET' and not query_string in [
-        "/api/health",
-    ]
+    return (
+        not remote_address.startswith("127.0.0.1:")
+        or request_method != "GET"
+        or query_string != "/api/health"
+    )
 
 logging.getLogger('uvicorn.access').addFilter(health_check_filter)
 
