@@ -8,6 +8,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir --no-warn-script-location .
 
