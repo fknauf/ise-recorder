@@ -36,7 +36,7 @@ function filterDevices(devices: MediaDeviceInfo[], kind: string) {
         return [
           seen.has(key) ? list : [ ...list, dev ],
           seen.add(key)
-        ] as const
+        ] as const;
       },
       [[] as MediaDeviceInfo[], new Set<string>()] as const
     )[0];

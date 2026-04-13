@@ -62,8 +62,8 @@ test("store filters out duplicate devices", () => {
     makeDevice("dev1", "g1", "audioinput", "Mic Integrated M"),
     makeDevice("dev1", "g1", "audioinput", "Mic Integrated N")
   ];
-  
-  store.getState().setMediaDevices(devices)
+
+  store.getState().setMediaDevices(devices);
 
   expect(store.getState().videoDevices).toStrictEqual(devices.slice(0, 1));
   expect(store.getState().audioDevices).toStrictEqual(devices.slice(2, 3));

@@ -1,3 +1,5 @@
+""" Logging setup for ise-recorder  """
+
 import logging
 
 def health_check_filter(record: logging.LogRecord):
@@ -12,6 +14,10 @@ def health_check_filter(record: logging.LogRecord):
     )
 
 def setup_logging():
+    """
+    Set up logging to match uvicorn options and filter out the container's
+    health check
+    """
     logging.getLogger('uvicorn.access').addFilter(health_check_filter)
 
     uvicorn_logger = logging.getLogger('uvicorn.error')
