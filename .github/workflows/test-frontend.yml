@@ -34,4 +34,4 @@ jobs:
     - name: Test Frontend
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test
+        npm run test -- -no-file-parallelism

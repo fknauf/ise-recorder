@@ -4,7 +4,6 @@ import { playwright } from "@vitest/browser-playwright";
 import { listenForFileDownload } from "./__tests__/command-download";
 
 export default defineConfig({
-  fileParallelism: false,
   resolve: {
     tsconfigPaths: true
   },
