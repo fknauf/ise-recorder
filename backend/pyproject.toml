@@ -9,8 +9,7 @@ dependencies = [
     "email-validator~=2.3.0",
     "fastapi~=0.135.3",
     "pydantic-settings~=2.13.1",
-    "pydantic-extra-types~=2.11.1",
-    "python-multipart~=0.0.24",
+    "python-multipart~=0.0.26",
     "uvicorn~=0.44.0",
 ]
 

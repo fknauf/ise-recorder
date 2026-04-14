@@ -12,7 +12,6 @@ from typing import Annotated, List, Optional
 import aiofiles
 from fastapi import BackgroundTasks, FastAPI, Form, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
-from pydantic_extra_types.domain import DomainStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ise_record.logging import setup_logging
@@ -36,7 +35,7 @@ class Settings(BaseSettings):
     smtp_password: Optional[str] = None
     smtp_sender: Optional[EmailStr] = None
     smtp_starttls: bool = False
-    smtp_allowed_domains: List[DomainStr] = []
+    smtp_allowed_domains: List[str] = []
 
     chunk_file_digits: int = 4
 
