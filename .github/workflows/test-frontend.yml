@@ -22,8 +22,8 @@ jobs:
       working-directory: ${{ github.workspace }}/frontend
       run: |
         npm install
-        sudo npx playwright install-deps
-        npx playwright install
+        sudo npx playwright install-deps chromium firefox
+        npx playwright install chromium firefox
 
     - name: Run linter
       continue-on-error: true
