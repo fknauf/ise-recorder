@@ -31,7 +31,12 @@ jobs:
       run: |
         npm run lint
 
-    - name: Test Frontend
+    - name: Test Frontend (Firefox)
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --no-file-parallelism
+        npm run test -- --project=firefox
+
+    - name: Test Frontend (Chromium)
+      working-directory: ${{ github.workspace }}/frontend
+      run: |
+        npm run test -- --project=chromium
