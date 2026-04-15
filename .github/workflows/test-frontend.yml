@@ -36,9 +36,9 @@ jobs:
       if: runner.environment == 'github-hosted'
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project=firefox --no-file-parallelism --test-timeout=30000
+        npm run test -- --project=firefox
 
     - name: Test Frontend (Chromium)
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project=chromium --no-file-parallelism --test-timeout=30000
+        npm run test -- --project=chromium
