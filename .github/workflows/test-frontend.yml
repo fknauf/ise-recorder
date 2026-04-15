@@ -33,7 +33,7 @@ jobs:
 
     - name: Test Frontend (Firefox)
       # has trouble running on the forgejo ci in my cheap VM, so just run on github ci for now
-      if: runner.environment == "github-hosted"
+      if: runner.environment == 'github-hosted'
       working-directory: ${{ github.workspace }}/frontend
       run: |
         npm run test -- --project=firefox --no-file-parallelism --test-timeout=30000
