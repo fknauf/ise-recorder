@@ -34,9 +34,9 @@ jobs:
     - name: Test Frontend (Firefox)
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project=firefox
+        npm run test -- --project=firefox --no-file-parallelism --test-timeout=30000
 
     - name: Test Frontend (Chromium)
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project=chromium
+        npm run test -- --project=chromium --no-file-parallelism --test-timeout=30000
