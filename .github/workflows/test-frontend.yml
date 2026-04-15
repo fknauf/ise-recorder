@@ -30,7 +30,12 @@ jobs:
       run: |
         npm run lint
 
-    - name: Test Frontend
+    - name: Test Frontend (Chromium)
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test
+        npm run test -- --project chromium
+
+    - name: Test Frontend (Firefox)
+      working-directory: ${{ github.workspace }}/frontend
+      run: |
+        npm run test -- --project firefox
