@@ -30,14 +30,7 @@ jobs:
       run: |
         npm run lint
 
-    - name: Test Frontend (Firefox)
-      # has trouble running on the forgejo ci in my cheap VM, so just run on github ci for now
-      if: runner.environment == 'github-hosted'
+    - name: Test Frontend
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project=firefox
-
-    - name: Test Frontend (Chromium)
-      working-directory: ${{ github.workspace }}/frontend
-      run: |
-        npm run test -- --project=chromium
+        npm run test
