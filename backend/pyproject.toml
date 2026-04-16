@@ -1,30 +1,30 @@
 [project]
 name = "ise-record"
 version = "1.0.8"
-requires-python = ">=3.14"
+requires-python = "~=3.14"
 
 dependencies = [
-    "aiofiles~=25.1.0",
-    "aiosmtplib~=5.1.0",
-    "email-validator~=2.3.0",
-    "fastapi~=0.136.0",
-    "pydantic-settings~=2.13.1",
-    "python-multipart~=0.0.26",
-    "uvicorn~=0.44.0",
+    "aiofiles~=25.1",
+    "aiosmtplib~=5.1",
+    "email-validator~=2.3",
+    "fastapi~=0.136",
+    "pydantic-settings~=2.13",
+    "python-multipart~=0.0",
+    "uvicorn~=0.44",
 ]
 
 [dependency-groups]
 test = [
-    "httpx~=0.28.1",
-    "pytest~=9.0.3",
-    "pytest-asyncio~=1.3.0",
-    "pytest-mock~=3.15.1",
+    "httpx~=0.28",
+    "pytest~=9.0",
+    "pytest-asyncio~=1.3",
+    "pytest-mock~=3.15",
 ]
 
 dev = [
     { include-group = "test" },
     "fastapi[standard]",
-    "pylint~=4.0.5",
+    "pylint~=4.0",
 ]
 
 [build-system]
