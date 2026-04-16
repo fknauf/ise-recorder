@@ -9,9 +9,9 @@ from argparse import ArgumentParser
 import logging
 from pathlib import Path
 
-from ise_record.postprocess import postprocess_recording
+from .postprocess import postprocess_recording
 
-async def main():
+async def async_main():
     """
     Main function. Parses command line, calls postprocessing and prints results.
     """
@@ -28,5 +28,6 @@ async def main():
     result = await postprocess_recording(argv.recording_directory)
     print(f"Result: {result.reason.name}, output = {result.output_file}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def main():
+    """ Spawns main routine """
+    asyncio.run(async_main())

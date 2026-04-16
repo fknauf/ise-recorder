@@ -27,6 +27,9 @@ dev = [
     "pylint~=4.0",
 ]
 
+[project.scripts]
+ise-rerender = "ise_record.rerender:main"
+
 [build-system]
 requires = ["setuptools >= 82.0.1"]
 build-backend = "setuptools.build_meta"

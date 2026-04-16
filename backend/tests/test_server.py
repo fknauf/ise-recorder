@@ -14,35 +14,35 @@ import aiosmtplib
 import fastapi
 from fastapi.testclient import TestClient
 import pytest
-import server
 
+import ise_record.server
 from ise_record.postprocess import Result, ResultReason
 
-client = TestClient(server.app)
+client = TestClient(ise_record.server.app)
 
 @pytest.mark.asyncio
 async def test_postprocessing_task_with_report(mocker):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("server.postprocess_recording", autospec=True, return_value=expected_result)
+    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
     mocker.patch("aiosmtplib.send", autospec=True)
-    mocker.patch("server.settings.smtp_server", "localhost")
-    mocker.patch("server.settings.smtp_port", 587)
-    mocker.patch("server.settings.smtp_local_hostname", "server.example.de")
-    mocker.patch("server.settings.smtp_username", "server@example.de")
-    mocker.patch("server.settings.smtp_password", "supersecure")
-    mocker.patch("server.settings.smtp_sender", "render@example.de")
-    mocker.patch("server.settings.smtp_starttls", True)
-    mocker.patch("server.settings.smtp_allowed_domains", [ "example.de" ])
+    mocker.patch("ise_record.server.settings.smtp_server", "localhost")
+    mocker.patch("ise_record.server.settings.smtp_port", 587)
+    mocker.patch("ise_record.server.settings.smtp_local_hostname", "smtp.example.de")
+    mocker.patch("ise_record.server.settings.smtp_username", "server@example.de")
+    mocker.patch("ise_record.server.settings.smtp_password", "supersecure")
+    mocker.patch("ise_record.server.settings.smtp_sender", "render@example.de")
+    mocker.patch("ise_record.server.settings.smtp_starttls", True)
+    mocker.patch("ise_record.server.settings.smtp_allowed_domains", [ "example.de" ])
 
-    await server._postprocessing_task(server.PostProcessingJob(recording = "foo", recipient = "lecturer@example.de"))
+    await ise_record.server._postprocessing_task(ise_record.server.PostProcessingJob(recording = "foo", recipient = "lecturer@example.de"))
 
-    server.postprocess_recording.assert_called_once_with(Path("data/foo"))
+    ise_record.server.postprocess_recording.assert_called_once_with(Path("data/foo"))
     aiosmtplib.send.assert_called_once_with(
         ANY,
         hostname="localhost",
         port=587,
-        local_hostname="server.example.de",
+        local_hostname="smtp.example.de",
         start_tls=True,
         username="server@example.de",
         password="supersecure"
@@ -59,32 +59,32 @@ async def test_postprocessing_task_with_report(mocker):
 async def test_postprocessing_task_no_lecturer(mocker):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("server.postprocess_recording", autospec=True, return_value=expected_result)
+    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
     mocker.patch("aiosmtplib.send", autospec=True)
-    mocker.patch("server.settings.smtp_server", "localhost")
-    mocker.patch("server.settings.smtp_port", 587)
-    mocker.patch("server.settings.smtp_local_hostname", "server.example.de")
-    mocker.patch("server.settings.smtp_username", "server@example.de")
-    mocker.patch("server.settings.smtp_password", "supersecure")
-    mocker.patch("server.settings.smtp_sender", "render@example.de")
-    mocker.patch("server.settings.smtp_starttls", True)
-    mocker.patch("server.settings.smtp_allowed_domains", [ "example.de" ])
+    mocker.patch("ise_record.server.settings.smtp_server", "localhost")
+    mocker.patch("ise_record.server.settings.smtp_port", 587)
+    mocker.patch("ise_record.server.settings.smtp_local_hostname", "smtp.example.de")
+    mocker.patch("ise_record.server.settings.smtp_username", "server@example.de")
+    mocker.patch("ise_record.server.settings.smtp_password", "supersecure")
+    mocker.patch("ise_record.server.settings.smtp_sender", "render@example.de")
+    mocker.patch("ise_record.server.settings.smtp_starttls", True)
+    mocker.patch("ise_record.server.settings.smtp_allowed_domains", [ "example.de" ])
 
-    await server._postprocessing_task(server.PostProcessingJob(recording = "foo", recipient = None))
+    await ise_record.server._postprocessing_task(ise_record.server.PostProcessingJob(recording = "foo", recipient = None))
 
-    server.postprocess_recording.assert_called_once_with(Path("data/foo"))
+    ise_record.server.postprocess_recording.assert_called_once_with(Path("data/foo"))
     aiosmtplib.send.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_postprocessing_task_no_smtp_config(mocker):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("server.postprocess_recording", autospec=True, return_value=expected_result)
+    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
     mocker.patch("aiosmtplib.send", autospec=True)
 
-    await server._postprocessing_task(server.PostProcessingJob(recording = "foo", recipient = "lecturer@example.de"))
+    await ise_record.server._postprocessing_task(ise_record.server.PostProcessingJob(recording = "foo", recipient = "lecturer@example.de"))
 
-    server.postprocess_recording.assert_called_once_with(Path("data/foo"))
+    ise_record.server.postprocess_recording.assert_called_once_with(Path("data/foo"))
     aiosmtplib.send.assert_not_called()
 
 def test_schedule_postprocessing(mocker):
@@ -101,10 +101,10 @@ def test_schedule_postprocessing(mocker):
     )
 
     assert response.status_code == 202
-    os.path.isdir.assert_called_once_with(server.settings.destdir / "foo")
+    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
     fastapi.BackgroundTasks.add_task.assert_called_once_with(
-        server._postprocessing_task,
-        server.PostProcessingJob(recording="foo", recipient="foo@bar.de")
+        ise_record.server._postprocessing_task,
+        ise_record.server.PostProcessingJob(recording="foo", recipient="foo@bar.de")
     )
 
 def test_schedule_postprocessing_recipient_omitted(mocker):
@@ -120,10 +120,10 @@ def test_schedule_postprocessing_recipient_omitted(mocker):
     )
 
     assert response.status_code == 202
-    os.path.isdir.assert_called_once_with(server.settings.destdir / "foo")
+    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
     fastapi.BackgroundTasks.add_task.assert_called_once_with(
-        server._postprocessing_task,
-        server.PostProcessingJob(recording="foo", recipient=None)
+        ise_record.server._postprocessing_task,
+        ise_record.server.PostProcessingJob(recording="foo", recipient=None)
     )
 
 def test_schedule_postprocessing_error(mocker):
@@ -140,7 +140,7 @@ def test_schedule_postprocessing_error(mocker):
     )
 
     assert response.status_code == 400
-    os.path.isdir.assert_called_once_with(server.settings.destdir / "foo")
+    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
     fastapi.BackgroundTasks.add_task.assert_not_called()
 
 def test_schedule_postprocessing_input_validation(mocker):
@@ -172,10 +172,10 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker):
     )
 
     assert response.status_code == 202
-    os.path.isdir.assert_called_once_with(server.settings.destdir / "foo")
+    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
     fastapi.BackgroundTasks.add_task.assert_called_once_with(
-        server._postprocessing_task,
-        server.PostProcessingJob(recording="foo", recipient="I made a lot of typos")
+        ise_record.server._postprocessing_task,
+        ise_record.server.PostProcessingJob(recording="foo", recipient="I made a lot of typos")
     )
 
 
@@ -189,7 +189,7 @@ def test_chunk_upload(mocker):
         (9999, "chunk.9999")
     ]:
         with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-            mocker.patch("server.settings.destdir", Path(tempdir))
+            mocker.patch("ise_record.server.settings.destdir", Path(tempdir))
 
             response = client.post(
                 "/api/chunks",

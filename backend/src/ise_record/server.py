@@ -14,9 +14,9 @@ from fastapi import BackgroundTasks, FastAPI, Form, File, HTTPException, UploadF
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ise_record.logging import setup_logging
-from ise_record.postprocess import postprocess_recording
-from ise_record.reporting import normalize_recipient, send_report, SmtpSink
+from .logging import setup_logging
+from .postprocess import postprocess_recording
+from .reporting import normalize_recipient, send_report, SmtpSink
 
 SAFE_NAME_REGEX = '^[\\w.-]+$'
 
