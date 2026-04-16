@@ -36,6 +36,7 @@ jobs:
         npm run test -- --project chromium
 
     - name: Test Frontend (Firefox)
+      if: runner.environment == 'github-hosted'
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project firefox --no-file-parallelism --maxWorkers=1
+        npm run test -- --project firefox
