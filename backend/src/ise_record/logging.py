@@ -21,6 +21,4 @@ def setup_logging():
     logging.getLogger('uvicorn.access').addFilter(health_check_filter)
 
     uvicorn_logger = logging.getLogger('uvicorn.error')
-    logging.basicConfig(
-        level=uvicorn_logger.level,
-        handlers=uvicorn_logger.handlers)
+    logging.basicConfig(level=uvicorn_logger.level)

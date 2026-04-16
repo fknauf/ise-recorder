@@ -166,4 +166,5 @@ def schedule_job(
 @app.get('/api/health')
 def health_check():
     """ Endpoint for container health checks """
+    logger.debug("health check requested")
     return { "status": "healthy" }
