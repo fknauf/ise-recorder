@@ -22,7 +22,7 @@ jobs:
       working-directory: ${{ github.workspace }}/frontend
       run: |
         npm install
-        npx playwright install chromium firefox
+        npx playwright install --only-shell chromium firefox
 
     - name: Run linter
       continue-on-error: true
