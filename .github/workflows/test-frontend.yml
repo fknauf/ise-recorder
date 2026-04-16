@@ -38,4 +38,4 @@ jobs:
     - name: Test Frontend (Firefox)
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project firefox
+        npm run test -- --project firefox --no-file-parallelism --maxWorkers=1
