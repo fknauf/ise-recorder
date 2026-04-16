@@ -1,6 +1,6 @@
 FROM python:3.14-alpine
 
-RUN apk --update-cache upgrade && apk add --no-cache ffmpeg
+RUN apk --no-cache upgrade && apk add --no-cache ffmpeg
 
 WORKDIR /app
 
