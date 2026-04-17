@@ -95,7 +95,7 @@ export async function deleteRecording(recordingName: string) {
 
 export async function downloadFile(recordingName: string, filename: string) {
   // This is a bit hacky, but I haven't been able to come up with a cleaner
-  // way. Read file, create an object url for it, temporarly append a link
+  // way. Read file, create an object url for it, temporarily append a link
   // to the document, click it programmatically and remove it again.
   //
   // It might be prudent to switch this to the File System Access API once

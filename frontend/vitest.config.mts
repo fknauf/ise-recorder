@@ -14,9 +14,6 @@ export default defineConfig({
       enabled: true,
       headless: true,
       ui: false,
-      // force viewport size to landscape mode for the VideoPreview tests, otherwise @eatsjobs/media-mock
-      // switches width and height on us with unhelpful results. At the moment the whole project makes no
-      // sense on mobile anyway, so limiting tests this way should be fine.
       instances: [
         {
           browser: "chromium",

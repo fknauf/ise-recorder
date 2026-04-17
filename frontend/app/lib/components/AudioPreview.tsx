@@ -48,7 +48,7 @@ export function AudioPreview(
       const space = canvas.width / freqData.length;
       const isClipping = timeData.some(v => v <= 5 || v >= 250);
 
-      // paint spectrum as a histrogram. Use the warning color iff audio is clipping.
+      // paint spectrum as a histogram. Use the warning color iff audio is clipping.
       ctx.lineWidth = Math.ceil(space);
       ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isClipping ? "--warning" : "--foreground");
 
@@ -62,7 +62,7 @@ export function AudioPreview(
       }
     };
 
-    // refresh at 30 fps. We don't need ultrafluent animation for an audio spectrum;
+    // refresh at 30 fps. We don't need ultra-fluent animation for an audio spectrum;
     // it just looks jittery and wastes CPU cycles.
     const timer = setInterval(renderFunction, 1000 / 30);
     return () => clearInterval(timer);
