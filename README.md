@@ -47,8 +47,9 @@ Clone repo and for the frontend run
 
     cd frontend
     npm install
-    # omit the ISE_RECORD_API_URL envvar to run serverless
-    ISE_RECORD_API_URL=http://localhost:5000 npm run dev
+    npm run dev
+    # or if you want to use the postprocessing backend:
+    ISE_RECORD_API_URL=http://localhost:8000 npm run dev
 
 For the backend run
 
