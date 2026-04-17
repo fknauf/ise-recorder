@@ -8,6 +8,16 @@ the environment variable `ISE_RECORD_API_URL`. If it is set, the recorded
 streams will be posted there chunk by chunk and the server notified to start
 post-processing when the recording stops.
 
+Video streams can be marked as main or overlay, and post-processing consists of
+overlaying the overlay stream (usually the speaker on a webcam) over the main
+stream (usually lecture slides) in the top-right corner such that the slides
+are not obstructed but the speaker remains recognizable. If there are multiple
+audio streams, they will all be attached to the resulting video file. If there
+is no overlay, post-processing just indexes the main video stream.
+
+Recordings that don't fit the mold of 1 main video, 0-1 overlay, n audio streams
+require manual post-processing.
+
 ## Get started
 
 I recommend running in docker:
@@ -45,5 +55,5 @@ For the backend run
     cd backend
     python -m venv .venv
     . .venv/bin/activate
-    pip install -r app/requirements.txt
-    python app/server.py
+    pip install -e . --group dev
+    fastapi dev

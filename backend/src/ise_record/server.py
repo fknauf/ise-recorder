@@ -14,7 +14,7 @@ from fastapi import BackgroundTasks, FastAPI, Form, File, HTTPException, UploadF
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .logging import setup_logging
+from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
 

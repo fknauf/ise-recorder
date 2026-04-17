@@ -15,8 +15,8 @@ import fastapi
 from fastapi.testclient import TestClient
 import pytest
 
-import ise_record.server
 from ise_record.postprocess import Result, ResultReason
+import ise_record.server
 
 client = TestClient(ise_record.server.app)
 
