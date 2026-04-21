@@ -53,7 +53,7 @@ def _log_error(err: CalledProcessError) -> None:
                  "stderr\n------\n%s\n",
                  err.returncode, err.cmd, err.stdout, err.stderr)
 
-async def _run_command(command: List[str]) -> str:
+async def _run_command(command: List[str]) -> bytes:
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.DEVNULL,
