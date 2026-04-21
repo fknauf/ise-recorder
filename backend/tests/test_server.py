@@ -209,38 +209,6 @@ def test_chunk_upload(mocker):
             assert os.path.isfile(target_path)
             assert os.stat(target_path).st_size == sample_size
 
-def test_chunk_upload_with_more_digits(mocker):
-    # Note: This patches the settings after the pydantic constraints on the endpoints have
-    # been set, so with an index >= 10000 the client.post call would still fail.
-    #
-    # This only changes the behavior inside the endpoint, so that is all this test covers.
-    ise_record.server.settings.chunk_file_digits = 5
-
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
-    sample_size = os.stat(sample_path).st_size
-
-    with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-        mocker.patch("ise_record.server.settings.destdir", Path(tempdir))
-
-        response = client.post(
-            "/api/chunks",
-            data={
-                "recording": "foo",
-                "track": "stream",
-                "index": 42
-            },
-            files={
-                "chunk": sample
-            }
-        )
-
-        target_path = Path(tempdir) / "foo" / "stream" / "chunk.00042"
-
-        print(response.content)
-        assert response.status_code == 201
-        assert os.path.isfile(target_path)
-        assert os.stat(target_path).st_size == sample_size
-
 def test_chunk_upload_input_validation():
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
 
@@ -341,3 +309,38 @@ def test_chunk_upload_input_validation():
         )
 
         assert response.status_code == 422
+
+def test_chunk_upload_with_more_digits(mocker):
+    mocker.patch("ise_record.server.settings.chunk_file_digits", 5)
+
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+    sample_size = os.stat(sample_path).st_size
+
+    for ix, status_code, fname in [
+        (     0, 201, "chunk.00000"),
+        (    42, 201, "chunk.00042"),
+        ( 12345, 201, "chunk.12345"),
+        ( 99999, 201, "chunk.99999"),
+        (100000, 422, None)
+    ]:
+        with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
+            mocker.patch("ise_record.server.settings.destdir", Path(tempdir))
+
+            response = client.post(
+                "/api/chunks",
+                data={
+                    "recording": "foo",
+                    "track": "stream",
+                    "index": ix
+                },
+                files={
+                    "chunk": sample
+                }
+            )
+
+            assert response.status_code == status_code
+
+            if fname is not None:
+                target_path = Path(tempdir) / "foo" / "stream" / fname
+                assert os.path.isfile(target_path)
+                assert os.stat(target_path).st_size == sample_size

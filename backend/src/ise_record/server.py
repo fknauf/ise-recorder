@@ -69,7 +69,6 @@ async def upload_chunk(
         int,
         Form(
             ge=0,
-            le=10 ** settings.chunk_file_digits - 1,
             description="Running number of the chunk in the track. Start at 0.",
             examples=[0]
         )
@@ -84,6 +83,9 @@ async def upload_chunk(
     """
     POST endpoint for the upload of chunk files.
     """
+    if index >= 10 ** settings.chunk_file_digits:
+        raise HTTPException(status_code=422, detail="index out of range")
+
     filename = f'chunk.{index:0{settings.chunk_file_digits}d}'
 
     track_path = settings.destdir / recording / track
