@@ -209,6 +209,38 @@ def test_chunk_upload(mocker):
             assert os.path.isfile(target_path)
             assert os.stat(target_path).st_size == sample_size
 
+def test_chunk_upload_with_more_digits(mocker):
+    # Note: This patches the settings after the pydantic constraints on the endpoints have
+    # been set, so with an index >= 10000 the client.post call would still fail.
+    # 
+    # This only changes the behavior inside the endpoint, so that is all this test covers.
+    ise_record.server.settings.chunk_file_digits = 5
+
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+    sample_size = os.stat(sample_path).st_size
+
+    with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
+        mocker.patch("ise_record.server.settings.destdir", Path(tempdir))
+
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "foo",
+                "track": "stream",
+                "index": 42
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        target_path = Path(tempdir) / "foo" / "stream" / "chunk.00042"
+
+        print(response.content)
+        assert response.status_code == 201
+        assert os.path.isfile(target_path)
+        assert os.stat(target_path).st_size == sample_size
+
 def test_chunk_upload_input_validation():
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
 

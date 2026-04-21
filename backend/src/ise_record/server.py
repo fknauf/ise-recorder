@@ -84,7 +84,7 @@ async def upload_chunk(
     """
     POST endpoint for the upload of chunk files.
     """
-    filename = f'chunk.{index:04d}'
+    filename = f'chunk.{index:0{settings.chunk_file_digits}d}'
 
     track_path = settings.destdir / recording / track
     filepath = track_path / filename
