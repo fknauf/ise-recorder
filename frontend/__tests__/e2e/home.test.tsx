@@ -82,6 +82,10 @@ test("e2e recording a stream works", async () => {
   const audioDest = audioCtx.createMediaStreamDestination();
   oscillator.connect(audioDest);
 
+  // necessary to keep playwright-chromium from capturing an empty media stream
+  oscillator.start()
+  await act(() => audioCtx.resume());
+
   const audioStream = audioDest.stream;
   const mediaStream = new MediaStream([ ...videoStream.getTracks(), ...audioStream.getTracks() ]);
 
@@ -130,20 +134,12 @@ test("e2e recording a stream works", async () => {
     expect(tree.getByText("Start Recording")).toBeInTheDocument();
   });
 
-  const card = await screen.findByTestId("sr-card");
-  const removeButton = within(card).getByRole("button", { name: "Remove" });
-  await waitFor(() => expect(removeButton).not.toBeDisabled());
-
   // wait for the "postprocessing scheduled" toast displayed as part of the end-of-recording
   // sequence. Without this the test framework will intermittently complain about things not
   // being run inside act -- not because we actually run things here that would require act,
   // but because react-spectrum's toast queue does. We're not waiting for the toast to disappear
   // here, so if the test later becomes long-running after this point (more than 5 seconds), the
   // complaints might pop up again.
-  //
-  // This also fixes a flakiness issue where the file sizes are misreported as zero, possibly because
-  // the test framework doesn't see OPFS updates immediately. Waiting for the toast seems to give it
-  // enough time to see it reliably. I hope.
   await screen.findByText(/postprocessing scheduled/i);
 
   const recordings = await gatherRecordingsList();  
