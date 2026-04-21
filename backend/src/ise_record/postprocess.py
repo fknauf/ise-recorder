@@ -349,9 +349,8 @@ async def postprocess_tracks(
         return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
         # unlink temporaries to save disk space and limit the number of expected states
-        # missing_ok is purely defensive; files should not be missing at this point.
         for p in inputs:
-            p.unlink(missing_ok=True)
+            p.unlink()
 
 async def postprocess_recording(recording_path: Path) -> Result:
     """
