@@ -212,7 +212,7 @@ def test_chunk_upload(mocker):
 def test_chunk_upload_with_more_digits(mocker):
     # Note: This patches the settings after the pydantic constraints on the endpoints have
     # been set, so with an index >= 10000 the client.post call would still fail.
-    # 
+    #
     # This only changes the behavior inside the endpoint, so that is all this test covers.
     ise_record.server.settings.chunk_file_digits = 5
 
