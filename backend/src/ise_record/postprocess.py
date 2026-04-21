@@ -174,11 +174,15 @@ async def concat_chunks(track_path: Path) -> Path:
     """
     target_path = track_path / "full.webm"
 
-    async with aiofiles.open(target_path, 'wb') as dest:
-        for src_path in sorted(track_path.glob('chunk.*')):
-            async with aiofiles.open(src_path, 'rb') as src:
-                while content := await src.read(512 * 1024):
-                    await dest.write(content)
+    try:
+        async with aiofiles.open(target_path, 'wb') as dest:
+            for src_path in sorted(track_path.glob('chunk.*')):
+                async with aiofiles.open(src_path, 'rb') as src:
+                    while content := await src.read(512 * 1024):
+                        await dest.write(content)
+    except:
+        target_path.unlink(missing_ok=True)
+        raise
 
     return target_path
 
@@ -344,8 +348,10 @@ async def postprocess_tracks(
         _log_error(err)
         return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
+        # unlink temporaries to save disk space and limit the number of expected states
+        # missing_ok is purely defensive; files should not be missing at this point.
         for p in inputs:
-            p.unlink()
+            p.unlink(missing_ok=True)
 
 async def postprocess_recording(recording_path: Path) -> Result:
     """

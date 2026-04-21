@@ -13,8 +13,10 @@ import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRec
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { useLecture } from "../hooks/useLecture";
 import { useServerEnv } from "../hooks/useServerEnv";
+import { ActiveRecording } from "../store/store";
+import GithubLink from "./GithubLink";
 
-export type RecorderState = "idle" | "starting" | "recording" | "stopping";
+export type RecorderState = ActiveRecording["state"];
 
 const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || "unsafe character in lecture title";
 const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";

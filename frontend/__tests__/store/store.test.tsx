@@ -34,9 +34,9 @@ test("store splits media devices into video and audio", () => {
   const devices: MediaDeviceInfo[] = [
     makeDevice("c1", "g1", "videoinput", "Cam 1"),
     makeDevice("c2", "g2", "videoinput", "Cam 2"),
-    makeDevice("m1", "g1", "videoinput", "Mic 1"),
-    makeDevice("m1", "g2", "videoinput", "Mic 1"),
-    makeDevice("m3", "g3", "videoinput", "Mic 3"),
+    makeDevice("m1", "g1", "audioinput", "Mic 1"),
+    makeDevice("m1", "g2", "audioinput", "Mic 1"),
+    makeDevice("m3", "g3", "audioinput", "Mic 3"),
     makeDevice("s1", "g4", "audiooutput", "Speaker") // should be filtered out
   ];
 

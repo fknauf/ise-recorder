@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { AppStoreProvider } from "@/app/lib/hooks/useAppStore";
 import { Home } from "@/app/page";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { gatherRecordingsList } from "@/app/lib/utils/browserStorage";
@@ -130,21 +130,31 @@ test("e2e recording a stream works", async () => {
     expect(tree.getByText("Start Recording")).toBeInTheDocument();
   });
 
-  // workaround around test framework limitations: There's still some background stuff going on that needs to conclude before
-  // gatherRecordingsList can see the file contents on the non-browser side. This double-yield seems to reliably do the trick.
-  await act(() => new Promise(resolve => setTimeout(resolve)));
-  await act(() => new Promise(resolve => setTimeout(resolve)));
+  const card = await screen.findByTestId("sr-card");
+  const removeButton = within(card).getByRole("button", { name: "Remove" });
+  await waitFor(() => expect(removeButton).not.toBeDisabled());
 
-  const recordings = await gatherRecordingsList();
+  // wait for the "postprocessing scheduled" toast displayed as part of the end-of-recording
+  // sequence. Without this the test framework will intermittently complain about things not
+  // being run inside act -- not because we actually run things here that would require act,
+  // but because react-spectrum's toast queue does. We're not waiting for the toast to disappear
+  // here, so if the test later becomes long-running after this point (more than 5 seconds), the
+  // complaints might pop up again.
+  //
+  // This also fixes a flakiness issue where the file sizes are misreported as zero, possibly because
+  // the test framework doesn't see OPFS updates immediately. Waiting for the toast seems to give it
+  // enough time to see it reliably. I hope.
+  await screen.findByText(/postprocessing scheduled/i);
+
+  const recordings = await gatherRecordingsList();  
 
   expect(recordings.length).toBe(1);
   expect(recordings[0].name).toBe("FOO_101_2025-12-21T123456.789Z");
   expect(recordings[0].files.length).toBe(2);
   expect(recordings[0].files[0].name).toBe("overlay.webm");
-  // FIXME: this test is unreliable for some reason, probably we're sometimes seeing stale state.
-  // expect(recordings[0].files[0].size).toBeGreaterThan(0);
+  expect(recordings[0].files[0].size).toBeGreaterThan(0);
   expect(recordings[0].files[1].name).toBe("stream.webm");
-  // expect(recordings[0].files[1].size).toBeGreaterThan(0);
+  expect(recordings[0].files[1].size).toBeGreaterThan(0);
 
   expect(window.fetch).toHaveBeenCalledTimes(3);
   expect(window.fetch).toHaveBeenCalledWith("http://localhost:5000/api/chunks", { method: "POST", body: expect.anything() });

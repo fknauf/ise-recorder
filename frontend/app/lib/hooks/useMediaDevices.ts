@@ -3,15 +3,10 @@
 import { MediaDeviceUid } from "../store/store";
 import { showError } from "../utils/notifications";
 import { useAppStore } from "./useAppStore";
+import { createDeviceConstraints } from "../store/store";
 
 const trackIsFromDevice = (track: MediaStreamTrack, uid: MediaDeviceUid) =>
   track.getSettings().groupId === uid.groupId && track.getSettings().deviceId === uid.deviceId;
-
-const createDeviceConstraints = (devUid: MediaDeviceUid): MediaTrackConstraints =>
-  ({
-    groupId: { exact: devUid.groupId },
-    deviceId: { exact: devUid.deviceId }
-  });
 
 export function useMediaDevices() {
   const videoDevices = useAppStore(state => state.videoDevices);

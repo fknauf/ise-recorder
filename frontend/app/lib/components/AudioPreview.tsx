@@ -65,7 +65,11 @@ export function AudioPreview(
     // refresh at 30 fps. We don't need ultra-fluent animation for an audio spectrum;
     // it just looks jittery and wastes CPU cycles.
     const timer = setInterval(renderFunction, 1000 / 30);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      audioSource.disconnect();
+      audioContext.close();
+    }
   };
 
   return (

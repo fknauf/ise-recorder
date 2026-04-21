@@ -18,7 +18,7 @@ from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
 
-SAFE_NAME_REGEX = '^[\\w.-]+$'
+SAFE_NAME_REGEX = '^\\w[\\w.-]*$'
 
 class Settings(BaseSettings):
     """
@@ -83,8 +83,16 @@ async def upload_chunk(
     """
     POST endpoint for the upload of chunk files.
     """
-    if index >= 10 ** settings.chunk_file_digits:
-        raise HTTPException(status_code=422, detail="index out of range")
+    index_limit = 10 ** settings.chunk_file_digits
+
+    if index >= index_limit:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Lecture has been going on too long. "
+                f"Attempted to store {index} chunks (max = {index_limit})"
+            )
+        )
 
     filename = f'chunk.{index:0{settings.chunk_file_digits}d}'
 

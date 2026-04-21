@@ -9,9 +9,9 @@ import { GithubLink } from "./lib/components/GithubLink";
 
 export const Home = () =>
   <Flex direction="column" width="100vw" height="100vh" gap="size-100">
-    <Flex direction="row" alignItems="end" justifyContent="center" gap="size-500">
+    <Flex direction="row" justifyContent="center" gap="size-500">
       <RecorderControls/>
-      <GithubLink/>
+      <GithubLink marginTop="size-450"/>
     </Flex>
 
     <QuotaWarning thresholdBytes={2 ** 30}/>

@@ -310,6 +310,21 @@ def test_chunk_upload_input_validation():
 
         assert response.status_code == 422
 
+        response = client.post(
+            "/api/chunks",
+            data={
+                "recording": "..",
+                "track": "..",
+                "index": 42
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        assert response.status_code == 422
+
+
 def test_chunk_upload_with_more_digits(mocker):
     mocker.patch("ise_record.server.settings.chunk_file_digits", 5)
 

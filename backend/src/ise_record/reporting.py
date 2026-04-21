@@ -121,6 +121,7 @@ async def send_report(
        :param result job result data to be formatted into the message
     """
 
+    # Generate report first just so it'll show up in debug logs.
     msg = generate_report(sender, recipient, job_title, result)
     logger.debug("Report generated: \n%s", msg)
 

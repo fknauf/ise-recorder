@@ -4,7 +4,7 @@ import { openRecordingFileStream } from "./browserStorage";
 import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
 
 // used to remove characters from the recording name that would trip up ffmpeg in post.
-export const unsafeTitleCharacters = /[^\w.-]/g;
+export const unsafeTitleCharacters = /[^\w.-]/;
 
 interface RecordingTask {
   trackTitle: string
@@ -186,7 +186,7 @@ export async function recordLecture(
 ) {
   const timestamp = new Date();
   const lecturePrefix = lectureTitle ? `${lectureTitle}_` : "";
-  const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(unsafeTitleCharacters, "");
+  const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(new RegExp(unsafeTitleCharacters, "g"), "");
 
   const videoOptions: MediaRecorderOptions = { mimeType: "video/webm" };
   const audioOptions: MediaRecorderOptions = { mimeType: "audio/webm" };
