@@ -20,10 +20,6 @@ const nextConfig: NextConfig = {
             value: "camera=self, microphone=self, display-capture=self, autoplay=self, payment=(), geolocation=(), clipboard-read=(), clipboard-write=()"
           },
           {
-            key: "X-Frame-Options",
-            value: "DENY"
-          },
-          {
             key: "X-Content-Type-Options",
             value: "nosniff"
           },
