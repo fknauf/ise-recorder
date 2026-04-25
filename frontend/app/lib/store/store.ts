@@ -23,7 +23,7 @@ export type StateUpdate<T> = T | ((old: T) => T);
 export const createDeviceKey = (dev: MediaDeviceInfo) =>
   JSON.stringify({ groupId: dev.groupId, deviceId: dev.deviceId } as MediaDeviceUid);
 export const parseDeviceKey = (devUid: string): MediaDeviceUid =>
-  JSON.parse(devUid as string);
+  JSON.parse(devUid);
 
 function filterDevices(devices: MediaDeviceInfo[], kind: string) {
   return devices

@@ -31,7 +31,7 @@ def _is_in_domain(domain: str, normalized_address: str):
 def _is_whitelisted(normalized_address: str, whitelist: List[str]):
     if whitelist == []:
         return True
-    return next((True for d in whitelist if _is_in_domain(d, normalized_address)), False)
+    return any(_is_in_domain(d, normalized_address) for d in whitelist)
 
 def normalize_recipient(address: str | None, domain_whitelist: List[str]) -> str | None:
     """
@@ -51,8 +51,10 @@ def normalize_recipient(address: str | None, domain_whitelist: List[str]) -> str
         validated = validate_email(address)
         if _is_whitelisted(validated.normalized, domain_whitelist):
             return validated.normalized
+
+        logger.warning("Blacklisted recipient address: %s", address)
     except EmailNotValidError:
-        logger.warning("Invalid or blacklisted recipient address: %s", address)
+        logger.warning("Invalid recipient address: %s", address)
 
     return None
 

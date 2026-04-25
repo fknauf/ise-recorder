@@ -84,10 +84,7 @@ def determine_crop_area(
 
         :param stream_width width of the input stream
         :param stream_height height of the input stream
-        :param crop_left x coordinate of the leftmost pixel in the detected cropping area
-        :param crop_right x coordinate of the rightmost pixel in the detected cropping area
-        :param crop_top y coordinate of the top pixel in the detected cropping area
-        :param crop_bottom y coordinate of the bottom pixel in the detected cropping area
+        :param raw_crop cropping area as detected by ffmpeg
         :returns the effective cropping area
     """
 

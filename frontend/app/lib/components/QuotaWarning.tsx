@@ -26,7 +26,7 @@ export function QuotaWarning({ thresholdBytes }: Readonly<QuotaWarningProps>) {
   const quotaCritical = quota !== undefined && usage !== undefined && quota - usage < thresholdBytes;
 
   if(!quotaCritical) {
-    return <></>;
+    return null;
   }
 
   return (
