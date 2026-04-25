@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { AppStoreProvider } from "@/app/lib/hooks/useAppStore";
 import { Home } from "@/app/page";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { gatherRecordingsList } from "@/app/lib/utils/browserStorage";
@@ -86,7 +86,7 @@ test("e2e recording a stream works", async () => {
   // which this audio stream will be connected), but also breaks the test there the first time
   // running because audioCtx.resume() never resolves. The test runs to completion the second
   // time when npm run test is in watch mode.
-  // 
+  //
   // The reasons for this are rather unclear, possibly related to chromium's notion of media
   // engagement index wrt whether autoplay is allowed/automatically enabled for the audio context.
   // I haven't found a way to make this work from the get-go so far, so for the moment we accept
@@ -152,7 +152,7 @@ test("e2e recording a stream works", async () => {
   // complaints might pop up again.
   await screen.findByText(/postprocessing scheduled/i);
 
-  const recordings = await gatherRecordingsList();  
+  const recordings = await gatherRecordingsList();
 
   expect(recordings.length).toBe(1);
   expect(recordings[0].name).toBe("FOO_101_2025-12-21T123456.789Z");
@@ -161,7 +161,7 @@ test("e2e recording a stream works", async () => {
   expect(recordings[0].files[0].size).toBeGreaterThan(0);
   expect(recordings[0].files[1].name).toBe("stream.webm");
   // Flaky on chromium, see comment above on audioCtx.resume().
-  //expect(recordings[0].files[1].size).toBeGreaterThan(0);
+  // expect(recordings[0].files[1].size).toBeGreaterThan(0);
 
   expect(window.fetch).toHaveBeenCalledTimes(3);
   expect(window.fetch).toHaveBeenCalledWith("http://localhost:5000/api/chunks", { method: "POST", body: expect.anything() });

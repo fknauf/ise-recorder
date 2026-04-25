@@ -69,7 +69,7 @@ export function AudioPreview(
       clearInterval(timer);
       audioSource.disconnect();
       audioContext.close();
-    }
+    };
   };
 
   return (

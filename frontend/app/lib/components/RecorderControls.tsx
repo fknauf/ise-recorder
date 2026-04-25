@@ -14,7 +14,6 @@ import { useMediaDevices } from "../hooks/useMediaDevices";
 import { useLecture } from "../hooks/useLecture";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { ActiveRecording } from "../store/store";
-import GithubLink from "./GithubLink";
 
 export type RecorderState = ActiveRecording["state"];
 

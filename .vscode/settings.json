@@ -24,6 +24,7 @@
         "nextjs",
         "nonblock",
         "noopener",
+        "nosniff",
         "OPFS",
         "partialize",
         "pillarboxed",
