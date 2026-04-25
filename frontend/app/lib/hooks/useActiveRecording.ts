@@ -5,6 +5,7 @@ import { recordLecture } from "../utils/recording";
 import { useLecture } from "./useLecture";
 import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
+import { showError } from "../utils/notifications";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
@@ -38,7 +39,7 @@ export function useStartStopRecording() {
     apiUrl
   } = useServerEnv();
 
-  const startRecording = () => {
+  const startRecording = async () => {
     if(activeRecording.state !== "idle") {
       return;
     }
@@ -76,11 +77,15 @@ export function useStartStopRecording() {
       setActiveRecording({ state: "idle" });
     };
 
-    recordLecture(
-      displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
-      lectureTitle, lecturerEmail, apiUrl,
-      onStarting, onStarted, onChunkWritten, onFinished
-    );
+    try {
+      await recordLecture(
+        displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
+        lectureTitle, lecturerEmail, apiUrl,
+        onStarting, onStarted, onChunkWritten, onFinished
+      );
+    } catch(e) {
+      showError("Recording failed", e);
+    }
   };
 
   const stopRecording = () => {

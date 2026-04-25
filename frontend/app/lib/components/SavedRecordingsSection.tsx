@@ -7,6 +7,15 @@ import { downloadFile, RecordingFileList } from "../utils/browserStorage";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
 import { useActiveRecording } from "../hooks/useActiveRecording";
 
+const mibFormatter = new Intl.NumberFormat(
+  "en-us",
+  {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false
+  }
+);
+
 /**
  * Section on the main page showing all saved recordings.
  *
@@ -21,7 +30,6 @@ export function SavedRecordingsSection() {
     removeSavedRecording
   } = useBrowserStorage();
 
-  const formatter = new Intl.NumberFormat("en-us", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const isDisabled = (r: RecordingFileList) => r.name === activeRecording.name;
 
   return (
@@ -46,7 +54,7 @@ export function SavedRecordingsSection() {
                     onPress={() => downloadFile(rec.name, filename)}
                   >
                     <Download/>
-                    <Text>Download {filename} {size !== undefined && `(${formatter.format(size / 2 ** 20)} MiB)`}</Text>
+                    <Text>Download {filename} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
                   </ActionButton>
                 )
               }

@@ -222,28 +222,40 @@ export async function recordLecture(
   };
 
   const jobs = prepareRecording(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, videoOptions, audioOptions, onChunkAvailable);
+  const stopJobs = () => {
+    for(const job of jobs) {
+      try {
+        job.stop();
+      } catch(e) {
+        console.warn("Failed to stop recording job", e);
+      }
+    }
+  }
 
   if(jobs.length > 0) {
     await onStarting(recordingName);
+    try {
+      for(const job of jobs) {
+        const filename = formatFilename(job.trackTitle);
+        const outputStream = await openRecordingFileStream(recordingName, filename);
+        streams.set(filename, outputStream);
 
-    for(const job of jobs) {
-      const filename = formatFilename(job.trackTitle);
-      const outputStream = await openRecordingFileStream(recordingName, filename);
-      streams.set(filename, outputStream);
-
-      try {
-        job.start();
-      } catch(e) {
-        console.error(job.trackTitle, e);
+        try {
+          job.start();
+        } catch(e) {
+          console.error(job.trackTitle, e);
+        }
       }
-    }
 
-    await onStarted(recordingName, () => jobs.forEach(job => job.stop()));
-    await Promise.all(jobs.map(job => job.finished));
-    await Promise.all([
-      ...streams.values().map(stream => stream.close()),
-      schedulePostprocessing(apiUrl, recordingName, lecturerEmail)
-    ]);
-    await onFinished(recordingName);
+      await onStarted(recordingName, stopJobs);
+      await Promise.allSettled(jobs.map(job => job.finished));
+      await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+    } catch(e) {
+      stopJobs();
+      throw e;
+    } finally {
+      await Promise.allSettled(streams.values().map(stream => stream.close()));
+      await onFinished(recordingName);
+    }
   }
 }

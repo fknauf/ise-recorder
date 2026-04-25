@@ -363,7 +363,7 @@ async def postprocess_recording(recording_path: Path) -> Result:
 
     stream_dir = recording_path / "stream"
     overlay_dir = recording_path / "overlay"
-    audio_dirs = list(recording_path.glob('audio-*'))
+    audio_dirs = sorted(recording_path.glob('audio-*'))
     output_path = recording_path / 'presentation.webm'
 
     if not stream_dir.is_dir():

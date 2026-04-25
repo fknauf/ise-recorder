@@ -3,7 +3,14 @@
 import { Content, Flex, Heading, InlineAlert } from "@adobe/react-spectrum";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
 
-const mibFormatter = new Intl.NumberFormat("en-us", { minimumFractionDigits: 0, maximumFractionDigits: 0, useGrouping: false });
+const mibFormatter = new Intl.NumberFormat(
+  "en-us",
+  {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+    useGrouping: false
+  }
+);
 
 function formatMib(x: number | undefined) {
   if(x === undefined) {
