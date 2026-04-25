@@ -18,7 +18,7 @@ async def main():
 
     parser = ArgumentParser(
         prog="ise-rerender",
-        description="Manually (re)execute postprocessing for a ise-recorder recording"
+        description="Manually (re)execute postprocessing for an ise-recorder recording"
     )
     parser.add_argument('recording_directory', type=Path)
     parser.add_argument('-l', '--log-level', default="INFO")

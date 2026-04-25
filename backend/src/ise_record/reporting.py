@@ -29,7 +29,7 @@ def _is_in_domain(domain: str, normalized_address: str):
     return normalized_address.endswith(f'@{domain}') or normalized_address.endswith(f'.{domain}')
 
 def _is_whitelisted(normalized_address: str, whitelist: List[str]):
-    if whitelist == []:
+    if not whitelist:
         return True
     return any(_is_in_domain(d, normalized_address) for d in whitelist)
 
