@@ -230,7 +230,7 @@ export async function recordLecture(
         console.warn("Failed to stop recording job", e);
       }
     }
-  }
+  };
 
   if(jobs.length > 0) {
     await onStarting(recordingName);
