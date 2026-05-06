@@ -6,11 +6,12 @@
 
 import logging
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, List, Optional
 
 import aiofiles
-from fastapi import BackgroundTasks, FastAPI, Form, File, HTTPException, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -41,7 +42,11 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="ise_record_")
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    """ Cached settings loader """
+    return Settings()
+
 app = FastAPI()
 setup_logging()
 
@@ -78,13 +83,13 @@ async def upload_chunk(
         File(
             description="video/audio blob to store, as file"
         )
-    ]
-):
+    ],
+    settings: Annotated[Settings, Depends(get_settings)]
+) -> dict[str, str | int]:
     """
     POST endpoint for the upload of chunk files.
     """
     index_limit = 10 ** settings.chunk_file_digits
-
     if index >= index_limit:
         raise HTTPException(
             status_code=422,
@@ -136,7 +141,7 @@ class PostProcessingJob(BaseModel):
         )
     ]
 
-async def _postprocessing_task(job: PostProcessingJob) -> None:
+async def _postprocessing_task(job: PostProcessingJob, settings: Settings) -> None:
     recording_path = settings.destdir / job.recording
     job_result = await postprocess_recording(recording_path)
 
@@ -161,7 +166,8 @@ async def _postprocessing_task(job: PostProcessingJob) -> None:
 @app.post('/api/jobs', status_code=status.HTTP_202_ACCEPTED)
 def schedule_job(
     job: PostProcessingJob,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    settings: Annotated[Settings, Depends(get_settings)]
 ):
     """ Endpoint for the scheduling of postprocessing jobs """
 
@@ -169,7 +175,7 @@ def schedule_job(
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
         raise HTTPException(status_code=400, detail=f'Recording {job.recording} does not exist')
 
-    background_tasks.add_task(_postprocessing_task, job)
+    background_tasks.add_task(_postprocessing_task, job, settings)
 
     return job
 

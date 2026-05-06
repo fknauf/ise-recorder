@@ -10,35 +10,40 @@ from pathlib import Path
 import tempfile
 from unittest.mock import ANY
 
-import aiosmtplib
-import fastapi
 from fastapi.testclient import TestClient
 import pytest
+from pytest_mock import MockerFixture
 
 from ise_record.postprocess import Result, ResultReason
-import ise_record.server
+from ise_record.server import app, get_settings, _postprocessing_task, PostProcessingJob, Settings # pyright: ignore[reportPrivateUsage]
 
-client = TestClient(ise_record.server.app)
+client = TestClient(app)
 
 @pytest.mark.asyncio
-async def test_postprocessing_task_with_report(mocker):
+async def test_postprocessing_task_with_report(mocker: MockerFixture):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
-    mocker.patch("aiosmtplib.send", autospec=True)
-    mocker.patch("ise_record.server.settings.smtp_server", "localhost")
-    mocker.patch("ise_record.server.settings.smtp_port", 587)
-    mocker.patch("ise_record.server.settings.smtp_local_hostname", "smtp.example.de")
-    mocker.patch("ise_record.server.settings.smtp_username", "server@example.de")
-    mocker.patch("ise_record.server.settings.smtp_password", "supersecure")
-    mocker.patch("ise_record.server.settings.smtp_sender", "render@example.de")
-    mocker.patch("ise_record.server.settings.smtp_starttls", True)
-    mocker.patch("ise_record.server.settings.smtp_allowed_domains", [ "example.de" ])
+    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
-    await ise_record.server._postprocessing_task(ise_record.server.PostProcessingJob(recording = "foo", recipient = "lecturer@example.de"))
+    settings = Settings(
+        smtp_server="localhost",
+        smtp_port=587,
+        smtp_local_hostname="smtp.example.de",
+        smtp_username="server@example.de",
+        smtp_password="supersecure",
+        smtp_sender="render@example.de",
+        smtp_starttls=True,
+        smtp_allowed_domains=["example.de"]
+    )
 
-    ise_record.server.postprocess_recording.assert_called_once_with(Path("data/foo"))
-    aiosmtplib.send.assert_called_once_with(
+    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
+        settings
+    )
+
+    mock_postprocess.assert_called_once_with(Path("data/foo"))
+    mock_send.assert_called_once_with(
         ANY,
         hostname="localhost",
         port=587,
@@ -48,7 +53,7 @@ async def test_postprocessing_task_with_report(mocker):
         password="supersecure"
     )
 
-    sent_report = aiosmtplib.send.call_args[0][0]
+    sent_report = mock_send.call_args[0][0]
 
     assert "foo" in sent_report["Subject"]
     assert "render@example.de" == sent_report["From"]
@@ -56,40 +61,49 @@ async def test_postprocessing_task_with_report(mocker):
     assert "foo/presentation.webm" in sent_report.get_payload()
 
 @pytest.mark.asyncio
-async def test_postprocessing_task_no_lecturer(mocker):
+async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
-    mocker.patch("aiosmtplib.send", autospec=True)
-    mocker.patch("ise_record.server.settings.smtp_server", "localhost")
-    mocker.patch("ise_record.server.settings.smtp_port", 587)
-    mocker.patch("ise_record.server.settings.smtp_local_hostname", "smtp.example.de")
-    mocker.patch("ise_record.server.settings.smtp_username", "server@example.de")
-    mocker.patch("ise_record.server.settings.smtp_password", "supersecure")
-    mocker.patch("ise_record.server.settings.smtp_sender", "render@example.de")
-    mocker.patch("ise_record.server.settings.smtp_starttls", True)
-    mocker.patch("ise_record.server.settings.smtp_allowed_domains", [ "example.de" ])
+    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
-    await ise_record.server._postprocessing_task(ise_record.server.PostProcessingJob(recording = "foo", recipient = None))
+    settings = Settings(
+        smtp_server="localhost",
+        smtp_port=587,
+        smtp_local_hostname="smtp.example.de",
+        smtp_username="server@example.de",
+        smtp_password="supersecure",
+        smtp_sender="render@example.de",
+        smtp_starttls=True,
+        smtp_allowed_domains=["example.de"]
+    )
 
-    ise_record.server.postprocess_recording.assert_called_once_with(Path("data/foo"))
-    aiosmtplib.send.assert_not_called()
+    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient=None),
+        settings
+    )
+
+    mock_postprocess.assert_called_once_with(Path("data/foo"))
+    mock_send.assert_not_called()
 
 @pytest.mark.asyncio
-async def test_postprocessing_task_no_smtp_config(mocker):
+async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
-    mocker.patch("aiosmtplib.send", autospec=True)
+    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
-    await ise_record.server._postprocessing_task(ise_record.server.PostProcessingJob(recording = "foo", recipient = "lecturer@example.de"))
+    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
+        Settings()
+    )
 
-    ise_record.server.postprocess_recording.assert_called_once_with(Path("data/foo"))
-    aiosmtplib.send.assert_not_called()
+    mock_postprocess.assert_called_once_with(Path("data/foo"))
+    mock_send.assert_not_called()
 
-def test_schedule_postprocessing(mocker):
-    mocker.patch("os.path.isdir", return_value=True)
-    mocker.patch("fastapi.BackgroundTasks.add_task")
+def test_schedule_postprocessing(mocker: MockerFixture):
+    mock_isdir = mocker.patch("os.path.isdir", return_value=True)
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
@@ -101,15 +115,16 @@ def test_schedule_postprocessing(mocker):
     )
 
     assert response.status_code == 202
-    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
-    fastapi.BackgroundTasks.add_task.assert_called_once_with(
-        ise_record.server._postprocessing_task,
-        ise_record.server.PostProcessingJob(recording="foo", recipient="foo@bar.de")
+    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_add_task.assert_called_once_with(
+        _postprocessing_task, # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient="foo@bar.de"),
+        get_settings()
     )
 
-def test_schedule_postprocessing_recipient_omitted(mocker):
-    mocker.patch("os.path.isdir", return_value=True)
-    mocker.patch("fastapi.BackgroundTasks.add_task")
+def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture):
+    mock_isdir = mocker.patch("os.path.isdir", return_value=True)
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
@@ -120,15 +135,16 @@ def test_schedule_postprocessing_recipient_omitted(mocker):
     )
 
     assert response.status_code == 202
-    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
-    fastapi.BackgroundTasks.add_task.assert_called_once_with(
-        ise_record.server._postprocessing_task,
-        ise_record.server.PostProcessingJob(recording="foo", recipient=None)
+    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_add_task.assert_called_once_with(
+        _postprocessing_task, # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient=None),
+        get_settings()
     )
 
-def test_schedule_postprocessing_error(mocker):
-    mocker.patch("os.path.isdir", return_value=False)
-    mocker.patch("fastapi.BackgroundTasks.add_task")
+def test_schedule_postprocessing_error(mocker: MockerFixture):
+    mock_isdir = mocker.patch("os.path.isdir", return_value=False)
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
@@ -140,11 +156,11 @@ def test_schedule_postprocessing_error(mocker):
     )
 
     assert response.status_code == 400
-    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
-    fastapi.BackgroundTasks.add_task.assert_not_called()
+    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_add_task.assert_not_called()
 
-def test_schedule_postprocessing_input_validation(mocker):
-    mocker.patch("fastapi.BackgroundTasks.add_task")
+def test_schedule_postprocessing_input_validation(mocker: MockerFixture):
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
@@ -156,11 +172,11 @@ def test_schedule_postprocessing_input_validation(mocker):
     )
 
     assert response.status_code == 422
-    fastapi.BackgroundTasks.add_task.assert_not_called()
+    mock_add_task.assert_not_called()
 
-def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker):
-    mocker.patch("os.path.isdir", return_value=True)
-    mocker.patch("fastapi.BackgroundTasks.add_task")
+def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: MockerFixture):
+    mock_isdir = mocker.patch("os.path.isdir", return_value=True)
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
@@ -172,14 +188,15 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker):
     )
 
     assert response.status_code == 202
-    os.path.isdir.assert_called_once_with(ise_record.server.settings.destdir / "foo")
-    fastapi.BackgroundTasks.add_task.assert_called_once_with(
-        ise_record.server._postprocessing_task,
-        ise_record.server.PostProcessingJob(recording="foo", recipient="I made a lot of typos")
+    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_add_task.assert_called_once_with(
+        _postprocessing_task, # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient="I made a lot of typos"),
+        get_settings()
     )
 
 
-def test_chunk_upload(mocker):
+def test_chunk_upload():
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
     sample_size = os.stat(sample_path).st_size
 
@@ -189,25 +206,30 @@ def test_chunk_upload(mocker):
         (9999, "chunk.9999")
     ]:
         with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-            mocker.patch("ise_record.server.settings.destdir", Path(tempdir))
+            def mock_settings(destdir: Path = Path(tempdir)):
+                return Settings(destdir=destdir)
+            app.dependency_overrides[get_settings] = mock_settings
 
-            response = client.post(
-                "/api/chunks",
-                data={
-                    "recording": "foo",
-                    "track": "stream",
-                    "index": ix
-                },
-                files={
-                    "chunk": sample
-                }
-            )
+            try:
+                response = client.post(
+                    "/api/chunks",
+                    data={
+                        "recording": "foo",
+                        "track": "stream",
+                        "index": str(ix)
+                    },
+                    files={
+                        "chunk": sample
+                    }
+                )
 
-            target_path = Path(tempdir) / "foo" / "stream" / fname
+                target_path = Path(tempdir) / "foo" / "stream" / fname
 
-            assert response.status_code == 201
-            assert os.path.isfile(target_path)
-            assert os.stat(target_path).st_size == sample_size
+                assert response.status_code == 201
+                assert os.path.isfile(target_path)
+                assert os.stat(target_path).st_size == sample_size
+            finally:
+                del app.dependency_overrides[get_settings]
 
 def test_chunk_upload_input_validation():
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
@@ -218,7 +240,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "AND 0 == 0; DROP TABLE important_data; --",
                 "track": "stream",
-                "index": 42
+                "index": "42"
             },
             files={
                 "chunk": sample
@@ -232,7 +254,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "foo",
                 "track": "AND 0 == 0; DROP TABLE important_data; --",
-                "index": 42
+                "index": "42"
             },
             files={
                 "chunk": sample
@@ -246,7 +268,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "foo",
                 "track": "stream",
-                "index": -1
+                "index": "-1"
             },
             files={
                 "chunk": sample
@@ -260,7 +282,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "foo",
                 "track": "stream",
-                "index": 10000
+                "index": "10000"
             },
             files={
                 "chunk": sample
@@ -274,7 +296,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "foo",
                 "track": "stream",
-                "index": 42
+                "index": "42"
             }
         )
 
@@ -285,7 +307,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "AND 0 == 0; DROP TABLE important_data; --",
                 "track": "stream",
-                "index": 42,
+                "index": "42",
                 "nonsense": "poppycock"
             },
             files={
@@ -300,7 +322,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "AND 0 == 0; DROP TABLE important_data; --",
                 "track": "stream",
-                "index": 42
+                "index": "42"
             },
             files={
                 "chunk": sample,
@@ -315,7 +337,7 @@ def test_chunk_upload_input_validation():
             data={
                 "recording": "..",
                 "track": "..",
-                "index": 42
+                "index": "42"
             },
             files={
                 "chunk": sample
@@ -325,37 +347,42 @@ def test_chunk_upload_input_validation():
         assert response.status_code == 422
 
 
-def test_chunk_upload_with_more_digits(mocker):
-    mocker.patch("ise_record.server.settings.chunk_file_digits", 5)
-
+def test_chunk_upload_with_more_digits():
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
     sample_size = os.stat(sample_path).st_size
 
-    for ix, status_code, fname in [
+    cases: list[tuple[int, int, str | None]] = [
         (     0, 201, "chunk.00000"),
         (    42, 201, "chunk.00042"),
         ( 12345, 201, "chunk.12345"),
         ( 99999, 201, "chunk.99999"),
         (100000, 422, None)
-    ]:
+    ]
+
+    for ix, status_code, fname in cases:
         with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-            mocker.patch("ise_record.server.settings.destdir", Path(tempdir))
+            def mock_settings(destdir: Path = Path(tempdir)):
+                return Settings(destdir=destdir, chunk_file_digits=5)
+            app.dependency_overrides[get_settings] = mock_settings
 
-            response = client.post(
-                "/api/chunks",
-                data={
-                    "recording": "foo",
-                    "track": "stream",
-                    "index": ix
-                },
-                files={
-                    "chunk": sample
-                }
-            )
+            try:
+                response = client.post(
+                    "/api/chunks",
+                    data={
+                        "recording": "foo",
+                        "track": "stream",
+                        "index": str(ix)
+                    },
+                    files={
+                        "chunk": sample
+                    }
+                )
 
-            assert response.status_code == status_code
+                assert response.status_code == status_code
 
-            if fname is not None:
-                target_path = Path(tempdir) / "foo" / "stream" / fname
-                assert os.path.isfile(target_path)
-                assert os.stat(target_path).st_size == sample_size
+                if fname is not None:
+                    target_path = Path(tempdir) / "foo" / "stream" / fname
+                    assert os.path.isfile(target_path)
+                    assert os.stat(target_path).st_size == sample_size
+            finally:
+                del app.dependency_overrides[get_settings]

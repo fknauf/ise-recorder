@@ -8,8 +8,8 @@
 from pathlib import Path
 from unittest.mock import ANY
 
-import aiosmtplib
 import pytest
+from pytest_mock import MockerFixture
 
 from ise_record.postprocess import Result, ResultReason
 from ise_record.reporting import (
@@ -73,13 +73,13 @@ def test_generate_report_missing():
     assert "Missing main display stream" in report.get_payload()
 
 @pytest.mark.asyncio
-async def test_send_report(mocker):
+async def test_send_report(mocker: MockerFixture):
     sender = "render@example.de"
     recipient = "lecturer@example.de"
     job_title = "foo_1234"
     result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
 
-    mocker.patch("aiosmtplib.send", autospec=True)
+    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     smtp_sink = SmtpSink(
         server = "localhost",
@@ -100,7 +100,7 @@ async def test_send_report(mocker):
 
     report = generate_report(sender, recipient, job_title, result)
 
-    aiosmtplib.send.assert_called_once_with(
+    mock_send.assert_called_once_with(
         ANY,
         hostname=smtp_sink.server,
         port = smtp_sink.port,
@@ -110,7 +110,7 @@ async def test_send_report(mocker):
         password = smtp_sink.password
     )
 
-    sent_report = aiosmtplib.send.call_args.args[0]
+    sent_report = mock_send.call_args.args[0]
 
     assert sent_report["From"] == report["From"]
     assert sent_report["To"] == report["To"]
@@ -118,13 +118,13 @@ async def test_send_report(mocker):
     assert sent_report.get_payload() == report.get_payload()
 
 @pytest.mark.asyncio
-async def test_send_report_no_smtp(mocker):
+async def test_send_report_no_smtp(mocker: MockerFixture):
     sender = "render@example.de"
     recipient = "lecturer@example.de"
     job_title = "foo_1234"
     result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
 
-    mocker.patch("aiosmtplib.send", autospec=True)
+    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     smtp_sink = SmtpSink(
         server = None,
@@ -143,4 +143,4 @@ async def test_send_report_no_smtp(mocker):
         result = result
     )
 
-    aiosmtplib.send.assert_not_called()
+    mock_send.assert_not_called()

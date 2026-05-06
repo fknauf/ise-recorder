@@ -65,7 +65,7 @@ async def _run_command(command: List[str]) -> bytes:
 
     if proc.returncode != 0:
         raise CalledProcessError(
-            returncode = proc.returncode,
+            returncode = proc.returncode if proc.returncode is not None else -65535,
             cmd = command,
             output = out,
             stderr = err
@@ -304,7 +304,7 @@ async def postprocess_tracks(
         :returns whether the job succeeded, plus info for the e-mail report
     """
 
-    inputs = []
+    inputs: list[Path] = []
 
     has_overlay = overlay_dir.is_dir()
     logger.debug("Recording %s an overlay track", "has" if has_overlay else "doesn't have")

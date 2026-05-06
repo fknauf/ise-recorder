@@ -12,10 +12,10 @@ import tempfile
 from unittest.mock import AsyncMock, call
 
 import pytest
+from pytest_mock import MockerFixture
 
-import ise_record.postprocess
 from ise_record.postprocess import (
-    _run_command,
+    _run_command, # pyright: ignore[reportPrivateUsage]
     concat_chunks,
     determine_crop_area,
     generate_overlay_scale,
@@ -86,10 +86,10 @@ async def test_concat_chunks():
     with tempfile.TemporaryDirectory() as tempdir:
         temp_path = Path(tempdir)
 
-        with open(temp_path / "chunk.0000", "wb") as chnk1:
-            chnk1.write(first_data)
-        with open(temp_path / "chunk.0001", "wb") as chnk2:
-            chnk2.write(second_data)
+        with open(temp_path / "chunk.0000", "wb") as chunk1:
+            chunk1.write(first_data)
+        with open(temp_path / "chunk.0001", "wb") as chunk2:
+            chunk2.write(second_data)
 
         await concat_chunks(temp_path)
 
@@ -138,29 +138,29 @@ def test_generate_ffmpeg_filter():
     filter_pillar_nooverlay     = generate_ffmpeg_filter(stream_pillar,     False)
     filter_letterbox_nooverlay  = generate_ffmpeg_filter(stream_letterbox,  False)
 
-    ovly_nocrop    = generate_overlay_scale(stream_nocrop.crop,    1920, 1080)
-    ovly_pillar    = generate_overlay_scale(stream_pillar.crop,    1920, 1080)
-    ovly_letterbox = generate_overlay_scale(stream_letterbox.crop, 1920, 1080)
+    overlay_nocrop    = generate_overlay_scale(stream_nocrop.crop,    1920, 1080)
+    overlay_pillar    = generate_overlay_scale(stream_pillar.crop,    1920, 1080)
+    overlay_letterbox = generate_overlay_scale(stream_letterbox.crop, 1920, 1080)
 
     assert filter_nocrop_nooverlay    == "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:0:-1,fps=30"
     assert filter_pillar_nooverlay    == "[0:v]crop=1200:810:120:0,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:0:-1,fps=30"
     assert filter_letterbox_nooverlay == "[0:v]crop=1440:600:0:105,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:0:-1,fps=30"
 
-    assert filter_nocrop    == f"{filter_nocrop_nooverlay   }[main];[1:v]{ovly_nocrop   }[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
-    assert filter_pillar    == f"{filter_pillar_nooverlay   }[main];[1:v]{ovly_pillar   }[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
-    assert filter_letterbox == f"{filter_letterbox_nooverlay}[main];[1:v]{ovly_letterbox}[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
+    assert filter_nocrop    == f"{filter_nocrop_nooverlay   }[main];[1:v]{overlay_nocrop   }[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
+    assert filter_pillar    == f"{filter_pillar_nooverlay   }[main];[1:v]{overlay_pillar   }[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
+    assert filter_letterbox == f"{filter_letterbox_nooverlay}[main];[1:v]{overlay_letterbox}[overlay];[main][overlay]overlay=(main_w-overlay_w):0"
 
 @pytest.mark.asyncio
-async def test_postprocess_tracks(mocker):
+async def test_postprocess_tracks(mocker: MockerFixture):
     async def mock_concat(p: Path):
         return p / "full.webm"
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mocker.patch("ise_record.postprocess._run_command")
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
+    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
-    mocker.patch("pathlib.Path.unlink", autospec=True)
+    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
 
     result = await postprocess_tracks(
@@ -173,7 +173,7 @@ async def test_postprocess_tracks(mocker):
     assert result.reason == ResultReason.SUCCESS
     assert result.output_file == Path("foo/presentation.webm")
 
-    ise_record.postprocess._run_command.assert_called_once_with([
+    mock_run_command.assert_called_once_with([
         "ffmpeg",
         "-i", "foo/stream/full.webm",
         "-i", "foo/overlay/full.webm",
@@ -182,18 +182,18 @@ async def test_postprocess_tracks(mocker):
         "-y", "foo/presentation.webm"
     ])
 
-    ise_record.postprocess.concat_chunks.assert_has_calls([
+    mock_concat_chunks.assert_has_calls([
         call(Path("foo/stream")),
         call(Path("foo/overlay"))
     ])
 
-    Path.unlink.assert_has_calls([
+    mock_unlink.assert_has_calls([
         call(Path("foo/stream/full.webm")),
         call(Path("foo/overlay/full.webm"))
     ])
 
 @pytest.mark.asyncio
-async def test_postprocess_tracks_no_overlay(mocker):
+async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
     async def mock_concat(p: Path):
         return p / "full.webm"
 
@@ -202,10 +202,10 @@ async def test_postprocess_tracks_no_overlay(mocker):
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mocker.patch("ise_record.postprocess._run_command")
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
+    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
-    mocker.patch("pathlib.Path.unlink", autospec=True)
+    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
 
     result = await postprocess_tracks(
@@ -218,7 +218,7 @@ async def test_postprocess_tracks_no_overlay(mocker):
     assert result.reason == ResultReason.SUCCESS
     assert result.output_file == Path("foo/presentation.webm")
 
-    ise_record.postprocess._run_command.assert_called_once_with([
+    mock_run_command.assert_called_once_with([
         "ffmpeg",
         "-i", "foo/stream/full.webm",
         "-filter_complex", generate_ffmpeg_filter(stream_props, False),
@@ -226,20 +226,20 @@ async def test_postprocess_tracks_no_overlay(mocker):
         "-y", "foo/presentation.webm"
     ])
 
-    ise_record.postprocess.concat_chunks.assert_called_once_with(Path("foo/stream"))
-    Path.unlink.assert_called_once_with(Path("foo/stream/full.webm"))
+    mock_concat_chunks.assert_called_once_with(Path("foo/stream"))
+    mock_unlink.assert_called_once_with(Path("foo/stream/full.webm"))
 
 @pytest.mark.asyncio
-async def test_postprocess_tracks_multi_audio(mocker):
+async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
     async def mock_concat(p: Path):
         return p / "full.webm"
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mocker.patch("ise_record.postprocess._run_command")
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
+    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
-    mocker.patch("pathlib.Path.unlink", autospec=True)
+    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
 
     result = await postprocess_tracks(
@@ -256,7 +256,7 @@ async def test_postprocess_tracks_multi_audio(mocker):
     assert result.reason == ResultReason.SUCCESS
     assert result.output_file == Path("foo/presentation.webm")
 
-    ise_record.postprocess._run_command.assert_called_once_with([
+    mock_run_command.assert_called_once_with([
         "ffmpeg",
         "-i", "foo/stream/full.webm",
         "-i", "foo/overlay/full.webm",
@@ -271,7 +271,7 @@ async def test_postprocess_tracks_multi_audio(mocker):
         "-y", "foo/presentation.webm"
     ])
 
-    ise_record.postprocess.concat_chunks.assert_has_calls([
+    mock_concat_chunks.assert_has_calls([
         call(Path("foo/stream")),
         call(Path("foo/overlay")),
         call(Path("foo/audio-0")),
@@ -279,7 +279,7 @@ async def test_postprocess_tracks_multi_audio(mocker):
         call(Path("foo/audio-2"))
     ])
 
-    Path.unlink.assert_has_calls([
+    mock_unlink.assert_has_calls([
         call(Path("foo/stream/full.webm")),
         call(Path("foo/overlay/full.webm")),
         call(Path("foo/audio-0/full.webm")),
@@ -288,7 +288,7 @@ async def test_postprocess_tracks_multi_audio(mocker):
     ])
 
 @pytest.mark.asyncio
-async def test_postprocess_tracks_multi_audio_no_overlay(mocker):
+async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
     async def mock_concat(p: Path):
         return p / "full.webm"
 
@@ -297,10 +297,10 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker):
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mocker.patch("ise_record.postprocess._run_command")
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
+    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
-    mocker.patch("pathlib.Path.unlink", autospec=True)
+    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
 
     result = await postprocess_tracks(
@@ -317,7 +317,7 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker):
     assert result.reason == ResultReason.SUCCESS
     assert result.output_file == Path("foo/presentation.webm")
 
-    ise_record.postprocess._run_command.assert_called_once_with([
+    mock_run_command.assert_called_once_with([
         "ffmpeg",
         "-i", "foo/stream/full.webm",
         "-i", "foo/audio-0/full.webm",
@@ -331,14 +331,14 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker):
         "-y", "foo/presentation.webm"
     ])
 
-    ise_record.postprocess.concat_chunks.assert_has_calls([
+    mock_concat_chunks.assert_has_calls([
         call(Path("foo/stream")),
         call(Path("foo/audio-0")),
         call(Path("foo/audio-1")),
         call(Path("foo/audio-2"))
     ])
 
-    Path.unlink.assert_has_calls([
+    mock_unlink.assert_has_calls([
         call(Path("foo/stream/full.webm")),
         call(Path("foo/audio-0/full.webm")),
         call(Path("foo/audio-1/full.webm")),
@@ -346,7 +346,7 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker):
     ])
 
 @pytest.mark.asyncio
-async def test_postprocess_recordings(mocker):
+async def test_postprocess_recordings(mocker: MockerFixture):
     rec_path = Path("foo")
     audio_paths = [
         Path("foo/audio-0"),
@@ -355,46 +355,46 @@ async def test_postprocess_recordings(mocker):
 
     expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("pathlib.Path.is_dir", return_value=True, autospec=True)
-    mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
-    mocker.patch("ise_record.postprocess.postprocess_tracks", return_value=expected_result, autospec=True)
+    mock_is_dir = mocker.patch("pathlib.Path.is_dir", return_value=True, autospec=True)
+    mock_glob = mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
+    mock_postprocess_tracks = mocker.patch("ise_record.postprocess.postprocess_tracks", return_value=expected_result, autospec=True)
 
     result = await postprocess_recording(rec_path)
 
     assert result == expected_result
 
-    ise_record.postprocess.postprocess_tracks.assert_called_once_with(
+    mock_postprocess_tracks.assert_called_once_with(
         rec_path / "stream",
         rec_path / "overlay",
         audio_paths,
         expected_result.output_file
     )
 
-    Path.is_dir.assert_has_calls([
+    mock_is_dir.assert_has_calls([
         call(rec_path),
         call(rec_path / "stream")
     ])
 
-    Path.glob.assert_called_once_with(rec_path, "audio-*")
+    mock_glob.assert_called_once_with(rec_path, "audio-*")
 
 @pytest.mark.asyncio
-async def test_postprocess_recordings_nonexistent(mocker):
+async def test_postprocess_recordings_nonexistent(mocker: MockerFixture):
     rec_path = Path("foo")
     expected_result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
 
-    mocker.patch("pathlib.Path.is_dir", return_value=False, autospec=True)
+    mock_is_dir = mocker.patch("pathlib.Path.is_dir", return_value=False, autospec=True)
     mocker.patch("pathlib.Path.glob", return_value=[], autospec=True)
-    mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
+    mock_postprocess_tracks = mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
 
     result = await postprocess_recording(rec_path)
 
     assert result == expected_result
 
-    ise_record.postprocess.postprocess_tracks.assert_not_called()
-    Path.is_dir.assert_called_once_with(rec_path)
+    mock_postprocess_tracks.assert_not_called()
+    mock_is_dir.assert_called_once_with(rec_path)
 
 @pytest.mark.asyncio
-async def test_postprocess_recordings_missing_main(mocker):
+async def test_postprocess_recordings_missing_main(mocker: MockerFixture):
     rec_path = Path("foo")
     audio_paths = [
         Path("foo/audio-0"),
@@ -403,16 +403,19 @@ async def test_postprocess_recordings_missing_main(mocker):
 
     expected_result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
 
-    mocker.patch("pathlib.Path.is_dir", wraps=lambda p: p == rec_path, autospec=True)
+    def mock_isdir(p: Path) -> bool:
+        return p == rec_path
+
+    mock_is_dir = mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
     mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
-    mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
+    mock_postprocess_tracks = mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
 
     result = await postprocess_recording(rec_path)
 
     assert result == expected_result
 
-    ise_record.postprocess.postprocess_tracks.assert_not_called()
-    Path.is_dir.assert_has_calls([
+    mock_postprocess_tracks.assert_not_called()
+    mock_is_dir.assert_has_calls([
         call(rec_path),
         call(rec_path / "stream")
     ])

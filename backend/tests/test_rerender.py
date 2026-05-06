@@ -5,36 +5,36 @@
 # pylint: disable=protected-access
 # pylint: disable=no-member
 
-import logging
 from pathlib import Path
 
 import pytest
-import rerender
+from pytest_mock import MockerFixture
+import rerender # pyright: ignore[reportMissingTypeStubs]
 
 from ise_record.postprocess import Result, ResultReason
 
 @pytest.mark.asyncio
-async def test_rerender(mocker):
+async def test_rerender(mocker: MockerFixture):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
 
     mocker.patch("sys.argv", [ "./rerender.py", "foo" ])
-    mocker.patch("rerender.postprocess_recording", autospec=True, return_value=expected_result)
-    mocker.patch("logging.basicConfig")
+    mock_postprocess = mocker.patch("rerender.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_basic_config = mocker.patch("logging.basicConfig")
 
     await rerender.main()
 
-    logging.basicConfig.assert_called_once_with(level="INFO")
-    rerender.postprocess_recording.assert_called_once_with(Path("foo"))
+    mock_basic_config.assert_called_once_with(level="INFO")
+    mock_postprocess.assert_called_once_with(Path("foo"))
 
 @pytest.mark.asyncio
-async def test_rerender_loglevel(mocker):
+async def test_rerender_loglevel(mocker: MockerFixture):
     expected_result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
 
     mocker.patch("sys.argv", [ "./rerender.py", "--log-level", "DEBUG", "foo" ])
-    mocker.patch("rerender.postprocess_recording", autospec=True, return_value=expected_result)
-    mocker.patch("logging.basicConfig")
+    mock_postprocess = mocker.patch("rerender.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_basic_config = mocker.patch("logging.basicConfig")
 
     await rerender.main()
 
-    logging.basicConfig.assert_called_once_with(level="DEBUG")
-    rerender.postprocess_recording.assert_called_once_with(Path("foo"))
+    mock_basic_config.assert_called_once_with(level="DEBUG")
+    mock_postprocess.assert_called_once_with(Path("foo"))
