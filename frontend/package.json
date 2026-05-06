@@ -16,7 +16,7 @@
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "validator": "^13.15.35",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.10.0",
