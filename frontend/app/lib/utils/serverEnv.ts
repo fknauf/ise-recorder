@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import isURL, { IsURLOptions } from "validator/es/lib/isURL";
 
 function validateApiUrl(apiUrl: string | undefined): string | undefined {
-  if(apiUrl === undefined) {
+  if(apiUrl === undefined || apiUrl === "") {
     return undefined;
   }
 
