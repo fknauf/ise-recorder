@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Annotated, List, Optional
 
 import aiofiles
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Form, File, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -40,6 +41,8 @@ class Settings(BaseSettings):
 
     chunk_file_digits: int = 4
 
+    cors_origins: List[str] = []
+
     model_config = SettingsConfigDict(env_prefix="ise_record_")
 
 @lru_cache
@@ -47,12 +50,11 @@ def get_settings() -> Settings:
     """ Cached settings loader """
     return Settings()
 
-app = FastAPI()
 setup_logging()
-
 logger = logging.getLogger(__name__)
+router = APIRouter()
 
-@app.post('/api/chunks', status_code=status.HTTP_201_CREATED)
+@router.post('/api/chunks', status_code=status.HTTP_201_CREATED)
 async def upload_chunk(
     recording: Annotated[
         str,
@@ -163,7 +165,7 @@ async def _postprocessing_task(job: PostProcessingJob, settings: Settings) -> No
             job_title=job.recording,
             result=job_result)
 
-@app.post('/api/jobs', status_code=status.HTTP_202_ACCEPTED)
+@router.post('/api/jobs', status_code=status.HTTP_202_ACCEPTED)
 def schedule_job(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
@@ -179,8 +181,29 @@ def schedule_job(
 
     return job
 
-@app.get('/api/health')
+@router.get('/api/health')
 def health_check():
     """ Endpoint for container health checks """
     logger.debug("health check requested")
     return { "status": "healthy" }
+
+
+def create_app(
+        settings: Settings = get_settings()
+) -> FastAPI:
+    """ Application factory. Creates a FastAPI app configured with the given settings. """
+    application = FastAPI()
+
+    if settings.cors_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
+        )
+    application.include_router(router)
+    return application
+
+
+app = create_app()

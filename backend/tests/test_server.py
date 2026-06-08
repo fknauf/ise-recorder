@@ -15,7 +15,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.postprocess import Result, ResultReason
-from ise_record.server import app, get_settings, _postprocessing_task, PostProcessingJob, Settings # pyright: ignore[reportPrivateUsage]
+from ise_record.server import app, create_app, get_settings, _postprocessing_task, PostProcessingJob, Settings # pyright: ignore[reportPrivateUsage]
 
 client = TestClient(app)
 
@@ -386,3 +386,48 @@ def test_chunk_upload_with_more_digits():
                     assert os.stat(target_path).st_size == sample_size
             finally:
                 del app.dependency_overrides[get_settings]
+
+
+def test_cors_preflight_jobs_unconfigured():
+    response = client.options(
+        "/api/jobs",
+        headers={
+            "Origin": "http://example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        }
+    )
+    assert response.status_code == 405
+    assert "Access-Control-Allow-Origin" not in response.headers
+    assert "Access-Control-Allow-Methods" not in response.headers
+    assert "Access-Control-Allow-Headers" not in response.headers
+
+def test_cors_preflight_jobs():
+    tc = TestClient(create_app(Settings(cors_origins=["http://allowed.example.com"])))
+
+    response = tc.options(
+        "/api/jobs",
+        headers={
+            "Origin": "http://allowed.example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        }
+    )
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == "http://allowed.example.com"
+    assert "POST" in response.headers["Access-Control-Allow-Methods"]
+    assert "content-type" in response.headers["Access-Control-Allow-Headers"].lower()
+
+def test_cors_preflight_jobs_forbidden():
+    tc = TestClient(create_app(Settings(cors_origins=["http://allowed.example.com"])))
+
+    response = tc.options(
+        "/api/jobs",
+        headers={
+            "Origin": "http://example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        }
+    )
+    assert response.status_code == 400
+    assert "Access-Control-Allow-Origin" not in response.headers
