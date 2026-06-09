@@ -17,5 +17,6 @@ ENTRYPOINT [ "/app/run_server.sh" ]
 HEALTHCHECK \
     --interval=5m \
     --timeout=5s \
-    --start-period=5s \
+    --start-period=30s \
+    --start-interval=5s \
     CMD wget --spider --tries=1 "http://localhost:${PORT:-8000}/api/health"
