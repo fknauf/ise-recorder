@@ -18,6 +18,10 @@ is no overlay, post-processing just indexes the main video stream.
 Recordings that don't fit the mold of 1 main video, 0-1 overlay, n audio streams
 require manual post-processing.
 
+## Take a look
+
+![ISE-Recorder-Screenshot](screenshot.png)
+
 ## Get started
 
 I recommend running in docker:
