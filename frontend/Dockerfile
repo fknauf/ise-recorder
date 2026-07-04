@@ -1,4 +1,4 @@
-FROM node:lts-alpine AS base
+FROM node:26-alpine AS base
 
 FROM base AS deps
 RUN apk update && apk add --no-cache libc6-compat
