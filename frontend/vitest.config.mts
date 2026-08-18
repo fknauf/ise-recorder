@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
-import { listenForFileDownload } from "./__tests__/command-download.mts";
+import { listenForFileDownload } from "./__tests__/command-download.mjs";
 
 export default defineConfig({
   resolve: {
