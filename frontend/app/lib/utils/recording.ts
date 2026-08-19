@@ -28,6 +28,7 @@ function prepareTrackRecording(
   options: MediaRecorderOptions,
   onChunkAvailable: (chunk: Blob, trackTitle: string, chunkNum: number) => Promise<RecordingBackgroundTask>
 ): RecordingTask {
+  const chunkMillis = 5000;
   const recordedStream = new MediaStream(tracks);
   const newRecorder = new MediaRecorder(recordedStream, options);
 
@@ -85,7 +86,7 @@ function prepareTrackRecording(
 
   return {
     trackTitle,
-    start: () => newRecorder.start(5000),
+    start: () => newRecorder.start(chunkMillis),
     stop: () => newRecorder.stop(),
     finished: finishedPromise
   };
