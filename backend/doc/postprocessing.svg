@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="190mm"
+   height="165mm"
+   viewBox="0 0 190 165"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   sodipodi:docname="postprocessing.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="false"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="1.824272"
+     inkscape:cx="412.49331"
+     inkscape:cy="378.23307"
+     inkscape:window-width="3072"
+     inkscape:window-height="1659"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer2" />
+  <defs
+     id="defs1">
+    <marker
+       style="overflow:visible"
+       id="ConcaveTriangle"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Concave triangle arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         transform="scale(0.7)"
+         d="M -2,-4 9,0 -2,4 c 2,-2.33 2,-5.66 0,-8 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:none"
+         id="path7" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="ConcaveTriangle-6"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Concave triangle arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         transform="scale(0.7)"
+         d="M -2,-4 9,0 -2,4 c 2,-2.33 2,-5.66 0,-8 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:none"
+         id="path7-0" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="ConcaveTriangle-6-2"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Concave triangle arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         transform="scale(0.7)"
+         d="M -2,-4 9,0 -2,4 c 2,-2.33 2,-5.66 0,-8 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:none"
+         id="path7-0-1" />
+    </marker>
+  </defs>
+  <g
+     inkscape:groupmode="layer"
+     id="layer2"
+     inkscape:label="Background">
+    <rect
+       style="fill:#ffffff;fill-opacity:1;stroke:#ffffff;stroke-width:0.799999;stroke-dasharray:none;stroke-opacity:1"
+       id="rect8"
+       width="189.2"
+       height="164.20001"
+       x="0.3999995"
+       y="0.3999995" />
+  </g>
+  <g
+     inkscape:label="Lag 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1"
+       width="79.75"
+       height="44.750004"
+       x="105.125"
+       y="5.125" />
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-4"
+       width="15.75"
+       height="8.75"
+       x="169.125"
+       y="5.125" />
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="170.173"
+       y="10.075622"
+       id="text1"><tspan
+         sodipodi:role="line"
+         id="tspan1"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="170.173"
+         y="10.075622">Overlay</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="134.23187"
+       y="28.138729"
+       id="text1-2"><tspan
+         sodipodi:role="line"
+         id="tspan1-4"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="134.23187"
+         y="28.138729">Main Display</tspan></text>
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-08"
+       width="79.75"
+       height="44.750004"
+       x="5.125"
+       y="5.125" />
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="34.231873"
+       y="28.138729"
+       id="text1-2-34"><tspan
+         sodipodi:role="line"
+         id="tspan1-4-0"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="34.231873"
+         y="28.138729">Main Display</tspan></text>
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-0"
+       width="79.75"
+       height="44.750004"
+       x="105.125"
+       y="60.125" />
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-4-5"
+       width="15.75"
+       height="8.75"
+       x="169.125"
+       y="60.125" />
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="170.173"
+       y="65.075623"
+       id="text1-1"><tspan
+         sodipodi:role="line"
+         id="tspan1-1"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="170.173"
+         y="65.075623">Overlay</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="130.02711"
+       y="83.754059"
+       id="text1-2-0"><tspan
+         sodipodi:role="line"
+         id="tspan1-4-8"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="130.02711"
+         y="83.754059">Main Display</tspan></text>
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-8"
+       width="79.75"
+       height="44.750004"
+       x="105.125"
+       y="115.125" />
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-4-1"
+       width="23.75"
+       height="13.25"
+       x="161.05623"
+       y="115.20149" />
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="166.99379"
+       y="122.22928"
+       id="text1-28"><tspan
+         sodipodi:role="line"
+         id="tspan1-9"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="166.99379"
+         y="122.22928">Overlay</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="121.00224"
+       y="139.06172"
+       id="text1-2-3"><tspan
+         sodipodi:role="line"
+         id="tspan1-4-6"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="121.00224"
+         y="139.06172">Main Display</tspan></text>
+    <rect
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       id="rect2"
+       width="24"
+       height="31.5"
+       x="160.93123"
+       y="128.57649" />
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-8-4"
+       width="79.75"
+       height="44.750004"
+       x="5.125"
+       y="115.125" />
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="33.620289"
+       y="138.9167"
+       id="text1-2-3-7"><tspan
+         sodipodi:role="line"
+         id="tspan1-4-6-5"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="33.620289"
+         y="138.9167">Main Display</tspan></text>
+    <rect
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       id="rect2-69"
+       width="12"
+       height="45"
+       x="73"
+       y="115" />
+    <rect
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       id="rect2-69-2"
+       width="12"
+       height="45"
+       x="5"
+       y="115" />
+    <rect
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       id="rect2-6"
+       width="64"
+       height="9"
+       x="105"
+       y="60" />
+    <rect
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       id="rect2-6-2"
+       width="80"
+       height="9"
+       x="105"
+       y="96" />
+    <rect
+       style="fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       id="rect1-0-6"
+       width="79.75"
+       height="44.750004"
+       x="5.125"
+       y="60.125" />
+    <text
+       xml:space="preserve"
+       style="font-size:19.7556px;font-family:Impact;-inkscape-font-specification:'Impact, Normal';writing-mode:lr-tb;direction:ltr;fill:#ffffff;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+       x="30.027107"
+       y="83.754059"
+       id="text1-2-0-8"><tspan
+         sodipodi:role="line"
+         id="tspan1-4-8-0"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:3.52778px;font-family:'Bitstream Vera Sans';-inkscape-font-specification:'Bitstream Vera Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25"
+         x="30.027107"
+         y="83.754059">Main Display</tspan></text>
+    <rect
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       id="rect2-6-5"
+       width="80"
+       height="9"
+       x="5"
+       y="60" />
+    <rect
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       id="rect2-6-2-6"
+       width="80"
+       height="9"
+       x="5"
+       y="96" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#ConcaveTriangle)"
+       d="m 90,26.24 h 7"
+       id="path2"
+       sodipodi:nodetypes="cc"
+       inkscape:connector-curvature="0"
+       inkscape:connector-type="polyline" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#ConcaveTriangle-6)"
+       d="m 90,82.24 h 7"
+       id="path2-6"
+       sodipodi:nodetypes="cc"
+       inkscape:connector-curvature="0"
+       inkscape:connector-type="polyline" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#ConcaveTriangle-6-2)"
+       d="m 90,137.24 h 7"
+       id="path2-6-9"
+       sodipodi:nodetypes="cc"
+       inkscape:connector-curvature="0"
+       inkscape:connector-type="polyline" />
+  </g>
+</svg>
