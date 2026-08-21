@@ -2,12 +2,12 @@
 
 ## UI sketch
 
-![UI sketch](ui-sketch.png)
+![UI sketch](doc/ui-sketch.png)
 
 ## Use Cases
 
 <div hidden>
-@startuml use-cases
+@startuml doc/use-cases
 
 :User:
 :Admin:
@@ -20,7 +20,7 @@ Admin --> (Configure\npostprocessing)
 @enduml
 </div>
 
-![Use case diagram](use-cases.svg)
+![Use case diagram](doc/use-cases.svg)
 
 ### UC1: Record Lecture
 
