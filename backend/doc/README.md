@@ -8,7 +8,7 @@ visible but does not obscure the content on the slides. This may involve croppin
 stream and rearrangement depending on the format of the slides; the following figure shows the way this backend
 treats the main cases:
 
-![Cropping Variants](doc/postprocessing.svg)
+![Cropping Variants](postprocessing.svg)
 
 Note that there is some technical nuance to the positioning of the main display stream: the positioning depends
 on the relation between the main display stream's content area after cropping and the output geometry, which we

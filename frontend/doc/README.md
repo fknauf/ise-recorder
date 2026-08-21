@@ -2,25 +2,25 @@
 
 ## UI sketch
 
-![UI sketch](doc/ui-sketch.png)
+![UI sketch](ui-sketch.png)
 
 ## Use Cases
 
-<div hidden>
-@startuml doc/use-cases
+<!--
+@startuml use-cases
 
 :User:
 :Admin:
 
-User --> (Record lecture)
-User --> (Download finished\nrecording)
-User --> (Delete recording)
-Admin --> (Configure\npostprocessing)
+User --_> (Record lecture)
+User --_> (Download finished\nrecording)
+User --_> (Delete recording)
+Admin --_> (Configure\npostprocessing)
 
 @enduml
-</div>
+-->
 
-![Use case diagram](doc/use-cases.svg)
+![Use case diagram](use-cases.svg)
 
 ### UC1: Record Lecture
 
