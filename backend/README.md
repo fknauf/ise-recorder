@@ -1,4 +1,4 @@
-# Technical Documentation (backend)
+# ISE-Recorder Backend: Technical Documentation
 
 ## Purpose
 

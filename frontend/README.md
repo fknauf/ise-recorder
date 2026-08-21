@@ -1,4 +1,4 @@
-# Technical Documentation (Frontend)
+# ISE-Recorder Frontend: Technical Documentation
 
 ## UI sketch
 
