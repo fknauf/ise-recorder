@@ -56,18 +56,37 @@ The API is an HTTP API with three endpoints:
 | `/api/jobs` | POST | Schedule postprocessing job | recording name, notification email address |
 | `/api/health` | GET | Monitoring | none |
 
-For convenience of implementation on the frontend side, `/api/chunks` accepts input encoded as `multipart/form-data`, with the
-following values:
+For convenience of implementation on the frontend side, `/api/chunks` accepts input encoded as `multipart/form-data` with the
+following fields:
 
 - `recording`: name of recording (string)
 - `track`: name of the track (string)
 - `index`: number of the chunk in the track (integer)
 - `chunk`: chunk data (file)
 
-The `/api/jobs` endpoint accepts a JSON object (with `Content-Type: application/json`) in the body with two members:
+This is meant to work with the following Typescript snippet:
 
-- `recording`: name of recording (string)
-- `recipient`: e-mail address of the notification recipient (string)
+```typescript
+const data = new FormData();
+data.append("recording", "GVS_2026-01-23T12:34:56.789Z");
+data.append("track", "stream");
+data.append("index", "0");
+data.append("chunk", chunk); // where chunk is of type Blob
+
+const request: RequestInit = {
+    method: "POST",
+    body: data
+};
+```
+
+The `/api/jobs` endpoint accepts a JSON object (with `Content-Type: application/json`) in the body shaped like
+
+```json
+{
+    "recording": "GVS_2026-01-23T12:34:56.789Z",
+    "recipient": "lecturer@uni.edu"
+}
+```
 
 Where `recording` must match a recording name for which chunks have been stored before.
 
