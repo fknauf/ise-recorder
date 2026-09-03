@@ -33,6 +33,10 @@ class SqlUserDatabase(UserDatabase):
 
             return User(username=username)
 
+    def user_exists(self, username: str) -> bool:
+        with Session(self._engine) as session:
+            return session.get(SqlUser, username) is not None
+
     def create_user(self, username: str, password: str) -> None:
         """
         Create a user

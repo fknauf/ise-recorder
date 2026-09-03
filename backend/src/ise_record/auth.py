@@ -33,36 +33,6 @@ def get_user_db(
 
     return None
 
-def create_access_token(
-        username: str,
-        password: str,
-        settings: Settings,
-        user_db: UserDatabase
-) -> Optional[str]:
-    """
-    Create a JWT from user credentials. The authenticated endpoints expect this token in the
-    request headers.
-
-    :param username user to authenticate
-    :param password the user's password
-    :param settings server settings
-    :param user_db the configured user database
-    """
-
-    user = user_db.authenticate(username, password)
-
-    if user is None:
-        return None
-
-    return jwt.encode(
-        {
-            "username": user.username,
-            "exp": datetime.now(timezone.utc) + timedelta(hours=18)
-        },
-        settings.auth_jwt_secret,
-        "HS384"
-    )
-
 def get_current_user(
         token: Annotated[str, Depends(oauth2_scheme)],
         settings: Annotated[Settings, Depends(get_settings)],
@@ -84,8 +54,13 @@ def get_current_user(
     )
 
     try:
-        payload = jwt.decode(token, settings.auth_jwt_secret, algorithms=["HS384"])
-        username = payload.get("username")
+        payload = jwt.decode(
+            token,
+            settings.auth_jwt_secret,
+            algorithms=["HS384"],
+            leeway=timedelta(seconds=30)
+        )
+        username = payload.get("sub")
         expiry = payload.get("exp", 0)
 
         if not isinstance(username, str) or expiry < datetime.now(timezone.utc).timestamp():
@@ -94,3 +69,28 @@ def get_current_user(
         return User(username=username)
     except InvalidTokenError as exc:
         raise credentials_exception from exc
+
+def sign_access_token(
+        user: User,
+        settings: Settings
+) -> Optional[str]:
+    """
+    Sign an access token 
+
+    :param user user, presumed to be authenticated
+    :param settings server settings
+    """
+    if settings.auth_backend == AuthBackend.YOLO:
+        return None
+
+    now = datetime.now(timezone.utc)
+
+    return jwt.encode(
+        {
+            "sub": user.username,
+            "iat": now,
+            "exp": now + timedelta(hours=18)
+        },
+        settings.auth_jwt_secret,
+        "HS384"
+    )

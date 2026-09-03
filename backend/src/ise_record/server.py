@@ -16,11 +16,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .auth_base import User, UserDatabase
-from .auth import create_access_token, get_user_db, get_current_user
+from .auth import get_user_db, get_current_user, sign_access_token
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
-from .settings import Settings, get_settings
+from .settings import AuthBackend, Settings, get_settings
 
 SAFE_NAME_REGEX = '^\\w[\\w.-]*$'
 
@@ -194,15 +194,36 @@ def authenticate_for_jwt(
     user_db: Annotated[UserDatabase, Depends(get_user_db)]
 ):
     """ Endpoint to obtain a JWT for the chunk/job endpoints """
-    token = create_access_token(auth_request.username, auth_request.password, settings, user_db)
+    if settings.auth_backend == AuthBackend.YOLO:
+        return None
 
-    if token is None:
+    user = user_db.authenticate(auth_request.username, auth_request.password)
+
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
         )
 
-    return token
+    return sign_access_token(user, settings)
+
+@router.get('/api/auth/refresh', status_code=status.HTTP_202_ACCEPTED)
+def refresh_auth_token(
+    user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user_db: Annotated[UserDatabase, Depends(get_user_db)]
+):
+    """ Endpoint to obtain a JWT for the chunk/job endpoints """
+    if settings.auth_backend == AuthBackend.YOLO:
+        return None
+
+    if not user_db.user_exists(user.username):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
+
+    return sign_access_token(user, settings)
 
 def create_app(
         settings: Optional[Settings] = None

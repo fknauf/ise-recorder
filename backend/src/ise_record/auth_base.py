@@ -28,3 +28,11 @@ class UserDatabase(ABC):
         :param username user's name
         :param password user's password
         """
+
+    @abstractmethod
+    def user_exists(self, username: str) -> bool:
+        """
+        Check if a user exists in the database
+
+        :param username user's name
+        """

@@ -30,6 +30,9 @@ class MockUserDatabase(UserDatabase):
             return None
         return User(username="user")
 
+    def user_exists(self, username: str) -> bool:
+        return username == "user"
+
 client = TestClient(app)
 
 @pytest.mark.asyncio
@@ -474,9 +477,53 @@ def test_auth_jwt():
 
     auth_data = jwt.decode(response.json(), settings.auth_jwt_secret, "HS384")
 
-    assert auth_data["username"] == "user"
-    assert auth_data["exp"] >= (datetime.now(timezone.utc) + timedelta(hours=17)).timestamp()
-    assert auth_data["exp"] <= (datetime.now(timezone.utc) + timedelta(hours=19)).timestamp()
+    now = datetime.now(timezone.utc) + timedelta(seconds=1)
+    issued_at = datetime.fromtimestamp(auth_data["iat"], timezone.utc)
+    expiry = datetime.fromtimestamp(auth_data["exp"], timezone.utc)
+
+    assert auth_data["sub"] == "user"
+    assert issued_at <= now and issued_at >= now - timedelta(seconds=30)
+    assert expiry == issued_at + timedelta(hours=18)
+
+def test_auth_jwt_refresh():
+    settings = Settings(
+        auth_backend=AuthBackend.SQL,
+        auth_jwt_secret="0123456789abcdef" * 3
+    )
+
+    test_app = create_app(settings)
+    test_app.dependency_overrides[get_user_db] = MockUserDatabase
+
+    tc = TestClient(test_app)
+
+    auth_response = tc.post(
+        "/api/auth",
+        json={
+            "username": "user",
+            "password": "password"
+        }
+    )
+
+    assert auth_response.status_code == 202
+
+    refresh_response = tc.get(
+        "/api/auth/refresh",
+        headers = {
+            "Authorization": f"Bearer {auth_response.json()}"
+        }
+    )
+
+    assert refresh_response.status_code == 202
+
+    auth_data = jwt.decode(refresh_response.json(), settings.auth_jwt_secret, "HS384")
+
+    now = datetime.now(timezone.utc) + timedelta(seconds=1)
+    issued_at = datetime.fromtimestamp(auth_data["iat"], timezone.utc)
+    expiry = datetime.fromtimestamp(auth_data["exp"], timezone.utc)
+
+    assert auth_data["sub"] == "user"
+    assert issued_at <= now and issued_at >= now - timedelta(seconds=30)
+    assert expiry == issued_at + timedelta(hours=18)
 
 def test_auth_failure():
     settings = Settings(
