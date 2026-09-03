@@ -1,21 +1,34 @@
 # pylint: disable=line-too-long
+# pylint: disable=missing-class-docstring
 # pylint: disable=missing-function-docstring
 # pylint: disable=missing-module-docstring
+# pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
 # pylint: disable=protected-access
 # pylint: disable=no-member
 
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import tempfile
 from unittest.mock import ANY
 
 from fastapi.testclient import TestClient
+import jwt
 import pytest
 from pytest_mock import MockerFixture
 
+from ise_record.auth_base import User, UserDatabase, yolo_user
+from ise_record.auth import get_user_db
 from ise_record.postprocess import Result, ResultReason
-from ise_record.server import app, create_app, get_settings, _postprocessing_task, PostProcessingJob, Settings # pyright: ignore[reportPrivateUsage]
+from ise_record.server import app, create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
+from ise_record.settings import get_settings, AuthBackend, Settings
+
+class MockUserDatabase(UserDatabase):
+    def authenticate(self, username: str, password: str) -> User | None:
+        if username != "user" or password != "password":
+            return None
+        return User(username="user")
 
 client = TestClient(app)
 
@@ -34,12 +47,13 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
         smtp_password="supersecure",
         smtp_sender="render@example.de",
         smtp_starttls=True,
-        smtp_allowed_domains=["example.de"]
+        smtp_allowed_domains=("example.de",),
     )
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
-        settings
+        settings,
+        yolo_user
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -75,12 +89,13 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
         smtp_password="supersecure",
         smtp_sender="render@example.de",
         smtp_starttls=True,
-        smtp_allowed_domains=["example.de"]
+        smtp_allowed_domains=("example.de",)
     )
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
-        settings
+        settings,
+        yolo_user
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -95,7 +110,8 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
-        Settings()
+        Settings(),
+        yolo_user
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -119,7 +135,8 @@ def test_schedule_postprocessing(mocker: MockerFixture):
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="foo@bar.de"),
-        get_settings()
+        get_settings(),
+        yolo_user
     )
 
 def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture):
@@ -139,7 +156,8 @@ def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture):
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
-        get_settings()
+        get_settings(),
+        yolo_user
     )
 
 def test_schedule_postprocessing_error(mocker: MockerFixture):
@@ -192,7 +210,8 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: Mock
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="I made a lot of typos"),
-        get_settings()
+        get_settings(),
+        yolo_user
     )
 
 
@@ -403,7 +422,7 @@ def test_cors_preflight_jobs_unconfigured():
     assert "Access-Control-Allow-Headers" not in response.headers
 
 def test_cors_preflight_jobs():
-    tc = TestClient(create_app(Settings(cors_origins=["http://allowed.example.com"])))
+    tc = TestClient(create_app(Settings(cors_origins=("http://allowed.example.com",))))
 
     response = tc.options(
         "/api/jobs",
@@ -419,7 +438,7 @@ def test_cors_preflight_jobs():
     assert "content-type" in response.headers["Access-Control-Allow-Headers"].lower()
 
 def test_cors_preflight_jobs_forbidden():
-    tc = TestClient(create_app(Settings(cors_origins=["http://allowed.example.com"])))
+    tc = TestClient(create_app(Settings(cors_origins=("http://allowed.example.com",))))
 
     response = tc.options(
         "/api/jobs",
@@ -431,3 +450,138 @@ def test_cors_preflight_jobs_forbidden():
     )
     assert response.status_code == 400
     assert "Access-Control-Allow-Origin" not in response.headers
+
+def test_auth_jwt():
+    settings = Settings(
+        auth_backend=AuthBackend.SQL,
+        auth_jwt_secret="0123456789abcdef" * 3
+    )
+
+    test_app = create_app(settings)
+    test_app.dependency_overrides[get_user_db] = MockUserDatabase
+
+    tc = TestClient(test_app)
+
+    response = tc.post(
+        "/api/auth",
+        json={
+            "username": "user",
+            "password": "password"
+        }
+    )
+
+    assert response.status_code == 202
+
+    auth_data = jwt.decode(response.json(), settings.auth_jwt_secret, "HS384")
+
+    assert auth_data["username"] == "user"
+    assert auth_data["exp"] >= (datetime.now(timezone.utc) + timedelta(hours=17)).timestamp()
+    assert auth_data["exp"] <= (datetime.now(timezone.utc) + timedelta(hours=19)).timestamp()
+
+def test_auth_failure():
+    settings = Settings(
+        auth_backend=AuthBackend.SQL,
+        auth_jwt_secret="0123456789abcdef" * 3
+    )
+
+    test_app = create_app(settings)
+    test_app.dependency_overrides[get_user_db] = MockUserDatabase
+
+    tc = TestClient(test_app)
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+
+    with open(sample_path, "rb") as sample:
+        response = tc.post(
+            "/api/chunks",
+            data={
+                "recording": "foo",
+                "track": "stream",
+                "index": "0"
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        assert response.status_code == 401
+
+    job_response = tc.post(
+        "/api/jobs",\
+        json={
+            "recording": "foo",
+            "recipient": "foo@bar.de"
+        }
+    )
+
+    assert job_response.status_code == 401
+
+def test_auth_success(mocker: MockerFixture):
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+    sample_size = os.stat(sample_path).st_size
+
+    with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
+        settings = Settings(
+            auth_backend=AuthBackend.SQL,
+            auth_jwt_secret="0123456789abcdef" * 3,
+            destdir = Path(tempdir)
+        )
+
+        test_app = create_app(settings)
+        test_app.dependency_overrides[get_user_db] = MockUserDatabase
+
+        tc = TestClient(test_app)
+
+        auth_response = tc.post(
+            "/api/auth",
+            json={
+                "username": "user",
+                "password": "password"
+            }
+        )
+
+        assert auth_response.status_code == 202
+        auth_token = auth_response.json()
+        assert auth_token is not None
+        assert auth_token != ""
+
+        chunk_response = tc.post(
+            "/api/chunks",
+            headers = {
+                "Authorization": f"Bearer {auth_token}"
+            },
+            data={
+                "recording": "foo",
+                "track": "stream",
+                "index": "0"
+            },
+            files={
+                "chunk": sample
+            }
+        )
+
+        target_path = Path(tempdir) / "user" / "foo" / "stream" / "chunk.0000"
+
+        assert chunk_response.status_code == 201
+        assert os.path.isfile(target_path)
+        assert os.stat(target_path).st_size == sample_size
+
+        job_response = tc.post(
+            "/api/jobs",
+            headers={
+                "Authorization": f"Bearer {auth_token}"
+            },
+            json={
+                "recording": "foo",
+                "recipient": "foo@bar.de"
+            }
+        )
+
+        assert job_response.status_code == 202
+        mock_add_task.assert_called_once_with(
+            _postprocessing_task, # pyright: ignore[reportPrivateUsage]
+            PostProcessingJob(recording="foo", recipient="foo@bar.de"),
+            settings,
+            User(username="user")
+        )

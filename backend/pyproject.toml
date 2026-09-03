@@ -8,8 +8,11 @@ dependencies = [
     "aiosmtplib~=5.1",
     "email-validator~=2.3",
     "fastapi~=0.136",
+    "pwdlib[argon2]~=0.3",
     "pydantic-settings~=2.13",
+    "PyJWT~=2.13",
     "python-multipart~=0.0",
+    "sqlmodel~=0.0",
     "uvicorn~=0.44",
 ]
 
@@ -35,6 +38,9 @@ build-backend = "setuptools.build_meta"
 addopts = [
     "--import-mode=importlib",
 ]
+
+[tool.pyright]
+useLibraryCodeForTypes = true
 
 [tool.fastapi]
 entrypoint = "ise_record.server:app"

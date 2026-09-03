@@ -67,8 +67,6 @@ async def test_video_properties():
 
     info = await video_properties(sample_path)
 
-    print(info)
-
     assert info.width == 480
     assert info.height == 270
 
