@@ -8,6 +8,7 @@
 # pylint: disable=no-member
 
 from datetime import datetime, timedelta, timezone
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -454,6 +455,26 @@ def test_cors_preflight_jobs_forbidden():
     assert response.status_code == 400
     assert "Access-Control-Allow-Origin" not in response.headers
 
+def test_auth_status_yolo():
+    response = client.get('/api/auth/status')
+
+    assert response.status_code == 200
+    assert response.json()["required"] == False
+
+def test_auth_status():
+    settings = Settings(
+        auth_backend=AuthBackend.SQL,
+        auth_jwt_secret="0123456789abcdef" * 3
+    )
+
+    test_app = create_app(settings)
+    tc = TestClient(test_app)
+
+    response = tc.get('/api/auth/status')
+
+    assert response.status_code == 200
+    assert response.json()["required"] == True
+
 def test_auth_jwt():
     settings = Settings(
         auth_backend=AuthBackend.SQL,
@@ -466,7 +487,7 @@ def test_auth_jwt():
     tc = TestClient(test_app)
 
     response = tc.post(
-        "/api/auth",
+        "/api/auth/login",
         json={
             "username": "user",
             "password": "password"
@@ -497,7 +518,7 @@ def test_auth_jwt_refresh():
     tc = TestClient(test_app)
 
     auth_response = tc.post(
-        "/api/auth",
+        "/api/auth/login",
         json={
             "username": "user",
             "password": "password"
@@ -515,7 +536,7 @@ def test_auth_jwt_refresh():
 
     assert refresh_response.status_code == 202
 
-    auth_data = jwt.decode(refresh_response.json(), settings.auth_jwt_secret, "HS384")
+    auth_data = jwt.decode(refresh_response.json(), settings.auth_jwt_secret, algorithms=["HS384"])
 
     now = datetime.now(timezone.utc) + timedelta(seconds=1)
     issued_at = datetime.fromtimestamp(auth_data["iat"], timezone.utc)
@@ -581,7 +602,7 @@ def test_auth_success(mocker: MockerFixture):
         tc = TestClient(test_app)
 
         auth_response = tc.post(
-            "/api/auth",
+            "/api/auth/login",
             json={
                 "username": "user",
                 "password": "password"

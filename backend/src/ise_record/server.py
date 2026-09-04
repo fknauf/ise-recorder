@@ -187,7 +187,15 @@ class AuthenticationRequest(BaseModel):
         )
     ]
 
-@router.post('/api/auth', status_code=status.HTTP_202_ACCEPTED)
+@router.get('/api/auth/status', status_code=status.HTTP_200_OK)
+def auth_system_status(
+    settings: Annotated[Settings, Depends(get_settings)]
+):
+    return {
+        "required": settings.auth_backend != AuthBackend.YOLO
+    }
+
+@router.post('/api/auth/login', status_code=status.HTTP_202_ACCEPTED)
 def authenticate_for_jwt(
     auth_request: AuthenticationRequest,
     settings: Annotated[Settings, Depends(get_settings)],
