@@ -42,6 +42,7 @@
         "setuptools",
         "STARTTLS",
         "supersecure",
+        "unconfigured",
         "unsanitized",
         "uvicorn",
         "venv",

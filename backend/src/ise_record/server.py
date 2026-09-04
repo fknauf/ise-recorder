@@ -13,17 +13,13 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, FastAPI, Form, HTTPException, UploadFile, status
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 
-from .auth import decode_access_token, get_user_db, get_current_user, sign_access_token
-from .auth_base import User, UserDatabase
-from .auth_yolo import yolo_user
+from .auth import get_current_user
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
-from .settings import AuthBackend, Settings, get_settings
+from .settings import Settings, get_settings
 
 SAFE_NAME_REGEX = '^\\w[\\w.-]*$'
 
@@ -69,7 +65,7 @@ class ChunkUpload(BaseModel):
 async def upload_chunk(
     upload: Annotated[ChunkUpload, Form()],
     settings: Annotated[Settings, Depends(get_settings)],
-    user: Annotated[User, Depends(get_current_user)]
+    user: Annotated[str, Depends(get_current_user)]
 ) -> dict[str, str | int]:
     """
     POST endpoint for the upload of chunk files.
@@ -86,7 +82,7 @@ async def upload_chunk(
 
     filename = f'chunk.{upload.index:0{settings.chunk_file_digits}d}'
 
-    track_path = settings.destdir / user.relative_home_dir / upload.recording / upload.track
+    track_path = settings.destdir / user / upload.recording / upload.track
     filepath = track_path / filename
     logger.debug("saving %s", filepath)
 
@@ -126,8 +122,8 @@ class PostProcessingJob(BaseModel):
         )
     ]
 
-async def _postprocessing_task(job: PostProcessingJob, settings: Settings, user: User) -> None:
-    recording_path = settings.destdir / user.relative_home_dir / job.recording
+async def _postprocessing_task(job: PostProcessingJob, settings: Settings, user: str) -> None:
+    recording_path = settings.destdir / user / job.recording
     job_result = await postprocess_recording(recording_path)
 
     normalized_recipient = normalize_recipient(job.recipient, list(settings.smtp_allowed_domains))
@@ -153,11 +149,11 @@ def schedule_job(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
-    user: Annotated[User, Depends(get_current_user)]
+    user: Annotated[str, Depends(get_current_user)]
 ):
     """ Endpoint for the scheduling of postprocessing jobs """
 
-    if not os.path.isdir(settings.destdir / user.relative_home_dir / job.recording):
+    if not os.path.isdir(settings.destdir / user / job.recording):
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
         raise HTTPException(status_code=400, detail=f'Recording {job.recording} does not exist')
 
@@ -170,76 +166,6 @@ def health_check():
     """ Endpoint for container health checks """
     logger.debug("health check requested")
     return { "status": "healthy" }
-
-def _oauth_response(
-        content: any,
-        status_code: int = status.HTTP_200_OK,
-) -> JSONResponse:
-    return JSONResponse(
-        status_code = status_code,
-        content = content,
-        headers = {
-            "Cache-Control": "no-store",
-            "Pragma": "no-cache"
-        }
-    )
-
-def _oauth_error(
-        error: str,
-        description: str
-) -> JSONResponse:
-    return _oauth_response(
-        content = {
-            "error": error,
-            "error_description": description
-        },
-        status_code = status.HTTP_400_BAD_REQUEST
-    )
-    
-
-@router.get('/api/auth/status')
-def auth_system_status(
-    settings: Annotated[Settings, Depends(get_settings)]
-):
-    return {
-        "required": settings.auth_backend != AuthBackend.YOLO
-    }
-
-@router.post('/api/auth/login')
-def authenticate_for_jwt(
-    auth_request: Annotated[OAuth2PasswordRequestForm, Depends()],
-    settings: Annotated[Settings, Depends(get_settings)],
-    user_db: Annotated[UserDatabase, Depends(get_user_db)]
-):
-    """ Endpoint to obtain a JWT for the chunk/job endpoints """
-    if settings.auth_backend == AuthBackend.YOLO:
-        user = yolo_user
-    else:
-        user = user_db.authenticate(auth_request.username, auth_request.password)
-
-    if user is None:
-        return _oauth_error("invalid_grant", "Could not validate credentials")
-
-    return _oauth_response(sign_access_token(user, settings))
-
-@router.post('/api/auth/refresh')
-def refresh_auth_token(
-    refresh_token: Annotated[str, Form()],
-    settings: Annotated[Settings, Depends(get_settings)],
-    user_db: Annotated[UserDatabase, Depends(get_user_db)]
-):
-    """ Endpoint to obtain a JWT for the chunk/job endpoints """
-    if settings.auth_backend == AuthBackend.YOLO:
-        return None
-
-    user = decode_access_token(refresh_token, settings.auth_jwt_secret)
-
-    if user is None:
-        return _oauth_error("invalid_grant", "Invalid refresh token")
-    elif not user_db.user_exists(user.username):
-        return _oauth_error("invalid_grant", "User does no longer exist")
-
-    return _oauth_response(sign_access_token(user, settings))
 
 def create_app(
         settings: Optional[Settings] = None
@@ -262,6 +188,5 @@ def create_app(
         )
     application.include_router(router)
     return application
-
 
 app = create_app()

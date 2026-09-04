@@ -7,32 +7,18 @@
 # pylint: disable=protected-access
 # pylint: disable=no-member
 
-from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import tempfile
 from unittest.mock import ANY
 
 from fastapi.testclient import TestClient
-import jwt
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.auth import get_user_db
-from ise_record.auth_base import User, UserDatabase
-from ise_record.auth_yolo import yolo_user
 from ise_record.postprocess import Result, ResultReason
 from ise_record.server import app, create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
-from ise_record.settings import get_settings, AuthBackend, Settings
-
-class MockUserDatabase(UserDatabase):
-    def authenticate(self, username: str, password: str) -> User | None:
-        if username != "user" or password != "password":
-            return None
-        return User(username="user")
-
-    def user_exists(self, username: str) -> bool:
-        return username == "user"
+from ise_record.settings import get_settings, Settings
 
 client = TestClient(app)
 
@@ -57,7 +43,7 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
         settings,
-        yolo_user
+        "."
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -99,7 +85,7 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
         settings,
-        yolo_user
+        "."
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -115,7 +101,7 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
         Settings(),
-        yolo_user
+        "."
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -140,7 +126,7 @@ def test_schedule_postprocessing(mocker: MockerFixture):
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="foo@bar.de"),
         get_settings(),
-        yolo_user
+        "."
     )
 
 def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture):
@@ -161,7 +147,7 @@ def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture):
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
         get_settings(),
-        yolo_user
+        "."
     )
 
 def test_schedule_postprocessing_error(mocker: MockerFixture):
@@ -215,7 +201,7 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: Mock
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="I made a lot of typos"),
         get_settings(),
-        yolo_user
+        "."
     )
 
 
@@ -454,220 +440,3 @@ def test_cors_preflight_jobs_forbidden():
     )
     assert response.status_code == 400
     assert "Access-Control-Allow-Origin" not in response.headers
-
-def test_auth_status_yolo():
-    response = client.get('/api/auth/status')
-
-    assert response.status_code == 200
-    assert response.json()["required"] == False
-
-def test_auth_status():
-    settings = Settings(
-        auth_backend=AuthBackend.SQL,
-        auth_jwt_secret="0123456789abcdef" * 3
-    )
-
-    test_app = create_app(settings)
-    tc = TestClient(test_app)
-
-    response = tc.get('/api/auth/status')
-
-    assert response.status_code == 200
-    assert response.json()["required"] == True
-
-def test_auth_jwt():
-    settings = Settings(
-        auth_backend=AuthBackend.SQL,
-        auth_jwt_secret="0123456789abcdef" * 3
-    )
-
-    test_app = create_app(settings)
-    test_app.dependency_overrides[get_user_db] = MockUserDatabase
-
-    tc = TestClient(test_app)
-
-    response = tc.post(
-        "/api/auth/login",
-        data={
-            "username": "user",
-            "password": "password"
-        }
-    )
-
-    assert response.status_code == 200
-    assert response.json()["token_type"] == "bearer"
-    assert "access_token" in response.json()
-    assert "expires_in" in response.json()
-    assert "refresh_token" in response.json()
-
-    auth_data = jwt.decode(response.json()["access_token"], settings.auth_jwt_secret, "HS384")
-
-    now = datetime.now(timezone.utc) + timedelta(seconds=1)
-    issued_at = datetime.fromtimestamp(auth_data["iat"], timezone.utc)
-    expiry = datetime.fromtimestamp(auth_data["exp"], timezone.utc)
-
-    assert auth_data["sub"] == "user"
-    assert issued_at <= now and issued_at >= now - timedelta(seconds=30)
-    assert expiry == issued_at + timedelta(hours=18)
-
-def test_auth_jwt_refresh():
-    settings = Settings(
-        auth_backend=AuthBackend.SQL,
-        auth_jwt_secret="0123456789abcdef" * 3
-    )
-
-    test_app = create_app(settings)
-    test_app.dependency_overrides[get_user_db] = MockUserDatabase
-
-    tc = TestClient(test_app)
-
-    auth_response = tc.post(
-        "/api/auth/login",
-        data={
-            "username": "user",
-            "password": "password"
-        }
-    )
-
-    assert auth_response.status_code == 200
-    assert auth_response.json()["token_type"] == "bearer"
-    assert "access_token" in auth_response.json()
-    assert "expires_in" in auth_response.json()
-    assert "refresh_token" in auth_response.json()
-
-    refresh_response = tc.post(
-        "/api/auth/refresh",
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": auth_response.json()["refresh_token"]
-        }
-    )
-
-    assert refresh_response.status_code == 200
-    assert refresh_response.json()["token_type"] == "bearer"
-    assert "access_token" in refresh_response.json()
-    assert "expires_in" in refresh_response.json()
-    assert "refresh_token" in refresh_response.json()
-
-    auth_data = jwt.decode(refresh_response.json()["access_token"], settings.auth_jwt_secret, algorithms=["HS384"])
-
-    now = datetime.now(timezone.utc) + timedelta(seconds=1)
-    issued_at = datetime.fromtimestamp(auth_data["iat"], timezone.utc)
-    expiry = datetime.fromtimestamp(auth_data["exp"], timezone.utc)
-
-    assert auth_data["sub"] == "user"
-    assert issued_at <= now and issued_at >= now - timedelta(seconds=30)
-    assert expiry == issued_at + timedelta(hours=18)
-
-def test_auth_failure():
-    settings = Settings(
-        auth_backend=AuthBackend.SQL,
-        auth_jwt_secret="0123456789abcdef" * 3
-    )
-
-    test_app = create_app(settings)
-    test_app.dependency_overrides[get_user_db] = MockUserDatabase
-
-    tc = TestClient(test_app)
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
-
-    with open(sample_path, "rb") as sample:
-        response = tc.post(
-            "/api/chunks",
-            data={
-                "recording": "foo",
-                "track": "stream",
-                "index": "0"
-            },
-            files={
-                "chunk": sample
-            }
-        )
-
-        assert response.status_code == 401
-
-    job_response = tc.post(
-        "/api/jobs",\
-        json={
-            "recording": "foo",
-            "recipient": "foo@bar.de"
-        }
-    )
-
-    assert job_response.status_code == 401
-
-def test_auth_success(mocker: MockerFixture):
-    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
-
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
-    sample_size = os.stat(sample_path).st_size
-
-    with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-        settings = Settings(
-            auth_backend=AuthBackend.SQL,
-            auth_jwt_secret="0123456789abcdef" * 3,
-            destdir = Path(tempdir)
-        )
-
-        test_app = create_app(settings)
-        test_app.dependency_overrides[get_user_db] = MockUserDatabase
-
-        tc = TestClient(test_app)
-
-        auth_response = tc.post(
-            "/api/auth/login",
-            data={
-                "username": "user",
-                "password": "password"
-            }
-        )
-
-        assert auth_response.status_code == 200
-        assert auth_response.json()["token_type"] == "bearer" 
-        assert "access_token" in auth_response.json()
-        assert "refresh_token" in auth_response.json()
-        assert "expires_in" in auth_response.json()
-
-        auth_token = auth_response.json()["access_token"]
-        assert auth_token is not None
-        assert auth_token != ""
-
-        chunk_response = tc.post(
-            "/api/chunks",
-            headers = {
-                "Authorization": f"Bearer {auth_token}"
-            },
-            data={
-                "recording": "foo",
-                "track": "stream",
-                "index": "0"
-            },
-            files={
-                "chunk": sample
-            }
-        )
-
-        target_path = Path(tempdir) / "user" / "foo" / "stream" / "chunk.0000"
-
-        assert chunk_response.status_code == 201
-        assert os.path.isfile(target_path)
-        assert os.stat(target_path).st_size == sample_size
-
-        job_response = tc.post(
-            "/api/jobs",
-            headers={
-                "Authorization": f"Bearer {auth_token}"
-            },
-            json={
-                "recording": "foo",
-                "recipient": "foo@bar.de"
-            }
-        )
-
-        assert job_response.status_code == 202
-        mock_add_task.assert_called_once_with(
-            _postprocessing_task, # pyright: ignore[reportPrivateUsage]
-            PostProcessingJob(recording="foo", recipient="foo@bar.de"),
-            settings,
-            User(username="user")
-        )

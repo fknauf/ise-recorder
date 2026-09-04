@@ -1,134 +1,73 @@
-""" Authentication facilities that are not backend-specific """
+from datetime import timedelta
+from typing import Annotated, Any, NamedTuple, Optional
 
-from datetime import datetime, timezone, timedelta
-from functools import lru_cache
-import logging
-from typing import Annotated, Optional
-
-from fastapi import Depends, status, HTTPException
-from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import httpx2
 import jwt
-from jwt.exceptions import InvalidTokenError
 
-from .auth_base import User, UserDatabase
-from .auth_sql import SqlUserDatabase
-from .auth_yolo import yolo_user, yolo_user_db
-from .settings import AuthBackend, Settings, get_settings
+from .settings import Settings, get_settings
 
-logger = logging.getLogger(__name__)
+security_scheme = HTTPBearer(auto_error=False)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+class OpenIDConfiguration(NamedTuple):
+    issuer: str
+    jwks_uri: str
+    jwks_cache: Optional[dict[str, Any]]
 
-@lru_cache
-def get_user_db(
+async def get_openid_config(
+        request: Request,
         settings: Annotated[Settings, Depends(get_settings)]
-) -> UserDatabase:
-    """
-    Get the user-database matching the configured auth backend
+) -> Optional[OpenIDConfiguration]:
+    if not settings.openid_provider_url:
+        return None
 
-    :param settings server configuration
-    """
+    if not hasattr(request.app.state, "openid_config"):
+        async with httpx2.AsyncClient() as client:
+            discovery_response = await client.get(f"{settings.openid_provider_url}/.well-known/openid-configuration")
+            discovery_response.raise_for_status()
+            issuer = discovery_response.json()["issuer"]
+            jwks_uri = discovery_response.json()["jwks_uri"]
 
-    match settings.auth_backend:
-        case AuthBackend.SQL:
-            if settings.auth_sql_url is None:
-                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
-            return SqlUserDatabase(settings.auth_sql_url)
-        case AuthBackend.LDAP:
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
-        case AuthBackend.YOLO:
-            return yolo_user_db
+            jwks_response = await client.get(jwks_uri)
+            jwks_response.raise_for_status()
+            jwks_cache = jwks_response.json()
 
-    raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+            request.app.state.openid_config = OpenIDConfiguration(
+                issuer=issuer,
+                jwks_uri=jwks_uri,
+                jwks_cache=jwks_cache
+            )
 
-def decode_access_token(token: str, jwt_secret: Optional[str]) -> Optional[User]:
+    return request.app.state.openid_config
+
+def get_current_user(
+        credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
+        openid_config: Annotated[Optional[OpenIDConfiguration], Depends(get_openid_config)],
+        settings: Annotated[Settings, Depends(get_settings)]
+) -> str:
+    if not settings.openid_provider_url:
+        return "."
+
+    if not openid_config:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to contact OpenID provider"
+        )
+
     try:
-        payload = jwt.decode(
-            token,
-            jwt_secret,
-            algorithms=["HS384"],
+        payload = jwt.decode( # pyright: ignore[reportUnknownMemberType]
+            credentials.credentials,
+            openid_config.jwks_cache,
+            algorithms=["RS256"],
+            issuer=openid_config.issuer,
+            options={"verify_aud": False},
             leeway=timedelta(seconds=30)
         )
 
-        username = payload.get("sub")
-        expiry = payload.get("exp", 0)
-
-        if not isinstance(username, str) or expiry < datetime.now(timezone.utc).timestamp():
-            return None
-
-        return User(username=username)
-    except InvalidTokenError:
-        return None
-
-def get_current_user(
-        token: Annotated[str, Depends(oauth2_scheme)],
-        settings: Annotated[Settings, Depends(get_settings)],
-) -> User:
-    """
-    Gets the current user, or throws in case of auth failure
-
-    :param token the sent JWT
-    :param settings server settings
-    """
-
-    if settings.auth_backend == AuthBackend.YOLO:
-        return yolo_user
-
-    user = decode_access_token(token, settings.auth_jwt_secret)
-
-    if user is None:
+        return payload["sub"]
+    except jwt.exceptions.PyJWTError as e:
         raise HTTPException(
-           status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return user
-
-class SignedToken(BaseModel):
-    access_token: str
-    token_type: str
-    expires_in: int
-    refresh_token: str
-
-def sign_access_token(
-        user: User,
-        settings: Settings
-) -> SignedToken:
-    """
-    Sign an access token 
-
-    :param user user, presumed to be authenticated
-    :param settings server settings
-    """
-    now = datetime.now(timezone.utc)
-
-    access_token = jwt.encode(
-        {
-            "sub": user.username,
-            "typ": "access",
-            "iat": now,
-            "exp": now + timedelta(hours=1)
-        },
-        settings.auth_jwt_secret,
-        "HS384"
-    )
-
-    refresh_token = jwt.encode(
-        {
-            "sub": user.username,
-            "typ": "refresh",
-            "iat": now,
-            "exp": now + timedelta(hours=24)
-        },
-        settings.auth_jwt_secret,
-        "HS384"
-    )
-
-    return SignedToken(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=timedelta(hours=18).seconds,
-        refresh_token=refresh_token
-    )
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token"
+        ) from e

@@ -1,19 +1,11 @@
 """ Admin-configurable server settings """
 
-from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Optional
 
 from pydantic import EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class AuthBackend(str, Enum):
-    """ Authentication backend mechanism. YOLO means no authentication. """
-    YOLO = "yolo"
-    SQL = "sql"
-    LDAP = "ldap"
 
 class Settings(BaseSettings):
     """
@@ -35,9 +27,7 @@ class Settings(BaseSettings):
 
     cors_origins: tuple[str, ...] = ()
 
-    auth_jwt_secret: Optional[str] = None
-    auth_backend: AuthBackend = AuthBackend.YOLO
-    auth_sql_url: Optional[str] = None
+    openid_provider_url: Optional[str] = None
 
     model_config = SettingsConfigDict(env_prefix="ise_record_", frozen=True)
 
