@@ -6,7 +6,7 @@
 
 import logging
 import os
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import aiofiles
 from fastapi import (
@@ -15,7 +15,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .auth import get_current_user
+from .auth import get_current_user, get_openid_config, get_token_payload, OpenIDConfiguration
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
@@ -166,6 +166,39 @@ def health_check():
     """ Endpoint for container health checks """
     logger.debug("health check requested")
     return { "status": "healthy" }
+
+class AuthStatus(BaseModel):
+    auth_required: bool
+    token_valid: bool
+    authorization_endpoint: Optional[str]
+    token_endpoint: Optional[str]
+
+@router.get('/api/auth/status')
+def auth_status(
+    openid_config: Annotated[Optional[OpenIDConfiguration], Depends(get_openid_config)],
+    payload: Annotated[Optional[dict[str, Any]], Depends(get_token_payload)],
+    settings: Annotated[Settings, Depends(get_settings)]
+):
+    if settings.openid_provider_url is None:
+        return AuthStatus(
+            auth_required=False,
+            token_valid=False,
+            authorization_endpoint=None,
+            token_endpoint=None
+        )
+
+    if openid_config is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to contact OpenID provider"
+        )
+
+    return AuthStatus(
+        auth_required=True,
+        token_valid=payload is not None,
+        authorization_endpoint=openid_config.authorization_endpoint,
+        token_endpoint=openid_config.token_endpoint
+    )
 
 def create_app(
         settings: Optional[Settings] = None
