@@ -14,8 +14,6 @@ class User:
         self.username = username
         self.relative_home_dir = home_override or username
 
-yolo_user = User("yolo", home_override=".")
-
 class UserDatabase(ABC):
     # pylint: disable=too-few-public-methods
     """ User database base class """

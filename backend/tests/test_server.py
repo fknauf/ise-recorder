@@ -8,7 +8,6 @@
 # pylint: disable=no-member
 
 from datetime import datetime, timedelta, timezone
-import json
 import os
 from pathlib import Path
 import tempfile
@@ -19,8 +18,9 @@ import jwt
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.auth_base import User, UserDatabase, yolo_user
 from ise_record.auth import get_user_db
+from ise_record.auth_base import User, UserDatabase
+from ise_record.auth_yolo import yolo_user
 from ise_record.postprocess import Result, ResultReason
 from ise_record.server import app, create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
 from ise_record.settings import get_settings, AuthBackend, Settings
@@ -488,15 +488,19 @@ def test_auth_jwt():
 
     response = tc.post(
         "/api/auth/login",
-        json={
+        data={
             "username": "user",
             "password": "password"
         }
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 200
+    assert response.json()["token_type"] == "bearer"
+    assert "access_token" in response.json()
+    assert "expires_in" in response.json()
+    assert "refresh_token" in response.json()
 
-    auth_data = jwt.decode(response.json(), settings.auth_jwt_secret, "HS384")
+    auth_data = jwt.decode(response.json()["access_token"], settings.auth_jwt_secret, "HS384")
 
     now = datetime.now(timezone.utc) + timedelta(seconds=1)
     issued_at = datetime.fromtimestamp(auth_data["iat"], timezone.utc)
@@ -519,24 +523,33 @@ def test_auth_jwt_refresh():
 
     auth_response = tc.post(
         "/api/auth/login",
-        json={
+        data={
             "username": "user",
             "password": "password"
         }
     )
 
-    assert auth_response.status_code == 202
+    assert auth_response.status_code == 200
+    assert auth_response.json()["token_type"] == "bearer"
+    assert "access_token" in auth_response.json()
+    assert "expires_in" in auth_response.json()
+    assert "refresh_token" in auth_response.json()
 
-    refresh_response = tc.get(
+    refresh_response = tc.post(
         "/api/auth/refresh",
-        headers = {
-            "Authorization": f"Bearer {auth_response.json()}"
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": auth_response.json()["refresh_token"]
         }
     )
 
-    assert refresh_response.status_code == 202
+    assert refresh_response.status_code == 200
+    assert refresh_response.json()["token_type"] == "bearer"
+    assert "access_token" in refresh_response.json()
+    assert "expires_in" in refresh_response.json()
+    assert "refresh_token" in refresh_response.json()
 
-    auth_data = jwt.decode(refresh_response.json(), settings.auth_jwt_secret, algorithms=["HS384"])
+    auth_data = jwt.decode(refresh_response.json()["access_token"], settings.auth_jwt_secret, algorithms=["HS384"])
 
     now = datetime.now(timezone.utc) + timedelta(seconds=1)
     issued_at = datetime.fromtimestamp(auth_data["iat"], timezone.utc)
@@ -603,14 +616,19 @@ def test_auth_success(mocker: MockerFixture):
 
         auth_response = tc.post(
             "/api/auth/login",
-            json={
+            data={
                 "username": "user",
                 "password": "password"
             }
         )
 
-        assert auth_response.status_code == 202
-        auth_token = auth_response.json()
+        assert auth_response.status_code == 200
+        assert auth_response.json()["token_type"] == "bearer" 
+        assert "access_token" in auth_response.json()
+        assert "refresh_token" in auth_response.json()
+        assert "expires_in" in auth_response.json()
+
+        auth_token = auth_response.json()["access_token"]
         assert auth_token is not None
         assert auth_token != ""
 

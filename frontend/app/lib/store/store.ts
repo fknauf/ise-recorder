@@ -97,6 +97,9 @@ export interface AppStoreState {
   adjustedSavedRecordings: readonly RecordingFileList[]
   quota: number | undefined
   usage: number | undefined
+  authRequired: boolean | undefined
+  authToken: string | undefined
+  authRefreshAt: Temporal.Instant
 
   setLectureTitle: (lectureTitle: string) => void
   setLecturerEmail: (lecturerEmail: string) => void

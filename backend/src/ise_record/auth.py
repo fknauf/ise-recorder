@@ -7,11 +7,13 @@ from typing import Annotated, Optional
 
 from fastapi import Depends, status, HTTPException
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 import jwt
 from jwt.exceptions import InvalidTokenError
 
-from .auth_base import User, UserDatabase, yolo_user
+from .auth_base import User, UserDatabase
 from .auth_sql import SqlUserDatabase
+from .auth_yolo import yolo_user, yolo_user_db
 from .settings import AuthBackend, Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -21,17 +23,43 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 @lru_cache
 def get_user_db(
         settings: Annotated[Settings, Depends(get_settings)]
-) -> Optional[UserDatabase]:
+) -> UserDatabase:
     """
     Get the user-database matching the configured auth backend
 
     :param settings server configuration
     """
 
-    if settings.auth_backend == AuthBackend.SQL and settings.auth_sql_url is not None:
-        return SqlUserDatabase(settings.auth_sql_url)
+    match settings.auth_backend:
+        case AuthBackend.SQL:
+            if settings.auth_sql_url is None:
+                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return SqlUserDatabase(settings.auth_sql_url)
+        case AuthBackend.LDAP:
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+        case AuthBackend.YOLO:
+            return yolo_user_db
 
-    return None
+    raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def decode_access_token(token: str, jwt_secret: Optional[str]) -> Optional[User]:
+    try:
+        payload = jwt.decode(
+            token,
+            jwt_secret,
+            algorithms=["HS384"],
+            leeway=timedelta(seconds=30)
+        )
+
+        username = payload.get("sub")
+        expiry = payload.get("exp", 0)
+
+        if not isinstance(username, str) or expiry < datetime.now(timezone.utc).timestamp():
+            return None
+
+        return User(username=username)
+    except InvalidTokenError:
+        return None
 
 def get_current_user(
         token: Annotated[str, Depends(oauth2_scheme)],
@@ -47,50 +75,60 @@ def get_current_user(
     if settings.auth_backend == AuthBackend.YOLO:
         return yolo_user
 
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    user = decode_access_token(token, settings.auth_jwt_secret)
 
-    try:
-        payload = jwt.decode(
-            token,
-            settings.auth_jwt_secret,
-            algorithms=["HS384"],
-            leeway=timedelta(seconds=30)
+    if user is None:
+        raise HTTPException(
+           status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        username = payload.get("sub")
-        expiry = payload.get("exp", 0)
 
-        if not isinstance(username, str) or expiry < datetime.now(timezone.utc).timestamp():
-            raise credentials_exception
+    return user
 
-        return User(username=username)
-    except InvalidTokenError as exc:
-        raise credentials_exception from exc
+class SignedToken(BaseModel):
+    access_token: str
+    token_type: str
+    expires_in: int
+    refresh_token: str
 
 def sign_access_token(
         user: User,
         settings: Settings
-) -> Optional[str]:
+) -> SignedToken:
     """
     Sign an access token 
 
     :param user user, presumed to be authenticated
     :param settings server settings
     """
-    if settings.auth_backend == AuthBackend.YOLO:
-        return None
-
     now = datetime.now(timezone.utc)
 
-    return jwt.encode(
+    access_token = jwt.encode(
         {
             "sub": user.username,
+            "typ": "access",
             "iat": now,
-            "exp": now + timedelta(hours=18)
+            "exp": now + timedelta(hours=1)
         },
         settings.auth_jwt_secret,
         "HS384"
+    )
+
+    refresh_token = jwt.encode(
+        {
+            "sub": user.username,
+            "typ": "refresh",
+            "iat": now,
+            "exp": now + timedelta(hours=24)
+        },
+        settings.auth_jwt_secret,
+        "HS384"
+    )
+
+    return SignedToken(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=timedelta(hours=18).seconds,
+        refresh_token=refresh_token
     )

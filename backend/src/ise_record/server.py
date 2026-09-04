@@ -13,10 +13,13 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, FastAPI, Form, HTTPException, UploadFile, status
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 
+from .auth import decode_access_token, get_user_db, get_current_user, sign_access_token
 from .auth_base import User, UserDatabase
-from .auth import get_user_db, get_current_user, sign_access_token
+from .auth_yolo import yolo_user
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
@@ -168,26 +171,33 @@ def health_check():
     logger.debug("health check requested")
     return { "status": "healthy" }
 
-class AuthenticationRequest(BaseModel):
-    """ Authentication request to obtain a JWT """
+def _oauth_response(
+        content: any,
+        status_code: int = status.HTTP_200_OK,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code = status_code,
+        content = content,
+        headers = {
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache"
+        }
+    )
 
-    username: Annotated[
-        str,
-        Field(
-            pattern=SAFE_NAME_REGEX,
-            description="Name of the user",
-            examples=["user", "yoloman9001"]
-        )
-    ]
-    password: Annotated[
-        str,
-        Field(
-            description="Password",
-            examples=["hunter2"]
-        )
-    ]
+def _oauth_error(
+        error: str,
+        description: str
+) -> JSONResponse:
+    return _oauth_response(
+        content = {
+            "error": error,
+            "error_description": description
+        },
+        status_code = status.HTTP_400_BAD_REQUEST
+    )
+    
 
-@router.get('/api/auth/status', status_code=status.HTTP_200_OK)
+@router.get('/api/auth/status')
 def auth_system_status(
     settings: Annotated[Settings, Depends(get_settings)]
 ):
@@ -195,29 +205,26 @@ def auth_system_status(
         "required": settings.auth_backend != AuthBackend.YOLO
     }
 
-@router.post('/api/auth/login', status_code=status.HTTP_202_ACCEPTED)
+@router.post('/api/auth/login')
 def authenticate_for_jwt(
-    auth_request: AuthenticationRequest,
+    auth_request: Annotated[OAuth2PasswordRequestForm, Depends()],
     settings: Annotated[Settings, Depends(get_settings)],
     user_db: Annotated[UserDatabase, Depends(get_user_db)]
 ):
     """ Endpoint to obtain a JWT for the chunk/job endpoints """
     if settings.auth_backend == AuthBackend.YOLO:
-        return None
-
-    user = user_db.authenticate(auth_request.username, auth_request.password)
+        user = yolo_user
+    else:
+        user = user_db.authenticate(auth_request.username, auth_request.password)
 
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-        )
+        return _oauth_error("invalid_grant", "Could not validate credentials")
 
-    return sign_access_token(user, settings)
+    return _oauth_response(sign_access_token(user, settings))
 
-@router.get('/api/auth/refresh', status_code=status.HTTP_202_ACCEPTED)
+@router.post('/api/auth/refresh')
 def refresh_auth_token(
-    user: Annotated[User, Depends(get_current_user)],
+    refresh_token: Annotated[str, Form()],
     settings: Annotated[Settings, Depends(get_settings)],
     user_db: Annotated[UserDatabase, Depends(get_user_db)]
 ):
@@ -225,13 +232,14 @@ def refresh_auth_token(
     if settings.auth_backend == AuthBackend.YOLO:
         return None
 
-    if not user_db.user_exists(user.username):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-        )
+    user = decode_access_token(refresh_token, settings.auth_jwt_secret)
 
-    return sign_access_token(user, settings)
+    if user is None:
+        return _oauth_error("invalid_grant", "Invalid refresh token")
+    elif not user_db.user_exists(user.username):
+        return _oauth_error("invalid_grant", "User does no longer exist")
+
+    return _oauth_response(sign_access_token(user, settings))
 
 def create_app(
         settings: Optional[Settings] = None
@@ -250,7 +258,7 @@ def create_app(
             allow_origins=settings.cors_origins,
             allow_credentials=False,
             allow_methods=["GET", "POST"],
-            allow_headers=["Content-Type"],
+            allow_headers=["Authorization", "Content-Type"],
         )
     application.include_router(router)
     return application
