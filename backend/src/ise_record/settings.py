@@ -2,10 +2,22 @@
 
 from functools import lru_cache
 from pathlib import Path
+import re
 from typing import Annotated, Optional
 
-from pydantic import EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SAFE_NAME_REGEX = re.compile('^\\w[\\w.-]*$')
+
+class OpenIdSettings(BaseModel):
+    """
+    OpenID settings for authentication (if desired).
+    """
+    provider_url: str
+    audience: str
+    leeway_seconds: Annotated[float, Field(ge=0)] = 30.0
+    http_timeout_seconds: Annotated[float, Field(gt=0)] = 5.0
 
 class Settings(BaseSettings):
     """
@@ -26,10 +38,14 @@ class Settings(BaseSettings):
     chunk_file_digits: int = 4
 
     cors_origins: tuple[str, ...] = ()
-
-    openid_provider_url: Optional[str] = None
+    openid: Optional[OpenIdSettings] = None
 
     model_config = SettingsConfigDict(env_prefix="ise_record_", frozen=True)
+
+    @property
+    def auth_required(self) -> bool:
+        """ Whether clients must present an access token """
+        return self.openid is not None
 
 
 @lru_cache

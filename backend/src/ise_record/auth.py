@@ -1,86 +1,178 @@
-from datetime import timedelta
+"""
+    OpenID Connect access token validation.
+
+    The service acts as an OAuth2 resource server: an external identity provider issues
+    access tokens, and this module verifies them. Provider metadata is discovered once at
+    startup; signing keys are fetched and refreshed by PyJWKClient.
+"""
+
+import hashlib
+import logging
+import re
 from typing import Annotated, Any, NamedTuple, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx2
 import jwt
+from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
 
-from .settings import Settings, get_settings
+from .settings import get_settings, SAFE_NAME_REGEX, Settings
+
+logger = logging.getLogger(__name__)
 
 security_scheme = HTTPBearer(auto_error=False)
 
+ANONYMOUS_HOME = "."
+REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub", "scope")
+JWKS_CACHE_SECONDS = 1800.0
+
+INSECURE_ALGORITHMS = frozenset({"none", "hs256", "hs384", "hs512"})
+
+_UNAUTHENTICATED = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Invalid or expired token",
+    headers={"WWW-Authenticate": "Bearer"},
+)
+
+_PROVIDER_UNREACHABLE = HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    detail="Unable to contact the OpenID provider",
+)
+
+
 class OpenIDConfiguration(NamedTuple):
-    authorization_endpoint: str
+    """ Provider metadata discovered from the well-known endpoint, plus its key client """
     issuer: str
-    jwks_uri: str
-    jwks_cache: Optional[dict[str, Any]]
-    token_endpoint: str
+    jwk_client: jwt.PyJWKClient
 
-async def get_openid_config(
-        request: Request,
-        settings: Annotated[Settings, Depends(get_settings)]
+
+async def discover_openid_config(settings: Settings) -> OpenIDConfiguration:
+    """ Fetch provider metadata from the well-known discovery endpoint. """
+    assert settings.openid is not None
+
+    discovery_url = (
+        f"{settings.openid.provider_url.rstrip('/')}/.well-known/openid-configuration"
+    )
+
+    async with httpx2.AsyncClient(timeout=settings.openid.http_timeout_seconds) as client:
+        response = await client.get(discovery_url)
+        response.raise_for_status()
+        metadata = response.json()
+
+    jwks_uri = metadata["jwks_uri"]
+    jwk_client = jwt.PyJWKClient(
+        jwks_uri,
+        cache_jwk_set=True,
+        lifespan=JWKS_CACHE_SECONDS,
+        timeout=settings.openid.http_timeout_seconds,
+    )
+
+    return OpenIDConfiguration(
+        issuer=metadata["issuer"],
+        jwk_client=jwk_client,
+    )
+
+
+async def load_openid_config(
+        app_state: Any,
+        settings: Settings
 ) -> Optional[OpenIDConfiguration]:
-    if settings.openid_provider_url is None:
+    """
+    Return the cached provider configuration, discovering it if necessary.
+
+    Called once from the application lifespan so the cost and any failure are visible at
+    startup. Discovery is retried on demand afterwards, so a provider that is briefly down
+    while the service boots does not require a restart.
+    """
+    if not settings.auth_required:
         return None
 
-    if not hasattr(request.app.state, "openid_config"):
-        async with httpx2.AsyncClient() as client:
-            discovery_response = await client.get(f"{settings.openid_provider_url}/.well-known/openid-configuration")
-            discovery_response.raise_for_status()
-
-            jwks_uri = discovery_response.json()["jwks_uri"]
-            jwks_response = await client.get(jwks_uri)
-            jwks_response.raise_for_status()
-            jwks_cache = jwks_response.json()
-
-            request.app.state.openid_config = OpenIDConfiguration(
-                authorization_endpoint=discovery_response.json()["authorization_endpoint"],
-                issuer=discovery_response.json()["issuer"],
-                jwks_uri=jwks_uri,
-                jwks_cache=jwks_cache,
-                token_endpoint=discovery_response.json()["token_endpoint"]
-            )
-
-    return request.app.state.openid_config
-
-def get_token_payload(
-        credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(security_scheme)],
-        openid_config: Annotated[Optional[OpenIDConfiguration], Depends(get_openid_config)],
-) -> Optional[dict[str, Any]]:
-    if openid_config is None or credentials is None:
-        return None
+    cached: Optional[OpenIDConfiguration] = getattr(app_state, "openid_config", None)
+    if cached is not None:
+        return cached
 
     try:
-        return jwt.decode( # pyright: ignore[reportUnknownMemberType]
-            credentials.credentials,
-            openid_config.jwks_cache,
-            algorithms=["RS256"],
-            issuer=openid_config.issuer,
-            options={"verify_aud": False},
-            leeway=timedelta(seconds=30)
-        )
-    except jwt.exceptions.PyJWTError:
+        config = await discover_openid_config(settings)
+    except (httpx2.HTTPError, KeyError, ValueError):
+        logger.exception("OpenID discovery failed; authenticated endpoints will return 503")
         return None
 
-def get_current_user(
-        openid_config: Annotated[Optional[OpenIDConfiguration], Depends(get_openid_config)],
+    app_state.openid_config = config
+    logger.info("OpenID provider ready: issuer=%s", config.issuer)
+    return config
+
+
+def validate_access_token(
+        token: str,
+        openid_config: OpenIDConfiguration,
+        settings: Settings
+) -> dict[str, Any]:
+    """ Verify an access token and return its claims. """
+    assert settings.openid is not None
+
+    try:
+        signing_key = openid_config.jwk_client.get_signing_key_from_jwt(token)
+        algorithm = signing_key.algorithm_name
+
+        if algorithm.lower() in INSECURE_ALGORITHMS:
+            logger.error("key %s signs with %s, which we refuse to verify",
+                         signing_key.key_id, algorithm)
+            raise _UNAUTHENTICATED
+
+        return jwt.decode(
+            token,
+            signing_key,
+            algorithms=[algorithm],
+            issuer=openid_config.issuer,
+            audience=settings.openid.audience,
+            leeway=settings.openid.leeway_seconds,
+            options={
+                "require": list(REQUIRED_CLAIMS)
+            },
+        )
+    except PyJWKClientConnectionError as exc:
+        logger.error("cannot reach the JWKS endpoint: %s", exc)
+        raise _PROVIDER_UNREACHABLE from exc
+    except PyJWKClientError as exc:
+        logger.warning("no usable signing key for the presented token: %s", exc)
+        raise _UNAUTHENTICATED from exc
+    except PyJWTError as exc:
+        logger.info("rejected access token: %s", exc)
+        raise _UNAUTHENTICATED from exc
+
+
+def user_home_dir(claims: dict[str, Any]) -> str:
+    """ Derive a filesystem-safe, human-readable per-user directory name from token claims. """
+    subject = claims["sub"]
+    digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()[:12]
+
+    username = claims.get("preferred_username")
+    if not isinstance(username, str):
+        return digest
+
+    sanitized = re.sub(r'[^\w.-]', '_', username)[:48]
+    candidate = f"{sanitized}-{digest}"
+
+    return candidate if SAFE_NAME_REGEX.match(candidate) else digest
+
+
+async def get_current_user_home(
+        request: Request,
         settings: Annotated[Settings, Depends(get_settings)],
-        payload: Annotated[Optional[dict[str, Any]], Depends(get_token_payload)]
+        credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(security_scheme)],
 ) -> str:
-    if settings.openid_provider_url is None:
-        return "."
+    """ Resolve the caller's home directory name, rejecting unauthenticated requests. """
+    if not settings.auth_required:
+        return ANONYMOUS_HOME
 
+    openid_config = await load_openid_config(request.app.state, settings)
     if openid_config is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unable to contact OpenID provider"
-        )
+        raise _PROVIDER_UNREACHABLE
 
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid or expired token"
-        )
+    if credentials is None:
+        raise _UNAUTHENTICATED
 
-    return payload["sub"]
+    claims = validate_access_token(credentials.credentials, openid_config, settings)
+
+    return user_home_dir(claims)

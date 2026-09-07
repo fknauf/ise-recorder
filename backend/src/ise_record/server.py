@@ -4,9 +4,10 @@
    This module defines the HTTP API endpoints and validates inputs.
 """
 
+from contextlib import asynccontextmanager
 import logging
 import os
-from typing import Annotated, Any, Optional
+from typing import Annotated, AsyncGenerator, Optional
 
 import aiofiles
 from fastapi import (
@@ -15,13 +16,11 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .auth import get_current_user, get_openid_config, get_token_payload, OpenIDConfiguration
+from .auth import get_current_user_home, load_openid_config
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
-from .settings import Settings, get_settings
-
-SAFE_NAME_REGEX = '^\\w[\\w.-]*$'
+from .settings import SAFE_NAME_REGEX, Settings, get_settings
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -65,7 +64,7 @@ class ChunkUpload(BaseModel):
 async def upload_chunk(
     upload: Annotated[ChunkUpload, Form()],
     settings: Annotated[Settings, Depends(get_settings)],
-    user: Annotated[str, Depends(get_current_user)]
+    user_home: Annotated[str, Depends(get_current_user_home)]
 ) -> dict[str, str | int]:
     """
     POST endpoint for the upload of chunk files.
@@ -82,7 +81,7 @@ async def upload_chunk(
 
     filename = f'chunk.{upload.index:0{settings.chunk_file_digits}d}'
 
-    track_path = settings.destdir / user / upload.recording / upload.track
+    track_path = settings.destdir / user_home / upload.recording / upload.track
     filepath = track_path / filename
     logger.debug("saving %s", filepath)
 
@@ -149,7 +148,7 @@ def schedule_job(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
-    user: Annotated[str, Depends(get_current_user)]
+    user: Annotated[str, Depends(get_current_user_home)]
 ):
     """ Endpoint for the scheduling of postprocessing jobs """
 
@@ -167,49 +166,27 @@ def health_check():
     logger.debug("health check requested")
     return { "status": "healthy" }
 
-class AuthStatus(BaseModel):
-    auth_required: bool
-    token_valid: bool
-    authorization_endpoint: Optional[str]
-    token_endpoint: Optional[str]
-
-@router.get('/api/auth/status')
-def auth_status(
-    openid_config: Annotated[Optional[OpenIDConfiguration], Depends(get_openid_config)],
-    payload: Annotated[Optional[dict[str, Any]], Depends(get_token_payload)],
-    settings: Annotated[Settings, Depends(get_settings)]
-):
-    if settings.openid_provider_url is None:
-        return AuthStatus(
-            auth_required=False,
-            token_valid=False,
-            authorization_endpoint=None,
-            token_endpoint=None
-        )
-
-    if openid_config is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unable to contact OpenID provider"
-        )
-
-    return AuthStatus(
-        auth_required=True,
-        token_valid=payload is not None,
-        authorization_endpoint=openid_config.authorization_endpoint,
-        token_endpoint=openid_config.token_endpoint
-    )
-
 def create_app(
         settings: Optional[Settings] = None
 ) -> FastAPI:
     """ Application factory. Creates a FastAPI app configured with the given settings. """
-    application = FastAPI()
+    override_settings = settings
+    settings = settings if settings is not None else get_settings()
 
-    if settings is None:
-        settings = get_settings()
-    else:
-        application.dependency_overrides[get_settings] = lambda: settings
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
+        if settings.auth_required:
+            # Attempt to load openid config at application start instead of first request. This isn't
+            # strictly necessary but will log an error if the openid provider is unreachable.
+            await load_openid_config(application.state, settings)
+        else:
+            logger.warning("no OpenID provider configured -- endpoints are unauthenticated")
+        yield
+
+    application = FastAPI(lifespan=lifespan)
+
+    if override_settings is not None:
+        application.dependency_overrides[get_settings] = lambda: override_settings
 
     if settings.cors_origins:
         application.add_middleware(
