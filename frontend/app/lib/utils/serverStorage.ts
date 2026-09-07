@@ -28,10 +28,23 @@ async function callWithRetries(
 
 async function sendRequest(
   url: string | URL | Request,
-  request?: RequestInit
+  request: RequestInit,
+  getAccessToken: () => Promise<string | undefined>,
 ): Promise<CallResult> {
   try {
-    const response = await fetch(url, request);
+    const token = await getAccessToken();
+
+    const authorizedRequest: RequestInit | undefined = token !== undefined
+      ? {
+          ...request,
+          headers: {
+            ...request.headers,
+            "Authorization": `Bearer ${token}`
+          }
+        }
+      : request;
+
+    const response = await fetch(url, authorizedRequest);
 
     if(response.ok) {
       return { ok: true };
@@ -50,6 +63,7 @@ export async function sendChunkToServer(
   recording: string,
   track: string,
   index: number,
+  getAccessToken: () => Promise<string | undefined>,
   retryPolicy: RetryPolicy = { retries: 10, intervalMillis: 2000 }
 ) {
   if(!apiUrl) {
@@ -69,7 +83,7 @@ export async function sendChunkToServer(
     body: data
   };
 
-  const result = await callWithRetries(() => sendRequest(chunkUrl, request), retryPolicy);
+  const result = await callWithRetries(() => sendRequest(chunkUrl, request, getAccessToken), retryPolicy);
 
   if(!result.ok) {
     showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`);
@@ -79,7 +93,8 @@ export async function sendChunkToServer(
 export async function schedulePostprocessing(
   apiUrl: string | undefined,
   recording: string,
-  recipient?: string,
+  recipient: string | undefined,
+  getAccessToken: () => Promise<string | undefined>,
   retryPolicy: RetryPolicy = { retries: 5, intervalMillis: 1000 }
 ) {
   if(!apiUrl) {
@@ -101,7 +116,7 @@ export async function schedulePostprocessing(
     body: JSON.stringify(data)
   };
 
-  const result = await callWithRetries(() => sendRequest(jobUrl, request), retryPolicy);
+  const result = await callWithRetries(() => sendRequest(jobUrl, request, getAccessToken), retryPolicy);
 
   if(result.ok) {
     showSuccess(`Recording "${recording}" finished; postprocessing scheduled.`);

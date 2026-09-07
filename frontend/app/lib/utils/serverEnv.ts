@@ -28,6 +28,8 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
 export interface ServerEnv {
   version?: string
   apiUrl?: string
+  openid_provider_url?: string
+  openid_client_id?: string
 }
 
 let runtimeEnvironment: ServerEnv | undefined;
@@ -40,7 +42,9 @@ export async function getServerEnv(): Promise<ServerEnv> {
   if(runtimeEnvironment === undefined) {
     runtimeEnvironment = {
       version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? process.env.npm_package_version : undefined,
-      apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL)
+      apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
+      openid_provider_url: validateApiUrl(process.env.ISE_RECORD_OPENID_PROVIDER_URL),
+      openid_client_id: process.env.ISE_RECORD_OPENID_CLIENT_ID
     };
   }
 

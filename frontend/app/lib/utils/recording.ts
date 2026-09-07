@@ -183,7 +183,8 @@ export async function recordLecture(
   onStarting: (recordingName: string) => Promise<void> | void,
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,
   onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
-  onFinished: (recordingName: string) => Promise<void> | void
+  onFinished: (recordingName: string) => Promise<void> | void,
+  getAccessToken: () => Promise<string | undefined>
 ) {
   const timestamp = new Date();
   const lecturePrefix = lectureTitle ? `${lectureTitle}_` : "";
@@ -199,7 +200,7 @@ export async function recordLecture(
 
   const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
     // No need to await: we support sending chunks to server out of order and/or concurrently.
-    const backgroundPromise = sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex);
+    const backgroundPromise = sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex, getAccessToken);
 
     // For local file storage on the other hand, it's important that chunks to the same file
     // are not written concurrently and that filesystem state updates are correctly ordered.
@@ -250,7 +251,7 @@ export async function recordLecture(
 
       await onStarted(recordingName, stopJobs);
       await Promise.allSettled(jobs.map(job => job.finished));
-      await schedulePostprocessing(apiUrl, recordingName, lecturerEmail);
+      await schedulePostprocessing(apiUrl, recordingName, lecturerEmail, getAccessToken);
     } catch(e) {
       stopJobs();
       throw e;

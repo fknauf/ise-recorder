@@ -51,3 +51,4 @@ __pycache__
 /data
 /backend/data
 /backend/build
+get_token.sh

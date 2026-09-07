@@ -6,6 +6,7 @@ import { useLecture } from "./useLecture";
 import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
+import { useAccessTokenSource } from "./useAuthTokenSource";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
@@ -38,6 +39,10 @@ export function useStartStopRecording() {
   const {
     apiUrl
   } = useServerEnv();
+
+  const {
+    getAccessToken
+  } = useAccessTokenSource();
 
   const startRecording = async () => {
     if(activeRecording.state !== "idle") {
@@ -81,7 +86,8 @@ export function useStartStopRecording() {
       await recordLecture(
         displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
         lectureTitle, lecturerEmail, apiUrl,
-        onStarting, onStarted, onChunkWritten, onFinished
+        onStarting, onStarted, onChunkWritten, onFinished,
+        getAccessToken
       );
     } catch(e) {
       showError("Recording failed", e);
