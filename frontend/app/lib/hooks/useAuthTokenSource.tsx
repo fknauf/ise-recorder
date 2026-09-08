@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, ReactNode, useContext, useMemo, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { AuthProvider } from "react-oidc-context";
 import { UserManager } from "oidc-client-ts";
+import { useRouter } from "next/navigation";
 
 interface AccessTokenSource {
   authRequired: boolean
@@ -39,9 +40,6 @@ function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNo
   );
 }
 
-const onSigninCallback = () =>
-  window.history.replaceState({}, document.title, window.location.pathname);
-
 function AuthenticatedTokenSourceProvider({ config, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
   const [ userMgr ] = useState(() =>
     new UserManager({
@@ -50,11 +48,14 @@ function AuthenticatedTokenSourceProvider({ config, children }: Readonly<Authent
       redirect_uri: typeof window === "undefined"
         ? ""
         : `${window.location.origin}/auth/callback`,
-      scope: "openid profile email offline_access",
+      scope: "openid profile email",
       automaticSilentRenew: true,
-      accessTokenExpiringNotificationTimeInSeconds: 120
+      accessTokenExpiringNotificationTimeInSeconds: 120,
     })
   );
+
+  const router = useRouter();
+  const onSigninCallback = useCallback(() => router.replace("/"), [router]);
 
   const value = useMemo(() => ({
     authRequired: true,

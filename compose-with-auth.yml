@@ -24,6 +24,10 @@ configs:
           "username": "lecturer",
           "enabled": true,
           "email": "lecturer@example.com",
+          "emailVerified": true,
+          "firstName": "Dr.",
+          "lastName": "Lecturer",
+          "requiredActions": [],
           "credentials": [{ "type": "password", "value": "hunter2", "temporary": false }]
         }]
       }    
@@ -51,11 +55,12 @@ services:
     container_name: ise-recorder-backend
     init: true
     restart: unless-stopped
+    depends_on:
+      keycloak:
+        condition: service_healthy
     user: 1000:1000
     ports:
       - 127.0.0.1:8000:8000
-    extra_hosts:
-      - keycloak.localhost:host-gateway
     volumes:
       - ./data:/app/data
     command:
@@ -67,15 +72,26 @@ services:
       - ISE_RECORD_OIDC__AUDIENCE=ise-recorder
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.4
+    image: quay.io/keycloak/keycloak:26.7
     command: [ "start-dev", "--import-realm" ]
     ports:
       - 127.0.0.1:8080:8080
       - "[::1]:8080:8080"
+    networks:
+      default:
+        aliases:
+          - keycloak.localhost
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HOSTNAME: http://keycloak.localhost:8080
+      KC_HEALTH_ENABLED: true
+    healthcheck:
+      test: [ "CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'" ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     configs:
       - source: realm
         target: /opt/keycloak/data/import/realm.json

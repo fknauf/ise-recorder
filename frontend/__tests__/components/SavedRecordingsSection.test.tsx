@@ -161,7 +161,8 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
   vi.mocked(useActiveRecording).mockReturnValue({
     state: "recording",
     name: "BAR_2025-12-11T214230.418Z",
-    stop: vi.fn()
+    stop: vi.fn(),
+    streamingImpeded: false
   });
 
   vi.mocked(useBrowserStorage).mockReturnValue({

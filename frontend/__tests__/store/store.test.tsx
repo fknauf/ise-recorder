@@ -213,7 +213,8 @@ test("setActiveRecording accepts values and reducers", async () => {
     ({
       name: old.name ?? "",
       state: "recording",
-      stop: stopFn
+      stop: stopFn,
+      streamingImpeded: false
     })
   );
   expect(store.getState().activeRecording).toStrictEqual({

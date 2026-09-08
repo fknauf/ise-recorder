@@ -117,7 +117,12 @@ test("RecorderControls renders controls correctly when recording", async () => {
     "lecturer@vss.uni-hannover.de",
     [],
     [],
-    { state: "recording", name: "PSU_TIMESTAMP", stop: vi.fn() }
+    {
+      state: "recording",
+      name: "PSU_TIMESTAMP",
+      stop: vi.fn(),
+      streamingImpeded: false
+    }
   );
 
   render(
@@ -292,7 +297,12 @@ test("RecorderControls handles the stop recording button properly", async () => 
     "lecturer@vss.uni-hannover.de",
     [],
     [],
-    { state: "recording", name: "PSU_TIMESTAMP", stop: vi.fn() }
+    { 
+      state: "recording",
+      name: "PSU_TIMESTAMP",
+      stop: vi.fn(), 
+      streamingImpeded: false
+    }
   );
 
   render(
