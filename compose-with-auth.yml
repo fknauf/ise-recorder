@@ -1,0 +1,81 @@
+configs:
+  realm:
+    content: |
+      {
+        "realm": "ise",
+        "enabled": true,
+        "clients": [{
+          "clientId": "ise-recorder",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "redirectUris": [ "http://localhost:3000/auth/callback" ],
+          "webOrigins": [ "http://localhost:3000" ],
+          "protocolMappers": [{
+            "name": "audience",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "config": {
+              "included.client.audience": "ise-recorder",
+              "access.token.claim": "true"
+            }
+          }]
+        }],
+        "users": [{
+          "username": "lecturer",
+          "enabled": true,
+          "email": "lecturer@example.com",
+          "credentials": [{ "type": "password", "value": "hunter2", "temporary": false }]
+        }]
+      }    
+
+services:
+  frontend:
+    image: code.rinderher.de/library/ise-recorder:${ISE_RECORD_TAG:-latest}
+    build: frontend
+    pull_policy: daily
+    container_name: ise-recorder-frontend
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:3000:3000
+    environment:
+      - TZ=Europe/Berlin
+      - ISE_RECORD_API_URL=http://localhost:8000
+      - ISE_RECORD_SHOW_VERSION=true
+      - ISE_RECORD_OIDC_URL=http://keycloak.localhost:8080/realms/ise
+      - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
+
+  backend:
+    image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}
+    build: backend
+    pull_policy: daily
+    container_name: ise-recorder-backend
+    init: true
+    restart: unless-stopped
+    user: 1000:1000
+    ports:
+      - 127.0.0.1:8000:8000
+    extra_hosts:
+      - keycloak.localhost:host-gateway
+    volumes:
+      - ./data:/app/data
+    command:
+      - --log-level
+      - debug
+    environment:
+      - TZ=Europe/Berlin
+      - ISE_RECORD_OIDC__PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
+      - ISE_RECORD_OIDC__AUDIENCE=ise-recorder
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: [ "start-dev", "--import-realm" ]
+    ports:
+      - 127.0.0.1:8080:8080
+      - "[::1]:8080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://keycloak.localhost:8080
+    configs:
+      - source: realm
+        target: /opt/keycloak/data/import/realm.json

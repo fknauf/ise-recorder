@@ -41,21 +41,21 @@ _PROVIDER_UNREACHABLE = HTTPException(
 )
 
 
-class OpenIDConfiguration(NamedTuple):
+class OidcConfiguration(NamedTuple):
     """ Provider metadata discovered from the well-known endpoint, plus its key client """
     issuer: str
     jwk_client: jwt.PyJWKClient
 
 
-async def discover_openid_config(settings: Settings) -> OpenIDConfiguration:
+async def discover_oidc_config(settings: Settings) -> OidcConfiguration:
     """ Fetch provider metadata from the well-known discovery endpoint. """
-    assert settings.openid is not None
+    assert settings.oidc is not None
 
     discovery_url = (
-        f"{settings.openid.provider_url.rstrip('/')}/.well-known/openid-configuration"
+        f"{settings.oidc.provider_url.rstrip('/')}/.well-known/openid-configuration"
     )
 
-    async with httpx2.AsyncClient(timeout=settings.openid.http_timeout_seconds) as client:
+    async with httpx2.AsyncClient(timeout=settings.oidc.http_timeout_seconds) as client:
         response = await client.get(discovery_url)
         response.raise_for_status()
         metadata = response.json()
@@ -65,19 +65,19 @@ async def discover_openid_config(settings: Settings) -> OpenIDConfiguration:
         jwks_uri,
         cache_jwk_set=True,
         lifespan=JWKS_CACHE_SECONDS,
-        timeout=settings.openid.http_timeout_seconds,
+        timeout=settings.oidc.http_timeout_seconds,
     )
 
-    return OpenIDConfiguration(
+    return OidcConfiguration(
         issuer=metadata["issuer"],
         jwk_client=jwk_client,
     )
 
 
-async def load_openid_config(
+async def load_oidc_config(
         app_state: Any,
         settings: Settings
-) -> Optional[OpenIDConfiguration]:
+) -> Optional[OidcConfiguration]:
     """
     Return the cached provider configuration, discovering it if necessary.
 
@@ -88,31 +88,31 @@ async def load_openid_config(
     if not settings.auth_required:
         return None
 
-    cached: Optional[OpenIDConfiguration] = getattr(app_state, "openid_config", None)
+    cached: Optional[OidcConfiguration] = getattr(app_state, "oidc_config", None)
     if cached is not None:
         return cached
 
     try:
-        config = await discover_openid_config(settings)
+        config = await discover_oidc_config(settings)
     except (httpx2.HTTPError, KeyError, ValueError):
         logger.exception("OpenID discovery failed; authenticated endpoints will return 503")
         return None
 
-    app_state.openid_config = config
+    app_state.oidc_config = config
     logger.info("OpenID provider ready: issuer=%s", config.issuer)
     return config
 
 
 def validate_access_token(
         token: str,
-        openid_config: OpenIDConfiguration,
+        oidc_config: OidcConfiguration,
         settings: Settings
 ) -> dict[str, Any]:
     """ Verify an access token and return its claims. """
-    assert settings.openid is not None
+    assert settings.oidc is not None
 
     try:
-        signing_key = openid_config.jwk_client.get_signing_key_from_jwt(token)
+        signing_key = oidc_config.jwk_client.get_signing_key_from_jwt(token)
         algorithm = signing_key.algorithm_name
 
         if algorithm.lower() in INSECURE_ALGORITHMS:
@@ -124,9 +124,9 @@ def validate_access_token(
             token,
             signing_key,
             algorithms=[algorithm],
-            issuer=openid_config.issuer,
-            audience=settings.openid.audience,
-            leeway=settings.openid.leeway_seconds,
+            issuer=oidc_config.issuer,
+            audience=settings.oidc.audience,
+            leeway=settings.oidc.leeway_seconds,
             options={
                 "require": list(REQUIRED_CLAIMS)
             },
@@ -166,13 +166,13 @@ async def get_current_user_home(
     if not settings.auth_required:
         return ANONYMOUS_HOME
 
-    openid_config = await load_openid_config(request.app.state, settings)
-    if openid_config is None:
+    oidc_config = await load_oidc_config(request.app.state, settings)
+    if oidc_config is None:
         raise _PROVIDER_UNREACHABLE
 
     if credentials is None:
         raise _UNAUTHENTICATED
 
-    claims = validate_access_token(credentials.credentials, openid_config, settings)
+    claims = validate_access_token(credentials.credentials, oidc_config, settings)
 
     return user_home_dir(claims)

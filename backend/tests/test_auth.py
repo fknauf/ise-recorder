@@ -20,7 +20,7 @@ import pytest
 
 from ise_record.auth import user_home_dir
 from ise_record.server import create_app
-from ise_record.settings import OpenIdSettings, SAFE_NAME_REGEX, Settings
+from ise_record.settings import OidcSettings, SAFE_NAME_REGEX, Settings
 
 CLIENT_ID = "ise-recorder"
 
@@ -132,7 +132,7 @@ def provider() -> Iterator[Provider]:
 def settings(provider: Provider, tmp_path: Path) -> Settings:
     return Settings(
         destdir=tmp_path,
-        openid=OpenIdSettings(
+        oidc=OidcSettings(
             provider_url=provider.issuer,
             audience=CLIENT_ID
         )
@@ -143,7 +143,7 @@ def settings(provider: Provider, tmp_path: Path) -> Settings:
 def fresh_settings(provider: Provider, tmp_path: Path) -> Settings:
     return Settings(
         destdir=tmp_path / "fresh",
-        openid=OpenIdSettings(
+        oidc=OidcSettings(
             provider_url=provider.issuer,
             audience=CLIENT_ID
         )

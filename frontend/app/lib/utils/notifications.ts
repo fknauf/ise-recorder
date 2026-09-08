@@ -16,3 +16,7 @@ export function showError(description: string, err?: unknown) {
 export function showSuccess(message: string) {
   ToastQueue.positive(message, { timeout: 5000 });
 }
+
+export function showMessage(message: string) {
+  ToastQueue.neutral(message);
+}

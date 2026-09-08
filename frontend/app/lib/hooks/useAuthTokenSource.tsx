@@ -2,31 +2,31 @@
 
 import { createContext, ReactNode, useContext, useMemo, useState } from "react";
 import { AuthProvider } from "react-oidc-context";
-import { User, UserManager } from "oidc-client-ts";
+import { UserManager } from "oidc-client-ts";
 
 interface AccessTokenSource {
   authRequired: boolean
   getAccessToken: () => Promise<string | undefined>
 }
 
-const AccessTokenSourceContext = createContext<AccessTokenSource | undefined>(undefined);
+export const AccessTokenSourceContext = createContext<AccessTokenSource | undefined>(undefined);
 
-export interface OpenIdConfiguration {
-  providerUrl: string,
-  clientId: string,
+export interface OidcConfiguration {
+  providerUrl: string
+  clientId: string
 }
 
 export interface AccessTokenSourceProviderProps {
-  config?: OpenIdConfiguration
+  config?: OidcConfiguration
   children?: ReactNode
 }
 
 export interface AuthenticatedTokenSourceProviderProps {
-  config: OpenIdConfiguration
+  config: OidcConfiguration
   children?: ReactNode
 }
 
-function AnonymousTokenSourceProvider({ children } : Readonly<{ children : ReactNode}>) {
+function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
   const value = useMemo(() => ({
     authRequired: false,
     getAccessToken: async () => undefined
@@ -39,12 +39,11 @@ function AnonymousTokenSourceProvider({ children } : Readonly<{ children : React
   );
 }
 
-const onSigninCallback = (_user: User | undefined): void => {
+const onSigninCallback = () =>
   window.history.replaceState({}, document.title, window.location.pathname);
-};
 
 function AuthenticatedTokenSourceProvider({ config, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
-  const [ userMgr ] = useState(() => 
+  const [ userMgr ] = useState(() =>
     new UserManager({
       authority: config.providerUrl,
       client_id: config.clientId,
@@ -53,13 +52,21 @@ function AuthenticatedTokenSourceProvider({ config, children }: Readonly<Authent
         : `${window.location.origin}/auth/callback`,
       scope: "openid profile email offline_access",
       automaticSilentRenew: true,
-      accessTokenExpiringNotificationTimeInSeconds: 120,
+      accessTokenExpiringNotificationTimeInSeconds: 120
     })
   );
 
   const value = useMemo(() => ({
     authRequired: true,
-    getAccessToken: async () => (await userMgr.getUser())?.access_token
+    getAccessToken: async () => {
+      const user = await userMgr.getUser();
+
+      if(user === null || user.expired) {
+        return undefined;
+      }
+
+      return user.access_token;
+    }
   }), [userMgr]);
 
   return (

@@ -10,9 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SAFE_NAME_REGEX = re.compile('^\\w[\\w.-]*$')
 
-class OpenIdSettings(BaseModel):
+class OidcSettings(BaseModel):
     """
-    OpenID settings for authentication (if desired).
+    OpenID Connect settings for authentication (if desired).
     """
     provider_url: str
     audience: str
@@ -24,6 +24,12 @@ class Settings(BaseSettings):
         Configuration settings for the server. Options can be set through ISE_RECORD_VARNAME
         environment variables at server startup.
     """
+    model_config = SettingsConfigDict(
+        env_prefix="ise_record_",
+        env_nested_delimiter="_",
+        frozen=True
+    )
+
     destdir: Path = Path("./data")
 
     smtp_server: Optional[str] = None
@@ -38,14 +44,12 @@ class Settings(BaseSettings):
     chunk_file_digits: int = 4
 
     cors_origins: tuple[str, ...] = ()
-    openid: Optional[OpenIdSettings] = None
-
-    model_config = SettingsConfigDict(env_prefix="ise_record_", frozen=True)
+    oidc: Optional[OidcSettings] = None
 
     @property
     def auth_required(self) -> bool:
         """ Whether clients must present an access token """
-        return self.openid is not None
+        return self.oidc is not None
 
 
 @lru_cache

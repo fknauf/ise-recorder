@@ -1,10 +1,18 @@
 "use client";
 
 import { openRecordingFileStream } from "./browserStorage";
-import { schedulePostprocessing, sendChunkToServer } from "./serverStorage";
+import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
 
 // used to remove characters from the recording name that would trip up ffmpeg in post.
 export const unsafeTitleCharacters = /[^\w.-]/;
+
+export interface RecordingTrackBundle {
+  displayTracks: readonly MediaStreamTrack[]
+  videoTracks: readonly MediaStreamTrack[]
+  audioTracks: readonly MediaStreamTrack[]
+  mainDisplay: MediaStreamTrack | undefined
+  overlay: MediaStreamTrack | undefined
+}
 
 interface RecordingTask {
   trackTitle: string
@@ -103,11 +111,7 @@ function prepareTrackRecording(
  * storage logic.
  */
 function prepareRecording(
-  displayTracks: readonly MediaStreamTrack[],
-  videoTracks: readonly MediaStreamTrack[],
-  audioTracks: readonly MediaStreamTrack[],
-  mainDisplay: MediaStreamTrack | undefined,
-  overlay: MediaStreamTrack | undefined,
+  { displayTracks, videoTracks, audioTracks, mainDisplay, overlay }: RecordingTrackBundle,
   videoOptions: MediaRecorderOptions,
   audioOptions: MediaRecorderOptions,
   onChunkAvailable: (chunk: Blob, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>
@@ -172,19 +176,14 @@ function prepareRecording(
  * a chunk was written.
  */
 export async function recordLecture(
-  displayTracks: readonly MediaStreamTrack[],
-  videoTracks: readonly MediaStreamTrack[],
-  audioTracks: readonly MediaStreamTrack[],
-  mainDisplay: MediaStreamTrack | undefined,
-  overlay: MediaStreamTrack | undefined,
+  trackBundle: RecordingTrackBundle,
   lectureTitle: string,
   lecturerEmail: string,
-  apiUrl: string | undefined,
+  destination: ServerStorageDestination,
   onStarting: (recordingName: string) => Promise<void> | void,
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,
   onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
-  onFinished: (recordingName: string) => Promise<void> | void,
-  getAccessToken: () => Promise<string | undefined>
+  onFinished: (recordingName: string) => Promise<void> | void
 ) {
   const timestamp = new Date();
   const lecturePrefix = lectureTitle ? `${lectureTitle}_` : "";
@@ -200,7 +199,8 @@ export async function recordLecture(
 
   const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
     // No need to await: we support sending chunks to server out of order and/or concurrently.
-    const backgroundPromise = sendChunkToServer(apiUrl, chunk, recordingName, trackTitle, chunkIndex, getAccessToken);
+    const backgroundPromise =
+      sendChunkToServer(destination, chunk, recordingName, trackTitle, chunkIndex);
 
     // For local file storage on the other hand, it's important that chunks to the same file
     // are not written concurrently and that filesystem state updates are correctly ordered.
@@ -223,7 +223,7 @@ export async function recordLecture(
     return { promise: backgroundPromise };
   };
 
-  const jobs = prepareRecording(displayTracks, videoTracks, audioTracks, mainDisplay, overlay, videoOptions, audioOptions, onChunkAvailable);
+  const jobs = prepareRecording(trackBundle, videoOptions, audioOptions, onChunkAvailable);
   const stopJobs = () => {
     for(const job of jobs) {
       try {
@@ -251,7 +251,7 @@ export async function recordLecture(
 
       await onStarted(recordingName, stopJobs);
       await Promise.allSettled(jobs.map(job => job.finished));
-      await schedulePostprocessing(apiUrl, recordingName, lecturerEmail, getAccessToken);
+      await schedulePostprocessing(destination, recordingName, lecturerEmail);
     } catch(e) {
       stopJobs();
       throw e;

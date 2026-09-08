@@ -7,7 +7,11 @@ export function proxy(request: NextRequest) {
 
   const isDev = process.env.NODE_ENV === "development";
   const apiUrl = process.env.ISE_RECORD_API_URL;
-  const connectSrc = apiUrl ? apiUrl + (apiUrl.endsWith("/") ? "" : "/") : "";
+  const apiSrc = apiUrl ? apiUrl + (apiUrl.endsWith("/") ? "" : "/") : "";
+  const oidcSrc = process.env.ISE_RECORD_OIDC_URL !== undefined
+    ? new URL(process.env.ISE_RECORD_OIDC_URL).origin
+    : "";
+
 
   // would like to use ${isDev ? "'unsafe-eval'" : `nonce-${nonce}`}; instead of unsafe-inline for
   // style-src, but react spectrum requires inline styles and doesn't apply nonces at the moment.
@@ -22,7 +26,7 @@ export function proxy(request: NextRequest) {
     base-uri 'self';
     form-action 'self';
     frame-ancestors 'none';
-    connect-src 'self' ${connectSrc};
+    connect-src 'self' ${apiSrc} ${oidcSrc};
     upgrade-insecure-requests;
 `;
   // Replace newline characters and spaces

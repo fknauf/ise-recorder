@@ -1,6 +1,6 @@
 "use client";
 
-import { showError, showSuccess } from "./notifications";
+import { showError, showMessage, showSuccess } from "./notifications";
 
 interface CallResult {
   ok: boolean
@@ -10,6 +10,12 @@ interface CallResult {
 interface RetryPolicy {
   retries: number
   intervalMillis: number
+}
+
+export interface ServerStorageDestination {
+  apiUrl: string | undefined
+  streamingImpeded: boolean
+  getAccessToken: () => Promise<string | undefined>
 }
 
 async function callWithRetries(
@@ -29,7 +35,7 @@ async function callWithRetries(
 async function sendRequest(
   url: string | URL | Request,
   request: RequestInit,
-  getAccessToken: () => Promise<string | undefined>,
+  getAccessToken: () => Promise<string | undefined>
 ): Promise<CallResult> {
   try {
     const token = await getAccessToken();
@@ -39,7 +45,7 @@ async function sendRequest(
           ...request,
           headers: {
             ...request.headers,
-            "Authorization": `Bearer ${token}`
+            Authorization: `Bearer ${token}`
           }
         }
       : request;
@@ -58,19 +64,18 @@ async function sendRequest(
 }
 
 export async function sendChunkToServer(
-  apiUrl: string | undefined,
+  destination: ServerStorageDestination,
   chunk: Blob,
   recording: string,
   track: string,
   index: number,
-  getAccessToken: () => Promise<string | undefined>,
   retryPolicy: RetryPolicy = { retries: 10, intervalMillis: 2000 }
 ) {
-  if(!apiUrl) {
+  if(!destination.apiUrl || destination.streamingImpeded) {
     return;
   }
 
-  const chunkUrl = `${apiUrl}/api/chunks`;
+  const chunkUrl = `${destination.apiUrl}/api/chunks`;
 
   const data = new FormData();
   data.append("recording", recording);
@@ -83,7 +88,7 @@ export async function sendChunkToServer(
     body: data
   };
 
-  const result = await callWithRetries(() => sendRequest(chunkUrl, request, getAccessToken), retryPolicy);
+  const result = await callWithRetries(() => sendRequest(chunkUrl, request, destination.getAccessToken), retryPolicy);
 
   if(!result.ok) {
     showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`);
@@ -91,17 +96,19 @@ export async function sendChunkToServer(
 }
 
 export async function schedulePostprocessing(
-  apiUrl: string | undefined,
+  destination: ServerStorageDestination,
   recording: string,
   recipient: string | undefined,
-  getAccessToken: () => Promise<string | undefined>,
   retryPolicy: RetryPolicy = { retries: 5, intervalMillis: 1000 }
 ) {
-  if(!apiUrl) {
+  if(!destination.apiUrl) {
+    return;
+  } else if(destination.streamingImpeded) {
+    showMessage("Post-processing could not be scheduled because streaming was impeded. Please download the recording files for manual postprocessing.");
     return;
   }
 
-  const jobUrl = `${apiUrl}/api/jobs`;
+  const jobUrl = `${destination.apiUrl}/api/jobs`;
 
   const data = {
     recording,
@@ -116,7 +123,7 @@ export async function schedulePostprocessing(
     body: JSON.stringify(data)
   };
 
-  const result = await callWithRetries(() => sendRequest(jobUrl, request, getAccessToken), retryPolicy);
+  const result = await callWithRetries(() => sendRequest(jobUrl, request, destination.getAccessToken), retryPolicy);
 
   if(result.ok) {
     showSuccess(`Recording "${recording}" finished; postprocessing scheduled.`);

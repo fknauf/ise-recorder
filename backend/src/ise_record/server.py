@@ -16,7 +16,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .auth import get_current_user_home, load_openid_config
+from .auth import get_current_user_home, load_oidc_config
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
@@ -178,7 +178,7 @@ def create_app(
         if settings.auth_required:
             # Attempt to load openid config at application start instead of first request. This isn't
             # strictly necessary but will log an error if the openid provider is unreachable.
-            await load_openid_config(application.state, settings)
+            await load_oidc_config(application.state, settings)
         else:
             logger.warning("no OpenID provider configured -- endpoints are unauthenticated")
         yield

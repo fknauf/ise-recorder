@@ -28,19 +28,14 @@ export function useStartStopRecording() {
     lecturerEmail
   } = useLecture();
 
-  const {
-    displayTracks,
-    videoTracks,
-    audioTracks,
-    mainDisplay,
-    overlay
-  } = useMediaTracks();
+  const trackBundle = useMediaTracks();
 
   const {
     apiUrl
   } = useServerEnv();
 
   const {
+    authRequired,
     getAccessToken
   } = useAccessTokenSource();
 
@@ -48,6 +43,8 @@ export function useStartStopRecording() {
     if(activeRecording.state !== "idle") {
       return;
     }
+
+    const streamingImpeded = apiUrl !== undefined && authRequired && await getAccessToken() === undefined;
 
     const onStarting = (recordingName: string) => {
       setActiveRecording({
@@ -62,7 +59,8 @@ export function useStartStopRecording() {
       setActiveRecording({
         state: "recording",
         name: recordingName,
-        stop: stopFunction
+        stop: stopFunction,
+        streamingImpeded
       });
 
       await updateBrowserStorage();
@@ -84,10 +82,10 @@ export function useStartStopRecording() {
 
     try {
       await recordLecture(
-        displayTracks, videoTracks, audioTracks, mainDisplay, overlay,
-        lectureTitle, lecturerEmail, apiUrl,
-        onStarting, onStarted, onChunkWritten, onFinished,
-        getAccessToken
+        trackBundle,
+        lectureTitle, lecturerEmail,
+        { apiUrl, streamingImpeded, getAccessToken },
+        onStarting, onStarted, onChunkWritten, onFinished
       );
     } catch(e) {
       showError("Recording failed", e);
