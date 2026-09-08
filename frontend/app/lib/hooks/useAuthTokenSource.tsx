@@ -50,7 +50,7 @@ function AuthenticatedTokenSourceProvider({ config, children }: Readonly<Authent
         : `${window.location.origin}/auth/callback`,
       scope: "openid profile email",
       automaticSilentRenew: true,
-      accessTokenExpiringNotificationTimeInSeconds: 120,
+      accessTokenExpiringNotificationTimeInSeconds: 120
     })
   );
 

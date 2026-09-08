@@ -4,7 +4,7 @@ import { useAccessTokenSource } from "../hooks/useAuthTokenSource";
 import { useAutoSignin } from "react-oidc-context";
 import { Content, Flex, Heading, InlineAlert, ProgressCircle, Text } from "@adobe/react-spectrum";
 import { useActiveRecording } from "../hooks/useActiveRecording";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 function AuthStatusMessageImpl() {
   const auth = useAutoSignin();
@@ -58,14 +58,15 @@ function StreamingImpededWarning() {
   );
 }
 
-export function AuthStatusMessage() {
-  const tokenSource = useAccessTokenSource();
-  const [ mounted, setMounted ] = useState(false);
+const emptySubscribe = () => () => {};
 
+export function AuthStatusMessage() {
   // Make sure SSR and first render both see this component as empty
   // to avoid complaints about mismatches during hydration.
-  useEffect(() => setMounted(true), []);
-  if(!tokenSource.authRequired || !mounted) {
+  const hydrated = useSyncExternalStore(emptySubscribe, () => true, () => false);
+  const tokenSource = useAccessTokenSource();
+
+  if(!tokenSource.authRequired || !hydrated) {
     return null;
   }
 

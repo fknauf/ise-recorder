@@ -297,10 +297,10 @@ test("RecorderControls handles the stop recording button properly", async () => 
     "lecturer@vss.uni-hannover.de",
     [],
     [],
-    { 
+    {
       state: "recording",
       name: "PSU_TIMESTAMP",
-      stop: vi.fn(), 
+      stop: vi.fn(),
       streamingImpeded: false
     }
   );
