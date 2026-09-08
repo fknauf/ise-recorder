@@ -2,6 +2,7 @@
 
 import { connection } from "next/server";
 import isURL, { IsURLOptions } from "validator/es/lib/isURL";
+import pkg from "../../../package.json" with { type: "json" };
 
 function validateApiUrl(apiUrl: string | undefined): string | undefined {
   if(apiUrl === undefined || apiUrl === "") {
@@ -41,7 +42,7 @@ export async function getServerEnv(): Promise<ServerEnv> {
 
   if(runtimeEnvironment === undefined) {
     runtimeEnvironment = {
-      version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? process.env.npm_package_version : undefined,
+      version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? pkg.version : undefined,
       apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
       oidc_provider_url: validateApiUrl(process.env.ISE_RECORD_OIDC_URL),
       oidc_client_id: process.env.ISE_RECORD_OIDC_CLIENT_ID
