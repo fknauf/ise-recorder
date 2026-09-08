@@ -1,10 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { RecordingTrackBundle, recordLecture } from "@/app/lib/utils/recording";
-import { gatherRecordingsList } from "@/app/lib/utils/browserStorage";
+import { RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
+import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { render, screen } from "@testing-library/react";
-import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/app/lib/utils/serverStorage";
+import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
 
-vi.mock("@/app/lib/utils/serverStorage");
+vi.mock("@/lib/utils/serverStorage");
 
 const accessToken = async () => "test-token";
 

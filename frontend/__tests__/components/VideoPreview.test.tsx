@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
-import { VideoPreview } from "@/app/lib/components/VideoPreview";
+import { VideoPreview } from "@/lib/components/VideoPreview";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { useEffect, useState } from "react";

@@ -1,12 +1,12 @@
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { ReactNode } from "react";
-import { AppStoreProvider } from "@/app/lib/hooks/useAppStore";
+import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { Home } from "@/app/page";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
-import { gatherRecordingsList } from "@/app/lib/utils/browserStorage";
-import { AccessTokenSourceContext, useAccessTokenSource } from "@/app/lib/hooks/useAuthTokenSource";
+import { gatherRecordingsList } from "@/lib/utils/browserStorage";
+import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAuthTokenSource";
 
 const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
   deviceId, groupId, kind, label,

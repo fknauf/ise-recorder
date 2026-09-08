@@ -1,10 +1,10 @@
 import { expect, test, vi } from "vitest";
 import { render, renderHook, screen, waitFor } from "@testing-library/react";
-import { AppStoreProvider, useAppStore } from "@/app/lib/hooks/useAppStore";
+import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { ReactNode, useEffect } from "react";
-import { useMediaDevices } from "@/app/lib/hooks/useMediaDevices";
+import { useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import userEvent from "@testing-library/user-event";
-import { useMediaTracks } from "@/app/lib/hooks/useMediaTracks";
+import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
 import _ from "lodash";
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>

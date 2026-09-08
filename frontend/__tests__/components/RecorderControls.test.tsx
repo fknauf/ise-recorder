@@ -1,18 +1,18 @@
 import { expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RecorderControls } from "@/app/lib/components/RecorderControls";
+import { RecorderControls } from "@/lib/components/RecorderControls";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
-import { useServerEnv } from "@/app/lib/hooks/useServerEnv";
-import { useLecture } from "@/app/lib/hooks/useLecture";
-import { useActiveRecording, useStartStopRecording } from "@/app/lib/hooks/useActiveRecording";
-import { useMediaDevices } from "@/app/lib/hooks/useMediaDevices";
-import { ActiveRecording } from "@/app/lib/store/store";
+import { useServerEnv } from "@/lib/hooks/useServerEnv";
+import { useLecture } from "@/lib/hooks/useLecture";
+import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
+import { useMediaDevices } from "@/lib/hooks/useMediaDevices";
+import { ActiveRecording } from "@/lib/store/store";
 
-vi.mock("@/app/lib/hooks/useServerEnv");
-vi.mock("@/app/lib/hooks/useLecture");
-vi.mock("@/app/lib/hooks/useActiveRecording");
-vi.mock("@/app/lib/hooks/useMediaDevices");
+vi.mock("@/lib/hooks/useServerEnv");
+vi.mock("@/lib/hooks/useLecture");
+vi.mock("@/lib/hooks/useActiveRecording");
+vi.mock("@/lib/hooks/useMediaDevices");
 
 function setupMockHooks(
   apiUrl: string | undefined,

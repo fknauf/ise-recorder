@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { SpectrumProvider } from "./lib/components/SpectrumProvider";
-import { AppStoreProvider } from "./lib/hooks/useAppStore";
-import { getServerEnv } from "./lib/utils/serverEnv";
-import { AccessTokenSourceProvider, OidcConfiguration } from "./lib/hooks/useAuthTokenSource";
+import { SpectrumProvider } from "@/lib/components/SpectrumProvider";
+import { AppStoreProvider } from "@/lib/hooks/useAppStore";
+import { getServerEnv } from "@/lib/utils/serverEnv";
+import { AccessTokenSourceProvider, OidcConfiguration } from "@/lib/hooks/useAuthTokenSource";
 
 export const metadata: Metadata = {
   title: "ISE-Recorder",

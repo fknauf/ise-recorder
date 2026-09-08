@@ -1,12 +1,12 @@
 "use client";
 
 import { Flex, ToastContainer } from "@adobe/react-spectrum";
-import { QuotaWarning } from "./lib/components/QuotaWarning";
-import { RecorderControls } from "./lib/components/RecorderControls";
-import { SavedRecordingsSection } from "./lib/components/SavedRecordingsSection";
-import { PreviewSection } from "./lib/components/PreviewSection";
-import { GithubLink } from "./lib/components/GithubLink";
-import { AuthStatusMessage } from "./lib/components/AuthStatusMessage";
+import { QuotaWarning } from "@/lib/components/QuotaWarning";
+import { RecorderControls } from "@/lib/components/RecorderControls";
+import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
+import { PreviewSection } from "@/lib/components/PreviewSection";
+import { GithubLink } from "@/lib/components/GithubLink";
+import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 
 export const Home = () =>
   <Flex direction="column" width="100vw" height="100vh" gap="size-100">

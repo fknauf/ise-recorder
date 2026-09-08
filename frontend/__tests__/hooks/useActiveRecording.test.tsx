@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { AppStoreProvider, useAppStore } from "@/app/lib/hooks/useAppStore";
-import { useActiveRecording } from "@/app/lib/hooks/useActiveRecording";
+import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
+import { useActiveRecording } from "@/lib/hooks/useActiveRecording";
 import { ReactNode, useEffect } from "react";
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>

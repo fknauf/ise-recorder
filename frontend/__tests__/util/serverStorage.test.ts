@@ -1,13 +1,13 @@
 import { expect, test, vi } from "vitest";
-import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/app/lib/utils/serverStorage";
-import { showError } from "@/app/lib/utils/notifications";
+import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
+import { showError } from "@/lib/utils/notifications";
 
 interface FetchRequest {
   url: string | URL | Request
   data?: RequestInit
 }
 
-vi.mock("@/app/lib/utils/notifications");
+vi.mock("@/lib/utils/notifications");
 
 const accessToken = async () => "test-token";
 const noAccessToken = async () => undefined;

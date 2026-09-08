@@ -1,9 +1,9 @@
 import { expect, test, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { AppStoreProvider, useAppStore } from "@/app/lib/hooks/useAppStore";
-import { useBrowserStorage } from "@/app/lib/hooks/useBrowserStorage";
+import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
+import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 import { ReactNode, useEffect } from "react";
-import { gatherRecordingsList, RecordingFileList } from "@/app/lib/utils/browserStorage";
+import { gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
   <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
@@ -35,7 +35,7 @@ const mockRecordings: RecordingFileList[] = [
   }
 ];
 
-vi.mock("@/app/lib/utils/browserStorage");
+vi.mock("@/lib/utils/browserStorage");
 
 test("useBrowserStorage initializes at first render", async () => {
   vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);

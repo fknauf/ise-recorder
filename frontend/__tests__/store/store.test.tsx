@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createAppStore } from "@/app/lib/store/store";
+import { createAppStore } from "@/lib/store/store";
 import { render, screen } from "@testing-library/react";
-import { gatherRecordingsList, RecordingFileList } from "@/app/lib/utils/browserStorage";
+import { gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
 
-vi.mock("@/app/lib/utils/browserStorage");
+vi.mock("@/lib/utils/browserStorage");
 
 beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
@@ -218,7 +218,7 @@ test("setActiveRecording accepts values and reducers", async () => {
     })
   );
   expect(store.getState().activeRecording).toStrictEqual({
-    name: "FOO", state: "recording", stop: stopFn
+    name: "FOO", state: "recording", stop: stopFn, streamingImpeded: false
   });
 });
 

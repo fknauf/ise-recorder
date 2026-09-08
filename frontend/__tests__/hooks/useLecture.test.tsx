@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { AppStoreProvider } from "@/app/lib/hooks/useAppStore";
+import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { ReactNode, useEffect } from "react";
-import { useLecture } from "@/app/lib/hooks/useLecture";
+import { useLecture } from "@/lib/hooks/useLecture";
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
   <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>

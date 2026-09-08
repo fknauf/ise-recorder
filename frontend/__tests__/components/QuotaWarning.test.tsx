@@ -1,10 +1,10 @@
 import { expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { QuotaWarning } from "@/app/lib/components/QuotaWarning";
+import { QuotaWarning } from "@/lib/components/QuotaWarning";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
-import { useBrowserStorage } from "@/app/lib/hooks/useBrowserStorage";
+import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 
-vi.mock("@/app/lib/hooks/useBrowserStorage");
+vi.mock("@/lib/hooks/useBrowserStorage");
 
 test("QuotaWarning shows up if quota is critical", async () => {
   const GiB = 2 ** 30;

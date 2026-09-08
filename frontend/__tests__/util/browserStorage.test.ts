@@ -1,5 +1,5 @@
 
-import { deleteRecording, downloadFile, gatherRecordingsList, openRecordingFileStream } from "@/app/lib/utils/browserStorage";
+import { deleteRecording, downloadFile, gatherRecordingsList, openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { expect, test, afterEach } from "vitest";
 import { commands } from "vitest/browser";
 
