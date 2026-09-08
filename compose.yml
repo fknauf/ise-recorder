@@ -11,6 +11,9 @@ services:
       - TZ=Europe/Berlin
       - ISE_RECORD_API_URL=http://localhost:8000
       - ISE_RECORD_SHOW_VERSION=true
+# see compose-with-auth.yaml for a deployment with oidc authentication
+#      - ISE_RECORD_OIDC_URL=http://keycloak.localhost:8080/realms/ise
+#      - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
 
   backend:
     image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}
@@ -39,3 +42,6 @@ services:
 #      - ISE_RECORD_SMTP_SENDER=ise-record@example.com
 #      - ISE_RECORD_SMTP_STARTTLS=true
 #      - ISE_RECORD_SMTP_ALLOWED_DOMAINS=[ "example.com", "example.org" ]
+# see compose-with-auth.yaml for a deployment with oidc authentication
+#      - ISE_RECORD_OIDC__PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
+#      - ISE_RECORD_OIDC__AUDIENCE=ise-recorder

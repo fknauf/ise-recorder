@@ -3,10 +3,14 @@
 This is a fairly simple web-based lecture recorder. Recordings are stored on
 the client-side in the browser's OPFS.
 
-There's optional support for a post-processing backend server, configurable in
-the environment variable `ISE_RECORD_API_URL`. If it is set, the recorded
-streams will be posted there chunk by chunk and the server notified to start
-post-processing when the recording stops.
+There's optional support for a post-processing backend server. If enabled, the
+recorded streams will be posted there chunk by chunk and the server notified to
+start post-processing when the recording stops. The backend can authenticate
+users against an OpenID Connect service or run without authentication. The
+latter is only advisable in small private-network deployments where everyone in
+the network is trusted, of course. You don't want the whole Internet to be able
+to write to your server and schedule compute-heavy jobs. You know how those
+guys are. 
 
 Video streams can be marked as main or overlay, and post-processing consists of
 overlaying the overlay stream (usually the speaker on a webcam) over the main
@@ -15,8 +19,8 @@ are not obstructed but the speaker remains recognizable. If there are multiple
 audio streams, they will all be attached to the resulting video file. If there
 is no overlay, post-processing just indexes the main video stream.
 
-Recordings that don't fit the mold of 1 main video, 0-1 overlay, n audio streams
-require manual post-processing.
+Recordings that don't fit the mold of 1 main video, 0-1 overlay, n audio
+streams require manual post-processing.
 
 ## Take a look
 
@@ -39,11 +43,14 @@ from the one running in the backend container, which can happen with
 rootless docker or if your uid:gid is not `1000:1000`. Giving it mode 777
 just avoids the need for configuration before getting started.
 
-For production environments, it's recommended to mount a data directory owned
-by the process user in the backend container. You can run it behind a reverse
+For production environments, it's advisable to mount a data directory owned by
+the process user in the backend container. You can run it behind a reverse
 proxy that handles TLS. I haven't tested serving it in a subdirectory, so I
 recommend using a subdomain; the most straightforward config is to have the
 frontend at `/` and the backend (if you want one) at `/api`.
+
+In most production environments it's also strongly advised to configure
+OpenID-Connect authentication. See `compose-with-auth.yml` for a toy example.
 
 ## Hack it yourself
 
@@ -62,3 +69,6 @@ For the backend run
     . .venv/bin/activate
     pip install -e . --group dev
     fastapi dev
+
+Both of these accept a number of environment variables for configuration. They
+are listed in `compose.yml`.
