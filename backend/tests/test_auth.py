@@ -28,7 +28,7 @@ CLIENT_ID = "ise-recorder"
 def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
     """ Generate an RSA keypair and the JWK describing its public half """
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True) # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]        
+    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True) # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
     jwk.update({"kid": kid, "use": "sig", "alg": "RS256"}) # pyright: ignore[reportUnknownMemberType]
     return private_key, jwk # pyright: ignore[reportUnknownVariableType]
 

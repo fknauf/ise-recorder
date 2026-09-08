@@ -176,8 +176,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
         if settings.auth_required:
-            # Attempt to load openid config at application start instead of first request. This isn't
-            # strictly necessary but will log an error if the openid provider is unreachable.
+            # Attempt to load openid config at application start instead of first request. This
+            # isn't strictly necessary but will log an error if the openid provider is unreachable.
             await load_oidc_config(application.state, settings)
         else:
             logger.warning("no OpenID provider configured -- endpoints are unauthenticated")
