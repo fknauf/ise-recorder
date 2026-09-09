@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
 import { showError } from "@/lib/utils/notifications";
 
@@ -11,6 +11,42 @@ vi.mock("@/lib/utils/notifications");
 
 const accessToken = async () => "test-token";
 const noAccessToken = async () => undefined;
+
+const useRetryClock = () => vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
+
+// Captured before any test installs a fake clock, so we can still yield to the real
+// event loop while one is installed.
+const realSetTimeout = globalThis.setTimeout;
+
+/**
+ * Run a retry loop to completion under a fake clock.
+ *
+ * vi.runAllTimersAsync() inspects the timer queue at the moment it is called. When a
+ * retry loop starts, the first attempt is still in flight -- it awaits getAccessToken()
+ * and then fetch() -- so no backoff timer exists yet and the drain returns having fired
+ * nothing and advanced nothing. Each subsequent attempt has the same shape. So alternate
+ * between yielding to the real event loop (letting the in-flight attempt land and
+ * schedule its backoff) and draining the fake queue (firing that backoff), until the
+ * call settles.
+ */
+async function settleRetries<T>(pending: Promise<T>): Promise<T> {
+  let settled = false;
+  const tracked = pending.then(
+    value => { settled = true; return value; },
+    error => { settled = true; throw error; }
+  );
+
+  for(let guard = 0; !settled && guard < 100; ++guard) {
+    await new Promise(resolve => realSetTimeout(resolve, 0));
+    await vi.runAllTimersAsync();
+  }
+
+  return tracked;
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 test("sending chunk to server is nop if api url is undefined", async () => {
   const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
@@ -64,6 +100,8 @@ test("sending chunk to server", async () => {
 });
 
 test("sending chunk to flaky server", async () => {
+  useRetryClock();
+
   const destination: ServerStorageDestination = {
     apiUrl: "http://record.example.com",
     streamingImpeded: false,
@@ -82,7 +120,9 @@ test("sending chunk to flaky server", async () => {
       return Response.error();
     });
 
-  await sendChunkToServer(destination, chunk, "FOO", "stream.webm", 42, { retries: 10, intervalMillis: 50 });
+  const pending = sendChunkToServer(destination, chunk, "FOO", "stream.webm", 42, { retries: 10, intervalMillis: 50 });
+
+  await settleRetries(pending);
 
   expect(fetchRequests.length).toBe(2);
 
@@ -100,7 +140,9 @@ test("sending chunk to flaky server", async () => {
   }
 });
 
-test("sending chunk to broken server", { timeout: 30000 }, async () => {
+test("sending chunk to broken server", async () => {
+  useRetryClock();
+
   const destination: ServerStorageDestination = {
     apiUrl: "http://record.example.com",
     streamingImpeded: false,
@@ -115,15 +157,17 @@ test("sending chunk to broken server", { timeout: 30000 }, async () => {
       return Response.json("", { status: 503 });
     });
 
-  const before = new Date();
-  await sendChunkToServer(destination, chunk, "FOO", "stream.webm", 42, { retries: 3, intervalMillis: 50 });
-  const after = new Date();
+  const before = Date.now();
+  const pending = sendChunkToServer(destination, chunk, "FOO", "stream.webm", 42, { retries: 3, intervalMillis: 50 });
+
+  await settleRetries(pending);
+
+  const elapsed = Date.now() - before;
 
   expect(vi.mocked(showError)).toHaveBeenCalled();
 
   expect(fetchRequests.length).toBe(4);
-  expect(after.getTime() - before.getTime()).toBeGreaterThan(149);
-  expect(after.getTime() - before.getTime()).toBeLessThan(200);
+  expect(elapsed).toBe(150);
 
   for(const req of fetchRequests) {
     expect(req.url).toBe(`${destination.apiUrl}/api/chunks`);
@@ -180,6 +224,8 @@ test("schedule postprocessing", async () => {
 });
 
 test("schedule postprocessing to flaky server", async () => {
+  useRetryClock();
+
   const destination: ServerStorageDestination = {
     apiUrl: "http://record.example.com",
     streamingImpeded: false,
@@ -198,7 +244,9 @@ test("schedule postprocessing to flaky server", async () => {
       return Response.json("", { status: 503 });
     });
 
-  await schedulePostprocessing(destination, "FOO", "lecturer@example.com", { retries: 5, intervalMillis: 50 });
+  const pending = schedulePostprocessing(destination, "FOO", "lecturer@example.com", { retries: 5, intervalMillis: 50 });
+
+  await settleRetries(pending);
 
   expect(fetchRequests.length).toBe(2);
 
@@ -216,6 +264,8 @@ test("schedule postprocessing to flaky server", async () => {
 });
 
 test("schedule postprocessing to broken server", async () => {
+  useRetryClock();
+
   const destination: ServerStorageDestination = {
     apiUrl: "http://record.example.com",
     streamingImpeded: false,
@@ -230,13 +280,15 @@ test("schedule postprocessing to broken server", async () => {
       return Response.error();
     });
 
-  const before = new Date();
-  await schedulePostprocessing(destination, "FOO", "lecturer@example.com", { retries: 3, intervalMillis: 50 });
-  const after = new Date();
+  const before = Date.now();
+  const pending = schedulePostprocessing(destination, "FOO", "lecturer@example.com", { retries: 3, intervalMillis: 50 });
+
+  await settleRetries(pending);
+
+  const elapsed = Date.now() - before;
 
   expect(fetchRequests.length).toBe(4);
-  expect(after.getTime() - before.getTime()).toBeGreaterThan(149);
-  expect(after.getTime() - before.getTime()).toBeLessThan(200);
+  expect(elapsed).toBe(150);
   expect(vi.mocked(showError)).toHaveBeenCalled();
 
   for(const req of fetchRequests) {
@@ -295,6 +347,8 @@ test("postprocessing request is unauthenticated if no access token is available"
 });
 
 test("chunk upload requests a fresh access token for every attempt", async () => {
+  useRetryClock();
+
   const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
   const fetchRequests: FetchRequest[] = [];
 
@@ -319,7 +373,9 @@ test("chunk upload requests a fresh access token for every attempt", async () =>
       return Response.json("", { status: 401 });
     });
 
-  await sendChunkToServer(destination, chunk, "FOO", "stream.webm", 42, { retries: 10, intervalMillis: 50 });
+  const pending = sendChunkToServer(destination, chunk, "FOO", "stream.webm", 42, { retries: 10, intervalMillis: 50 });
+
+  await settleRetries(pending);
 
   expect(fetchRequests.length).toBe(2);
   expect(fetchRequests[0].data?.headers).toStrictEqual({ Authorization: "Bearer test-token-1" });
@@ -327,6 +383,8 @@ test("chunk upload requests a fresh access token for every attempt", async () =>
 });
 
 test("postprocessing request requests a fresh access token for every attempt", async () => {
+  useRetryClock();
+
   const fetchRequests: FetchRequest[] = [];
 
   let issuedTokens = 0;
@@ -348,7 +406,9 @@ test("postprocessing request requests a fresh access token for every attempt", a
       return Response.json("", { status: 401 });
     });
 
-  await schedulePostprocessing(destination, "FOO", "lecturer@example.com", { retries: 5, intervalMillis: 50 });
+  const pending = schedulePostprocessing(destination, "FOO", "lecturer@example.com", { retries: 5, intervalMillis: 50 });
+
+  await settleRetries(pending);
 
   expect(fetchRequests.length).toBe(2);
   expect(fetchRequests[0].data?.headers).toStrictEqual({
