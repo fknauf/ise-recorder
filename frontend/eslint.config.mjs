@@ -89,7 +89,6 @@ const eslintConfig = defineConfig([
           }
         }
       ],
-      "@stylistic/max-statements-per-line": "warn",
       "@stylistic/multiline-ternary": [ "warn", "always-multiline" ],
       "@stylistic/new-parens": "warn",
       "@stylistic/newline-per-chained-call": "warn",

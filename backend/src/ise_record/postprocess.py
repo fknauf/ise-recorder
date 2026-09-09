@@ -91,7 +91,7 @@ def determine_crop_area(
     slack_width = stream_width - raw_crop.width
     slack_height = stream_height - raw_crop.height
 
-    # less than one percent cropped on each side -> avoid cropping
+    # less than one percent cropped on each dimension -> avoid cropping
     if slack_width * 100 <= stream_width and slack_height * 100 <= stream_height:
         return Rectangle(width=stream_width, height=stream_height, left=0, top=0)
 
@@ -289,9 +289,9 @@ async def postprocess_tracks(
 ) -> Result:
     """
         Render the (first) camera stream as an overlay onto the (first) display stream.
-        This is the normal case. Frontend feeds us the first camera with all audio tracks
-        as "stream" and the (first) captured display as "display-0", so we know where to
-        look.
+        This is the normal case. Frontend feeds us the (first) captured display with all
+        audio tracks as "stream" and the (first) captured camera stream as "overlay", so
+        we know where to look.
 
         Most of the logic here is to figure out if and how to crop the display stream, how
         large the overlay should sensibly be, and to construct options that ffmpeg will

@@ -29,8 +29,8 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
 export interface ServerEnv {
   version?: string
   apiUrl?: string
-  oidc_provider_url?: string
-  oidc_client_id?: string
+  oidcProviderUrl?: string
+  oidcClientId?: string
 }
 
 let runtimeEnvironment: ServerEnv | undefined;
@@ -44,8 +44,8 @@ export async function getServerEnv(): Promise<ServerEnv> {
     runtimeEnvironment = {
       version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? pkg.version : undefined,
       apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
-      oidc_provider_url: validateApiUrl(process.env.ISE_RECORD_OIDC_URL),
-      oidc_client_id: process.env.ISE_RECORD_OIDC_CLIENT_ID
+      oidcProviderUrl: validateApiUrl(process.env.ISE_RECORD_OIDC_URL),
+      oidcClientId: process.env.ISE_RECORD_OIDC_CLIENT_ID
     };
   }
 

@@ -25,7 +25,7 @@ export function proxy(request: NextRequest) {
     object-src 'none';
     base-uri 'self';
     form-action 'self';
-    frame-ancestors 'none';
+    frame-ancestors 'self';
     connect-src 'self' ${apiSrc} ${oidcSrc};
     upgrade-insecure-requests;
 `;

@@ -93,16 +93,16 @@ in a specific part of the State known through the use of hooks and are rerendere
 ## Where to find what
 
 The application is built on Next.JS's app router, and the project organization follows from that. All application code is in the
-folder `app`, the tests in folder `__tests__`.
+folder `src`, the tests in folder `__tests__`.
 
 There are four main subsystems in the application code:
 
 | Subsystem | Function | Path |
 | - | - | - |
-| The Application Store | State management | `app/lib/store` |
-| Views | Display and user interaction | `app`, `app/lib/components` |
-| Hooks | State access and action logic | `app/lib/hooks` |
-| Utility functions | Application logic not concerned with UI updates | `app/lib/utils` |
+| The Application Store | State management | `src/lib/store` |
+| Views | Display and user interaction | `src/app`, `src/lib/components` |
+| Hooks | State access and action logic | `src/lib/hooks` |
+| Utility functions | Application logic not concerned with UI updates | `src/lib/utils` |
 
 ## Application State (Store)
 

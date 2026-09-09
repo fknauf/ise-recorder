@@ -1,6 +1,7 @@
 "use client";
 
 import { openRecordingFileStream } from "./browserStorage";
+import { showError } from "./notifications";
 import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
 
 // used to remove characters from the recording name that would trip up ffmpeg in post.
@@ -210,15 +211,14 @@ export async function recordLecture(
     if(stream !== undefined) {
       try {
         await stream.write(chunk);
+        await onChunkWritten(recordingName, filename, chunk.size);
       } catch(e) {
         // If this happens, it's probably because the browser quota is exhausted.
-        console.warn(`Could not write to ${filename}`, e);
+        showError(`Could not write to ${filename}`, e);
         await stream.close();
         streams.delete(filename);
       }
     }
-
-    await onChunkWritten(recordingName, filename, chunk.size);
 
     return { promise: backgroundPromise };
   };

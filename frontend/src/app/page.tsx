@@ -12,7 +12,7 @@ export const Home = () =>
   <Flex direction="column" width="100vw" height="100vh" gap="size-100">
     <Flex direction="row" justifyContent="center" gap="size-500">
       <RecorderControls/>
-      <GithubLink marginTop="size-450"/>
+      <GithubLink marginTop="size-450" size="M"/>
     </Flex>
 
     <AuthStatusMessage/>

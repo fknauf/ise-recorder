@@ -15,7 +15,7 @@ configs:
             "protocol": "openid-connect",
             "protocolMapper": "oidc-audience-mapper",
             "config": {
-              "included.client.audience": "ise-recorder",
+              "included.client.audience": "ise-recorder-users",
               "access.token.claim": "true"
             }
           }]
@@ -69,7 +69,7 @@ services:
     environment:
       - TZ=Europe/Berlin
       - ISE_RECORD_OIDC__PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
-      - ISE_RECORD_OIDC__AUDIENCE=ise-recorder
+      - ISE_RECORD_OIDC__AUDIENCE=ise-recorder-users
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7

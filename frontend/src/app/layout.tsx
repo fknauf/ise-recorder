@@ -13,20 +13,18 @@ export const metadata: Metadata = {
 export default async function RootLayout(
   { children }: Readonly<{ children: React.ReactNode }>
 ) {
-  "use server";
-
   const env = await getServerEnv();
 
   let openIdConfig: OidcConfiguration | undefined = undefined;
 
-  if(env.oidc_provider_url !== undefined) {
-    if(env.oidc_client_id === undefined) {
+  if(env.oidcProviderUrl !== undefined) {
+    if(env.oidcClientId === undefined) {
       throw Error("OpenID provider configured but no client ID supplied");
     }
 
     openIdConfig = {
-      providerUrl: env.oidc_provider_url,
-      clientId: env.oidc_client_id
+      providerUrl: env.oidcProviderUrl,
+      clientId: env.oidcClientId
     };
   }
 
