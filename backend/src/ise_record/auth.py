@@ -29,16 +29,18 @@ JWKS_CACHE_SECONDS = 1800.0
 
 INSECURE_ALGORITHMS = frozenset({"none", "hs256", "hs384", "hs512"})
 
-_UNAUTHENTICATED = HTTPException(
-    status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Invalid or expired token",
-    headers={"WWW-Authenticate": "Bearer"},
-)
+def _UNAUTHENTICATED():
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
-_PROVIDER_UNREACHABLE = HTTPException(
-    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-    detail="Unable to contact the OpenID provider",
-)
+def _PROVIDER_UNREACHABLE(): 
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Unable to contact the OpenID provider",
+    )
 
 
 class OidcConfiguration(NamedTuple):
@@ -118,7 +120,7 @@ def validate_access_token(
         if algorithm.lower() in INSECURE_ALGORITHMS:
             logger.error("key %s signs with %s, which we refuse to verify",
                          signing_key.key_id, algorithm)
-            raise _UNAUTHENTICATED
+            raise _UNAUTHENTICATED()
 
         return jwt.decode(
             token,
@@ -133,13 +135,13 @@ def validate_access_token(
         )
     except PyJWKClientConnectionError as exc:
         logger.error("cannot reach the JWKS endpoint: %s", exc)
-        raise _PROVIDER_UNREACHABLE from exc
+        raise _PROVIDER_UNREACHABLE() from exc
     except PyJWKClientError as exc:
         logger.warning("no usable signing key for the presented token: %s", exc)
-        raise _UNAUTHENTICATED from exc
+        raise _UNAUTHENTICATED() from exc
     except PyJWTError as exc:
         logger.info("rejected access token: %s", exc)
-        raise _UNAUTHENTICATED from exc
+        raise _UNAUTHENTICATED() from exc
 
 
 def user_home_dir(claims: dict[str, Any]) -> str:
@@ -168,10 +170,10 @@ async def get_current_user_home(
 
     oidc_config = await load_oidc_config(request.app.state, settings)
     if oidc_config is None:
-        raise _PROVIDER_UNREACHABLE
+        raise _PROVIDER_UNREACHABLE()
 
     if credentials is None:
-        raise _UNAUTHENTICATED
+        raise _UNAUTHENTICATED()
 
     claims = validate_access_token(credentials.credentials, oidc_config, settings)
 
