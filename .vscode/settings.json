@@ -13,6 +13,7 @@
         "fastapi",
         "ffprobe",
         "getopt",
+        "healthcheck",
         "httpx",
         "janked",
         "lavfi",

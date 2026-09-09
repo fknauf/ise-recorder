@@ -4,6 +4,9 @@ configs:
       {
         "realm": "ise",
         "enabled": true,
+        "accessTokenLifespan": 300,
+        "ssoSessionIdleTimeout": 1800,
+        "ssoSessionMaxLifespan": 36000,
         "clients": [{
           "clientId": "ise-recorder",
           "publicClient": true,
@@ -47,6 +50,7 @@ services:
       - ISE_RECORD_SHOW_VERSION=true
       - ISE_RECORD_OIDC_URL=http://keycloak.localhost:8080/realms/ise
       - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
+      - ISE_RECORD_OIDC_MAX_AGE=25200 # 7 hours
 
   backend:
     image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}

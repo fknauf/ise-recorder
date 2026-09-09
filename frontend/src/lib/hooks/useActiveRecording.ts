@@ -36,7 +36,8 @@ export function useStartStopRecording() {
 
   const {
     authRequired,
-    getAccessToken
+    getAccessToken,
+    refreshAccessToken
   } = useAccessTokenSource();
 
   const startRecording = async () => {
@@ -44,7 +45,10 @@ export function useStartStopRecording() {
       return;
     }
 
-    const streamingImpeded = apiUrl !== undefined && authRequired && await getAccessToken() === undefined;
+    const streamingImpeded = 
+      apiUrl !== undefined &&
+      authRequired &&
+      await refreshAccessToken() === undefined;
 
     const onStarting = (recordingName: string) => {
       setActiveRecording({

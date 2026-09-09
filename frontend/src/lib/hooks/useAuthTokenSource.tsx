@@ -4,33 +4,28 @@ import { createContext, ReactNode, useCallback, useContext, useMemo, useState } 
 import { AuthProvider } from "react-oidc-context";
 import { UserManager } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
+import { useServerEnv } from "./useServerEnv";
 
 interface AccessTokenSource {
   authRequired: boolean
   getAccessToken: () => Promise<string | undefined>
+  refreshAccessToken: () => Promise<string | undefined>
 }
 
 export const AccessTokenSourceContext = createContext<AccessTokenSource | undefined>(undefined);
 
-export interface OidcConfiguration {
+export interface AuthenticatedTokenSourceProviderProps {
   providerUrl: string
   clientId: string
-}
-
-export interface AccessTokenSourceProviderProps {
-  config?: OidcConfiguration
-  children?: ReactNode
-}
-
-export interface AuthenticatedTokenSourceProviderProps {
-  config: OidcConfiguration
+  maxAge: number | undefined
   children?: ReactNode
 }
 
 function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
   const value = useMemo(() => ({
     authRequired: false,
-    getAccessToken: async () => undefined
+    getAccessToken: async () => undefined,
+    refreshAccessToken: async() => undefined
   }), []);
 
   return (
@@ -40,17 +35,18 @@ function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNo
   );
 }
 
-function AuthenticatedTokenSourceProvider({ config, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
+function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
   const [ userMgr ] = useState(() =>
     new UserManager({
-      authority: config.providerUrl,
-      client_id: config.clientId,
+      authority: providerUrl,
+      client_id: clientId,
       redirect_uri: typeof window === "undefined"
         ? ""
         : `${window.location.origin}/auth/callback`,
       scope: "openid profile email",
       automaticSilentRenew: true,
-      accessTokenExpiringNotificationTimeInSeconds: 120
+      accessTokenExpiringNotificationTimeInSeconds: 120,
+      max_age: maxAge
     })
   );
 
@@ -67,6 +63,20 @@ function AuthenticatedTokenSourceProvider({ config, children }: Readonly<Authent
       }
 
       return user.access_token;
+    },
+    refreshAccessToken: async() => {
+      try {
+        const user = await userMgr.signinSilent({
+          max_age: maxAge,
+          forceIframeAuth: true,
+          silentRequestTimeoutInSeconds: 15
+        });
+        return user?.access_token;
+      } catch(e) {
+        console.warn("Explicit access token refresh failed, using existing access token (if available)", e);
+        const existing = await userMgr.getUser();
+        return existing !== null && !existing.expired ? existing.access_token : undefined;
+      }
     }
   }), [userMgr]);
 
@@ -79,12 +89,20 @@ function AuthenticatedTokenSourceProvider({ config, children }: Readonly<Authent
   );
 }
 
-export function AccessTokenSourceProvider({ config, children }: Readonly<AccessTokenSourceProviderProps>) {
-  const authRequired = config !== undefined;
+export function AccessTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
+  const env = useServerEnv();
 
-  if(authRequired) {
+  if(env.oidcProviderUrl !== undefined) {
+    if(env.oidcClientId === undefined) {
+      throw Error("OpenID provider configured but no client ID supplied");
+    }
+
     return (
-      <AuthenticatedTokenSourceProvider config={config}>
+      <AuthenticatedTokenSourceProvider
+        providerUrl={env.oidcProviderUrl}
+        clientId={env.oidcClientId}
+        maxAge={env.oidcMaxAge}
+      >
         {children}
       </AuthenticatedTokenSourceProvider>
     );

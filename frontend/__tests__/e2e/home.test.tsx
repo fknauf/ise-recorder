@@ -27,12 +27,14 @@ type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
 
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
-  getAccessToken: async () => undefined
+  getAccessToken: async () => undefined,
+  refreshAccessToken: async () => undefined
 };
 
 const authenticatedTokenSource: AccessTokenSource = {
   authRequired: true,
-  getAccessToken: async () => "test-token"
+  getAccessToken: async () => "test-token",
+  refreshAccessToken: async () => "test-token"
 };
 
 const cleanupBetweenTests = async () => {

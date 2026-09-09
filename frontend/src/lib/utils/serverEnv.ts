@@ -4,8 +4,8 @@ import { connection } from "next/server";
 import isURL, { IsURLOptions } from "validator/es/lib/isURL";
 import pkg from "../../../package.json" with { type: "json" };
 
-function validateApiUrl(apiUrl: string | undefined): string | undefined {
-  if(apiUrl === undefined || apiUrl === "") {
+function validateBackendUrl(url: string | undefined, name: string): string | undefined {
+  if(url === undefined || url === "") {
     return undefined;
   }
 
@@ -18,10 +18,10 @@ function validateApiUrl(apiUrl: string | undefined): string | undefined {
     disallow_auth: true // prevent credentials leakage
   };
 
-  if(isURL(apiUrl, urlOptions)) {
-    return apiUrl;
+  if(isURL(url, urlOptions)) {
+    return url;
   } else {
-    console.error("Malformed API_URL:", apiUrl);
+    console.error(`Malformed ${name}:`, url);
     return undefined;
   }
 }
@@ -31,6 +31,7 @@ export interface ServerEnv {
   apiUrl?: string
   oidcProviderUrl?: string
   oidcClientId?: string
+  oidcMaxAge?: number
 }
 
 let runtimeEnvironment: ServerEnv | undefined;
@@ -43,9 +44,10 @@ export async function getServerEnv(): Promise<ServerEnv> {
   if(runtimeEnvironment === undefined) {
     runtimeEnvironment = {
       version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? pkg.version : undefined,
-      apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
-      oidcProviderUrl: validateApiUrl(process.env.ISE_RECORD_OIDC_URL),
-      oidcClientId: process.env.ISE_RECORD_OIDC_CLIENT_ID
+      apiUrl: validateBackendUrl(process.env.ISE_RECORD_API_URL, "API_URL"),
+      oidcProviderUrl: validateBackendUrl(process.env.ISE_RECORD_OIDC_URL, "OIDC_URL"),
+      oidcClientId: process.env.ISE_RECORD_OIDC_CLIENT_ID,
+      oidcMaxAge: process.env.ISE_RECORD_OIDC_MAX_AGE !== undefined ? parseInt(process.env.ISE_RECORD_OIDC_MAX_AGE) : undefined
     };
   }
 
