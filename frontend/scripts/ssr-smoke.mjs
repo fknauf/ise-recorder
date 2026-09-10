@@ -117,8 +117,8 @@ async function checkDeployment({ name, env }) {
 
       for(const needle of mustContain) {
         if(!html.includes(needle)) {
-          failures.push(`${name} ${path}: server-rendered HTML is missing ${JSON.stringify(needle)} `
-            + "-- the page most likely threw during SSR and fell back to a client-only shell");
+          failures.push(`${name} ${path}: server-rendered HTML is missing ${JSON.stringify(needle)} ` +
+            "-- the page most likely threw during SSR and fell back to a client-only shell");
         }
       }
 

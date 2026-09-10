@@ -7,6 +7,13 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true
   },
+  // Pre-bundle these at startup. They enter the browser module graph only through
+  // __tests__/util/serverEnv.test.ts, so Vite would otherwise discover them mid-run,
+  // re-optimize, and reload the page underneath whatever is executing -- which fails
+  // every test in the file with a bogus "doesn't provide an export named 'default'".
+  optimizeDeps: {
+    include: [ "next/server", "validator/es/lib/isURL" ]
+  },
   plugins: [ react() ],
   test: {
     browser: {

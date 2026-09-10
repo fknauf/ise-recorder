@@ -209,14 +209,20 @@ export async function recordLecture(
     const stream = streams.get(filename);
 
     if(stream !== undefined) {
+      let written = false;
+
       try {
         await stream.write(chunk);
-        await onChunkWritten(recordingName, filename, chunk.size);
+        written = true;
       } catch(e) {
         // If this happens, it's probably because the browser quota is exhausted.
         showError(`Could not write to ${filename}`, e);
-        await stream.close();
         streams.delete(filename);
+        await stream.close();
+      }
+
+      if(written) {
+        await onChunkWritten(recordingName, filename, chunk.size);
       }
     }
 
