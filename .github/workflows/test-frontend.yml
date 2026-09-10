@@ -36,6 +36,11 @@ jobs:
       run: |
         npm run lint
 
+    - name: Typecheck
+      working-directory: ${{ github.workspace }}/frontend
+      run: |
+        npm run typecheck
+
     - name: Test Frontend (Chromium)
       working-directory: ${{ github.workspace }}/frontend
       run: |
