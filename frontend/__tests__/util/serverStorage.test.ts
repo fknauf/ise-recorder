@@ -32,8 +32,14 @@ const realSetTimeout = globalThis.setTimeout;
 async function settleRetries<T>(pending: Promise<T>): Promise<T> {
   let settled = false;
   const tracked = pending.then(
-    value => { settled = true; return value; },
-    error => { settled = true; throw error; }
+    value => {
+      settled = true;
+      return value;
+    },
+    error => {
+      settled = true;
+      throw error;
+    }
   );
 
   for(let guard = 0; !settled && guard < 100; ++guard) {

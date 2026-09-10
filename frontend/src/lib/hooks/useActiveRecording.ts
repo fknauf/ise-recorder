@@ -45,7 +45,7 @@ export function useStartStopRecording() {
       return;
     }
 
-    const streamingImpeded = 
+    const streamingImpeded =
       apiUrl !== undefined &&
       authRequired &&
       await refreshAccessToken() === undefined;

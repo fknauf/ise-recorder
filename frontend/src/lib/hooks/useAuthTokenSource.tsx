@@ -25,7 +25,7 @@ function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNo
   const value = useMemo(() => ({
     authRequired: false,
     getAccessToken: async () => undefined,
-    refreshAccessToken: async() => undefined
+    refreshAccessToken: async () => undefined
   }), []);
 
   return (
@@ -64,7 +64,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 
       return user.access_token;
     },
-    refreshAccessToken: async() => {
+    refreshAccessToken: async () => {
       try {
         const user = await userMgr.signinSilent({
           max_age: maxAge,
@@ -78,7 +78,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
         return existing !== null && !existing.expired ? existing.access_token : undefined;
       }
     }
-  }), [userMgr]);
+  }), [userMgr, maxAge]);
 
   return (
     <AccessTokenSourceContext.Provider value={value}>
