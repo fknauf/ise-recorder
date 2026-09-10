@@ -440,3 +440,9 @@ def test_cors_preflight_jobs_forbidden():
     )
     assert response.status_code == 400
     assert "Access-Control-Allow-Origin" not in response.headers
+
+def test_health_endpoint():
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
