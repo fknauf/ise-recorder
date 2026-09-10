@@ -28,13 +28,13 @@ type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
   getAccessToken: async () => undefined,
-  refreshAccessToken: async () => undefined
+  expandSessionHeadroom: async () => "still-fresh"
 };
 
 const authenticatedTokenSource: AccessTokenSource = {
   authRequired: true,
   getAccessToken: async () => "test-token",
-  refreshAccessToken: async () => "test-token"
+  expandSessionHeadroom: async () => "still-fresh"
 };
 
 const cleanupBetweenTests = async () => {
@@ -59,7 +59,7 @@ afterAll(cleanupBetweenTests);
 
 /**
  * Drives a complete recording through the UI: adds sources, fills in the lecture details,
- * records for two seconds, stops, and checks the resulting local files. Parameterised by the
+ * records for two seconds, stops, and checks the resulting local files. Parameterized by the
  * access token source so the same session can be run for an unauthenticated deployment and
  * for one behind an OpenID provider.
  */

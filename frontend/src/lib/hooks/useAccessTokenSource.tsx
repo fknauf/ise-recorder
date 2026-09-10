@@ -1,18 +1,20 @@
 "use client";
 
-import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { AuthProvider } from "react-oidc-context";
 import { UserManager } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
-import { ServerEnv } from "../utils/serverEnv";
+import { useAppStore } from "./useAppStore";
+import { useServerEnv } from "./useServerEnv";
+
+export type SessionExpansionResult =
+  "still-fresh" | "still-stale" | "expired" | "renewed";
 
 interface AccessTokenSource {
   authRequired: boolean
   getAccessToken: () => Promise<string | undefined>
-  refreshAccessToken: () => Promise<string | undefined>
+  expandSessionHeadroom: () => Promise<SessionExpansionResult>
 }
-
-export const AccessTokenSourceContext = createContext<AccessTokenSource | undefined>(undefined);
 
 interface AuthenticatedTokenSourceProviderProps {
   providerUrl: string
@@ -21,21 +23,56 @@ interface AuthenticatedTokenSourceProviderProps {
   children?: ReactNode
 }
 
-function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const value = useMemo(() => ({
-    authRequired: false,
-    getAccessToken: async () => undefined,
-    refreshAccessToken: async () => undefined
-  }), []);
+const MAX_TIMEOUT_MILLIS = 2 ** 31 - 1;
 
+interface Staleness {
+  stale: boolean
+  recheckMillis?: number
+}
+
+export const AccessTokenSourceContext = createContext<AccessTokenSource | undefined>(undefined);
+
+async function sessionStaleness(
+  userMgr: UserManager,
+  maxAge: number | undefined
+): Promise<Staleness> {
+  const user = await userMgr.getUser();
+
+  if(user === null) {
+    return { stale: true };
+  }
+
+  if(maxAge === undefined || user.profile.auth_time === undefined) {
+    return { stale: false };
+  }
+
+  const staleAtMillis = (user.profile.auth_time + maxAge) * 1000;
+  const approxNowMillis = Math.max(user.profile.iat * 1000, Date.now());
+  const remainingMillis = staleAtMillis - approxNowMillis;
+
+  return remainingMillis > 0
+    ? { stale: false, recheckMillis: remainingMillis }
+    : { stale: true };
+}
+
+const anonymousTokenSource: AccessTokenSource = {
+  authRequired: false,
+  getAccessToken: async () => undefined,
+  expandSessionHeadroom: async () => "still-fresh"
+};
+
+function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <AccessTokenSourceContext.Provider value={value}>
+    <AccessTokenSourceContext.Provider value={anonymousTokenSource}>
       {children}
     </AccessTokenSourceContext.Provider>
   );
 }
 
 function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
+  const setStaleSession = useAppStore(store => store.setStaleSession);
+  const router = useRouter();
+
   const [ userMgr ] = useState(() =>
     new UserManager({
       authority: providerUrl,
@@ -46,39 +83,91 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
       scope: "openid profile email",
       automaticSilentRenew: true,
       accessTokenExpiringNotificationTimeInSeconds: 120,
-      max_age: maxAge
+      max_age: maxAge,
+      filterProtocolClaims: [ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ]
     })
   );
 
-  const router = useRouter();
   const onSigninCallback = useCallback(() => router.replace("/"), [router]);
 
-  const value = useMemo(() => ({
-    authRequired: true,
-    getAccessToken: async () => {
-      const user = await userMgr.getUser();
+  useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
 
-      if(user === null || user.expired) {
-        return undefined;
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const check = async () => {
+      clearTimeout(timer);
+      const { stale, recheckMillis } = await sessionStaleness(userMgr, maxAge);
+
+      if(cancelled) {
+        return;
       }
 
-      return user.access_token;
-    },
-    refreshAccessToken: async () => {
+      setStaleSession(stale);
+
+      if(recheckMillis !== undefined) {
+        timer = setTimeout(check, Math.min(recheckMillis, MAX_TIMEOUT_MILLIS));
+      }
+    };
+
+    check();
+    userMgr.events.addUserLoaded(check);
+    userMgr.events.addUserUnloaded(check);
+    document.addEventListener("visibilitychange", check);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", check);
+      userMgr.events.removeUserUnloaded(check);
+      userMgr.events.removeUserLoaded(check);
+      clearTimeout(timer);
+    };
+  }, [maxAge, setStaleSession, userMgr]);
+
+  const getAccessToken = useCallback(async () => {
+    const user = await userMgr.getUser();
+
+    if(user === null || user.expired) {
+      return undefined;
+    }
+
+    return user.access_token;
+  }, [userMgr]);
+
+  const expandSessionHeadroom = useCallback(async () => {
+    if((await sessionStaleness(userMgr, maxAge)).stale) {
       try {
-        const user = await userMgr.signinSilent({
-          max_age: maxAge,
-          forceIframeAuth: true,
-          silentRequestTimeoutInSeconds: 15
-        });
-        return user?.access_token;
+        await userMgr.signinPopup();
+        return "renewed";
       } catch(e) {
-        console.warn("Explicit access token refresh failed, using existing access token (if available)", e);
+        console.warn("Failed to reauthenticate stale oidc session, continuing with existing session", e);
+
         const existing = await userMgr.getUser();
-        return existing !== null && !existing.expired ? existing.access_token : undefined;
+
+        if(existing === null || existing.expired) {
+          return "expired";
+        }
+
+        return "still-stale";
       }
     }
-  }), [userMgr, maxAge]);
+
+    try {
+      // Force access/refresh token renewal at recording start.
+      await userMgr.signinSilent();
+    } catch(e) {
+      console.warn("Failed to force-refresh access/refresh token, continuing with existing tokens", e);
+    }
+
+    return "still-fresh";
+  }, [maxAge, userMgr]);
+
+  const value = useMemo<AccessTokenSource>(() => ({
+    authRequired: true,
+    getAccessToken,
+    expandSessionHeadroom
+  }), [getAccessToken, expandSessionHeadroom]);
 
   return (
     <AccessTokenSourceContext.Provider value={value}>
@@ -89,22 +178,20 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
   );
 }
 
-export interface AccessTokenSourceProviderProps {
-  serverEnv: ServerEnv
-  children: ReactNode
-}
+export function AccessTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
+  const env = useServerEnv();
 
-export function AccessTokenSourceProvider({ serverEnv, children }: Readonly<AccessTokenSourceProviderProps>) {
-  if(serverEnv.oidcProviderUrl !== undefined) {
-    if(serverEnv.oidcClientId === undefined) {
+  if(env.oidcProviderUrl !== undefined) {
+    if(env.oidcClientId === undefined) {
       throw Error("OpenID provider configured but no client ID supplied");
     }
 
     return (
       <AuthenticatedTokenSourceProvider
-        providerUrl={serverEnv.oidcProviderUrl}
-        clientId={serverEnv.oidcClientId}
-        maxAge={serverEnv.oidcMaxAge}
+        key={`${env.oidcProviderUrl}${env.oidcClientId}${env.oidcMaxAge}`}
+        providerUrl={env.oidcProviderUrl}
+        clientId={env.oidcClientId}
+        maxAge={env.oidcMaxAge}
       >
         {children}
       </AuthenticatedTokenSourceProvider>

@@ -37,7 +37,7 @@ export function useStartStopRecording() {
   const {
     authRequired,
     getAccessToken,
-    refreshAccessToken
+    expandSessionHeadroom
   } = useAccessTokenSource();
 
   const startRecording = async () => {
@@ -45,10 +45,19 @@ export function useStartStopRecording() {
       return;
     }
 
+    const sessionState = await expandSessionHeadroom();
+
+    if(sessionState === "renewed") {
+      // user just had to re-login. This happens rarely, so user is now slightly confused,
+      // which we don't want to record. Let him press the button again so he knows exactly
+      // where the recording starts.
+      return;
+    }
+
     const streamingImpeded =
       apiUrl !== undefined &&
       authRequired &&
-      await refreshAccessToken() === undefined;
+      sessionState === "expired";
 
     const onStarting = (recordingName: string) => {
       setActiveRecording({

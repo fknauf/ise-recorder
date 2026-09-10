@@ -20,7 +20,7 @@ export default async function RootLayout(
       <body>
         <SpectrumProvider>
           <AppStoreProvider serverEnv={env}>
-            <AccessTokenSourceProvider serverEnv={env}>
+            <AccessTokenSourceProvider>
               {children}
             </AccessTokenSourceProvider>
           </AppStoreProvider>

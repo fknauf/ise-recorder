@@ -98,6 +98,7 @@ export interface AppStoreState {
   adjustedSavedRecordings: readonly RecordingFileList[]
   quota: number | undefined
   usage: number | undefined
+  staleSession: boolean
 
   setLectureTitle: (lectureTitle: string) => void
   setLecturerEmail: (lecturerEmail: string) => void
@@ -114,6 +115,7 @@ export interface AppStoreState {
   resetFileSizeOverrides: () => void
   updateBrowserStorage: () => Promise<void>
   updateQuotaInformation: () => Promise<void>
+  setStaleSession: (stale: boolean) => void
 }
 
 const unselectTrack = (state: AppStoreState, track: MediaStreamTrack): Partial<AppStoreState> =>
@@ -142,6 +144,7 @@ const createRawAppStore = (
   adjustedSavedRecordings: [],
   quota: undefined,
   usage: undefined,
+  staleSession: false,
 
   setLectureTitle: lectureTitle => set({ lectureTitle }),
   setLecturerEmail: lecturerEmail => set({ lecturerEmail }),
@@ -250,7 +253,10 @@ const createRawAppStore = (
       savedRecordings: recordings,
       adjustedSavedRecordings: applyOverrides(recordings, state.fileSizeOverrides)
     }));
-  }
+  },
+
+  setStaleSession: (stale: StateUpdate<boolean>) =>
+    set(state => ({ staleSession: applyStateUpdate(state.staleSession, stale) }))
 });
 
 export const createAppStore = (

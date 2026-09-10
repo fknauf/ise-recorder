@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { AccessTokenSourceContext, SessionExpansionResult, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
 import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
 import { ServerStorageDestination } from "@/lib/utils/serverStorage";
@@ -33,10 +33,14 @@ interface CapturedRecording {
 let captured: CapturedRecording | undefined;
 let releaseRecordLecture: (() => void) | undefined;
 
-const makeTokenSource = (authRequired: boolean, token: string | undefined) => ({
+const makeTokenSource = (
+  authRequired: boolean,
+  token: string | undefined,
+  sessionResult: SessionExpansionResult = "still-fresh"
+): AccessTokenSource => ({
   authRequired,
   getAccessToken: vi.fn(async () => token),
-  refreshAccessToken: vi.fn(async () => token)
+  expandSessionHeadroom: vi.fn(async (): Promise<SessionExpansionResult> => sessionResult)
 });
 
 function renderRecorder(
@@ -147,52 +151,83 @@ test("startRecording is a no-op while a recording is already active", async () =
   expect(result.current.activeRecording.name).toBe("ALREADY_RUNNING");
 });
 
-// --- streamingImpeded ------------------------------------------------------
+// --- session headroom and streamingImpeded --------------------------------
 
-test("streaming is not impeded and no token is minted when auth is not required", async () => {
+test("the session headroom is expanded before every recording", async () => {
+  // unconditional: even an unauthenticated deployment goes through it, because the
+  // anonymous source answers "still-fresh" for free.
   const tokenSource = makeTokenSource(false, undefined);
+  const { result } = renderRecorder(tokenSource);
+
+  await startAndCapture(result.current.startRecording);
+
+  expect(tokenSource.expandSessionHeadroom).toHaveBeenCalledOnce();
+});
+
+test("a renewed session aborts the start so the user can press record again", async () => {
+  const tokenSource = makeTokenSource(true, "test-token", "renewed");
+  const { result } = renderRecorder(tokenSource);
+
+  await act(async () => {
+    await result.current.startRecording();
+  });
+
+  // the re-login popup just interrupted them; starting now would record the confusion
+  expect(vi.mocked(recordLecture)).not.toHaveBeenCalled();
+  expect(result.current.activeRecording.state).toBe("idle");
+});
+
+test("streaming is impeded when the session has expired", async () => {
+  const tokenSource = makeTokenSource(true, undefined, "expired");
+  const { result } = renderRecorder(tokenSource);
+
+  const call = await startAndCapture(result.current.startRecording);
+
+  expect(call.destination.streamingImpeded).toBe(true);
+});
+
+test("streaming is not impeded when the session is still fresh", async () => {
+  const tokenSource = makeTokenSource(true, "test-token", "still-fresh");
   const { result } = renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
   expect(call.destination.streamingImpeded).toBe(false);
-  expect(tokenSource.refreshAccessToken).not.toHaveBeenCalled();
 });
 
-test("no token is minted when no backend is configured", async () => {
-  const tokenSource = makeTokenSource(true, "test-token");
+test("streaming is not impeded when re-auth failed but the old token still works", async () => {
+  const tokenSource = makeTokenSource(true, "test-token", "still-stale");
+  const { result } = renderRecorder(tokenSource);
+
+  const call = await startAndCapture(result.current.startRecording);
+
+  // "still-stale" means the session is older than policy but the token is usable,
+  // so uploads carry on as normal.
+  expect(call.destination.streamingImpeded).toBe(false);
+});
+
+test("streaming is not impeded without a backend, whatever the session state", async () => {
+  const tokenSource = makeTokenSource(true, undefined, "expired");
   const { result } = renderRecorder(tokenSource, { apiUrl: undefined });
 
   const call = await startAndCapture(result.current.startRecording);
 
   expect(call.destination.streamingImpeded).toBe(false);
-  expect(tokenSource.refreshAccessToken).not.toHaveBeenCalled();
 });
 
-test("streaming is not impeded when a fresh token is available", async () => {
-  const tokenSource = makeTokenSource(true, "test-token");
+test("streaming is not impeded when auth is not required, whatever the session state", async () => {
+  const tokenSource = makeTokenSource(false, undefined, "expired");
   const { result } = renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(tokenSource.refreshAccessToken).toHaveBeenCalledOnce();
   expect(call.destination.streamingImpeded).toBe(false);
-});
-
-test("streaming is impeded when no token can be minted", async () => {
-  const tokenSource = makeTokenSource(true, undefined);
-  const { result } = renderRecorder(tokenSource);
-
-  const call = await startAndCapture(result.current.startRecording);
-
-  expect(tokenSource.refreshAccessToken).toHaveBeenCalledOnce();
-  expect(call.destination.streamingImpeded).toBe(true);
 });
 
 // --- state machine ---------------------------------------------------------
 
 test("the recorder walks idle -> starting -> recording -> idle", async () => {
-  const tokenSource = makeTokenSource(true, undefined);
+  const tokenSource = makeTokenSource(true, undefined, "expired");
   const { result } = renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);

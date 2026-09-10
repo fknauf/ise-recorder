@@ -15,8 +15,10 @@ export const Home = () =>
       <GithubLink marginTop="size-450" size="M"/>
     </Flex>
 
-    <AuthStatusMessage/>
-    <QuotaWarning thresholdBytes={2 ** 30}/>
+    <Flex direction="row" justifyContent="center" marginTop="size-200">
+      <AuthStatusMessage/>
+      <QuotaWarning thresholdBytes={2 ** 30}/>
+    </Flex>
     <PreviewSection canvasWidth={384} canvasHeight={216}/>
     <SavedRecordingsSection/>
     <ToastContainer/>
