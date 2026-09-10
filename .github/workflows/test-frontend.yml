@@ -41,6 +41,11 @@ jobs:
       run: |
         npm run typecheck
 
+    - name: SSR smoke test
+      working-directory: ${{ github.workspace }}/frontend
+      run: |
+        npm run smoke
+
     - name: Test Frontend (Chromium)
       working-directory: ${{ github.workspace }}/frontend
       run: |

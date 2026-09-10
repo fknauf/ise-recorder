@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "smoke": "next build && node scripts/ssr-smoke.mjs",
+    "smoke:dev": "node scripts/ssr-smoke.mjs --dev",
     "test": "vitest"
   },
   "dependencies": {
