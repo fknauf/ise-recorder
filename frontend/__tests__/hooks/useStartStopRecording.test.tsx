@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAuthTokenSource";
+import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
 import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
 import { ServerStorageDestination } from "@/lib/utils/serverStorage";

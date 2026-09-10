@@ -3,7 +3,7 @@ import "./globals.css";
 import { SpectrumProvider } from "@/lib/components/SpectrumProvider";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { getServerEnv } from "@/lib/utils/serverEnv";
-import { AccessTokenSourceProvider } from "@/lib/hooks/useAuthTokenSource";
+import { AccessTokenSourceProvider } from "@/lib/hooks/useAccessTokenSource";
 
 export const metadata: Metadata = {
   title: "ISE-Recorder",

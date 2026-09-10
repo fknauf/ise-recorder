@@ -6,7 +6,7 @@ import { useLecture } from "./useLecture";
 import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
-import { useAccessTokenSource } from "./useAuthTokenSource";
+import { useAccessTokenSource } from "./useAccessTokenSource";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();

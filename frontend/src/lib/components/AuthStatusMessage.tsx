@@ -1,6 +1,6 @@
 "use client";
 
-import { useAccessTokenSource } from "../hooks/useAuthTokenSource";
+import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
 import { useAutoSignin } from "react-oidc-context";
 import { Content, Flex, Heading, InlineAlert, ProgressCircle, Text } from "@adobe/react-spectrum";
 import { useActiveRecording } from "../hooks/useActiveRecording";
