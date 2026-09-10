@@ -4,7 +4,7 @@ import { createContext, ReactNode, useCallback, useContext, useMemo, useState } 
 import { AuthProvider } from "react-oidc-context";
 import { UserManager } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
-import { useServerEnv } from "./useServerEnv";
+import { ServerEnv } from "../utils/serverEnv";
 
 interface AccessTokenSource {
   authRequired: boolean
@@ -14,7 +14,7 @@ interface AccessTokenSource {
 
 export const AccessTokenSourceContext = createContext<AccessTokenSource | undefined>(undefined);
 
-export interface AuthenticatedTokenSourceProviderProps {
+interface AuthenticatedTokenSourceProviderProps {
   providerUrl: string
   clientId: string
   maxAge: number | undefined
@@ -89,19 +89,22 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
   );
 }
 
-export function AccessTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const env = useServerEnv();
+export interface AccessTokenSourceProviderProps {
+  serverEnv: ServerEnv
+  children: ReactNode
+}
 
-  if(env.oidcProviderUrl !== undefined) {
-    if(env.oidcClientId === undefined) {
+export function AccessTokenSourceProvider({ serverEnv, children }: Readonly<AccessTokenSourceProviderProps>) {
+  if(serverEnv.oidcProviderUrl !== undefined) {
+    if(serverEnv.oidcClientId === undefined) {
       throw Error("OpenID provider configured but no client ID supplied");
     }
 
     return (
       <AuthenticatedTokenSourceProvider
-        providerUrl={env.oidcProviderUrl}
-        clientId={env.oidcClientId}
-        maxAge={env.oidcMaxAge}
+        providerUrl={serverEnv.oidcProviderUrl}
+        clientId={serverEnv.oidcClientId}
+        maxAge={serverEnv.oidcMaxAge}
       >
         {children}
       </AuthenticatedTokenSourceProvider>
