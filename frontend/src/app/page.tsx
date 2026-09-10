@@ -7,21 +7,36 @@ import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection"
 import { PreviewSection } from "@/lib/components/PreviewSection";
 import { GithubLink } from "@/lib/components/GithubLink";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
+import { useAutoSignin } from "react-oidc-context";
+import { useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { useHydrated } from "@/lib/hooks/useHydrated";
 
-export const Home = () =>
-  <Flex direction="column" width="100vw" height="100vh" gap="size-100">
-    <Flex direction="row" justifyContent="center" gap="size-500">
-      <RecorderControls/>
-      <GithubLink marginTop="size-450" size="M"/>
-    </Flex>
+function AutoSignin() {
+  useAutoSignin();
+  return null;
+}
 
-    <Flex direction="row" justifyContent="center" marginTop="size-200">
-      <AuthStatusMessage/>
-      <QuotaWarning thresholdBytes={2 ** 30}/>
+export function Home() {
+  const hydrated = useHydrated();
+  const { authRequired } = useAccessTokenSource();
+
+  return (
+    <Flex direction="column" width="100vw" height="100vh" gap="size-100">
+      { hydrated && authRequired && <AutoSignin/> }
+      <Flex direction="row" justifyContent="center" gap="size-500">
+        <RecorderControls/>
+        <GithubLink marginTop="size-450" size="M"/>
+      </Flex>
+
+      <Flex direction="row" justifyContent="center" marginTop="size-200">
+        <AuthStatusMessage/>
+        <QuotaWarning thresholdBytes={2 ** 30}/>
+      </Flex>
+      <PreviewSection canvasWidth={384} canvasHeight={216}/>
+      <SavedRecordingsSection/>
+      <ToastContainer/>
     </Flex>
-    <PreviewSection canvasWidth={384} canvasHeight={216}/>
-    <SavedRecordingsSection/>
-    <ToastContainer/>
-  </Flex>;
+  );
+}
 
 export default Home;

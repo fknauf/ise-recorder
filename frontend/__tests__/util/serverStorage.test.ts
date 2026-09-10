@@ -7,7 +7,13 @@ interface FetchRequest {
   data?: RequestInit
 }
 
-vi.mock("@/lib/utils/notifications");
+vi.mock("@/lib/utils/notifications", () => ({
+  // An explicit factory, not automocking: vi.mock() alone yields spies that still call
+  // through, so the real showError logs and queues Spectrum toasts during the suite.
+  showError: vi.fn(),
+  showSuccess: vi.fn(),
+  showMessage: vi.fn()
+}));
 
 const accessToken = async () => "test-token";
 const noAccessToken = async () => undefined;

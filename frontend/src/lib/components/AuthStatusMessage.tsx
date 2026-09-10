@@ -1,15 +1,14 @@
 "use client";
 
 import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
-import { useAutoSignin } from "react-oidc-context";
+import { useAuth } from "react-oidc-context";
 import { ActionButton, Content, Flex, Heading, InlineAlert, ProgressCircle, Text } from "@adobe/react-spectrum";
 import { useActiveRecording } from "../hooks/useActiveRecording";
-import { useSyncExternalStore } from "react";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import { useAppStore } from "../hooks/useAppStore";
 
 function AuthStatusMessageImpl() {
-  const auth = useAutoSignin();
+  const auth = useAuth();
   const { expandSessionHeadroom } = useAccessTokenSource();
   const stale = useAppStore(state => state.staleSession);
 
@@ -73,15 +72,10 @@ function StreamingImpededWarning() {
   );
 }
 
-const emptySubscribe = () => () => {};
-
 export function AuthStatusMessage() {
-  // Make sure SSR and first render both see this component as empty
-  // to avoid complaints about mismatches during hydration.
-  const hydrated = useSyncExternalStore(emptySubscribe, () => true, () => false);
   const tokenSource = useAccessTokenSource();
 
-  if(!tokenSource.authRequired || !hydrated) {
+  if(!tokenSource.authRequired) {
     return null;
   }
 

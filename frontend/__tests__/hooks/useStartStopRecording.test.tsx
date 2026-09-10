@@ -14,7 +14,13 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
 // job is the state machine around recording, not the recording itself, and the real
 // implementation would need media devices and six seconds of wall clock.
 vi.mock("@/lib/utils/recording");
-vi.mock("@/lib/utils/notifications");
+vi.mock("@/lib/utils/notifications", () => ({
+  // An explicit factory, not automocking: vi.mock() alone yields spies that still call
+  // through, so the real showError logs and queues Spectrum toasts during the suite.
+  showError: vi.fn(),
+  showSuccess: vi.fn(),
+  showMessage: vi.fn()
+}));
 vi.mock("@/lib/utils/browserStorage");
 
 type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
@@ -341,13 +347,22 @@ test("stopRecording stops the recording and moves to stopping", async () => {
 });
 
 test("stopRecording is a no-op when nothing is being recorded", () => {
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  // The hook warns on this path deliberately, so silence it here rather than letting
+  // it litter the suite output -- and assert it, since the warning is the behaviour.
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-  act(() => {
-    result.current.stopRecording();
-  });
+  try {
+    const { result } = renderRecorder(makeTokenSource(false, undefined));
 
-  expect(result.current.activeRecording.state).toBe("idle");
+    act(() => {
+      result.current.stopRecording();
+    });
+
+    expect(result.current.activeRecording.state).toBe("idle");
+    expect(consoleWarn).toHaveBeenCalledWith(expect.stringContaining("wasn't recording"));
+  } finally {
+    consoleWarn.mockRestore();
+  }
 });
 
 // --- failure ---------------------------------------------------------------
