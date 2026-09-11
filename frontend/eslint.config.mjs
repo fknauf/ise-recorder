@@ -93,7 +93,14 @@ const eslintConfig = defineConfig([
       "@stylistic/new-parens": "warn",
       "@stylistic/newline-per-chained-call": "warn",
       "@stylistic/no-confusing-arrow": "warn",
-      "@stylistic/no-extra-parens": [ "warn", "all", { ignoredNodes: ["ArrowFunctionExpression[body.type=ConditionalExpression]"] }],
+      "@stylistic/no-extra-parens": [
+        "warn",
+        "all",
+        {
+          ignoredNodes: ["ArrowFunctionExpression[body.type=ConditionalExpression]"],
+          nestedBinaryExpressions: false
+        }
+      ],
       "@stylistic/no-extra-semi": "warn",
       "@stylistic/no-floating-decimal": "warn",
       "@stylistic/no-mixed-spaces-and-tabs": "warn",

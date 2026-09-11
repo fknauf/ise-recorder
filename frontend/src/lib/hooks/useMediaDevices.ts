@@ -8,6 +8,11 @@ import { createDeviceConstraints } from "../store/store";
 const trackIsFromDevice = (track: MediaStreamTrack, uid: MediaDeviceUid) =>
   track.getSettings().groupId === uid.groupId && track.getSettings().deviceId === uid.deviceId;
 
+// Extracted into a function to get around a limitation that exists in babel's react-compiler
+// at time of writing.
+const userPickedDevices = (userInteractionExpected: boolean, duration: number) =>
+  userInteractionExpected || (duration > 200 && navigator.userAgent.includes("Firefox"));
+
 export function useMediaDevices() {
   const videoDevices = useAppStore(state => state.videoDevices);
   const audioDevices = useAppStore(state => state.audioDevices);
@@ -45,9 +50,8 @@ export function useMediaDevices() {
         // permissions dialog should take longer.
         const after = new Date();
         const duration = after.getTime() - before.getTime();
-        const userInteractionDetected = navigator.userAgent.includes("Firefox") && duration > 200;
 
-        if(userInteractionExpected || userInteractionDetected) {
+        if(userPickedDevices(userInteractionExpected, duration)) {
           // User just saw the "please grant permissions" dialog and forgot about clicking our menu,
           // so in this case we just add the streams he just selected.
           addVideoTracks(stream.getVideoTracks());

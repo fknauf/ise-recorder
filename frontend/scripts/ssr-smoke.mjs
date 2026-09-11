@@ -14,6 +14,11 @@
  * UserManager fetches provider metadata lazily and AuthProvider does its work in
  * effects, so nothing here talks to Keycloak.
  *
+ * It also checks the CSP that proxy.ts sets. proxy.ts cannot be unit tested in the
+ * browser-mode suite -- importing NextRequest pulls in Next's server runtime, which
+ * needs __dirname -- but it runs on every request, so its output is right here in the
+ * response headers, unmocked and in the real runtime.
+ *
  * Scope: this checks server-side rendering only. A component that renders fine on the
  * server but throws after hydration is not covered -- Next's route-segment error
  * boundaries absorb it, and the HTML looks correct. Guarding that needs an end-to-end
@@ -27,8 +32,7 @@
 import { spawn } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const PORT = Number(process.env.SMOKE_PORT ?? 3100);
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE_PORT = Number(process.env.SMOKE_PORT ?? 3100);
 const USE_DEV = process.argv.includes("--dev");
 
 // Both branches of AccessTokenSourceProvider need covering: the anonymous one renders
@@ -49,6 +53,19 @@ const DEPLOYMENTS = [
   }
 ];
 
+/** Split a CSP header into directive -> sources, so nothing depends on ordering. */
+function parseCsp(header) {
+  return new Map(
+    header.split(";")
+      .map(directive => directive.trim())
+      .filter(directive => directive.length > 0)
+      .map(directive => {
+        const [ name, ...sources ] = directive.split(/\s+/);
+        return [ name, sources ];
+      })
+  );
+}
+
 const CHECKS = [
   {
     path: "/",
@@ -65,14 +82,18 @@ const CHECKS = [
 const ERROR_MARKERS = [ "window is not defined", "ReferenceError", "TypeError", "Internal Server Error" ];
 
 
-function startServer(env) {
+function startServer(env, port) {
   const args = USE_DEV
-    ? [ "next", "dev", "--port", String(PORT) ]
-    : [ "next", "start", "--port", String(PORT) ];
+    ? [ "next", "dev", "--port", String(port) ]
+    : [ "next", "start", "--port", String(port) ];
 
+  // detached so the whole process group can be killed: signalling npx alone leaves the
+  // actual Next server holding the port, and the next deployment then either fails to
+  // bind or -- worse -- gets checked against the previous deployment's environment.
   const server = spawn("npx", args, {
     env: { ...process.env, ...env },
-    stdio: [ "ignore", "pipe", "pipe" ]
+    stdio: [ "ignore", "pipe", "pipe" ],
+    detached: true
   });
 
   const output = [];
@@ -82,10 +103,10 @@ function startServer(env) {
   return { server, output };
 }
 
-async function waitForReady() {
+async function waitForReady(base) {
   for(let attempt = 0; attempt < 120; ++attempt) {
     try {
-      const response = await fetch(BASE, { signal: AbortSignal.timeout(2000) });
+      const response = await fetch(base, { signal: AbortSignal.timeout(2000) });
       if(response.status < 500) {
         return true;
       }
@@ -97,19 +118,28 @@ async function waitForReady() {
   return false;
 }
 
-async function checkDeployment({ name, env }) {
+async function checkDeployment({ name, env }, port) {
+  const base = `http://127.0.0.1:${port}`;
   const failures = [];
-  const { server, output } = startServer(env);
+  const { server, output } = startServer(env, port);
 
   try {
-    if(!await waitForReady()) {
+    if(!await waitForReady(base)) {
       failures.push(`${name}: server never became ready\n${output.join("").slice(-600)}`);
       return failures;
     }
 
     for(const { path, mustContain } of CHECKS) {
-      const response = await fetch(`${BASE}${path}`, { signal: AbortSignal.timeout(15000) });
-      const html = await response.text();
+      let response;
+      let html;
+
+      try {
+        response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(15000) });
+        html = await response.text();
+      } catch(e) {
+        failures.push(`${name} ${path}: request failed: ${String(e).slice(0, 120)}`);
+        continue;
+      }
 
       if(response.status !== 200) {
         failures.push(`${name} ${path}: expected 200, got ${response.status}`);
@@ -131,6 +161,8 @@ async function checkDeployment({ name, env }) {
       console.log(`  ${failures.length ? "✗" : "✓"} ${name} ${path} (${response.status}, ${html.length} bytes)`);
     }
 
+    failures.push(...await checkContentSecurityPolicy(name, env, base));
+
     // A page can render fine and still have logged an SSR error that React recovered from.
     const logged = output.join("");
     for(const marker of ERROR_MARKERS) {
@@ -140,19 +172,96 @@ async function checkDeployment({ name, env }) {
       }
     }
   } finally {
-    server.kill("SIGTERM");
-    await sleep(500);
-    server.kill("SIGKILL");
+    try {
+      process.kill(-server.pid, "SIGTERM");
+      await sleep(500);
+      process.kill(-server.pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
   }
 
   return failures;
 }
 
-console.log(`SSR smoke test (${USE_DEV ? "next dev" : "next start"}, port ${PORT})`);
+/** The CSP proxy.ts attaches to every response. */
+async function checkContentSecurityPolicy(name, env, base) {
+  const failures = [];
+  const note = message => failures.push(`${name} csp: ${message}`);
+
+  let first;
+
+  try {
+    first = await fetch(base, { signal: AbortSignal.timeout(15000) });
+  } catch(e) {
+    note(`request failed: ${String(e).slice(0, 120)}`);
+    return failures;
+  }
+
+  const header = first.headers.get("content-security-policy");
+
+  if(header === null) {
+    note("no Content-Security-Policy header on the response");
+    return failures;
+  }
+
+  const csp = parseCsp(header);
+  const connectSrc = csp.get("connect-src") ?? [];
+  const scriptSrc = csp.get("script-src") ?? [];
+
+  // the app must be allowed to reach its own backend, or every upload is blocked
+  if(env.ISE_RECORD_API_URL !== undefined &&
+    !connectSrc.some(source => source.startsWith(env.ISE_RECORD_API_URL))) {
+    note(`connect-src does not admit the configured API URL: ${connectSrc.join(" ")}`);
+  }
+
+  // only the provider's origin belongs here, not the realm path
+  if(env.ISE_RECORD_OIDC_URL === undefined) {
+    if(connectSrc.some(source => source.includes("keycloak"))) {
+      note(`connect-src admits an OpenID provider that is not configured: ${connectSrc.join(" ")}`);
+    }
+  } else {
+    const { origin, href } = new URL(env.ISE_RECORD_OIDC_URL);
+
+    if(!connectSrc.includes(origin)) {
+      note(`connect-src does not admit the OpenID provider origin ${origin}: ${connectSrc.join(" ")}`);
+    }
+
+    if(connectSrc.includes(href) || connectSrc.some(source => source.includes("/realms/"))) {
+      note(`connect-src carries the provider path rather than just its origin: ${connectSrc.join(" ")}`);
+    }
+  }
+
+  // silent renew redirects back into an iframe on our own origin
+  const frameAncestors = (csp.get("frame-ancestors") ?? []).join(" ");
+  if(frameAncestors !== "'self'") {
+    note(`frame-ancestors should be 'self', got: ${frameAncestors || "(absent)"}`);
+  }
+
+  const nonces = scriptSrc.filter(source => source.startsWith("'nonce-"));
+  if(nonces.length !== 1) {
+    note(`script-src should carry exactly one nonce, got: ${scriptSrc.join(" ")}`);
+  }
+
+  // a reused nonce is no better than no nonce
+  const second = await fetch(base, { signal: AbortSignal.timeout(15000) });
+  const secondNonces = (parseCsp(second.headers.get("content-security-policy") ?? "")
+    .get("script-src") ?? []).filter(source => source.startsWith("'nonce-"));
+
+  if(nonces[0] !== undefined && nonces[0] === secondNonces[0]) {
+    note(`the same nonce was reused across two requests: ${nonces[0]}`);
+  }
+
+  console.log(`  ${failures.length ? "✗" : "✓"} ${name} csp (${csp.size} directives)`);
+  return failures;
+}
+
+console.log(`SSR smoke test (${USE_DEV ? "next dev" : "next start"}, from port ${BASE_PORT})`);
 
 const failures = [];
-for(const deployment of DEPLOYMENTS) {
-  failures.push(...await checkDeployment(deployment));
+// a port per deployment, so a lingering server can never be mistaken for the next one
+for(const [ index, deployment ] of DEPLOYMENTS.entries()) {
+  failures.push(...await checkDeployment(deployment, BASE_PORT + index));
 }
 
 if(failures.length > 0) {

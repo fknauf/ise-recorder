@@ -102,19 +102,25 @@ test("query components and fragments are rejected", async () => {
     .toBeUndefined();
 });
 
-test("a rejected URL names the variable it came from", async () => {
-  await envFor({ ISE_RECORD_OIDC_URL: "not a url" });
+test("a rejected API URL is reported to the admin", async () => {
+  await envFor({ ISE_RECORD_API_URL: "not a url" });
 
-  // the message used to say API_URL whatever the source, which sent people looking in
-  // the wrong place
   expect(consoleError).toHaveBeenCalledWith(
-    expect.stringContaining("OIDC_URL"),
+    expect.stringContaining("API_URL"),
     "not a url"
   );
-  expect(consoleError).not.toHaveBeenCalledWith(
-    expect.stringContaining("API_URL"),
-    expect.anything()
-  );
+});
+
+test("the OpenID provider URL is passed through unvalidated", async () => {
+  // Validation here would only catch syntactically broken strings, while the mistakes
+  // that actually happen -- wrong host, wrong realm -- are well formed and pass anyway.
+  // Worse, rejecting it silently dropped the deployment to anonymous, which is the wrong
+  // way for an authentication setting to fail. A bad value now surfaces where the user
+  // can see it, as a failed sign-in.
+  const env = await envFor({ ISE_RECORD_OIDC_URL: "not a url" });
+
+  expect(env.oidcProviderUrl).toBe("not a url");
+  expect(consoleError).not.toHaveBeenCalled();
 });
 
 // --- the other fields ------------------------------------------------------
@@ -131,8 +137,74 @@ test("the OIDC settings are passed through", async () => {
   expect(env.oidcMaxAge).toBe(25200);
 });
 
-test("an unset max age stays undefined rather than becoming NaN", async () => {
+test("an empty or unset max age stays undefined rather than becoming NaN", async () => {
   expect((await envFor({})).oidcMaxAge).toBeUndefined();
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "" })).oidcMaxAge).toBeUndefined();
+  expect(consoleError).not.toHaveBeenCalled();
+});
+
+// --- max age validation ----------------------------------------------------
+
+/**
+ * The value is a whole number of seconds. Parsing it leniently is the dangerous option
+ * here: parseInt("29d") is 29, so a plausible-looking "29d" would silently become 29
+ * seconds and demand a fresh login roughly every half minute. Number() is no better --
+ * Number("") is 0, and a max_age of 0 means re-authenticate on every single request.
+ */
+
+test("a plain number of seconds is accepted", async () => {
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "25200" })).oidcMaxAge).toBe(25200);
+  expect(consoleError).not.toHaveBeenCalled();
+});
+
+test("surrounding whitespace is tolerated", async () => {
+  // a stray space in a .env or compose file should not disable staleness checking
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: " 25200 " })).oidcMaxAge).toBe(25200);
+  expect(consoleError).not.toHaveBeenCalled();
+});
+
+test("a duration suffix is rejected rather than silently truncated", async () => {
+  // the motivating case: "29d" must not quietly become 29 seconds
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "29d" })).oidcMaxAge).toBeUndefined();
+
+  expect(consoleError).toHaveBeenCalledWith(
+    expect.stringContaining("max_age"),
+    "29d"
+  );
+});
+
+test("a fractional value is rejected", async () => {
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "29.5" })).oidcMaxAge).toBeUndefined();
+});
+
+test("notations that are numbers to JavaScript but not to an admin are rejected", async () => {
+  // Number() would read these as 1000 and 31; neither is what anyone typed on purpose
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "1e3" })).oidcMaxAge).toBeUndefined();
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "0x1F" })).oidcMaxAge).toBeUndefined();
+});
+
+test("zero and negative values are rejected", async () => {
+  // max_age=0 is legal OIDC and means "re-authenticate on every request", which would
+  // make the app unusable. Far more likely a mistake than an intention.
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "0" })).oidcMaxAge).toBeUndefined();
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "-300" })).oidcMaxAge).toBeUndefined();
+});
+
+test("a non-numeric value is rejected", async () => {
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "seven hours" })).oidcMaxAge)
+    .toBeUndefined();
+});
+
+test("a rejected max age disables staleness checking rather than failing the boot", async () => {
+  // the fallback is indistinguishable from "no max age configured" once the process is
+  // running, so the console message is the only signal the admin gets
+  const env = await envFor({
+    ISE_RECORD_OIDC_URL: "http://keycloak.localhost:8080/realms/ise",
+    ISE_RECORD_OIDC_MAX_AGE: "29d"
+  });
+
+  expect(env.oidcProviderUrl).toBe("http://keycloak.localhost:8080/realms/ise");
+  expect(env.oidcMaxAge).toBeUndefined();
 });
 
 test("the version is only exposed when explicitly enabled", async () => {
