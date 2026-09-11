@@ -14,6 +14,7 @@ import { useMediaDevices } from "../hooks/useMediaDevices";
 import { useLecture } from "../hooks/useLecture";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { ActiveRecording } from "../store/store";
+import { useMediaTracks } from "../hooks/useMediaTracks";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -28,6 +29,9 @@ function RecordButton() {
   // to the "Stop recording" button the "I'm working" signal disappears even though the user just told the system to start working.
   // So in that case we just disable the button to prevent stop signals from being sent before we're in a state to process them.
   const activeRecording = useActiveRecording();
+  const mediaTracks = useMediaTracks();
+
+  const noTracksConfigured = mediaTracks.displayTracks.length + mediaTracks.videoTracks.length + mediaTracks.audioTracks.length === 0;
 
   const {
     startRecording,
@@ -37,7 +41,7 @@ function RecordButton() {
   switch(activeRecording.state) {
     case "idle":
       return (
-        <ActionButton onPress={startRecording}>
+        <ActionButton onPress={startRecording} isDisabled={noTracksConfigured}>
           <Circle/>
           <Text>Start Recording</Text>
         </ActionButton>

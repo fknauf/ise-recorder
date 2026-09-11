@@ -7,12 +7,27 @@ import { useServerEnv } from "@/lib/hooks/useServerEnv";
 import { useLecture } from "@/lib/hooks/useLecture";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
 import { useMediaDevices } from "@/lib/hooks/useMediaDevices";
+import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
 import { ActiveRecording } from "@/lib/store/store";
 
 vi.mock("@/lib/hooks/useServerEnv");
 vi.mock("@/lib/hooks/useLecture");
 vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useMediaDevices");
+vi.mock("@/lib/hooks/useMediaTracks");
+
+/**
+ * A track, as far as this component is concerned: it only ever counts them. Building real
+ * ones through canvas.captureStream would cost a working media pipeline per test for no
+ * extra coverage.
+ */
+const aTrack = () => ({}) as MediaStreamTrack;
+
+interface ConfiguredTracks {
+  displayTracks?: MediaStreamTrack[]
+  videoTracks?: MediaStreamTrack[]
+  audioTracks?: MediaStreamTrack[]
+}
 
 function setupMockHooks(
   apiUrl: string | undefined,
@@ -20,7 +35,10 @@ function setupMockHooks(
   lecturerEmail: string,
   videoDevices: MediaDeviceInfo[],
   audioDevices: MediaDeviceInfo[],
-  activeRecording: ActiveRecording
+  activeRecording: ActiveRecording,
+  // defaults to something recordable: these tests are about the other controls, and an
+  // empty default would silently disable the start button underneath all of them
+  tracks: ConfiguredTracks = { displayTracks: [ aTrack() ] }
 ) {
   const setLectureTitle = vi.fn();
   const setLecturerEmail = vi.fn();
@@ -47,6 +65,17 @@ function setupMockHooks(
   vi.mocked(useStartStopRecording).mockReturnValue({
     startRecording,
     stopRecording
+  });
+
+  vi.mocked(useMediaTracks).mockReturnValue({
+    displayTracks: tracks.displayTracks ?? [],
+    videoTracks: tracks.videoTracks ?? [],
+    audioTracks: tracks.audioTracks ?? [],
+    mainDisplay: undefined,
+    overlay: undefined,
+    selectMainDisplay: vi.fn(),
+    selectOverlay: vi.fn(),
+    removeTrack: vi.fn()
   });
 
   vi.mocked(useMediaDevices).mockReturnValue({
@@ -459,4 +488,49 @@ test("RecorderControls handles lecture metadata", async () => {
   expect(callbacks.openVideoStream).not.toHaveBeenCalled();
   expect(callbacks.startRecording).not.toHaveBeenCalled();
   expect(callbacks.stopRecording).not.toHaveBeenCalled();
+});
+
+// --- there has to be something to record -----------------------------------
+
+/**
+ * recordLecture short-circuits on an empty track bundle without telling anyone, so a
+ * press with nothing configured used to look like a dead button. Disabling it makes the
+ * precondition visible instead.
+ */
+
+const startButton = async () => await screen.findByRole("button", { name: /Start Recording/ });
+
+const renderIdleWith = (tracks: ConfiguredTracks) => {
+  setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "idle" },
+    tracks
+  );
+
+  render(
+    <Provider theme={defaultTheme}>
+      <RecorderControls/>
+    </Provider>
+  );
+};
+
+test("RecorderControls disables start when nothing is configured", async () => {
+  renderIdleWith({});
+
+  expect(await startButton()).toBeDisabled();
+});
+
+test.each([
+  [ "a screen capture", { displayTracks: [ aTrack() ] } ],
+  [ "a camera", { videoTracks: [ aTrack() ] } ],
+  [ "a microphone alone", { audioTracks: [ aTrack() ] } ]
+])("RecorderControls enables start with %s", async (_label, tracks) => {
+  // an audio-only recording is a legitimate lecture, so any single track counts
+  renderIdleWith(tracks);
+
+  expect(await startButton()).toBeEnabled();
 });
