@@ -65,10 +65,12 @@ export default defineConfig({
   test: {
     projects: [
       {
-        // the application suite, in real browsers
+        // The application suite, in real browsers. Each instance is a project of its own
+        // and names itself: without that, vitest derives the name from this project's --
+        // "browser (chromium)", or "0 (chromium)" when it is unnamed. CI runs the browsers
+        // in separate steps and filters on these names.
         extends: true,
         test: {
-          name: "browser",
           browser: {
             provider: playwright(),
             enabled: true,
@@ -76,6 +78,7 @@ export default defineConfig({
             ui: false,
             instances: [
               {
+                name: "chromium",
                 browser: "chromium",
                 viewport: {
                   width: 1920,
@@ -83,6 +86,7 @@ export default defineConfig({
                 }
               },
               {
+                name: "firefox",
                 browser: "firefox",
                 viewport: {
                   width: 1920,

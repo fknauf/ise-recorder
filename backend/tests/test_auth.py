@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 import jwt
 import pytest
 
+from ise_record import auth
 from ise_record.auth import user_home_dir
 from ise_record.server import create_app
 from ise_record.settings import OidcSettings, SAFE_NAME_REGEX, Settings
@@ -156,6 +157,19 @@ def client(settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 
+@pytest.fixture
+def instant_jwks_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Let an unknown kid refetch the key set immediately, instead of after the cooldown.
+
+    Rotation takes milliseconds here and half a minute in production, so without this a
+    rotation test would only be measuring PyJWKClient's rate limit. The cooldown is read
+    when the client is constructed, which is when the app starts up -- request this
+    fixture ahead of `client` so it is patched by then.
+    """
+    monkeypatch.setattr(auth, "JWKS_REFRESH_COOLDOWN_SECONDS", 0.0)
+
+
 def upload(client: TestClient, token: Optional[str], index: int = 0):
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return client.post(
@@ -250,7 +264,11 @@ def test_unknown_kid_is_rejected(client: TestClient, provider: Provider):
 
 # --- operational behaviour -------------------------------------------------
 
-def test_rotated_signing_key_is_picked_up_without_restart(client: TestClient, provider: Provider):
+def test_rotated_signing_key_is_picked_up_without_restart(
+    instant_jwks_refresh: None,  # pylint: disable=unused-argument
+    client: TestClient,
+    provider: Provider,
+):
     assert upload(client, provider.mint(), index=0).status_code == 201
 
     # The provider rotates: a new key appears and the old one is withdrawn.

@@ -49,7 +49,7 @@ jobs:
     - name: Test Frontend (Chromium)
       working-directory: ${{ github.workspace }}/frontend
       run: |
-        npm run test -- --project chromium
+        npm run test -- --project chromium --project build
 
     - name: Test Frontend (Firefox)
       if: runner.environment == 'github-hosted'

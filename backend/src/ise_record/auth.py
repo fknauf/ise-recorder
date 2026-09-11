@@ -26,6 +26,7 @@ security_scheme = HTTPBearer(auto_error=False)
 ANONYMOUS_HOME = "."
 REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub", "scope")
 JWKS_CACHE_SECONDS = 1800.0
+JWKS_REFRESH_COOLDOWN_SECONDS = 30.0
 
 INSECURE_ALGORITHMS = frozenset({"none", "hs256", "hs384", "hs512"})
 
@@ -67,6 +68,7 @@ async def discover_oidc_config(settings: Settings) -> OidcConfiguration:
         jwks_uri,
         cache_jwk_set=True,
         lifespan=JWKS_CACHE_SECONDS,
+        cooldown_duration=JWKS_REFRESH_COOLDOWN_SECONDS,
         timeout=settings.oidc.http_timeout_seconds,
     )
 
