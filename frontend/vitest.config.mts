@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { transformAsync } from "@babel/core";
+import { fileURLToPath } from "node:url";
 import { isCompilableSource, reactCompilerOptions } from "./scripts/reactCompiler.mjs";
 import { playwright } from "@vitest/browser-playwright";
 import { listenForFileDownload } from "./__tests__/command-download.mjs";
@@ -49,12 +50,16 @@ function reactCompiler(): Plugin {
 
 export default defineConfig({
   resolve: {
-    tsconfigPaths: true
+    tsconfigPaths: true,
+    alias: {
+      // see the stub for why this is safe
+      "server-only": fileURLToPath(new URL("./__tests__/stubs/server-only.ts", import.meta.url))
+    }
   },
   optimizeDeps: {
     // react/compiler-runtime needs to be pulled in manually because vitest scans the code
     // for deps before it's compiled, when it doesn't depend on react/compiler-runtime yet.
-    include: [ "next/server", "validator/es/lib/isURL", "validator/es/lib/isInt", "react/compiler-runtime" ]
+    include: [ "next/server", "validator/es/lib/isURL", "validator/es/lib/isInt", "react/compiler-runtime", "react-dom/server" ]
   },
   plugins: [ reactCompiler(), react() ],
   test: {

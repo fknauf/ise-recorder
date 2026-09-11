@@ -232,14 +232,18 @@ test("streaming is not impeded when auth is not required, whatever the session s
 
 // --- state machine ---------------------------------------------------------
 
-test("the recorder walks idle -> starting -> recording -> idle", async () => {
+test("the recorder walks idle -> preparing -> starting -> recording -> idle", async () => {
   const tokenSource = makeTokenSource(true, undefined, "expired");
   const { result } = renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
   const stop = vi.fn();
 
-  expect(result.current.activeRecording.state).toBe("idle");
+  // "preparing" is claimed synchronously, before expandSessionHeadroom is awaited, so a
+  // second press during that await sees a non-idle state and bails. The recording has no
+  // name yet -- recordLecture has not been reached -- and nothing is on disk to protect.
+  expect(result.current.activeRecording.state).toBe("preparing");
+  expect(result.current.activeRecording.name).toBeUndefined();
 
   await act(async () => {
     await call.onStarting("REC_1");
@@ -346,9 +350,36 @@ test("stopRecording stops the recording and moves to stopping", async () => {
   expect(result.current.activeRecording.name).toBe("REC_1");
 });
 
+test("a stopRecording captured before the recording began still stops it", async () => {
+  // The reason stopRecording reads the store through getStoreState() rather than using
+  // the activeRecording captured at render: it can be called from a closure taken before
+  // the recording existed -- an async path, a timer, an event handler bound early. A
+  // render-time capture would see "idle" there and refuse to stop, stranding the
+  // recording with no way to end it.
+  const { result } = renderRecorder(makeTokenSource(false, undefined));
+
+  // taken while still idle, and deliberately not re-read afterwards
+  const stopTakenWhileIdle = result.current.stopRecording;
+
+  const call = await startAndCapture(result.current.startRecording);
+  const stop = vi.fn();
+
+  await act(async () => {
+    await call.onStarting("REC_1");
+    await call.onStarted("REC_1", stop);
+  });
+
+  act(() => {
+    stopTakenWhileIdle();
+  });
+
+  expect(stop).toHaveBeenCalledOnce();
+  expect(result.current.activeRecording.state).toBe("stopping");
+});
+
 test("stopRecording is a no-op when nothing is being recorded", () => {
   // The hook warns on this path deliberately, so silence it here rather than letting
-  // it litter the suite output -- and assert it, since the warning is the behaviour.
+  // it litter the suite output -- and assert it, since the warning is the behavior.
   const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   try {
@@ -367,6 +398,23 @@ test("stopRecording is a no-op when nothing is being recorded", () => {
 
 // --- failure ---------------------------------------------------------------
 
+test("pressing start twice before the session check resolves records once", async () => {
+  // The guard reads the store, but until "preparing" is claimed the store still says
+  // "idle" for the whole duration of the expandSessionHeadroom await -- which can be a
+  // silent sign-in lasting seconds, while the button stays enabled. Both presses used to
+  // get through, producing two recordings writing two sets of files.
+  const { result } = renderRecorder(makeTokenSource(false, undefined));
+
+  await act(async () => {
+    void result.current.startRecording();
+    void result.current.startRecording();
+  });
+
+  await waitFor(() => expect(captured).toBeDefined());
+
+  expect(vi.mocked(recordLecture)).toHaveBeenCalledOnce();
+});
+
 test("a failing recording is reported to the user", async () => {
   const failure = new Error("no media for you");
   vi.mocked(recordLecture).mockRejectedValue(failure);
@@ -378,5 +426,10 @@ test("a failing recording is reported to the user", async () => {
   });
 
   expect(vi.mocked(showError)).toHaveBeenCalledWith("Recording failed", failure);
+
+  // recordLecture can reject before onStarting ever runs -- no media, a getUserMedia
+  // denial, an OPFS failure -- and nothing else resets the state on that path. Left at
+  // "preparing" the UI is wedged: a permanently disabled "Stop Recording" button, every
+  // track control locked by state !== "idle", and no way back except a page reload.
   expect(result.current.activeRecording.state).toBe("idle");
 });

@@ -72,7 +72,7 @@ async def upload_chunk(
     index_limit = 10 ** settings.chunk_file_digits
     if upload.index >= index_limit:
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Lecture has been going on too long. "
                 f"Attempted to store {upload.index} chunks (max = {index_limit})"
@@ -154,7 +154,7 @@ def schedule_job(
 
     if not os.path.isdir(settings.destdir / user / job.recording):
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
-        raise HTTPException(status_code=400, detail=f'Recording {job.recording} does not exist')
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Recording {job.recording} does not exist')
 
     background_tasks.add_task(_postprocessing_task, job, settings, user)
 

@@ -7,7 +7,7 @@ import { gatherRecordingsList, RecordingFileList } from "../utils/browserStorage
 import { StateCreator } from "zustand";
 
 export type ActiveRecording = {
-  state: "idle"
+  state: "idle" | "preparing"
   name?: undefined
 } | {
   state: "starting" | "stopping"
@@ -100,6 +100,11 @@ export interface AppStoreState {
   usage: number | undefined
   staleSession: boolean
 
+  // For use in async functions and event handlers, when the store value might change between
+  // invocation of the hook that provides the handler and invocation of the handler. Returned
+  // value must be treated as read-only.
+  selectFromStore: <T>(selector: (state: AppStoreState) => T) => T
+
   setLectureTitle: (lectureTitle: string) => void
   setLecturerEmail: (lecturerEmail: string) => void
   setObtainedDevicePermissions: () => void
@@ -126,7 +131,7 @@ const unselectTrack = (state: AppStoreState, track: MediaStreamTrack): Partial<A
 
 const createRawAppStore = (
   serverEnv: ServerEnv
-): StateCreator<AppStoreState, [], [], AppStoreState> => set => ({
+): StateCreator<AppStoreState, [], [], AppStoreState> => (set, get) => ({
   serverEnv,
   lectureTitle: "",
   lecturerEmail: "",
@@ -145,6 +150,8 @@ const createRawAppStore = (
   quota: undefined,
   usage: undefined,
   staleSession: false,
+
+  selectFromStore: selector => selector(get()),
 
   setLectureTitle: lectureTitle => set({ lectureTitle }),
   setLecturerEmail: lecturerEmail => set({ lecturerEmail }),

@@ -15,8 +15,7 @@ function preventClosing(e: BeforeUnloadEvent) {
 export const useActiveRecording = () => useAppStore(state => state.activeRecording);
 
 export function useStartStopRecording() {
-  const activeRecording = useActiveRecording();
-
+  const selectFromStore = useAppStore(state => state.selectFromStore);
   const setActiveRecording = useAppStore(state => state.setActiveRecording);
   const resetFileSizeOverrides = useAppStore(state => state.resetFileSizeOverrides);
   const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
@@ -41,16 +40,19 @@ export function useStartStopRecording() {
   } = useAccessTokenSource();
 
   const startRecording = async () => {
+    const activeRecording = selectFromStore(state => state.activeRecording);
     if(activeRecording.state !== "idle") {
       return;
     }
 
+    setActiveRecording({ state: "preparing" });
     const sessionState = await expandSessionHeadroom();
 
     if(sessionState === "renewed") {
       // user just had to re-login. This happens rarely, so user is now slightly confused,
       // which we don't want to record. Let him press the button again so he knows exactly
       // where the recording starts.
+      setActiveRecording({ state: "idle" });
       return;
     }
 
@@ -102,22 +104,19 @@ export function useStartStopRecording() {
       );
     } catch(e) {
       showError("Recording failed", e);
+      setActiveRecording({ state: "idle" });
     }
   };
 
   const stopRecording = () => {
-    setActiveRecording(prev => {
-      if(prev.state !== "recording") {
-        console.warn("attempted to stop recording while recorder wasn't recording");
-        return prev;
-      }
+    const current = selectFromStore(state => state.activeRecording);
 
-      prev.stop();
-      return {
-        ...prev,
-        state: "stopping"
-      };
-    });
+    if(current.state === "recording") {
+      current.stop();
+      setActiveRecording({ name: current.name, state: "stopping" });
+    } else {
+      console.warn("attempted to stop recording while recorder wasn't recording");
+    }
   };
 
   return {

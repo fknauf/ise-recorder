@@ -36,7 +36,7 @@ async function sessionStaleness(
   userMgr: UserManager,
   maxAge: number | undefined
 ): Promise<Staleness> {
-  const user = await userMgr.getUser();
+  const user = await userMgr.getUser().catch(() => null);
 
   if(user === null) {
     return { stale: true };
@@ -90,9 +90,11 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 
   const onSigninCallback = useCallback(() => router.replace("/"), [router]);
 
+  // clean up userMgr when the component is unmounted. Library does not handle it for us.
   useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
 
   useEffect(() => {
+    // set a timer that fires when the session goes past max_age
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
 
@@ -111,11 +113,13 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
       }
     };
 
+    // set event handlers that reset the timer when the session age changes or we're unsure of our clock
     check();
     userMgr.events.addUserLoaded(check);
     userMgr.events.addUserUnloaded(check);
     document.addEventListener("visibilitychange", check);
 
+    // make sure all this is cleaned up when the component is unmounted
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", check);
@@ -143,7 +147,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
       } catch(e) {
         console.warn("Failed to reauthenticate stale oidc session, continuing with existing session", e);
 
-        const existing = await userMgr.getUser();
+        const existing = await userMgr.getUser().catch(() => null);
 
         if(existing === null || existing.expired) {
           return "expired";

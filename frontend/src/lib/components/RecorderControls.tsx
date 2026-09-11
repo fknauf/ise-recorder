@@ -43,6 +43,7 @@ function RecordButton() {
         </ActionButton>
       );
     case "starting":
+    case "preparing":
       return (
         <ActionButton isDisabled>
           <Stop/>

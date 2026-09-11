@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
-import { showError } from "@/lib/utils/notifications";
+import { showError, showSuccess } from "@/lib/utils/notifications";
 
 interface FetchRequest {
   url: string | URL | Request
@@ -233,6 +233,10 @@ test("schedule postprocessing", async () => {
 
   const requestBody = JSON.parse(fetchRequest.data?.body as string);
   expect(requestBody).toStrictEqual({ recording: "FOO", recipient: "lecturer@example.com" });
+
+  // the confirmation is the only sign the lecturer gets that postprocessing was accepted
+  expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining("FOO"));
+  expect(vi.mocked(showError)).not.toHaveBeenCalled();
 });
 
 test("schedule postprocessing to flaky server", async () => {
@@ -431,4 +435,118 @@ test("postprocessing request requests a fresh access token for every attempt", a
     "Content-Type": "application/json",
     "Authorization": "Bearer test-token-2"
   });
+});
+
+// --- which failures are worth retrying ------------------------------------
+
+/**
+ * Retrying is deliberately aggressive: losing a lecture chunk is worse than hammering a
+ * backend that only ever serves one lecture at a time. But a response that says the
+ * request itself is wrong will say the same thing ten times, and the whole retry budget
+ * is spent before the user is told anything. Worse, the budget is spent *per chunk*, so
+ * a misconfigured apiUrl turns every five-second timeslice into twenty seconds of
+ * pointless traffic for the length of the lecture.
+ */
+
+const brokenServerResponding = (status: number) => {
+  const requests: FetchRequest[] = [];
+
+  window.fetch = vi.fn()
+    .mockImplementation(async (url: string | URL | Request, data?: RequestInit): Promise<Response> => {
+      requests.push({ url, data });
+      return Response.json("", { status });
+    });
+
+  return requests;
+};
+
+const brokenDestination: ServerStorageDestination = {
+  apiUrl: "http://record.example.com",
+  streamingImpeded: false,
+  getAccessToken: accessToken
+};
+
+const chunkOf = () => new Blob([ "Hello, world." ], { type: "text/plain" });
+
+test.each([ 400, 404, 422 ])("a chunk rejected with %i is not retried", async status => {
+  useRetryClock();
+
+  const requests = brokenServerResponding(status);
+
+  await settleRetries(
+    sendChunkToServer(brokenDestination, chunkOf(), "FOO", "stream.webm", 42, { retries: 3, intervalMillis: 50 })
+  );
+
+  // one attempt, no backoff: the server has said the request is malformed, and it will
+  // still be malformed in fifty milliseconds
+  expect(requests.length).toBe(1);
+  expect(vi.mocked(showError)).toHaveBeenCalled();
+});
+
+test.each([ 401, 403, 500, 502, 503 ])("a chunk rejected with %i is retried", async status => {
+  useRetryClock();
+
+  const requests = brokenServerResponding(status);
+  const before = Date.now();
+
+  await settleRetries(
+    sendChunkToServer(brokenDestination, chunkOf(), "FOO", "stream.webm", 42, { retries: 3, intervalMillis: 50 })
+  );
+
+  // 401 in particular has to stay retryable: it is plausibly an auth server restart, and
+  // the retry window gives the token time to be renewed
+  expect(requests.length).toBe(4);
+  expect(Date.now() - before).toBe(150);
+});
+
+test("a network failure is retried, since it says nothing about the request", async () => {
+  useRetryClock();
+
+  const attempts: number[] = [];
+
+  window.fetch = vi.fn().mockImplementation(async () => {
+    attempts.push(Date.now());
+    throw new TypeError("Failed to fetch");
+  });
+
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    await settleRetries(
+      sendChunkToServer(brokenDestination, chunkOf(), "FOO", "stream.webm", 42, { retries: 3, intervalMillis: 50 })
+    );
+
+    expect(attempts.length).toBe(4);
+  } finally {
+    consoleWarn.mockRestore();
+  }
+});
+
+test.each([ 400, 404, 422 ])("postprocessing rejected with %i is not retried", async status => {
+  useRetryClock();
+
+  const requests = brokenServerResponding(status);
+
+  await settleRetries(schedulePostprocessing(brokenDestination, "FOO", "lecturer@example.com"));
+
+  expect(requests.length).toBe(1);
+  expect(vi.mocked(showError)).toHaveBeenCalled();
+  expect(vi.mocked(showSuccess)).not.toHaveBeenCalled();
+});
+
+test("a permanent failure still reports the server's explanation", async () => {
+  useRetryClock();
+
+  window.fetch = vi.fn()
+    .mockImplementation(async () => new Response("recording name is not acceptable", { status: 422 }));
+
+  await settleRetries(
+    sendChunkToServer(brokenDestination, chunkOf(), "FOO", "stream.webm", 42, { retries: 3, intervalMillis: 50 })
+  );
+
+  // giving up early must not cost the diagnosis: without the body the user sees a bare
+  // status code for a mistake only the message explains
+  expect(vi.mocked(showError)).toHaveBeenCalledWith(
+    expect.stringContaining("recording name is not acceptable")
+  );
 });

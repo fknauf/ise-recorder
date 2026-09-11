@@ -24,24 +24,26 @@ Admin --_> (Configure\npostprocessing)
 
 ### UC1: Record Lecture
 
-1. User inputs lecture title and postprocessing-completion notification email
+1. System displays the main page.
+    - Alternative: System redirects user to the configured OpenID-Connect login page, user logs in, system then displays the main page.
+2. User inputs lecture title and postprocessing-completion notification email
     - Alternative: Title and email are remembered from previous use
     - Alternative: No postprocessing backend is configured, notification email input field is not shown
-2. User adds the slide stream
+3. User adds the slide stream
     - User clicks the "Add Slides" button
     - The system shows a dialog in which the user can select a window or screen to capture.
     - User selects an input source
     - The system shows a preview for the selected stream. If no main display is selected yet, the stream is selected as main display.
-3. User adds the overlay stream
+4. User adds the overlay stream
     - User clicks either "Add Video" or "Add Audio"
     - Browser asks permission to access media devices. This allows selecting a camera and microphone.
     - Both the selected camera and microphone are added as streams and shown as previews. If no overlay is selected yet, the camera stream is selected as overlay.
-4. User adds another microphone
+5. User adds another microphone
     - User clicks "Add Audio"
     - System shows a drop down menu listing the available microphones
     - User selects the desired microphone
     - System shows the stream from the microphone alongside the other previews (as audio spectrum)
-5. User records a lecture
+6. User records a lecture
     - User clicks "Start Recording"
     - System relabels the "Start Recording" button to "Stop Recording"
     - System disables lecture title, notification email input boxes, add slides/video/audio buttons, main/overlay selection toggles, and remove buttons under previews
@@ -68,6 +70,12 @@ Admin --_> (Configure\npostprocessing)
 ### UC4: Configure postprocessing backend
 
 - Admin sets `ISE_RECORD_API_URL` environment variable to the backend endpoint URL during deployment
+- Admin configures the use of his OpenID backend (see section below)
+- System asks user to authenticate upon first access
+- System displays a message warning the user that the session is about to expire and offering to reauthenticate when the session is past max_age
+- System will, if the user starts a recording while the session is past max_age, require the user to reauthenticate
+    - This is to ensure that the user always has more than the expected length of a recording left in the session
+    - max_age should be configured so that session length - max_age > max expected recording length
 - System shows the notification email address input field, streams to postprocessing and schedules postprocessing jobs upon completion
 - Alternative: Admin leaves `ISE_RECORD_API_URL` empty. Notification email address input field is not shown, streaming not attempted, and postprocessing not scheduled.
 
@@ -103,6 +111,7 @@ There are four main subsystems in the application code:
 | Views | Display and user interaction | `src/app`, `src/lib/components` |
 | Hooks | State access and action logic | `src/lib/hooks` |
 | Utility functions | Application logic not concerned with UI updates | `src/lib/utils` |
+| HTTP response | Content Security Policy | `src/proxy.ts` |
 
 ## Application State (Store)
 
@@ -123,6 +132,7 @@ classDiagram
         boolean obtainedDevicePermissions
         number? quota
         number? usage
+        boolean staleSession
     }
     AppStoreState *--> "1" ServerEnv: serverEnv
     AppStoreState --> "*" MediaDeviceInfo: videoDevices
@@ -140,6 +150,9 @@ classDiagram
     class ServerEnv {
         string? version
         string? apiUrl
+        string? oidcProviderUrl
+        string? oidcClientId
+        number? oidcMaxAge
     }
 
     class ActiveRecording {
@@ -151,6 +164,7 @@ classDiagram
     class RecorderState {
         <<Enumeration>>
         idle
+        preparing
         starting
         recording
         stopping
@@ -183,6 +197,7 @@ The state broadly covers the following tasks:
 | `savedRecordings` | list of finished recordings as present in the OPFS, i.e. without adjustments from `fileSizeOverrides` |
 | `adjustedSavedRecordings` | `savedRecordings` with adjustments from `fileSizeOverrides`. Displayed in the UI. |
 | `usage`, `quota` | displayed in the quota warning, and determines if that warning is shown |
+| `staleSession` | indicates that the authentication session is past the configured max_age |
 
 The state is modified through a number of supplied mutation functions that guarantee state consistency. In particular:
 
@@ -198,7 +213,7 @@ At present, ISE-Recorder is a single-page application. The UI is split into the 
 block
 columns 4
 controls["RecorderControls"]:3 ghlink["GithubLink"]
-quota["QuotaWarning"]:4
+quota["QuotaWarning"]:2 auth_status["AuthStatusMessage"]:2
 previews["PreviewSection (contains VideoPreview and AudioPreview)"]:4
 recordings["SavedRecordingsSection"]:4
 ```
@@ -208,6 +223,7 @@ recordings["SavedRecordingsSection"]:4
 | `RecorderControls` | Top-of-page recording controls: Buttons to add streams, start/stop recording, input fields to configure lecture title and notification email |
 | `GithubLink` | Link to this project's github page |
 | `QuotaWarning` | Shown when in-browser space for recordings runs low |
+| `AuthStatusMessage` | Shown when the authentication session is loading, stale, or an error occurred |
 | `PreviewSection` | Shows configured tracks to the user; user can configure main and overlay tracks or remove unwanted tracks |
 | `VideoPreview` | Preview of a configured video or screen capture stream, with controls to select main and overlay streams |
 | `AudioPreview` | Displays the spectrum of the captured audio stream, so the user can easily identify whether the captured device is actually capturing sound. |
@@ -238,6 +254,7 @@ separated from UI updates, and that's largely the purpose of the hook/utility sp
 | `useMediaDevices` | provides the list of audio and video devices and actions to refresh that list and open media tracks from a device |
 | `useMediaTracks` | provides the list of open tracks, which of those are selected as main and overlay, and actions to select main and overlay track or close a track. These actions will only work when the application is not recording. |
 | `useServerEnv` | provides the server-side configuration (no actions) |
+| `useAccessTokenSource` | provides functions concerning the authentication state, i.e. current access token retrieval and session headroom expansion, along with the information whether authentication is required at all. |
 
 ## Utilities
 
@@ -301,27 +318,35 @@ While a recording is underway, the UI state needs to be managed to
   a recording while one is already underway
 - update the so-far recorded size of the active recording
 
-This is done in a way that cleanly separates recording and UI logic. To this end, we define the following recorder states:
+This is done in a way that cleanly separates recording and UI logic. To this end, we define the following recorder states
+(excluding error-case transitions):
 
 ```mermaid
 stateDiagram-v2
 direction LR
 [*] --> idle
-idle --> starting
+idle --> preparing
+preparing --> starting
+preparing --> idle
 starting --> recording
 recording --> stopping
 stopping --> idle
 ```
 
-Of the, "starting" and "stopping" are transient and usually only active for a fraction of a second, although a slow-responding
-postprocessing backend can keep the UI in the "stopping" state for longer in exceptional cases. The "starting" state is mostly there
-to prevent double-starts of recordings in response to double-clicks by the user.
+Of the, "preparing", "starting" and "stopping" are transient and usually only active for a fraction of a second, although a
+slow-responding postprocessing backend can keep the UI in the "stopping" state for longer in exceptional cases. The "preparing"
+state covers the refreshing of authentication tokens before the start of the recording, such that their expiry is as far into
+the future as the OIDC provider allows. If at this point the session is past max_age, the user will be asked to reauthenticate,
+and the application drops back to "idle", otherwise it moves on to "starting". The "preparing" and "starting" states exists
+mostly to prevent double-starts of recordings in response to double-clicks by the user.
 
 The mechanism for UI updates during recording are four callback functions, passed from the `useActiveRecording` hook into the
 recording utility function and called at state transitions or in response to arriving media chunks.
 
-- At the idle -> starting transition, large parts of the UI are disabled and the `beforeunload` event arrested to prevent accidental
-  closing of the application during an active recording. The "Start Recording" button is relabeled "Stop Recording" and disabled.
+- At the idle -> preparing transition, large parts of the UI are disabled. The "Start Recording" button is relabeled "Stop Recording"
+  and disabled. If the session is stale, the user is asked to reauthenticate and the state reset to "idle".
+- At the preparing -> starting transition, the `beforeunload` event is arrested to prevent accidental closing of the application
+  during an active recording.
 - At the starting -> recording transition, the "Stop Recording button" is re-enabled and the new recording first shown in the
   list of recordings (with disabled download/remove buttons and size 0)
 - in response to media chunks arriving, the file sizes of the new recording are updated
@@ -330,3 +355,38 @@ recording utility function and called at state transitions or in response to arr
 - At the stopping -> idle transition, the UI is re-enabled, the "Stop Recording" button relabeled "Start Recording", the `beforeunload`
   event reset to default behavior, the now finished recording has its buttons enabled, and its file size information is read
   from the OPFS instead of the file size override map (which is reset).
+
+## Authentication
+
+### Administration
+
+An authentication backend can be configured through the environment variables
+
+| Variable | Example | Meaning |
+| - | - | - |
+| `ISE_RECORD_OIDC__URL`      | `https://auth.example.edu/realms/ise` | URL of the OpenID Connect provider |
+| `ISE_RECORD_OIDC_CLIENT_ID` | `ise-recorder`                        | Client-ID as configured in the OIDC provider |
+| `ISE_RECORD_OIDC_MAX_AGE`   | `79200`                               | OIDC max_age in seconds |
+
+Sessions past `ISE_RECORD_OIDC_MAX_AGE` will be considered stale, i.e. ise-recorder will not assume that there is enough time left
+before its expiry to record a full lecture. My recommendation is to configure the OpenID client with long session lengths
+and max_age - something like 8-day sessions and 7-day max_age - but that'll depend on your security needs and paranoia level.
+
+ISE-Recorder will query the `openid`, `profile`, and `email` scopes.
+
+### Technical Implementation
+
+The implementation is based on `react-oidc-context`, which uses `oidc-client-ts`, so most of the work is done in a library. The main wrinkles
+for ise-recorder are
+
+- support for not requiring authentication at all
+- the need to ensure that the user will not be asked to reauthenticate mid-recording
+
+The former is the reason that `AccessTokenSourceProvider` exists: this wraps `react-oidc-context`'s `AuthProvider` if authentication is required
+and provides a dummy interface that says "user is authenticated and will be forever" otherwise.
+
+The latter requires some extra plumbing in `useAccessTokenSource.tsx`:
+
+- a timer that fires when the authentication session goes past max_age and toggles `staleSession` in the store
+- event handlers that reset that timer when an event that changes the session length occurs
+- a function to explicitly refresh tokens and force the user to re-authenticate if the session is stale.

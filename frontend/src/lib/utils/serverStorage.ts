@@ -2,8 +2,10 @@
 
 import { showError, showMessage, showSuccess } from "./notifications";
 
+type CallStatus = "ok" | "temp-fail" | "permanent-fail";
+
 interface CallResult {
-  ok: boolean
+  status: CallStatus
   errorMessage?: string
 }
 
@@ -24,7 +26,7 @@ async function callWithRetries(
 ): Promise<CallResult> {
   let result = await fn();
 
-  for(let attempt = 0; !result.ok && attempt < retries; ++attempt) {
+  for(let attempt = 0; result.status === "temp-fail" && attempt < retries; ++attempt) {
     await new Promise(resolve => setTimeout(resolve, intervalMillis));
     result = await fn();
   }
@@ -53,13 +55,16 @@ async function sendRequest(
     const response = await fetch(url, authorizedRequest);
 
     if(response.ok) {
-      return { ok: true };
+      return { status: "ok" };
     }
 
-    return { ok: false, errorMessage: `server responded ${response.status}, ${await response.text()}` };
+    const permanentFailureCodes = [ 400, 404, 422 ];
+    const status: CallStatus = permanentFailureCodes.includes(response.status) ? "permanent-fail" : "temp-fail";
+
+    return { status, errorMessage: `server responded ${response.status}, ${await response.text()}` };
   } catch(e) {
     console.warn("Error occurred when fetching", url, e);
-    return { ok: false, errorMessage: e instanceof Error ? e.message : "unknown error" };
+    return { status: "temp-fail", errorMessage: e instanceof Error ? e.message : "unknown error" };
   }
 }
 
@@ -90,7 +95,7 @@ export async function sendChunkToServer(
 
   const result = await callWithRetries(() => sendRequest(chunkUrl, request, destination.getAccessToken), retryPolicy);
 
-  if(!result.ok) {
+  if(result.status !== "ok") {
     showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`);
   }
 }
@@ -125,7 +130,7 @@ export async function schedulePostprocessing(
 
   const result = await callWithRetries(() => sendRequest(jobUrl, request, destination.getAccessToken), retryPolicy);
 
-  if(result.ok) {
+  if(result.status === "ok") {
     showSuccess(`Recording "${recording}" finished; postprocessing scheduled.`);
   } else {
     showError(`Failed to schedule postprocessing: ${result.errorMessage}`);

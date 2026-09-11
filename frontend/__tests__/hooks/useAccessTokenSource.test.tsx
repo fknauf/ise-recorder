@@ -54,6 +54,8 @@ const oidc = vi.hoisted(() => {
 
     signinSilentCalls = 0;
     signinPopupCalls = 0;
+    /** Test-only: make getUser reject, as a blocked or corrupt user store does. */
+    getUserError: Error | null = null;
     signinSilentResult: FakeUser | Error | null = null;
     signinPopupResult: FakeUser | Error | null = null;
 
@@ -68,10 +70,15 @@ const oidc = vi.hoisted(() => {
     // The real UserManager filters protocol claims once at sign-in and stores the
     // *result*, so getUser never sees the unfiltered set. Model that here: it is the
     // only thing that makes these tests notice if auth_time gets filtered away again.
-    getUser = async (): Promise<FakeUser | null> =>
-      (this.user === null
+    getUser = async (): Promise<FakeUser | null> => {
+      if(this.getUserError !== null) {
+        throw this.getUserError;
+      }
+
+      return this.user === null
         ? null
-        : { ...this.user, profile: applyClaimFilter(this.user.profile, this.settings.filterProtocolClaims) });
+        : { ...this.user, profile: applyClaimFilter(this.user.profile, this.settings.filterProtocolClaims) };
+    };
 
     signinSilent = async (): Promise<FakeUser | null> => {
       this.signinSilentCalls += 1;
@@ -455,6 +462,75 @@ test("a hiccup refreshing a fresh session does not make it look stale", async ()
   } finally {
     consoleWarn.mockRestore();
   }
+});
+
+// --- an unreadable user store ----------------------------------------------
+
+/**
+ * getUser rejects when the browser refuses storage access, or when the stored entry is
+ * damaged enough that JSON.parse throws. Neither is common, but the consequence used to
+ * be out of proportion: expandSessionHeadroom is awaited outside any try in
+ * startRecording, so the rejection escaped as an unhandled rejection and left the
+ * recorder wedged in "preparing" with no message and no way back but a reload.
+ *
+ * The contract these pin: expandSessionHeadroom always resolves, and an unreadable store
+ * is treated as nobody being signed in.
+ */
+
+test("an unreadable user store is treated as a stale session rather than crashing", async () => {
+  const { result } = await renderTokenSource(authenticatedEnv);
+  const mgr = userManager();
+
+  mgr.getUserError = new Error("SecurityError: storage is not available");
+  mgr.signinPopupResult = userAged(0);
+
+  // stale rather than fresh: it must prompt for authentication, not skip the check
+  expect(await result.current.source.expandSessionHeadroom()).toBe("renewed");
+  expect(mgr.signinPopupCalls).toBe(1);
+});
+
+test("an unreadable user store during popup recovery is reported as expired", async () => {
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    const { result } = await renderTokenSource(authenticatedEnv);
+    const mgr = userManager();
+
+    // the store fails, so the popup is attempted -- and it fails too. The recovery path
+    // reads the store again, which fails again: that second read is inside the catch, so
+    // an unguarded throw there escapes the handler entirely.
+    mgr.getUserError = new Error("SyntaxError: Unexpected end of JSON input");
+    mgr.signinPopupResult = new Error("popup closed by user");
+
+    expect(await result.current.source.expandSessionHeadroom()).toBe("expired");
+  } finally {
+    consoleWarn.mockRestore();
+  }
+});
+
+test("the staleness watcher flips to stale when the user store becomes unreadable", async () => {
+  const { result } = await renderTokenSource(authenticatedEnv);
+  const mgr = userManager();
+
+  // establish a genuinely fresh session first, so the assertion below has somewhere to
+  // move from -- nobody-signed-in already reads as stale, which would make it vacuous
+  mgr.user = userAged(0);
+
+  await act(async () => {
+    mgr.emitUserLoaded();
+  });
+
+  expect(result.current.staleSession).toBe(false);
+
+  mgr.getUserError = new Error("storage unavailable");
+
+  await act(async () => {
+    mgr.emitUserLoaded();
+  });
+
+  // the watcher re-checks on provider events; a rejection there would leave the last
+  // verdict standing and an unhandled rejection behind
+  expect(result.current.staleSession).toBe(true);
 });
 
 // --- the staleness watcher -------------------------------------------------

@@ -1,4 +1,4 @@
-"use server";
+import "server-only";
 
 import { connection } from "next/server";
 import isURL, { IsURLOptions } from "validator/es/lib/isURL";
