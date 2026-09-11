@@ -16,6 +16,7 @@ from pytest_mock import MockerFixture
 
 from ise_record.postprocess import (
     _run_command, # pyright: ignore[reportPrivateUsage]
+    ConcatenatedFile,
     concat_chunks,
     determine_crop_area,
     generate_overlay_scale,
@@ -97,6 +98,144 @@ async def test_concat_chunks():
             content = full.read()
             assert content == first_data + second_data
 
+def make_track(tempdir: str, names: list[str]) -> Path:
+    """ A track directory holding the named chunk files, each containing its own name. """
+    track_path = Path(tempdir)
+
+    for name in names:
+        with open(track_path / name, "wb") as chunk:
+            chunk.write(name.encode())
+
+    return track_path
+
+async def concat_names(names: list[str]) -> tuple[bool, str]:
+    """ Concatenate a track made of the given files; report completeness and the result. """
+    with tempfile.TemporaryDirectory() as tempdir:
+        track_path = make_track(tempdir, names)
+        result = await concat_chunks(track_path)
+
+        with open(result.path, "rb") as full:
+            return result.incomplete, full.read().decode()
+
+@pytest.mark.asyncio
+async def test_concat_chunks_accepts_a_gapless_track():
+    incomplete, content = await concat_names([ f"chunk.{i:04d}" for i in range(4) ])
+
+    assert incomplete is False
+    assert content == "chunk.0000chunk.0001chunk.0002chunk.0003"
+
+@pytest.mark.asyncio
+async def test_concat_chunks_truncates_at_a_gap():
+    # A gap means the frontend never delivered that chunk. The webm stream does not
+    # survive one, so everything after it is unusable and is deliberately dropped rather
+    # than concatenated into a file that looks whole.
+    incomplete, content = await concat_names([ "chunk.0000", "chunk.0001", "chunk.0003" ])
+
+    assert incomplete is True
+    assert content == "chunk.0000chunk.0001"
+
+@pytest.mark.asyncio
+async def test_concat_chunks_rejects_a_track_that_does_not_start_at_zero():
+    incomplete, content = await concat_names([ "chunk.0001", "chunk.0002" ])
+
+    assert incomplete is True
+    assert content == ""
+
+@pytest.mark.asyncio
+async def test_concat_chunks_rejects_inconsistent_padding():
+    # chunk_file_digits is a setting. If it changes between recordings a track can hold
+    # both widths, and then the lexicographic sort no longer matches numeric order -- the
+    # one case that would otherwise produce a misordered file rather than a short one.
+    incomplete, content = await concat_names([ "chunk.0000", "chunk.001" ])
+
+    assert incomplete is True
+    assert content == "chunk.0000"
+
+@pytest.mark.asyncio
+async def test_concat_chunks_rejects_a_non_numeric_chunk():
+    incomplete, content = await concat_names([ "chunk.0000", "chunk.0001", "chunk.tmp" ])
+
+    assert incomplete is True
+    # the stray file is not concatenated: it is not part of the stream
+    assert content == "chunk.0000chunk.0001"
+
+@pytest.mark.asyncio
+async def test_concat_chunks_orders_numerically_past_the_padding_width():
+    # lexicographic order only agrees with numeric order because the names are padded;
+    # this fails immediately if the padding is ever dropped
+    incomplete, content = await concat_names([ f"chunk.{i:04d}" for i in range(11) ])
+
+    assert incomplete is False
+    assert content.startswith("chunk.0000chunk.0001")
+    assert content.endswith("chunk.0009chunk.0010")
+
+@pytest.mark.asyncio
+async def test_concat_chunks_removes_the_partial_output_when_writing_fails(mocker: MockerFixture):
+    # a half-written full.webm left behind would be picked up by a later run as though it
+    # were a finished concatenation
+    mocker.patch("aiofiles.open", side_effect=OSError("disk full"))
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        track_path = make_track(tempdir, [ "chunk.0000" ])
+
+        with pytest.raises(OSError):
+            await concat_chunks(track_path)
+
+        assert not os.path.exists(track_path / "full.webm")
+
+@pytest.mark.asyncio
+async def test_postprocess_tracks_reports_an_incomplete_track_as_partial_success(mocker: MockerFixture):
+    # the flag has to survive the whole pipeline: it is computed per track, but the
+    # lecturer only ever sees the recording-level result
+    async def mock_concat(p: Path):
+        return ConcatenatedFile(path=p / "full.webm", incomplete=p == Path("foo/overlay"))
+
+    stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
+
+    mocker.patch("ise_record.postprocess._run_command")
+    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mocker.patch("pathlib.Path.unlink", autospec=True)
+    mocker.patch("pathlib.Path.is_dir", return_value=True)
+
+    result = await postprocess_tracks(
+        Path("foo/stream"),
+        Path("foo/overlay"),
+        [],
+        Path("foo/presentation.webm")
+    )
+
+    assert result.reason == ResultReason.PARTIAL_SUCCESS
+    # the file is still produced and still delivered: a truncated lecture beats no lecture
+    assert result.output_file == Path("foo/presentation.webm")
+
+@pytest.mark.asyncio
+async def test_postprocess_tracks_reports_failure_over_incompleteness(mocker: MockerFixture):
+    async def mock_concat(p: Path):
+        return ConcatenatedFile(path=p / "full.webm", incomplete=True)
+
+    stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
+
+    mocker.patch(
+        "ise_record.postprocess._run_command",
+        side_effect=CalledProcessError(1, "ffmpeg", b"", b"boom")
+    )
+    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mocker.patch("pathlib.Path.unlink", autospec=True)
+    mocker.patch("pathlib.Path.is_dir", return_value=True)
+
+    result = await postprocess_tracks(
+        Path("foo/stream"),
+        Path("foo/overlay"),
+        [],
+        Path("foo/presentation.webm")
+    )
+
+    # there is no file to inspect, so "incomplete" would be misleading advice
+    assert result.reason == ResultReason.FAILURE
+    assert result.output_file is None
+
 def test_pick_target_geometry():
     assert pick_target_geometry(Rectangle(left=0, top=0, width=   1, height=   1)) == (1280,  720)
     assert pick_target_geometry(Rectangle(left=0, top=0, width=1279, height= 719)) == (1280,  720)
@@ -151,7 +290,7 @@ def test_generate_ffmpeg_filter():
 @pytest.mark.asyncio
 async def test_postprocess_tracks(mocker: MockerFixture):
     async def mock_concat(p: Path):
-        return p / "full.webm"
+        return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
@@ -193,7 +332,7 @@ async def test_postprocess_tracks(mocker: MockerFixture):
 @pytest.mark.asyncio
 async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
     async def mock_concat(p: Path):
-        return p / "full.webm"
+        return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
     def mock_isdir(self: Path):
         return self == Path("foo/stream")
@@ -230,7 +369,7 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
     async def mock_concat(p: Path):
-        return p / "full.webm"
+        return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
@@ -288,7 +427,7 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
     async def mock_concat(p: Path):
-        return p / "full.webm"
+        return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
     def mock_isdir(self: Path):
         return self != Path("foo/overlay")

@@ -154,7 +154,10 @@ def schedule_job(
 
     if not os.path.isdir(settings.destdir / user / job.recording):
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Recording {job.recording} does not exist')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Recording {job.recording} does not exist'
+        )
 
     background_tasks.add_task(_postprocessing_task, job, settings, user)
 

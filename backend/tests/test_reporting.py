@@ -72,6 +72,36 @@ def test_generate_report_missing():
     assert job_title in report.get_payload()
     assert "Missing main display stream" in report.get_payload()
 
+def test_generate_report_partial_success():
+    sender = "render@example.de"
+    recipient = "lecturer@example.de"
+    job_title = "foo_1234"
+    result = Result(reason = ResultReason.PARTIAL_SUCCESS, output_file = Path("foo/presentation.webm"))
+
+    report = generate_report(sender, recipient, job_title, result)
+
+    assert report["From"] == sender
+    assert report["To"] == recipient
+    assert job_title in report["Subject"]
+    assert job_title in report.get_payload()
+    # the lecturer has a usable file but must know it is short, or they will find out
+    # only when the recording stops mid-sentence
+    assert "incomplete" in report.get_payload()
+
+def test_generate_report_covers_every_result_reason():
+    # the match in generate_report has no fallback: a reason it does not handle leaves
+    # `message` unbound and raises UnboundLocalError instead of sending a degraded mail.
+    # This fails the moment a variant is added without a case for it.
+    for reason in ResultReason:
+        report = generate_report(
+            "render@example.de",
+            "lecturer@example.de",
+            "foo_1234",
+            Result(reason = reason, output_file = None)
+        )
+
+        assert report.get_payload().strip() != ""
+
 @pytest.mark.asyncio
 async def test_send_report(mocker: MockerFixture):
     sender = "render@example.de"

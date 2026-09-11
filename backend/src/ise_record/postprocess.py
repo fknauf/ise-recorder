@@ -21,6 +21,7 @@ class ResultReason(Enum):
     SUCCESS = 1
     FAILURE = 2
     MAIN_STREAM_MISSING = 3
+    PARTIAL_SUCCESS = 4
 
 class Result(NamedTuple):
     """ Result of a postprocessing job """
@@ -161,7 +162,16 @@ async def video_properties(path: Path) -> VideoProperties:
         crop = crop
     )
 
-async def concat_chunks(track_path: Path) -> Path:
+class ConcatenatedFile(NamedTuple):
+    """
+        A concatenated file, plus information on whether only part of the files in the track
+        directory could be used because of a gap (e.g. chunk.0000, chunk.0001, chunk.0003 exist but
+        no chunk.0002)
+    """
+    path: Path
+    incomplete: bool
+
+async def concat_chunks(track_path: Path) -> ConcatenatedFile:
     """
         Concatenates the chunk files supplied by the frontend to get the full stream file that
         we can feed to ffmpeg.
@@ -170,10 +180,27 @@ async def concat_chunks(track_path: Path) -> Path:
         :returns path of the assembled stream file
     """
     target_path = track_path / "full.webm"
+    incomplete = False
 
     try:
         async with aiofiles.open(target_path, 'wb') as dest:
+            last_extension = None
+            expected_ext_value = 0
+
             for src_path in sorted(track_path.glob('chunk.*')):
+                src_ext = src_path.suffix[1:]
+
+                if (
+                    not src_ext.isdigit()
+                    or int(src_ext) != expected_ext_value
+                    or (last_extension is not None and len(last_extension) != len(src_ext))
+                ):
+                    incomplete = True
+                    break
+
+                last_extension = src_ext
+                expected_ext_value = expected_ext_value + 1
+
                 async with aiofiles.open(src_path, 'rb') as src:
                     while content := await src.read(512 * 1024):
                         await dest.write(content)
@@ -181,7 +208,7 @@ async def concat_chunks(track_path: Path) -> Path:
         target_path.unlink(missing_ok=True)
         raise
 
-    return target_path
+    return ConcatenatedFile(path=target_path, incomplete=incomplete)
 
 def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
     """
@@ -304,14 +331,14 @@ async def postprocess_tracks(
         :returns whether the job succeeded, plus info for the e-mail report
     """
 
-    inputs: list[Path] = []
+    inputs: list[ConcatenatedFile] = []
 
     has_overlay = overlay_dir.is_dir()
     logger.debug("Recording %s an overlay track", "has" if has_overlay else "doesn't have")
 
     try:
         inputs.append(await concat_chunks(stream_dir))
-        stream_props = await video_properties(inputs[0])
+        stream_props = await video_properties(inputs[0].path)
 
         ffmpeg_maps = [
             '-filter_complex', generate_ffmpeg_filter(stream_props, has_overlay),
@@ -328,7 +355,7 @@ async def postprocess_tracks(
         render_command = [
             'ffmpeg'
         ] + [
-            arg for path in inputs for arg in [ '-i', str(path) ]
+            arg for input in inputs for arg in [ '-i', str(input.path) ]
         ] + ffmpeg_maps + [
             '-y', str(output_path)
         ]
@@ -340,6 +367,9 @@ async def postprocess_tracks(
 
         logger.info("Render completed")
 
+        if any(input.incomplete for input in inputs):
+            return Result(output_file=output_path, reason=ResultReason.PARTIAL_SUCCESS)
+
         return Result(output_file=output_path, reason=ResultReason.SUCCESS)
     except CalledProcessError as err:
         _log_error(err)
@@ -347,7 +377,7 @@ async def postprocess_tracks(
     finally:
         # unlink temporaries to save disk space and limit the number of expected states
         for p in inputs:
-            p.unlink()
+            p.path.unlink()
 
 async def postprocess_recording(recording_path: Path) -> Result:
     """

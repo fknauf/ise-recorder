@@ -83,6 +83,11 @@ def generate_report(
             message = 'Encoding failed. Check server logs.'
         case ResultReason.MAIN_STREAM_MISSING:
             message = 'Missing main display stream. Manual intervention required.'
+        case ResultReason.PARTIAL_SUCCESS:
+            message = (
+                'Encoding succeeded, but the stream was incomplete. '
+                'Please inspect the file to see what was missing.'
+            )
 
     content = dedent(
         """
