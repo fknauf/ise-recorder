@@ -97,10 +97,12 @@ is useful for primitive monitoring such as docker health checks.
 
 | File | Purpose |
 | - | - |
+| `src/ise_record/auth.py` | OpenID-Connect authentication (discovery and token verification) |
 | `src/ise_record/logconfig.py` | Logging configuration (e.g., filtering out health checks from the log) |
 | `src/ise_record/postprocess.py` | Postprocessing logic |
 | `src/ise_record/reporting.py` | Notification sending |
 | `src/ise_record/server.py` | API definition |
+| `src/ise_record/settings.py` | Configurable server settings |
 | `rerender.py` | Command-line script to redo postprocessing for a recording |
 
 ## Postprocessing Logic
@@ -128,3 +130,27 @@ This backend uses ffmpeg command-line utilities for postprocessing. The process 
 4. Identify all input files, i.e. stream, overlay, additional audio tracks
 5. Combine all those into an ffmpeg command and run it in the background
 6. Clean up when finished
+
+
+## Authentication
+
+The backend supports optional OpenID-Connect-based authentication. This is enabled by setting the environment
+variables
+
+| Variable | Example |
+| - | - |
+| `ISE_RECORD_OIDC__PROVIDER_URL` | http://keycloak.localhost:8080/realms/ise |
+| `ISE_RECORD_OIDC__AUDIENCE`     | ise-recorder-users                        |
+
+The frontend must be configured in a similar way, see the documentation there (or the `compose-with-auth.yml`
+sample deployment).
+
+The backend validates tokens only locally, without per-request calls to the OIDC provider. At server
+start, it attempts to discover the OIDC provider's issuer and jwks endpoint, then feeds those to a PyJWT
+`PyJWKClient`, which handles the key retrieval and refreshes. The actual token validation and decoding
+is then also based on PyJWT.
+
+The access tokens are mostly used just to establish trust, i.e. that a request is allowed to store data
+and schedule jobs. If `preferred_username` is present in the token, the backend uses `sub` and
+`preferred_username` to derive a human-readable (but unique) user-specific directory to store recordings.
+In the future, it may also read the `email` claim for reporting purposes.
