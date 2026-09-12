@@ -7,7 +7,7 @@ import Circle from "@spectrum-icons/workflow/Circle";
 import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
 import Stop from "@spectrum-icons/workflow/Stop";
 import isEmail from "validator/es/lib/isEmail";
-import { unsafeTitleCharacters } from "../utils/recording";
+import { classifyLectureTitle } from "../utils/recording";
 import { createDeviceKey, parseDeviceKey } from "../store/store";
 import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
 import { useMediaDevices } from "../hooks/useMediaDevices";
@@ -18,7 +18,17 @@ import { useMediaTracks } from "../hooks/useMediaTracks";
 
 export type RecorderState = ActiveRecording["state"];
 
-const validateLectureTitle = (title: string) => !unsafeTitleCharacters.test(title) || "unsafe character in lecture title";
+function validateLectureTitle(lectureTitle: string): string | true {
+  switch(classifyLectureTitle(lectureTitle)) {
+    case "unsafe-char":
+      return "Unsafe character in lecture title";
+    case "unsafe-start":
+      return "Lecture title begins with an unsafe character";
+    case "ok":
+      return true;
+  }
+}
+
 const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
 
 function RecordButton() {

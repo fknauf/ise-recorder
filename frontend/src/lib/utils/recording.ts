@@ -4,8 +4,41 @@ import { openRecordingFileStream } from "./browserStorage";
 import { showError } from "./notifications";
 import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
 
-// used to remove characters from the recording name that would trip up ffmpeg in post.
-export const unsafeTitleCharacters = /[^\w.-]/;
+// used to remove characters from the recording name that would trip up ffmpeg in post
+// and warn in the UI about unsafe names. Spaces are not warned about in the UI for
+// user convenience but will be stripped before upload. Dots are not allowed at the
+// start to avoid hidden recording directories on linux/unix backends.
+
+/* eslint-disable @stylistic/no-multi-spaces -- aligned for legibility */
+const warningNameCharacters =  /[^\p{L}\p{Nd}\p{Zs}._-]/u;
+const unsafeNameCharacters  =  /[^\p{L}\p{Nd}._-]+/gu;
+const unsafeNameStart       = /^[^\p{L}\p{Nd}_]+/u;
+/* eslint-enable @stylistic/no-multi-spaces */
+
+function sanitizedRecordingName(lectureTitle: string, timestamp: Date) {
+  const lecturePrefix = lectureTitle ? `${lectureTitle.trim()}_` : "";
+
+  return `${lecturePrefix}${timestamp.toISOString()}`
+    .normalize("NFC")
+    .replaceAll(unsafeNameCharacters, "")
+    .replace(unsafeNameStart, "");
+}
+
+type LectureTitleClass = "ok" | "unsafe-char" | "unsafe-start";
+
+export function classifyLectureTitle(lectureTitle: string): LectureTitleClass {
+  const title = lectureTitle.normalize("NFC").trim();
+
+  if(warningNameCharacters.test(title)) {
+    return "unsafe-char";
+  }
+
+  if(unsafeNameStart.test(title)) {
+    return "unsafe-start";
+  }
+
+  return "ok";
+}
 
 export interface RecordingTrackBundle {
   displayTracks: readonly MediaStreamTrack[]
@@ -187,8 +220,7 @@ export async function recordLecture(
   onFinished: (recordingName: string) => Promise<void> | void
 ) {
   const timestamp = new Date();
-  const lecturePrefix = lectureTitle ? `${lectureTitle}_` : "";
-  const recordingName = `${lecturePrefix}${timestamp.toISOString()}`.replaceAll(new RegExp(unsafeTitleCharacters, "g"), "");
+  const recordingName = sanitizedRecordingName(lectureTitle, timestamp);
 
   const videoOptions: MediaRecorderOptions = { mimeType: "video/webm" };
   const audioOptions: MediaRecorderOptions = { mimeType: "audio/webm" };

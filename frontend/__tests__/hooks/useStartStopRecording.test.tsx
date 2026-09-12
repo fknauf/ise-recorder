@@ -103,9 +103,18 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  // let any in-flight startRecording settle so it doesn't leak into the next test
-  releaseRecordLecture?.();
+afterEach(async () => {
+  // Let any in-flight startRecording settle so it doesn't leak into the next test.
+  //
+  // Inside act, because settling is not silent any more: startRecording claims "idle"
+  // itself once recordLecture returns, rather than leaving it to the onFinished callback,
+  // so releasing the parked recordLecture here renders the still-mounted hook. Bare, that
+  // is a state update outside act, and every test that parks a recording earns two
+  // warnings on the way out.
+  await act(async () => {
+    releaseRecordLecture?.();
+  });
+
   localStorage.clear();
 });
 
