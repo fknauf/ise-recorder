@@ -364,7 +364,7 @@ An authentication backend can be configured through the environment variables
 
 | Variable | Example | Meaning |
 | - | - | - |
-| `ISE_RECORD_OIDC__URL`      | `https://auth.example.edu/realms/ise` | URL of the OpenID Connect provider |
+| `ISE_RECORD_OIDC_URL`       | `https://auth.example.edu/realms/ise` | URL of the OpenID Connect provider |
 | `ISE_RECORD_OIDC_CLIENT_ID` | `ise-recorder`                        | Client-ID as configured in the OIDC provider |
 | `ISE_RECORD_OIDC_MAX_AGE`   | `79200`                               | OIDC max_age in seconds |
 

@@ -34,6 +34,7 @@ services:
 #      - --no-access-log
     environment:
       - TZ=Europe/Berlin
+      - ISE_RECORD_CORS_ORIGINS=[ "http://localhost:3000" ]
 #      - ISE_RECORD_DESTDIR=/app/data
 #      - ISE_RECORD_SMTP_SERVER=mail.example.com
 #      - ISE_RECORD_SMTP_PORT=25
@@ -43,7 +44,6 @@ services:
 #      - ISE_RECORD_SMTP_SENDER=ise-record@example.com
 #      - ISE_RECORD_SMTP_STARTTLS=true
 #      - ISE_RECORD_SMTP_ALLOWED_DOMAINS=[ "example.com", "example.org" ]
-#      - ISE_RECORD_CORS_ORIGINS=[]
 #      - ISE_RECORD_CHUNK_FILE_DIGITS=4
 # see compose-with-auth.yaml for a deployment with oidc authentication
 #      - ISE_RECORD_OIDC__PROVIDER_URL=http://keycloak.localhost:8080/realms/ise

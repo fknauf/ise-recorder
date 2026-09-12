@@ -103,7 +103,7 @@ is useful for primitive monitoring such as docker health checks.
 | `src/ise_record/reporting.py` | Notification sending |
 | `src/ise_record/server.py` | API definition |
 | `src/ise_record/settings.py` | Configurable server settings |
-| `rerender.py` | Command-line script to redo postprocessing for a recording |
+| `src/rerender.py` | Command-line script to redo postprocessing for a recording |
 
 ## Postprocessing Logic
 

@@ -120,7 +120,7 @@ export interface AppStoreState {
   resetFileSizeOverrides: () => void
   updateBrowserStorage: () => Promise<void>
   updateQuotaInformation: () => Promise<void>
-  setStaleSession: (stale: boolean) => void
+  setStaleSession: (stale: StateUpdate<boolean>) => void
 }
 
 const unselectTrack = (state: AppStoreState, track: MediaStreamTrack): Partial<AppStoreState> =>

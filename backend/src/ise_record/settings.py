@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-SAFE_NAME_REGEX = re.compile('^\\w[\\w.-]*$')
+SAFE_NAME_REGEX = re.compile('^\\w[\\w.-]*\\Z')
 
 class OidcSettings(BaseModel):
     """

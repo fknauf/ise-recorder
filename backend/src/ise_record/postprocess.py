@@ -401,4 +401,8 @@ async def postprocess_recording(recording_path: Path) -> Result:
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     logger.info("Postprocessing %s", recording_path)
-    return await postprocess_tracks(stream_dir, overlay_dir, audio_dirs, output_path)
+    try:
+        return await postprocess_tracks(stream_dir, overlay_dir, audio_dirs, output_path)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.exception("Postprocessing %s failed", recording_path, exc)
+        return Result(output_file=None, reason=ResultReason.FAILURE)

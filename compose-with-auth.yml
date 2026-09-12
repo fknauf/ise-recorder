@@ -72,6 +72,7 @@ services:
       - debug
     environment:
       - TZ=Europe/Berlin
+      - ISE_RECORD_CORS_ORIGINS=[ "http://localhost:3000" ]
       - ISE_RECORD_OIDC__PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
       - ISE_RECORD_OIDC__AUDIENCE=ise-recorder-users
 

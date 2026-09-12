@@ -265,8 +265,32 @@ test("the recorder walks idle -> preparing -> starting -> recording -> idle", as
     await call.onFinished("REC_1");
   });
 
-  expect(result.current.activeRecording.state).toBe("idle");
+  // onFinished hands back the file sizes and disarms the unload guard, but "idle" is
+  // claimed by startRecording once recordLecture returns rather than by the callback.
+  // That way the path where recordLecture resolves without ever invoking a callback --
+  // no tracks to record -- cannot leave the UI wedged. See the test below.
+  await act(async () => {
+    releaseRecordLecture?.();
+  });
+
+  await waitFor(() => expect(result.current.activeRecording.state).toBe("idle"));
   expect(result.current.activeRecording.name).toBeUndefined();
+});
+
+test("a recording that never gets off the ground returns the UI to idle", async () => {
+  // With no tracks configured there is nothing to record, so recordLecture resolves
+  // without calling onStarting, onStarted or onFinished. Nothing else would take the
+  // state back out of "preparing", and a wedged "preparing" is unrecoverable: the Stop
+  // button stays disabled and every track control stays locked by state !== "idle".
+  vi.mocked(recordLecture).mockResolvedValue(undefined);
+
+  const { result } = renderRecorder(makeTokenSource(false, undefined));
+
+  await act(async () => {
+    await result.current.startRecording();
+  });
+
+  expect(result.current.activeRecording.state).toBe("idle");
 });
 
 test("the unload guard is armed while starting and disarmed when finished", async () => {

@@ -34,6 +34,7 @@ export function AudioPreview(
 
     const freqData = new Uint8Array(audioAnalyzer.frequencyBinCount);
     const timeData = new Uint8Array(audioAnalyzer.fftSize);
+    const computedStyle = getComputedStyle(document.body);
 
     const renderFunction = () => {
       const ctx = canvas.getContext("2d");
@@ -50,7 +51,7 @@ export function AudioPreview(
 
       // paint spectrum as a histogram. Use the warning color iff audio is clipping.
       ctx.lineWidth = Math.ceil(space);
-      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue(isClipping ? "--warning" : "--foreground");
+      ctx.strokeStyle = computedStyle.getPropertyValue(isClipping ? "--warning" : "--foreground");
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 

@@ -92,7 +92,6 @@ export function useStartStopRecording() {
       // make sure the new file sizes are there before throwing away the overrides
       await updateBrowserStorage();
       resetFileSizeOverrides();
-      setActiveRecording({ state: "idle" });
     };
 
     try {
@@ -104,8 +103,9 @@ export function useStartStopRecording() {
       );
     } catch(e) {
       showError("Recording failed", e);
-      setActiveRecording({ state: "idle" });
     }
+
+    setActiveRecording({ state: "idle" });
   };
 
   const stopRecording = () => {

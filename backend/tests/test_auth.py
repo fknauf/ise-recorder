@@ -383,9 +383,20 @@ def test_key_claiming_an_insecure_algorithm_is_refused(
     # the same kid. PyJWK would bind HS256 to it; the denylist must refuse it.
     assert upload(client, provider.mint(), index=0).status_code == 201
 
+    # The served key is the one the token below is signed with, so the only thing standing
+    # between the forgery and a 201 is the denylist. A mismatched key would make this test
+    # pass on a plain signature failure and say nothing about the denylist at all. 32 bytes,
+    # because PyJWT warns about shorter HMAC keys and we do not want the warning to be the
+    # reason this is refused either.
     provider.keys["key-1"][1].clear()
     provider.keys["key-1"][1].update(
-        {"kty": "oct", "alg": "HS256", "k": "c2VjcmV0", "kid": "key-1", "use": "sig"}
+        {
+            "kty": "oct",
+            "alg": "HS256",
+            "k": "bEM2SVVab2FrdGVwNnFQY2JKTE5oUTFqaU9WbEFxS1k",
+            "kid": "key-1",
+            "use": "sig"
+        }
     )
     forged = jwt.encode(
         {
