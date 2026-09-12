@@ -7,6 +7,7 @@
 
 import os
 from pathlib import Path
+import shutil
 from subprocess import CalledProcessError
 import tempfile
 from unittest.mock import AsyncMock, call
@@ -76,6 +77,31 @@ async def test_video_properties():
     assert info.crop.height == 170
     assert info.crop.left == 125
     assert info.crop.top == 53
+
+@pytest.mark.asyncio
+async def test_video_properties_reads_a_path_the_filtergraph_would_choke_on(tmp_path: Path):
+    # The path reaches ffprobe through a lavfi filtergraph -- movie=<path>,cropdetect --
+    # where "," ";" "[" "]" "=" and "\'" are all syntax. A recording directory is named
+    # after a lecture title, so they are reachable from user input: a title containing a
+    # comma used to turn into "No such filter: 'b/full.webm'".
+    #
+    # They are not escaped, because filtergraph unescaping runs up to three levels deep
+    # and the obvious attempts get "\'" wrong. Instead the path is kept out of the graph:
+    # only the fixed file name goes in, and the directory rides along as the subprocess's
+    # working directory, which no parser ever sees. Revert that and this test fails.
+    track_path = tmp_path / "GVS,1[2];x='y'" / "stream"
+    track_path.mkdir(parents=True)
+    shutil.copy(
+        Path(os.path.dirname(__file__)) / "assets" / "sample.webm",
+        track_path / "full.webm"
+    )
+
+    info = await video_properties(track_path / "full.webm")
+
+    # the same file as test_video_properties, so only the path can account for a difference
+    assert info.width == 480
+    assert info.height == 270
+    assert info.crop == Rectangle(width=217, height=170, left=125, top=53)
 
 @pytest.mark.asyncio
 async def test_concat_chunks():

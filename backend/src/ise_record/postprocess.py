@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import NamedTuple, List, Tuple
+from typing import NamedTuple, List, Optional, Tuple
 
 import aiofiles
 
@@ -47,19 +47,13 @@ class VideoProperties(NamedTuple):
         """
         return self.width > self.crop.width or self.height > self.crop.height
 
-def _log_error(err: CalledProcessError) -> None:
-    logger.error("Failed with return code %d.\n" \
-                 "command = %s\n\n" \
-                 "stdout\n------\n%s\n\n" \
-                 "stderr\n------\n%s\n",
-                 err.returncode, err.cmd, err.stdout, err.stderr)
-
-async def _run_command(command: List[str]) -> bytes:
+async def _run_command(command: List[str], cwd: Optional[Path] = None) -> bytes:
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.PIPE,
+        cwd=cwd
     )
 
     out, err = await proc.communicate()
@@ -116,7 +110,7 @@ async def video_properties(path: Path) -> VideoProperties:
         'ffprobe',
         '-print_format', 'json',
         '-f', 'lavfi',
-        '-i', f'movie={str(path)},cropdetect',
+        '-i', f'movie={str(path.name)},cropdetect',
         '-show_streams',
         '-show_entries', 'packet_tags=lavfi.cropdetect.x1,lavfi.cropdetect.y1,'
                                      'lavfi.cropdetect.x2,lavfi.cropdetect.y2'
@@ -125,7 +119,7 @@ async def video_properties(path: Path) -> VideoProperties:
     logger.info("Analyzing %s...", path)
     logger.debug("Probe command = %s", probe_command)
 
-    probe_stdout = await _run_command(probe_command)
+    probe_stdout = await _run_command(probe_command, path.parent)
 
     info = json.loads(probe_stdout)
 
@@ -372,7 +366,12 @@ async def postprocess_tracks(
 
         return Result(output_file=output_path, reason=ResultReason.SUCCESS)
     except CalledProcessError as err:
-        _log_error(err)
+        logger.error(
+            "While processing %s, a subprocess failed with return code %d.\n" \
+            "command = %s\n\n" \
+            "stdout\n------\n%s\n\n" \
+            "stderr\n------\n%s\n",
+            str(output_path.parent), err.returncode, err.cmd, err.stdout, err.stderr)
         return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
         # unlink temporaries to save disk space and limit the number of expected states
