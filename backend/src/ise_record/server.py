@@ -7,11 +7,20 @@
 from contextlib import asynccontextmanager
 import logging
 import os
+from pathlib import Path
 from typing import Annotated, AsyncGenerator, Optional
 
 import aiofiles
 from fastapi import (
-    APIRouter, BackgroundTasks, Depends, FastAPI, Form, HTTPException, UploadFile, status
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status
 )
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -121,34 +130,58 @@ class PostProcessingJob(BaseModel):
         )
     ]
 
-async def _postprocessing_task(job: PostProcessingJob, settings: Settings, user: str) -> None:
+def get_running_jobs(request: Request) -> set[Path]:
+    """ Recordings that currently have a postprocessing job in flight. """
+    return request.app.state.running_jobs
+
+async def _postprocessing_task(
+        job: PostProcessingJob,
+        settings: Settings,
+        user: str,
+        running_jobs: set[Path]
+) -> None:
     recording_path = settings.destdir / user / job.recording
-    job_result = await postprocess_recording(recording_path)
 
-    normalized_recipient = normalize_recipient(job.recipient, list(settings.smtp_allowed_domains))
+    # Job's already running, so don't start it a second time.
+    if recording_path in running_jobs:
+        logger.warning("Already postprocessing %s, ignoring duplicate job", recording_path)
+        return
 
-    if normalized_recipient is not None:
-        smtp_sink = SmtpSink(
-            server = settings.smtp_server,
-            port = settings.smtp_port,
-            local_hostname = settings.smtp_local_hostname,
-            starttls = settings.smtp_starttls,
-            username = settings.smtp_username,
-            password = settings.smtp_password)
+    running_jobs.add(recording_path)
 
-        await send_report(
-            smtp_sink=smtp_sink,
-            sender=settings.smtp_sender,
-            recipient=normalized_recipient,
-            job_title=job.recording,
-            result=job_result)
+    try:
+        job_result = await postprocess_recording(recording_path)
+
+        normalized_recipient = normalize_recipient(
+            job.recipient,
+            list(settings.smtp_allowed_domains)
+        )
+
+        if normalized_recipient is not None:
+            smtp_sink = SmtpSink(
+                server = settings.smtp_server,
+                port = settings.smtp_port,
+                local_hostname = settings.smtp_local_hostname,
+                starttls = settings.smtp_starttls,
+                username = settings.smtp_username,
+                password = settings.smtp_password)
+
+            await send_report(
+                smtp_sink=smtp_sink,
+                sender=settings.smtp_sender,
+                recipient=normalized_recipient,
+                job_title=job.recording,
+                result=job_result)
+    finally:
+        running_jobs.discard(recording_path)
 
 @router.post('/api/jobs', status_code=status.HTTP_202_ACCEPTED)
 def schedule_job(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
-    user: Annotated[str, Depends(get_current_user_home)]
+    user: Annotated[str, Depends(get_current_user_home)],
+    running_jobs: Annotated[set[Path], Depends(get_running_jobs)]
 ):
     """ Endpoint for the scheduling of postprocessing jobs """
 
@@ -159,7 +192,7 @@ def schedule_job(
             detail=f'Recording {job.recording} does not exist'
         )
 
-    background_tasks.add_task(_postprocessing_task, job, settings, user)
+    background_tasks.add_task(_postprocessing_task, job, settings, user, running_jobs)
 
     return job
 
@@ -187,6 +220,7 @@ def create_app(
         yield
 
     application = FastAPI(lifespan=lifespan)
+    application.state.running_jobs = set()
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings

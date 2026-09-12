@@ -6,21 +6,44 @@
 # pylint: disable=too-many-locals
 # pylint: disable=protected-access
 # pylint: disable=no-member
+# pylint: disable=redefined-outer-name
 
 import os
 from pathlib import Path
-import tempfile
+from typing import Iterator
 from unittest.mock import ANY
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.postprocess import Result, ResultReason
-from ise_record.server import app, create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
-from ise_record.settings import get_settings, Settings
+from ise_record.server import create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
+from ise_record.settings import Settings
 
-client = TestClient(app)
+@pytest.fixture
+def settings(tmp_path: Path) -> Settings:
+    """ Documented defaults, with a destination directory of this test's own. """
+    return Settings(destdir=tmp_path)
+
+@pytest.fixture
+def app(settings: Settings) -> FastAPI:
+    """
+    A fresh application per test.
+
+    Per test rather than per module because the app carries mutable state: the set of
+    recordings with a job in flight lives on app.state, and dependency overrides are
+    installed on the app too. Sharing one app makes both of those leak between tests, in
+    the order-dependent way that only shows up once someone adds the wrong test.
+    """
+    return create_app(settings)
+
+@pytest.fixture
+def client(app: FastAPI) -> Iterator[TestClient]:
+    """ A client for the app, inside `with` so the lifespan actually runs. """
+    with TestClient(app) as test_client:
+        yield test_client
 
 @pytest.mark.asyncio
 async def test_postprocessing_task_with_report(mocker: MockerFixture):
@@ -43,7 +66,8 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
         settings,
-        "."
+        ".",
+        set()
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -85,7 +109,8 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
         settings,
-        "."
+        ".",
+        set()
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -101,13 +126,67 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
         Settings(),
-        "."
+        ".",
+        set()
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
     mock_send.assert_not_called()
 
-def test_schedule_postprocessing(mocker: MockerFixture):
+@pytest.mark.asyncio
+async def test_a_second_job_for_a_running_recording_is_dropped(mocker: MockerFixture):
+    # the frontend retries a job it got no response to, so a duplicate arrives by accident
+    # rather than by malice. Two renders would write over each other's assembled tracks.
+    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True)
+
+    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient=None),
+        Settings(),
+        ".",
+        { Path("data/foo") }
+    )
+
+    mock_postprocess.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_a_job_for_a_different_recording_is_not_dropped(mocker: MockerFixture):
+    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=Result(reason=ResultReason.SUCCESS, output_file=None))
+
+    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="bar", recipient=None),
+        Settings(),
+        ".",
+        { Path("data/foo") }
+    )
+
+    mock_postprocess.assert_called_once_with(Path("data/bar"))
+
+@pytest.mark.asyncio
+async def test_a_finished_job_releases_the_recording(mocker: MockerFixture):
+    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=Result(reason=ResultReason.SUCCESS, output_file=None))
+    running_jobs: set[Path] = set()
+
+    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
+        PostProcessingJob(recording="foo", recipient=None), Settings(), ".", running_jobs
+    )
+
+    assert running_jobs == set()
+
+@pytest.mark.asyncio
+async def test_a_job_that_blows_up_still_releases_the_recording(mocker: MockerFixture):
+    # otherwise one unexpected failure locks that recording out of postprocessing until
+    # the server is restarted, and rerender.py is the only way back
+    mocker.patch("ise_record.server.postprocess_recording", autospec=True, side_effect=RuntimeError("boom"))
+    running_jobs: set[Path] = set()
+
+    with pytest.raises(RuntimeError):
+        await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
+            PostProcessingJob(recording="foo", recipient=None), Settings(), ".", running_jobs
+        )
+
+    assert running_jobs == set()
+
+def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, app: FastAPI, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
@@ -121,15 +200,16 @@ def test_schedule_postprocessing(mocker: MockerFixture):
     )
 
     assert response.status_code == 202
-    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="foo@bar.de"),
-        get_settings(),
-        "."
+        settings,
+        ".",
+        app.state.running_jobs
     )
 
-def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture):
+def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client: TestClient, app: FastAPI, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
@@ -142,15 +222,16 @@ def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture):
     )
 
     assert response.status_code == 202
-    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
-        get_settings(),
-        "."
+        settings,
+        ".",
+        app.state.running_jobs
     )
 
-def test_schedule_postprocessing_error(mocker: MockerFixture):
+def test_schedule_postprocessing_error(mocker: MockerFixture, client: TestClient, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=False)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
@@ -164,10 +245,10 @@ def test_schedule_postprocessing_error(mocker: MockerFixture):
     )
 
     assert response.status_code == 400
-    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_not_called()
 
-def test_schedule_postprocessing_input_validation(mocker: MockerFixture):
+def test_schedule_postprocessing_input_validation(mocker: MockerFixture, client: TestClient):
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
@@ -182,7 +263,7 @@ def test_schedule_postprocessing_input_validation(mocker: MockerFixture):
     assert response.status_code == 422
     mock_add_task.assert_not_called()
 
-def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: MockerFixture):
+def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: MockerFixture, client: TestClient, app: FastAPI, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
@@ -196,16 +277,17 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: Mock
     )
 
     assert response.status_code == 202
-    mock_isdir.assert_called_once_with(get_settings().destdir / "foo")
+    mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="I made a lot of typos"),
-        get_settings(),
-        "."
+        settings,
+        ".",
+        app.state.running_jobs
     )
 
 
-def test_chunk_upload():
+def test_chunk_upload(client: TestClient, settings: Settings):
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
     sample_size = os.stat(sample_path).st_size
 
@@ -214,33 +296,26 @@ def test_chunk_upload():
         (  42, "chunk.0042"),
         (9999, "chunk.9999")
     ]:
-        with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-            def mock_settings(destdir: Path = Path(tempdir)):
-                return Settings(destdir=destdir)
-            app.dependency_overrides[get_settings] = mock_settings
+        with open(sample_path, "rb") as sample:
+            response = client.post(
+                "/api/chunks",
+                data={
+                    "recording": "foo",
+                    "track": "stream",
+                    "index": str(ix)
+                },
+                files={
+                    "chunk": sample
+                }
+            )
 
-            try:
-                response = client.post(
-                    "/api/chunks",
-                    data={
-                        "recording": "foo",
-                        "track": "stream",
-                        "index": str(ix)
-                    },
-                    files={
-                        "chunk": sample
-                    }
-                )
+        target_path = settings.destdir / "foo" / "stream" / fname
 
-                target_path = Path(tempdir) / "foo" / "stream" / fname
+        assert response.status_code == 201
+        assert os.path.isfile(target_path)
+        assert os.stat(target_path).st_size == sample_size
 
-                assert response.status_code == 201
-                assert os.path.isfile(target_path)
-                assert os.stat(target_path).st_size == sample_size
-            finally:
-                del app.dependency_overrides[get_settings]
-
-def test_chunk_upload_input_validation():
+def test_chunk_upload_input_validation(client: TestClient):
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
 
     with open(sample_path, "rb") as sample:
@@ -356,7 +431,10 @@ def test_chunk_upload_input_validation():
         assert response.status_code == 422
 
 
-def test_chunk_upload_with_more_digits():
+def test_chunk_upload_with_more_digits(tmp_path: Path):
+    # chunk_file_digits is not the default, so this builds its own app rather than taking
+    # the shared fixture
+    settings = Settings(destdir=tmp_path, chunk_file_digits=5)
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
     sample_size = os.stat(sample_path).st_size
 
@@ -368,13 +446,9 @@ def test_chunk_upload_with_more_digits():
         (100000, 422, None)
     ]
 
-    for ix, status_code, fname in cases:
-        with tempfile.TemporaryDirectory() as tempdir, open(sample_path, "rb") as sample:
-            def mock_settings(destdir: Path = Path(tempdir)):
-                return Settings(destdir=destdir, chunk_file_digits=5)
-            app.dependency_overrides[get_settings] = mock_settings
-
-            try:
+    with TestClient(create_app(settings)) as client:
+        for ix, status_code, fname in cases:
+            with open(sample_path, "rb") as sample:
                 response = client.post(
                     "/api/chunks",
                     data={
@@ -387,17 +461,15 @@ def test_chunk_upload_with_more_digits():
                     }
                 )
 
-                assert response.status_code == status_code
+            assert response.status_code == status_code
 
-                if fname is not None:
-                    target_path = Path(tempdir) / "foo" / "stream" / fname
-                    assert os.path.isfile(target_path)
-                    assert os.stat(target_path).st_size == sample_size
-            finally:
-                del app.dependency_overrides[get_settings]
+            if fname is not None:
+                target_path = settings.destdir / "foo" / "stream" / fname
+                assert os.path.isfile(target_path)
+                assert os.stat(target_path).st_size == sample_size
 
 
-def test_cors_preflight_jobs_unconfigured():
+def test_cors_preflight_jobs_unconfigured(client: TestClient):
     response = client.options(
         "/api/jobs",
         headers={
@@ -411,37 +483,41 @@ def test_cors_preflight_jobs_unconfigured():
     assert "Access-Control-Allow-Methods" not in response.headers
     assert "Access-Control-Allow-Headers" not in response.headers
 
-def test_cors_preflight_jobs():
-    tc = TestClient(create_app(Settings(cors_origins=("http://allowed.example.com",))))
+def test_cors_preflight_jobs(tmp_path: Path):
+    cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
 
-    response = tc.options(
-        "/api/jobs",
-        headers={
-            "Origin": "http://allowed.example.com",
-            "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "Content-Type",
-        }
-    )
+    with TestClient(create_app(cors_settings)) as cors_client:
+        response = cors_client.options(
+            "/api/jobs",
+            headers={
+                "Origin": "http://allowed.example.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type",
+            }
+        )
+
     assert response.status_code == 200
     assert response.headers["Access-Control-Allow-Origin"] == "http://allowed.example.com"
     assert "POST" in response.headers["Access-Control-Allow-Methods"]
     assert "content-type" in response.headers["Access-Control-Allow-Headers"].lower()
 
-def test_cors_preflight_jobs_forbidden():
-    tc = TestClient(create_app(Settings(cors_origins=("http://allowed.example.com",))))
+def test_cors_preflight_jobs_forbidden(tmp_path: Path):
+    cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
 
-    response = tc.options(
-        "/api/jobs",
-        headers={
-            "Origin": "http://example.com",
-            "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "Content-Type",
-        }
-    )
+    with TestClient(create_app(cors_settings)) as cors_client:
+        response = cors_client.options(
+            "/api/jobs",
+            headers={
+                "Origin": "http://example.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type",
+            }
+        )
+
     assert response.status_code == 400
     assert "Access-Control-Allow-Origin" not in response.headers
 
-def test_health_endpoint():
+def test_health_endpoint(client: TestClient):
     response = client.get("/api/health")
 
     assert response.status_code == 200

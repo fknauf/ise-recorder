@@ -556,3 +556,28 @@ async def test_postprocess_recordings_missing_main(mocker: MockerFixture):
         call(rec_path),
         call(rec_path / "stream")
     ])
+
+@pytest.mark.asyncio
+async def test_audio_tracks_are_ordered_by_number_not_by_name(
+        mocker: MockerFixture, tmp_path: Path
+):
+    # sort audio-1, audio-2, ..., audio-9, audio-10 instead of audio-1, audio-10, audio-2
+
+    mock_tracks = mocker.patch(
+        "ise_record.postprocess.postprocess_tracks",
+        autospec=True,
+        return_value=Result(reason=ResultReason.SUCCESS, output_file=None)
+    )
+
+    recording_path = tmp_path / "PSU_2026-02-13T164309.313"
+    (recording_path / "stream").mkdir(parents=True)
+
+    audio_dirs = [ f"audio-{i}" for i in range(12) ]
+
+    for d in audio_dirs:
+        (recording_path / d).mkdir()
+
+    await postprocess_recording(recording_path)
+    audio_args = [ path.name for path in mock_tracks.call_args.args[2] ]
+
+    assert audio_args == audio_dirs
