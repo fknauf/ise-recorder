@@ -9,7 +9,6 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 from pathlib import Path
-import re
 import threading
 from typing import Any, Iterator, Optional
 
@@ -21,7 +20,7 @@ import pytest
 from ise_record import auth
 from ise_record.auth import user_home_dir
 from ise_record.server import create_app
-from ise_record.settings import OidcSettings, SAFE_NAME_REGEX, Settings
+from ise_record.settings import OidcSettings, Settings
 
 CLIENT_ID = "ise-recorder"
 
@@ -303,39 +302,91 @@ def test_unconfigured_deployment_stays_open(tmp_path: Path):
 
 SUBJECT_DIGEST = hashlib.sha3_256(b"abc").hexdigest()[:12]
 
+# NAME_MAX on ext4. auth.py keeps its own, much smaller cap on the username part; this is
+# the bound the filesystem imposes on whatever comes out of it.
+NAME_MAX_BYTES = 255
+
+
+def home_dir_for(username: Any) -> str:
+    """ The directory name derived for a username, with the subject held fixed. """
+    return user_home_dir({"sub": "abc", "preferred_username": username})
+
 
 @pytest.mark.parametrize("username,expected_prefix", [
     ("lecturer", "lecturer-"),
     ("m.mustermann", "m.mustermann-"),
-    ("a/b", "a_b-"),
-    ("mit Leerzeichen", "mit_Leerzeichen-"),
+    ("user@example.com", "user@example.com-"),        # the shape most IdPs actually hand out
+    ("mit Leerzeichen", "mit_Leerzeichen-"),          # spaces become separators, not gaps
+    ("  padded  ", "padded-"),                        # stripped before the interior collapse
+    ("zwei  Leerzeichen", "zwei_Leerzeichen-"),       # and a run of them collapses to one
+    ("\u00e4 \u00f6 \u00fc", "\u00e4_\u00f6_\u00fc-"),
+    ("\u5f20\u4e09", "\u5f20\u4e09-"),                        # CJK is carried through intact
+    ("\u0939\u093f\u0928\u094d\u0926\u0940", "\u0939\u093f\u0928\u094d\u0926\u0940-"),      # and so are combining marks, which \\w dropped
+    ("a/b", "ab-"),                                   # the separator goes, the name survives
+    ("CON", "CON_-"),                                 # reserved on Windows, renamed by pathvalidate
 ])
 def test_readable_username_becomes_the_directory_prefix(username: str, expected_prefix: str):
-    name = user_home_dir({"sub": "abc", "preferred_username": username})
+    name = home_dir_for(username)
 
     assert name.startswith(expected_prefix)
     assert name.endswith(SUBJECT_DIGEST)
 
 
 @pytest.mark.parametrize("username", [
-    None, 42, "", "...", "---",           # nothing usable to prefix with
-    "../../etc/passwd", "..", "./x",      # would not survive as a path segment
-    "-rf",                                # leading dash
+    None, 42,                          # not a string at all
+    "", "   ", "\u3000",                # nothing left after stripping
+    "...", "---", "..", "-.-.-",       # nothing usable left at all
+    ".hidden", ".NET", "-rf", "-weird",  # a readable name, but not one that may lead
 ])
 def test_unusable_username_falls_back_to_the_subject_digest(username: Any):
-    assert user_home_dir({"sub": "abc", "preferred_username": username}) \
-        == SUBJECT_DIGEST
+    # the last four are a deliberate trade: rather than strip the leading character and keep
+    # a readable prefix, the whole prefix is dropped. Nothing downstream validates this name
+    # -- unlike a recording name, there is no pattern behind it -- so the one check at the
+    # end of user_home_dir is the entire guarantee, and it is worth keeping obvious
+    assert home_dir_for(username) == SUBJECT_DIGEST
+
+
+@pytest.mark.parametrize("username,expected", [
+    ("Anna\u00a0Schmidt", "Anna_Schmidt-"),    # non-breaking space, as a web form sends it
+    ("\u3000\u674e\u3000", "\u674e-"),                 # ideographic space, as a CJK IME sends it
+    ("a\u2003b", "a_b-"),                      # em space
+    ("a\tb", "a_b-"),
+    ("a\nb", "a_b-"),
+])
+def test_unicode_whitespace_is_a_separator_like_any_other(username: str, expected: str):
+    # \s on a str pattern is Unicode-aware, which is what keeps a pasted U+3000 out of a
+    # directory name -- pathvalidate would have left it there
+    assert home_dir_for(username).startswith(expected)
+
+
+def test_the_directory_name_does_not_depend_on_the_composition_of_the_username():
+    # spelled with escapes: the two forms are indistinguishable on screen, so an editor
+    # normalising this file would turn one half of this test into a copy of the other
+    decomposed = "U\u0308bung"
+    composed = "\u00dcbung"
+
+    assert decomposed != composed
+    assert home_dir_for(decomposed) == home_dir_for(composed)
 
 
 @pytest.mark.parametrize("username", [
     "lecturer", "a/b", "../../etc/passwd", "..", "", "-rf", "\\\\server\\share",
-    "a" * 300, "ä ö ü", "nul\x00byte", "%2e%2e%2f", "..;/", 42, None,
+    "a" * 300, "\u673a" * 200, "\U00020000" * 100, "\u00e4 \u00f6 \u00fc", "nul\x00byte",
+    "%2e%2e%2f", "..;/", "- - - 81457m4573r 9001 - - -", "\u3000\u674e\u3000",
+    "\u0308mark", 42, None,
 ])
 def test_directory_name_is_always_a_safe_single_path_segment(username: Any):
-    name = user_home_dir({"sub": "abc", "preferred_username": username})
+    name = home_dir_for(username)
 
-    assert re.match(SAFE_NAME_REGEX, name), f"unsafe directory name: {name!r}"
+    assert name, "an empty directory name would put chunks in the destination root"
+    assert not name.startswith((".", "-")), "hidden on unix, an option to anything argv-shaped"
+    assert "/" not in name and "\x00" not in name
+    assert not any(character.isspace() for character in name)
     assert (Path("/data") / name).resolve().parent == Path("/data")
+
+    # the bound that matters is bytes, not characters: NAME_MAX is 255 bytes on ext4 and
+    # the 48-character slice can be four bytes a character before the digest is appended
+    assert len(name.encode("utf-8")) <= NAME_MAX_BYTES
 
 
 def test_directory_name_is_stable_for_a_subject():
@@ -345,6 +396,8 @@ def test_directory_name_is_stable_for_a_subject():
 
 
 def test_username_collisions_are_separated_by_the_digest():
+    # pathvalidate maps several usernames onto one string -- "DOMAIN\\user" and "DOMAINuser"
+    # both come out as the latter -- so the digest is the only thing keeping them apart
     first = user_home_dir({"sub": "user-a", "preferred_username": "same"})
     second = user_home_dir({"sub": "user-b", "preferred_username": "same"})
 

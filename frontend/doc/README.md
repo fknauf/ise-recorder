@@ -268,6 +268,7 @@ fall into the following subsystems:
 | `recording` | recording logic; determines recording ID and track names, starts recording the configured tracks, stores the recording in the browser and optionally streams it to a backend server, where it also optionally schedules postprocessing when the recording ends. |
 | `serverEnv` | Definition, validation and wiring of the server environment into the nextjs framework |
 | `serverStorage` | functions to stream chunks of media to the backend server (if configured in the server env) |
+| `stringAux` | Grapheme-aware string truncation, used for recording name sanitation |
 
 The `recording` utility is the heart of the application logic and the most complex piece of machinery in the project, so read the comments
 there when you're working on it. There is some complexity here wrt ensuring that chunks of media are not dropped, processed in the

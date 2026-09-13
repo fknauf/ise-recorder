@@ -9,6 +9,7 @@ dependencies = [
     "email-validator~=2.3",
     "fastapi~=0.141",
     "httpx2~=2.12",
+    "pathvalidate~=3.3",
     "pydantic-settings~=2.15",
     "PyJWT[crypto]~=2.14",
     "python-multipart~=0.0",

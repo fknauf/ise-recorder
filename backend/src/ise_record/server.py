@@ -9,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated, AsyncGenerator, Optional
+import unicodedata
 
 import aiofiles
 from fastapi import (
@@ -23,13 +24,28 @@ from fastapi import (
     status
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pathvalidate import sanitize_filename
+from pydantic import BaseModel, BeforeValidator, Field
 
 from .auth import get_current_user_home, load_oidc_config
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report, SmtpSink
-from .settings import SAFE_NAME_REGEX, Settings, get_settings
+from .settings import Settings, get_settings
+
+def _normalize_for_filesystem(value: str) -> str:
+    return sanitize_filename(unicodedata.normalize("NFC", value), platform="universal")
+
+SafeRecording = Annotated[
+    str,
+    BeforeValidator(_normalize_for_filesystem),
+    Field(
+        pattern=r"\A[\p{L}\p{N}_][\p{L}\p{M}\p{N}._-]*\z",
+        min_length=1,
+        description="Name of the recording. Usually consists of Lecture Title and Timestamp",
+        examples=["PSU_2026-02-13T164309.313"],
+    )
+]
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -38,18 +54,11 @@ router = APIRouter()
 class ChunkUpload(BaseModel):
     """ An uploaded chunk with metadata """
 
-    recording: Annotated[
-        str,
-        Field(
-            pattern=SAFE_NAME_REGEX,
-            description="Name of the recording. Usually consists of Lecture Title and Timestamp",
-            examples=["PSU_2026-02-13T164309.313"],
-        )
-    ]
+    recording: SafeRecording
     track: Annotated[
         str,
         Field(
-            pattern=SAFE_NAME_REGEX,
+            pattern=r"\A[a-z][a-z0-9-]*\z",
             description="Name of the track, e.g. stream, overlay, audio-0",
             examples=["stream", "overlay", "audio-0"]
         )
@@ -110,14 +119,7 @@ async def upload_chunk(
 class PostProcessingJob(BaseModel):
     """ DTO for a postprocessing job the client wants to schedule """
 
-    recording: Annotated[
-        str,
-        Field(
-            pattern=SAFE_NAME_REGEX,
-            description="Name of the recording. Usually consists of Lecture Title and Timestamp",
-            examples=["PSU_2026-02-13T164309.313"]
-        )
-    ]
+    recording: SafeRecording
     # backend will validate before sending email. We want the postprocessing to work even if
     # someone has a typo in the mail address or doesn't specify a recipient, so we don't reject
     # a malformed recipient here (we just don't send mail later)

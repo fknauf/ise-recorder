@@ -36,6 +36,7 @@
         "OICD",
         "OPFS",
         "partialize",
+        "pathvalidate",
         "pillarboxed",
         "pwdlib",
         "pycache",

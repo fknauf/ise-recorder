@@ -7,7 +7,6 @@ import Circle from "@spectrum-icons/workflow/Circle";
 import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
 import Stop from "@spectrum-icons/workflow/Stop";
 import isEmail from "validator/es/lib/isEmail";
-import { classifyLectureTitle } from "../utils/recording";
 import { createDeviceKey, parseDeviceKey } from "../store/store";
 import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
 import { useMediaDevices } from "../hooks/useMediaDevices";
@@ -15,18 +14,23 @@ import { useLecture } from "../hooks/useLecture";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { ActiveRecording } from "../store/store";
 import { useMediaTracks } from "../hooks/useMediaTracks";
+import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
 
 export type RecorderState = ActiveRecording["state"];
 
 function validateLectureTitle(lectureTitle: string): string | true {
-  switch(classifyLectureTitle(lectureTitle)) {
-    case "unsafe-char":
-      return "Unsafe character in lecture title";
-    case "unsafe-start":
-      return "Lecture title begins with an unsafe character";
-    case "ok":
-      return true;
+  const normalizedTitle = normalizeLectureTitle(lectureTitle);
+  const sanitizedTitle = sanitizeLectureTitle(lectureTitle);
+
+  if(sanitizedTitle === "" && normalizedTitle !== "") {
+    return "sanitizes to empty string";
   }
+
+  if(sanitizedTitle !== normalizedTitle) {
+    return `sanitizes to ${sanitizedTitle}`;
+  }
+
+  return true;
 }
 
 const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
@@ -115,7 +119,7 @@ export function RecorderControls() {
     refreshMediaDevices
   } = useMediaDevices();
 
-  const hasEmailField = apiUrl !== undefined;
+  const isBackendConfigured = apiUrl !== undefined;
   const hasDisabledTrackControls = activeRecording.state !== "idle";
 
   const onMenuOpenChange = (isOpen: boolean) => {
@@ -137,7 +141,7 @@ export function RecorderControls() {
       />
 
       {
-        hasEmailField &&
+        isBackendConfigured &&
           <TextField
             label="e-Mail"
             value={lecturerEmail}

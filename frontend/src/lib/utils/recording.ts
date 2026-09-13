@@ -3,6 +3,7 @@
 import { openRecordingFileStream } from "./browserStorage";
 import { showError } from "./notifications";
 import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
+import { graphemeAwareTruncateToBytes } from "./stringAux";
 
 // used to remove characters from the recording name that would trip up ffmpeg in post
 // and warn in the UI about unsafe names. Spaces are not warned about in the UI for
@@ -10,34 +11,23 @@ import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } f
 // start to avoid hidden recording directories on linux/unix backends.
 
 /* eslint-disable @stylistic/no-multi-spaces -- aligned for legibility */
-const warningNameCharacters =  /[^\p{L}\p{Nd}\p{Zs}._-]/u;
-const unsafeNameCharacters  =  /[^\p{L}\p{Nd}._-]+/gu;
-const unsafeNameStart       = /^[^\p{L}\p{Nd}_]+/u;
+const unsafeNameCharacters =  /[^\p{L}\p{N}\p{M}._-]+/gu;
+const unsafeNameStart      = /^[^\p{L}\p{N}_]+/u;
 /* eslint-enable @stylistic/no-multi-spaces */
 
-function sanitizedRecordingName(lectureTitle: string, timestamp: Date) {
-  const lecturePrefix = lectureTitle ? `${lectureTitle.trim()}_` : "";
-
-  return `${lecturePrefix}${timestamp.toISOString()}`
+export const normalizeLectureTitle = (lectureTitle: string) =>
+  lectureTitle
+    .trim()
     .normalize("NFC")
-    .replaceAll(unsafeNameCharacters, "")
-    .replace(unsafeNameStart, "");
-}
+    .replace(/\p{Zs}/gu, "_");
 
-type LectureTitleClass = "ok" | "unsafe-char" | "unsafe-start";
+export function sanitizeLectureTitle(lectureTitle: string) {
+  const sanitizedLongTitle =
+    normalizeLectureTitle(lectureTitle)
+      .replaceAll(unsafeNameCharacters, "")
+      .replace(unsafeNameStart, "");
 
-export function classifyLectureTitle(lectureTitle: string): LectureTitleClass {
-  const title = lectureTitle.normalize("NFC").trim();
-
-  if(warningNameCharacters.test(title)) {
-    return "unsafe-char";
-  }
-
-  if(unsafeNameStart.test(title)) {
-    return "unsafe-start";
-  }
-
-  return "ok";
+  return graphemeAwareTruncateToBytes(sanitizedLongTitle, 192);
 }
 
 export interface RecordingTrackBundle {
@@ -219,8 +209,10 @@ export async function recordLecture(
   onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
   onFinished: (recordingName: string) => Promise<void> | void
 ) {
-  const timestamp = new Date();
-  const recordingName = sanitizedRecordingName(lectureTitle, timestamp);
+  const sanitizedTitle = sanitizeLectureTitle(lectureTitle);
+  const lecturePrefix = sanitizedTitle !== "" ? `${sanitizedTitle}_` : "";
+  const timestamp = new Date().toISOString().replaceAll(":", "");
+  const recordingName = `${lecturePrefix}${timestamp}`;
 
   const videoOptions: MediaRecorderOptions = { mimeType: "video/webm" };
   const audioOptions: MediaRecorderOptions = { mimeType: "audio/webm" };

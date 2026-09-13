@@ -10,14 +10,16 @@ import hashlib
 import logging
 import re
 from typing import Annotated, Any, NamedTuple, Optional
+import unicodedata
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx2
 import jwt
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
+from pathvalidate import sanitize_filename
 
-from .settings import get_settings, SAFE_NAME_REGEX, Settings
+from .settings import get_settings, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -151,14 +153,15 @@ def user_home_dir(claims: dict[str, Any]) -> str:
     subject = claims["sub"]
     digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()[:12]
 
-    username = claims.get("preferred_username")
-    if not isinstance(username, str):
+    raw_username = claims.get("preferred_username")
+    if not isinstance(raw_username, str):
         return digest
 
-    sanitized = re.sub(r'[^\w.-]', '_', username)[:48]
-    candidate = f"{sanitized}-{digest}"
+    normalized_user = re.sub(r"\s+", "_", unicodedata.normalize("NFC", raw_username).strip())
+    sanitized_user = sanitize_filename(normalized_user, platform="universal")[:48]
+    candidate = f"{sanitized_user}-{digest}"
 
-    return candidate if SAFE_NAME_REGEX.match(candidate) else digest
+    return candidate if candidate[:1] not in [ ".", "-" ] else digest
 
 
 async def get_current_user_home(

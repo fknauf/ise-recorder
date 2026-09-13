@@ -22,6 +22,9 @@ from ise_record.postprocess import Result, ResultReason
 from ise_record.server import create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
 from ise_record.settings import Settings
 
+# NAME_MAX on ext4, which is what pathvalidate caps a filename at inside SafeRecording
+NAME_MAX_BYTES = 255
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     """ Documented defaults, with a destination directory of this test's own. """
@@ -314,6 +317,74 @@ def test_chunk_upload(client: TestClient, settings: Settings):
         assert response.status_code == 201
         assert os.path.isfile(target_path)
         assert os.stat(target_path).st_size == sample_size
+
+@pytest.mark.parametrize("recording", [
+    "GVS_2025-12-21T123456.789Z",
+    "\u673a\u5668\u5b66\u4e60\u7b2c\u4e00\u8bb2_2025-12-21T123456.789Z",              # Chinese
+    "\u0939\u093f\u0928\u094d\u0926\u0940_\u0935\u094d\u092f\u093e\u0915\u0930\u0923_2025-12-21T123456.789Z",  # Devanagari, which \\w rejected
+    "\u00dcbung_3_2025-12-21T123456.789Z",
+])
+def test_chunk_upload_stores_a_non_latin_recording_name(recording: str, client: TestClient, settings: Settings):
+    # the endpoint has to accept what the frontend derives and then actually create the
+    # directory: os.makedirs is where a name that passed validation can still fail
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+
+    with open(sample_path, "rb") as sample:
+        response = client.post(
+            "/api/chunks",
+            data={"recording": recording, "track": "stream", "index": "0"},
+            files={"chunk": sample}
+        )
+
+    assert response.status_code == 201
+    assert (settings.destdir / recording / "stream" / "chunk.0000").is_file()
+
+
+def test_chunk_upload_stores_a_decomposed_name_under_one_directory(client: TestClient, settings: Settings):
+    # macOS and several IMEs send NFD, so the same lecture can arrive spelled two ways that
+    # are identical on screen. Both have to land in the composed directory, or the chunks of
+    # one recording end up split across two and the postprocessing job finds half of them.
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+
+    for index, recording in enumerate([ "U\u0308bung_2025", "\u00dcbung_2025" ]):
+        with open(sample_path, "rb") as sample:
+            response = client.post(
+                "/api/chunks",
+                data={"recording": recording, "track": "stream", "index": str(index)},
+                files={"chunk": sample}
+            )
+
+        assert response.status_code == 201
+
+    composed = settings.destdir / "\u00dcbung_2025" / "stream"
+
+    assert (composed / "chunk.0000").is_file()
+    assert (composed / "chunk.0001").is_file()
+    assert sorted(p.name for p in settings.destdir.iterdir()) == [ "\u00dcbung_2025" ]
+
+
+def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, settings: Settings):
+    # a client that ignores the frontend's cap must not get a permanent 422 for the length of
+    # a lecture, nor an OSError out of os.makedirs. The name is cut to the byte budget instead
+    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+    recording = "\u673a" * 200
+
+    with open(sample_path, "rb") as sample:
+        response = client.post(
+            "/api/chunks",
+            data={"recording": recording, "track": "stream", "index": "0"},
+            files={"chunk": sample}
+        )
+
+    assert response.status_code == 201
+
+    stored = list(settings.destdir.iterdir())
+
+    assert len(stored) == 1
+    assert len(stored[0].name.encode("utf-8")) <= NAME_MAX_BYTES
+    assert recording.startswith(stored[0].name)
+    assert (stored[0] / "stream" / "chunk.0000").is_file()
+
 
 def test_chunk_upload_input_validation(client: TestClient):
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"

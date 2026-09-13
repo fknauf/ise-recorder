@@ -2,13 +2,10 @@
 
 from functools import lru_cache
 from pathlib import Path
-import re
 from typing import Annotated, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-SAFE_NAME_REGEX = re.compile('^\\w[\\w.-]*\\Z')
 
 class OidcSettings(BaseModel):
     """
