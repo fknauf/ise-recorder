@@ -103,7 +103,7 @@ in a specific part of the State known through the use of hooks and are rerendere
 The application is built on Next.JS's app router, and the project organization follows from that. All application code is in the
 folder `src`, the tests in folder `__tests__`.
 
-There are four main subsystems in the application code:
+The code consists of the following main subsystems:
 
 | Subsystem | Function | Path |
 | - | - | - |
@@ -158,6 +158,7 @@ classDiagram
     class ActiveRecording {
         string? name
         stop?() void
+        boolean? streamingImpeded
     }
     ActiveRecording *--> "1" RecorderState: state
 
@@ -192,7 +193,7 @@ The state broadly covers the following tasks:
 | `videoDevices`, `audioDevices` | list of media devices. Displayed during media source selection and used to capture video and audio tracks |
 | `displayTracks`, `videoTracks`, `audioTracks` | Lists of display capture, camera, and microphone tracks added by the user. Displayed as previews, captured during recording |
 | `mainDisplay`, `overlay` | Tracks selected as main display and overlay (if any). Used to determine recording track names and set roles for postprocessing |
-| `activeRecording` | whether the app is currently recording, what the name of the recording is, and a `stop` function to finish the recording if one is active  |
+| `activeRecording` | whether the app is currently recording, the name of the recording, a `stop` function to end recording, and an indication whether streaming to backend is impeded |
 | `fileSizeOverrides` | amount of data recorded in the active recording, which is not yet committed to the browser OPFS and so doesn't appear in `savedRecordings` |
 | `savedRecordings` | list of finished recordings as present in the OPFS, i.e. without adjustments from `fileSizeOverrides` |
 | `adjustedSavedRecordings` | `savedRecordings` with adjustments from `fileSizeOverrides`. Displayed in the UI. |
@@ -241,20 +242,21 @@ achieve in a pure redux architecture.
 
 The hooks themselves are meant to contain only the UI-specific logic. What precisely this means in a frontend
 is of course a bit of a judgement call, but the heavier application logic lifting is done in utility functions, which the hooks
-use. For example, the start-recording action provided by the `useActiveRecording` hook uses the recording utility function and
+use. For example, the start-recording action provided by the `useStarStopRecording` hook uses the recording utility function and
 provides it with a number of callback functions that specify how the UI is to be updated when certain events during recording
 occur, e.g. the size of the active recording is updated as chunks of data roll in. Thus the actual recording logic is cleanly
 separated from UI updates, and that's largely the purpose of the hook/utility split.
 
 | Hook | Purpose |
 | - | - |
-| `useActiveRecording` | action functions to start and stop recording |
+| `useAccessTokenSource` | provides functions concerning the authentication state, i.e. current access token retrieval and session headroom expansion, along with the information whether authentication is required at all. |
+| `useActiveRecording` | provides info whether a recording is active and details about the active recording |
 | `useBrowserStorage` | provides information about the browser's OPFS, i.e. saved recordings and quota information, and an action to delete a recording |
 | `useLecture` | provides the configured lecture title and notification email address |
 | `useMediaDevices` | provides the list of audio and video devices and actions to refresh that list and open media tracks from a device |
 | `useMediaTracks` | provides the list of open tracks, which of those are selected as main and overlay, and actions to select main and overlay track or close a track. These actions will only work when the application is not recording. |
 | `useServerEnv` | provides the server-side configuration (no actions) |
-| `useAccessTokenSource` | provides functions concerning the authentication state, i.e. current access token retrieval and session headroom expansion, along with the information whether authentication is required at all. |
+| `useStartStopRecording` | action functions to start and stop recording |
 
 ## Utilities
 
@@ -264,7 +266,7 @@ fall into the following subsystems:
 | Utility | Purpose |
 | - | - |
 | `browserStorage` | save, query, delete, and download recordings in the browser-local file system |
-| `notification` | show warning and error messages to the user |
+| `notifications` | show warning and error messages to the user |
 | `recording` | recording logic; determines recording ID and track names, starts recording the configured tracks, stores the recording in the browser and optionally streams it to a backend server, where it also optionally schedules postprocessing when the recording ends. |
 | `serverEnv` | Definition, validation and wiring of the server environment into the nextjs framework |
 | `serverStorage` | functions to stream chunks of media to the backend server (if configured in the server env) |
@@ -341,7 +343,7 @@ the future as the OIDC provider allows. If at this point the session is past max
 and the application drops back to "idle", otherwise it moves on to "starting". The "preparing" and "starting" states exists
 mostly to prevent double-starts of recordings in response to double-clicks by the user.
 
-The mechanism for UI updates during recording are four callback functions, passed from the `useActiveRecording` hook into the
+The mechanism for UI updates during recording are four callback functions, passed from the `useStartStopRecording` hook into the
 recording utility function and called at state transitions or in response to arriving media chunks.
 
 - At the idle -> preparing transition, large parts of the UI are disabled. The "Start Recording" button is relabeled "Stop Recording"
@@ -365,6 +367,7 @@ An authentication backend can be configured through the environment variables
 
 | Variable | Example | Meaning |
 | - | - | - |
+| `ISE_RECORD_API_URL`        | `https://record.example.edu/api`      | Base URL of the backend API |
 | `ISE_RECORD_OIDC_URL`       | `https://auth.example.edu/realms/ise` | URL of the OpenID Connect provider |
 | `ISE_RECORD_OIDC_CLIENT_ID` | `ise-recorder`                        | Client-ID as configured in the OIDC provider |
 | `ISE_RECORD_OIDC_MAX_AGE`   | `79200`                               | OIDC max_age in seconds |

@@ -244,7 +244,7 @@ export async function recordLecture(
         // If this happens, it's probably because the browser quota is exhausted.
         showError(`Could not write to ${filename}`, e);
         streams.delete(filename);
-        await stream.close();
+        await stream.close().catch(() => null);
       }
 
       if(written) {

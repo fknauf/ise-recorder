@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     destdir: Path = Path("./data")
 
     smtp_server: Optional[str] = None
-    smtp_port: Annotated[int, Field(ge=0, lt=65536)] = 0
+    smtp_port: Annotated[Optional[int], Field(ge=0, lt=65536)] = None
     smtp_local_hostname: Optional[str] = None
     smtp_username: Optional[str] = None
     smtp_password: Optional[str] = None
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     smtp_starttls: bool = False
     smtp_allowed_domains: tuple[str, ...] = ()
 
-    chunk_file_digits: int = 4
+    chunk_file_digits: Annotated[int, Field(ge=3, lt=10)] = 4
 
     cors_origins: tuple[str, ...] = ()
     oidc: Optional[OidcSettings] = None

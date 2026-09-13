@@ -133,8 +133,8 @@ async def video_properties(path: Path) -> VideoProperties:
 
     crop_left   = min((int(p['tags']['lavfi.cropdetect.x1']) for p in packets), default=0)
     crop_top    = min((int(p['tags']['lavfi.cropdetect.y1']) for p in packets), default=0)
-    crop_right  = max((int(p['tags']['lavfi.cropdetect.x2']) for p in packets), default=width)
-    crop_bottom = max((int(p['tags']['lavfi.cropdetect.y2']) for p in packets), default=height)
+    crop_right  = max((int(p['tags']['lavfi.cropdetect.x2']) for p in packets), default=width - 1)
+    crop_bottom = max((int(p['tags']['lavfi.cropdetect.y2']) for p in packets), default=height - 1)
 
     logger.debug('%s: size=%dx%d, crop=%d,%d-%d,%d',
                  path, width, height, crop_left, crop_top, crop_right, crop_bottom)

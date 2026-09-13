@@ -19,7 +19,7 @@ class SmtpSink(NamedTuple):
     """ A destination for SMTP messages (parameter object) """
 
     server: str | None
-    port: int
+    port: int | None
     starttls: bool
     username: str | None
     password: str | None
@@ -48,11 +48,11 @@ def normalize_recipient(address: str | None, domain_whitelist: List[str]) -> str
         return None
 
     try:
-        validated = validate_email(address)
+        validated = validate_email(address, check_deliverability=False)
         if _is_whitelisted(validated.normalized, domain_whitelist):
             return validated.normalized
 
-        logger.warning("Blacklisted recipient address: %s", address)
+        logger.warning("Recipient address is not whitelisted: %s", address)
     except EmailNotValidError:
         logger.warning("Invalid recipient address: %s", address)
 
@@ -88,6 +88,8 @@ def generate_report(
                 'Encoding succeeded, but the stream was incomplete. '
                 'Please inspect the file to see what was missing.'
             )
+        case _:
+            message = "There's a bug in my code and something triggered it. Check server logs."
 
     content = dedent(
         """

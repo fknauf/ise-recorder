@@ -32,6 +32,7 @@ export function proxy(request: NextRequest) {
     base-uri 'self';
     form-action 'self';
     frame-ancestors 'self';
+    frame-src 'self' ${oidcSrc};
     connect-src 'self' ${apiSrc} ${oidcSrc};
     upgrade-insecure-requests;
 `;

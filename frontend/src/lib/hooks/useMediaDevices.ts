@@ -80,9 +80,11 @@ export function useMediaDevices() {
   const openDisplayStream = async () => {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia();
-      const tracks = screenStream.getVideoTracks();
 
-      addDisplayTracks(tracks);
+      addDisplayTracks(screenStream.getVideoTracks());
+      // Audio tracks are going to be rare here. This can happen when a user captures
+      // a browser tab that's playing audio.
+      addAudioTracks(screenStream.getAudioTracks());
     } catch(e) {
       showError("Could not obtain display stream", e);
     }

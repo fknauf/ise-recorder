@@ -10,3 +10,5 @@ next-env.d.ts
 out
 build
 doc
+**/__screenshots__
+.vitest_attachments

@@ -68,7 +68,7 @@ This is meant to work with the following Typescript snippet:
 
 ```typescript
 const data = new FormData();
-data.append("recording", "GVS_2026-01-23T12:34:56.789Z");
+data.append("recording", "GVS_2026-01-23T123456.789Z");
 data.append("track", "stream");
 data.append("index", "0");
 data.append("chunk", chunk); // where chunk is of type Blob
@@ -83,7 +83,7 @@ The `/api/jobs` endpoint accepts a JSON object (with `Content-Type: application/
 
 ```json
 {
-    "recording": "GVS_2026-01-23T12:34:56.789Z",
+    "recording": "GVS_2026-01-23T123456.789Z",
     "recipient": "lecturer@uni.edu"
 }
 ```
@@ -131,6 +131,21 @@ This backend uses ffmpeg command-line utilities for postprocessing. The process 
 5. Combine all those into an ffmpeg command and run it in the background
 6. Clean up when finished
 
+## Reporting
+
+The backend can be configured to send out completion notifications by email. The
+configuration is read from the following environment variables:
+
+| Variable | Example | Purpose |
+| - | - | - |
+| ISE_RECORD_SMTP_SERVER          | mail.example.edu                 | Hostname or IP address of the SMTP relay |
+| ISE_RECORD_SMTP_PORT            | 25                               | Port to use. Defaults to 587 if `ISE_RECORD_SMTP_STARTTLS` is true, 25 otherwise. |
+| ISE_RECORD_SMTP_LOCAL_HOSTNAME  | record.example.edu               | Hostname of the backend server, used for HELO/EHLO |
+| ISE_RECORD_SMTP_USERNAME        | user1                            | username for login, if required |
+| ISE_RECORD_SMTP_PASSWORD        | supersecure                      | password for login, if required |
+| ISE_RECORD_SMTP_SENDER          | ise-record@example.edu           | Mail address to put in the "From" header |
+| ISE_RECORD_SMTP_STARTTLS        | true                             | Whether `ISE_RECORD_SMTP_SERVER` supports the `STARTTLS` command |
+| ISE_RECORD_SMTP_ALLOWED_DOMAINS | [ "example.edu", "example.org" ] | Domains that the backend will send mail to. Subdomains are implicitly whitelisted. |
 
 ## Authentication
 
