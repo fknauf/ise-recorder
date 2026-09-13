@@ -5,10 +5,11 @@ import { showError } from "./notifications";
 import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
 import { graphemeAwareTruncateToBytes } from "./stringAux";
 
-// used to remove characters from the recording name that would trip up ffmpeg in post
-// and warn in the UI about unsafe names. Spaces are not warned about in the UI for
-// user convenience but will be stripped before upload. Dots are not allowed at the
-// start to avoid hidden recording directories on linux/unix backends.
+// used to remove characters from the recording name that could trip up ffmpeg in post
+// and warn in the UI about unsafe names. Spaces will be replaced with _ before upload.
+// Dots are not allowed at the start to avoid hidden recording directories on linux/unix
+// backends, dashes because the resulting directory would look like a command line option.
+// The backend could handle it, but no one wants to have directories like that.
 
 /* eslint-disable @stylistic/no-multi-spaces -- aligned for legibility */
 const unsafeNameCharacters =  /[^\p{L}\p{N}\p{M}._-]+/gu;
