@@ -27,17 +27,20 @@ import { ServerStorageDestination } from "@/lib/utils/serverStorage";
 vi.mock("@/lib/utils/serverStorage");
 
 /**
- * Transcribed from SAFE_NAME_REGEX in backend/src/ise_record/settings.py.
+ * Transcribed from the SafeRecording pattern in backend/src/ise_record/server.py, which is
+ * where the rule lives now -- pydantic enforces it through the Rust regex engine, which is
+ * what makes \p{...} available on that side at all.
  *
- * NOTE: this is the relaxed rule -- \p{M} in the body, which is what lets Devanagari, Thai
- * and any other script whose vowels are combining marks through at all. Until the backend
- * lands it, names containing a mark will pass here and be rejected there; the cases marked
- * below are the ones that tell the two apart.
+ * \p{M} in the body is the relaxation that matters: it is what lets Devanagari, Thai and
+ * every other script whose vowels are combining marks through. It replaced Python's \w,
+ * which on str patterns is `ch.isalnum() or ch == "_"` -- categories L*, Nd, Nl and No, plus
+ * underscore, and no marks. JS's \w is ASCII-only under every flag, so it has to be spelled
+ * out with property escapes -- and those need the u flag, or \p{L} silently degrades to
+ * Annex B legacy semantics and matches nearly everything.
  *
- * Python's \w on str patterns is `ch.isalnum() or ch == "_"`: Unicode categories L*, Nd, Nl
- * and No, plus underscore, and no marks. JS's \w is ASCII-only under every flag, so it has
- * to be spelled out with property escapes -- and those need the u flag, or \p{L} silently
- * degrades to Annex B legacy semantics and matches nearly everything.
+ * The backend repairs only what a filesystem refuses outright and composes to NFC; every
+ * other rule is this pattern, applied last. So a name that fails it is a 422, and a 422 on
+ * /api/chunks is permanent.
  */
 const BACKEND_SAFE_NAME = /^[\p{L}\p{N}_][\p{L}\p{M}\p{N}_.-]*$/u;
 
