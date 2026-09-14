@@ -23,8 +23,6 @@ interface AuthenticatedTokenSourceProviderProps {
   children?: ReactNode
 }
 
-const MAX_TIMEOUT_MILLIS = 2 ** 31 - 1;
-
 interface Staleness {
   stale: boolean
   recheckMillis?: number
@@ -47,6 +45,8 @@ async function sessionStaleness(
   }
 
   const staleAtMillis = (user.profile.auth_time + maxAge) * 1000;
+  // adjust for clock drift: normally, Date.now() is after the current access token's iat. If not, then
+  // the server clock and our clock are misaligned. Use iat then because it's closer to the server's now.
   const approxNowMillis = Math.max(user.profile.iat * 1000, Date.now());
   const remainingMillis = staleAtMillis - approxNowMillis;
 
@@ -55,6 +55,8 @@ async function sessionStaleness(
     : { stale: true };
 }
 
+// Stub token source for yolo mode: no auth required, can't provide tokens, there's technically
+// no session but also no need for one, so behave as if there always were a fresh session.
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
   getAccessToken: async () => undefined,
@@ -73,6 +75,8 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
   const setStaleSession = useAppStore(store => store.setStaleSession);
   const router = useRouter();
 
+  // Need to roll our own UserManager instead of relying on react-oidc-context so we have accesss
+  // to it later. That's required for manual reauthentication and headroom expansion ahead of a recording.
   const [ userMgr ] = useState(() =>
     new UserManager({
       authority: providerUrl,
@@ -84,7 +88,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
       automaticSilentRenew: true,
       accessTokenExpiringNotificationTimeInSeconds: 120,
       max_age: maxAge,
-      filterProtocolClaims: [ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ]
+      filterProtocolClaims: [ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ] // don't filter auth_time. Otherwise same as default.
     })
   );
 
@@ -93,8 +97,10 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
   // clean up userMgr when the component is unmounted. Library does not handle it for us.
   useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
 
+  // Staleness detection: set a flag in the store when session goes past max_age, unset it when
+  // the session is renewed. This uses a timer set to the expected expiry time and userMgr events
+  // as triggers, and on each trigger checks the session state and resets the timer if appropriate.
   useEffect(() => {
-    // set a timer that fires when the session goes past max_age
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
 
@@ -109,11 +115,13 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
       setStaleSession(stale);
 
       if(recheckMillis !== undefined) {
+        // timer's max value is about 25 days. If expiry is further away, do a spurious check in 25 days.
+        const MAX_TIMEOUT_MILLIS = 2 ** 31 - 1;
         timer = setTimeout(check, Math.min(recheckMillis, MAX_TIMEOUT_MILLIS));
       }
     };
 
-    // set event handlers that reset the timer when the session age changes or we're unsure of our clock
+    // set event handlers that reset the timer when the session age changes or when we're unsure of our clock
     check();
     userMgr.events.addUserLoaded(check);
     userMgr.events.addUserUnloaded(check);
@@ -139,6 +147,13 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
     return user.access_token;
   }, [userMgr]);
 
+  // Expanding the session headroom means making sure the current session isn't stale and refreshing the access token
+  // manually, so we have its full length at the beginning of the recording.
+  //
+  // If the current session is past max_age, this will force the user to reauthenticate and get a fresh session.
+  // Refreshing the access token is best-effort and not all that necessary in normal deployments with short-lived access
+  // tokens, but this way if a user likes access tokens that live long enough to cover a recording, then the access token
+  // present at the beginning of the recording will not need renewal during the lecture.
   const expandSessionHeadroom = useCallback(async () => {
     if((await sessionStaleness(userMgr, maxAge)).stale) {
       try {
@@ -185,6 +200,8 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 export function AccessTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
   const env = useServerEnv();
 
+  // Support openid authentication and legacy yolo-who-needs-authentication mode. Split into two
+  // impl components to conform to React hook rules.
   if(env.oidcProviderUrl !== undefined) {
     if(env.oidcClientId === undefined) {
       throw Error("OpenID provider configured but no client ID supplied");
@@ -210,11 +227,11 @@ export function AccessTokenSourceProvider({ children }: Readonly<{ children: Rea
 }
 
 export function useAccessTokenSource(): AccessTokenSource {
-  const store = useContext(AccessTokenSourceContext);
+  const tokenSource = useContext(AccessTokenSourceContext);
 
-  if(store === undefined) {
+  if(tokenSource === undefined) {
     throw new Error("useAccessTokenSource must be used within AccessTokenSourceProvider");
   }
 
-  return store;
+  return tokenSource;
 }

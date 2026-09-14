@@ -8,10 +8,22 @@ import { createDeviceConstraints } from "../store/store";
 const trackIsFromDevice = (track: MediaStreamTrack, uid: MediaDeviceUid) =>
   track.getSettings().groupId === uid.groupId && track.getSettings().deviceId === uid.deviceId;
 
-// Extracted into a function to get around a limitation that exists in babel's react-compiler
-// at time of writing.
-const userPickedDevices = (userInteractionExpected: boolean, duration: number) =>
-  userInteractionExpected || (duration > 200 && navigator.userAgent.includes("Firefox"));
+// Extracted into a function to work around a limitation in babel's react-compiler at time of writing: as of
+// 2026-09 it can't handle && and || in try blocks.
+const userPickedDevices = (userInteractionExpected: boolean, durationMillis: number, thresholdMillis: number) =>
+  userInteractionExpected || (durationMillis > thresholdMillis && navigator.userAgent.includes("Firefox"));
+
+async function queryPermissions(name: PermissionName) {
+  try {
+    const permissions = await navigator.permissions.query({ name });
+    return permissions.state;
+  } catch(e) {
+    // For old browsers that don't support permissions, fall back to denied. We can't really work with them, so
+    // that is about the sanest default.
+    console.error(`Unable to query ${name} permissions`, e);
+    return "denied";
+  }
+}
 
 export function useMediaDevices() {
   const videoDevices = useAppStore(state => state.videoDevices);
@@ -27,12 +39,12 @@ export function useMediaDevices() {
   const addAudioTracks = useAppStore(state => state.addAudioTracks);
 
   const refreshMediaDevices = async () => {
-    // This is unreliable on Firefox. If the user has granted temporary permission to a site before, then reloads
-    // the site or restarts the browser, the permissions API will report "granted" even though the browser is going
-    // to prompt. Mozilla's position is that this is in spec, and the spec is evidently written to cover this
-    // behavior, insane as it may seem.
-    const cameraPermissions = await navigator.permissions.query({ name: "camera" }).then(p => p.state);
-    const microphonePermissions = await navigator.permissions.query({ name: "microphone" }).then(p => p.state);
+    // Permissions API is unreliable on Firefox. If the user has granted temporary permission to a site before,
+    // then reloads the site or restarts the browser, the permissions API will report "granted" even though the
+    // browser is going to prompt. Mozilla's position is that this is in spec, and the spec is evidently written
+    // to cover this behavior, insane as it may seem.
+    const cameraPermissions = await queryPermissions("camera");
+    const microphonePermissions = await queryPermissions("microphone");
     const userInteractionExpected = cameraPermissions === "prompt" || microphonePermissions === "prompt";
 
     if(!obtainedDevicePermissions || userInteractionExpected) {
@@ -51,7 +63,7 @@ export function useMediaDevices() {
         const after = new Date();
         const duration = after.getTime() - before.getTime();
 
-        if(userPickedDevices(userInteractionExpected, duration)) {
+        if(userPickedDevices(userInteractionExpected, duration, 200)) {
           // User just saw the "please grant permissions" dialog and forgot about clicking our menu,
           // so in this case we just add the streams he just selected.
           addVideoTracks(stream.getVideoTracks());

@@ -49,6 +49,7 @@
         "pytest",
         "PYTHONDONTWRITEBYTECODE",
         "PYTHONUNBUFFERED",
+        "reauthentication",
         "rinderher",
         "setuptools",
         "STARTTLS",

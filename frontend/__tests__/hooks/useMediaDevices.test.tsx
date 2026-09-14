@@ -246,7 +246,10 @@ test("useMediaDevices().refreshMediaDevices adds streams when user was prompted 
 
 test("useMediaDevices().openDisplayStream works", async () => {
   const mockTrack = { label: "abc" };
-  const mockStream = { getVideoTracks: vi.fn().mockReturnValue([ mockTrack ]) };
+  const mockStream = {
+    getAudioTracks: vi.fn().mockReturnValue([]),
+    getVideoTracks: vi.fn().mockReturnValue([ mockTrack ])
+  };
 
   navigator.mediaDevices.getDisplayMedia = vi.fn().mockResolvedValue(mockStream);
 
@@ -287,7 +290,10 @@ test("useMediaDevices().openDisplayStream works", async () => {
   expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
 
   const mockTrack2 = { label: "def" };
-  const mockStream2 = { getVideoTracks: vi.fn().mockReturnValue([ mockTrack2 ]) };
+  const mockStream2 = { 
+    getAudioTracks: vi.fn().mockReturnValue([]),
+    getVideoTracks: vi.fn().mockReturnValue([ mockTrack2 ])
+  };
 
   navigator.mediaDevices.getDisplayMedia = vi.fn().mockResolvedValue(mockStream2);
 
@@ -322,8 +328,13 @@ test("useMediaDevices().openVideoStream works", async () => {
   ];
 
   const mockStreams = [
-    { getVideoTracks: vi.fn().mockReturnValue([ mockTracks[0] ]) },
-    { getVideoTracks: vi.fn().mockReturnValue([ mockTracks[1] ]) }
+    {
+      getAudioTracks: vi.fn().mockReturnValue([]),
+      getVideoTracks: vi.fn().mockReturnValue([ mockTracks[0] ])
+    }, {
+      getAudioTracks: vi.fn().mockReturnValue([]),
+      getVideoTracks: vi.fn().mockReturnValue([ mockTracks[1] ])
+    }
   ];
 
   navigator.mediaDevices.getUserMedia = vi.fn().mockImplementation(async (constraints: MediaStreamConstraints) => {
