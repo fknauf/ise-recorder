@@ -290,7 +290,7 @@ test("useMediaDevices().openDisplayStream works", async () => {
   expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
 
   const mockTrack2 = { label: "def" };
-  const mockStream2 = { 
+  const mockStream2 = {
     getAudioTracks: vi.fn().mockReturnValue([]),
     getVideoTracks: vi.fn().mockReturnValue([ mockTrack2 ])
   };

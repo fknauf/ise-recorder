@@ -13,18 +13,6 @@ const trackIsFromDevice = (track: MediaStreamTrack, uid: MediaDeviceUid) =>
 const userPickedDevices = (userInteractionExpected: boolean, durationMillis: number, thresholdMillis: number) =>
   userInteractionExpected || (durationMillis > thresholdMillis && navigator.userAgent.includes("Firefox"));
 
-async function queryPermissions(name: PermissionName) {
-  try {
-    const permissions = await navigator.permissions.query({ name });
-    return permissions.state;
-  } catch(e) {
-    // For old browsers that don't support permissions, fall back to denied. We can't really work with them, so
-    // that is about the sanest default.
-    console.error(`Unable to query ${name} permissions`, e);
-    return "denied";
-  }
-}
-
 export function useMediaDevices() {
   const videoDevices = useAppStore(state => state.videoDevices);
   const audioDevices = useAppStore(state => state.audioDevices);
@@ -43,8 +31,8 @@ export function useMediaDevices() {
     // then reloads the site or restarts the browser, the permissions API will report "granted" even though the
     // browser is going to prompt. Mozilla's position is that this is in spec, and the spec is evidently written
     // to cover this behavior, insane as it may seem.
-    const cameraPermissions = await queryPermissions("camera");
-    const microphonePermissions = await queryPermissions("microphone");
+    const cameraPermissions = await navigator.permissions.query({ name: "camera" }).then(p => p.state);
+    const microphonePermissions = await navigator.permissions.query({ name: "microphone" }).then(p => p.state);
     const userInteractionExpected = cameraPermissions === "prompt" || microphonePermissions === "prompt";
 
     if(!obtainedDevicePermissions || userInteractionExpected) {

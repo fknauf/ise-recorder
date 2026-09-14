@@ -242,7 +242,7 @@ achieve in a pure redux architecture.
 
 The hooks themselves are meant to contain only the UI-specific logic. What precisely this means in a frontend
 is of course a bit of a judgement call, but the heavier application logic lifting is done in utility functions, which the hooks
-use. For example, the start-recording action provided by the `useStarStopRecording` hook uses the recording utility function and
+use. For example, the start-recording action provided by the `useStartStopRecording` hook uses the recording utility function and
 provides it with a number of callback functions that specify how the UI is to be updated when certain events during recording
 occur, e.g. the size of the active recording is updated as chunks of data roll in. Thus the actual recording logic is cleanly
 separated from UI updates, and that's largely the purpose of the hook/utility split.

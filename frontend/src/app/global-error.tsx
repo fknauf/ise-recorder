@@ -1,11 +1,11 @@
 "use client";
 
-export default function GlobalError({
-  error
-}: {
-  error: Error
-}) {
-  console.error(error);
+import { useEffect } from "react";
+
+export default function GlobalError({ error }: Readonly<{ error: Error }>) {
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
 
   return (
     // global-error must include html and body tags

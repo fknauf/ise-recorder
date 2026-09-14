@@ -142,7 +142,7 @@ async def send_report(
         return
 
     logger.info("Sending report, result = %s", result.reason.name)
-    logger.debug("SMTP through %s:%d as %s",
+    logger.debug("SMTP through %s:%s as %s",
                  smtp_sink.server, smtp_sink.port, smtp_sink.local_hostname)
 
     try:

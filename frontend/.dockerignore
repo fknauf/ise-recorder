@@ -11,4 +11,4 @@ out
 build
 doc
 **/__screenshots__
-.vitest_attachments
+.vitest-attachments
