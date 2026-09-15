@@ -15,6 +15,7 @@ import { useServerEnv } from "../hooks/useServerEnv";
 import { ActiveRecording } from "../store/store";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
+import { useHydrated } from "../hooks/useHydrated";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -45,6 +46,7 @@ function RecordButton() {
   const activeRecording = useActiveRecording();
   const mediaTracks = useMediaTracks();
 
+  const hydrated = useHydrated();
   const noTracksConfigured = mediaTracks.displayTracks.length + mediaTracks.videoTracks.length + mediaTracks.audioTracks.length === 0;
 
   const {
@@ -55,7 +57,11 @@ function RecordButton() {
   switch(activeRecording.state) {
     case "idle":
       return (
-        <ActionButton onPress={startRecording} isDisabled={noTracksConfigured}>
+        // need hydration check here to work around a Firefox limitation: On a soft reload, Firefox's
+        // form autocomplete will strip the disabled tag from the SSR-rendered button if the button
+        // was enabled before the reload, which then leads to a React hydration error. It'll never add
+        // a disabled flag, so we can sidestep it with this check.
+        <ActionButton onPress={startRecording} isDisabled={hydrated && noTracksConfigured}>
           <Circle/>
           <Text>Start Recording</Text>
         </ActionButton>

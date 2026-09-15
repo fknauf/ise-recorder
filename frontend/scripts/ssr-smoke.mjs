@@ -81,6 +81,36 @@ const CHECKS = [
 
 const ERROR_MARKERS = [ "window is not defined", "ReferenceError", "TypeError", "Internal Server Error" ];
 
+const CONTROL_TAG = /<(button|input|select|textarea|fieldset|optgroup|option)\b[^>]*>/gi;
+// A preceding space is what keeps this off data-disabled and aria-disabled, which react-spectrum
+// emits freely and which are not the problem.
+const DISABLED_ATTR = /\sdisabled(?=[\s=>/])/i;
+
+/**
+ * Find form controls that the server rendered in a disabled state.
+ *
+ * Firefox restores form-control state across soft reloads, before any script runs, and that
+ * restore is one-directional: it will remove a `disabled` the markup carries, never add one.
+ * So a control shipped as disabled in the SSR'd HTML can arrive at hydration already enabled,
+ * React reports an attribute mismatch, and -- because React does not patch those up -- the
+ * control stays wrongly interactive until something else re-renders it. Measured against a
+ * standalone page: markup-disabled buttons came back enabled, markup-enabled ones were left
+ * alone, and `autocomplete="off"` opted out of the restore entirely. See the comment on
+ * RecordButton, which is the control this was found on.
+ *
+ * Rendering a control as enabled is always safe, so the rule is simply to never assert
+ * "disabled" from the server. Where the reason is client-only state the server cannot know
+ * anyway -- tracks, OPFS, quota -- gating on useHydrated() is the fix, and it is the more
+ * honest rendering regardless of Firefox.
+ *
+ * If a genuinely always-disabled control ever needs to ship that way, this is the place to
+ * record the exception rather than delete the check.
+ */
+function findServerDisabledControls(html) {
+  return [ ...html.matchAll(CONTROL_TAG) ]
+    .map(match => match[0])
+    .filter(tag => DISABLED_ATTR.test(tag));
+}
 
 function startServer(env, port) {
   const args = USE_DEV
@@ -156,6 +186,12 @@ async function checkDeployment({ name, env }, port) {
         if(html.includes(marker)) {
           failures.push(`${name} ${path}: server-rendered HTML contains ${JSON.stringify(marker)}`);
         }
+      }
+
+      for(const tag of findServerDisabledControls(html)) {
+        failures.push(`${name} ${path}: control is server-rendered as disabled, which Firefox ` +
+          "un-disables on a soft reload and React then refuses to patch up: " +
+          `${tag.length > 200 ? `${tag.slice(0, 200)}...` : tag}`);
       }
 
       console.log(`  ${failures.length ? "✗" : "✓"} ${name} ${path} (${response.status}, ${html.length} bytes)`);
