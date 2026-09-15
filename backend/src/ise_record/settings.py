@@ -41,7 +41,7 @@ class Settings(BaseSettings):
         frozen=True
     )
 
-    route_prefix: str = "/api"
+    route_prefix: str = ""
     destdir: Path = Path("./data")
     chunk_file_digits: Annotated[int, Field(ge=3, lt=10)] = 4
     cors_origins: tuple[str, ...] = ()

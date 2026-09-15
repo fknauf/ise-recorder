@@ -49,7 +49,7 @@ SafeRecording = Annotated[
 
 setup_logging()
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 class ChunkUpload(BaseModel):
     """ An uploaded chunk with metadata """
