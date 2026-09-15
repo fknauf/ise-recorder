@@ -46,7 +46,7 @@ const DEPLOYMENTS = [
     name: "openid-connect",
     env: {
       ISE_RECORD_API_URL: "http://localhost:8000",
-      ISE_RECORD_OIDC_URL: "http://keycloak.invalid/realms/ise",
+      ISE_RECORD_OIDC_PROVIDER_URL: "http://keycloak.invalid/realms/ise",
       ISE_RECORD_OIDC_CLIENT_ID: "ise-recorder",
       ISE_RECORD_OIDC_MAX_AGE: "25200"
     }
@@ -252,12 +252,12 @@ async function checkContentSecurityPolicy(name, env, base) {
   }
 
   // only the provider's origin belongs here, not the realm path
-  if(env.ISE_RECORD_OIDC_URL === undefined) {
+  if(env.ISE_RECORD_OIDC_PROVIDER_URL === undefined) {
     if(connectSrc.some(source => source.includes("keycloak"))) {
       note(`connect-src admits an OpenID provider that is not configured: ${connectSrc.join(" ")}`);
     }
   } else {
-    const { origin, href } = new URL(env.ISE_RECORD_OIDC_URL);
+    const { origin, href } = new URL(env.ISE_RECORD_OIDC_PROVIDER_URL);
 
     if(!connectSrc.includes(origin)) {
       note(`connect-src does not admit the OpenID provider origin ${origin}: ${connectSrc.join(" ")}`);
