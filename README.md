@@ -100,9 +100,10 @@ The backend has the following configuration envvars:
 
 | Variable | Example | Purpose |
 | - | - | - |
-| `ISE_RECORD_CHUNK_FILE_DIGITS`          | `4`                                         | Length of the numerical suffix on uploaded chunks. 4 is default and enough for about 14 hours of recording. |
-| `ISE_RECORD_CORS_ORIGINS`               | `[ "http://record-ui.example.edu" ]`        | If the backend is served on a different domain than the frontend, list the frontend's base URL here. |
+| `ISE_RECORD_ROUTE_PREFIX`               | `/api`                                      | Route prefix where the API endpoints will be mounted. /api by default. Corresponds to Frontend's `ISE_RECORD_API_URL`. |
 | `ISE_RECORD_DESTDIR`                    | `/app/data`                                 | Base directory where the uploaded chunks and processed video files will be stored |
+| `ISE_RECORD_CHUNK_FILE_DIGITS`          | `4`                                         | Length of the numerical suffix on uploaded chunks. 4 is default and enough for about 14 hours of recording. |
+| `ISE_RECORD_CORS_ORIGINS`               | `[ "https://record-ui.example.edu" ]`       | If the backend is served on a different domain than the frontend, list the frontend's base URL here. |
 | `ISE_RECORD_SMTP_SERVER`                | `mail.example.edu`                          | Hostname or IP address of the SMTP relay|
 | `ISE_RECORD_SMTP_PORT`                  | `25`                                        | Port to use. Defaults to 587 if `ISE_RECORD_SMTP_STARTTLS` is true, 25 otherwise. |
 | `ISE_RECORD_SMTP_LOCAL_HOSTNAME`        | `record-api.example.edu`                    | Hostname of the backend server, used for HELO/EHLO |

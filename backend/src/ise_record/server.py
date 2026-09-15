@@ -78,7 +78,7 @@ class ChunkUpload(BaseModel):
         )
     ]
 
-@router.post('/api/chunks', status_code=status.HTTP_201_CREATED)
+@router.post('/chunks', status_code=status.HTTP_201_CREATED)
 async def upload_chunk(
     upload: Annotated[ChunkUpload, Form()],
     settings: Annotated[Settings, Depends(get_settings)],
@@ -172,7 +172,7 @@ async def _postprocessing_task(
     finally:
         running_jobs.discard(recording_path)
 
-@router.post('/api/jobs', status_code=status.HTTP_202_ACCEPTED)
+@router.post('/jobs', status_code=status.HTTP_202_ACCEPTED)
 def schedule_job(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
@@ -193,7 +193,7 @@ def schedule_job(
 
     return job
 
-@router.get('/api/health')
+@router.get('/health')
 def health_check():
     """ Endpoint for container health checks """
     logger.debug("health check requested")
@@ -230,7 +230,7 @@ def create_app(
             allow_methods=["GET", "POST"],
             allow_headers=["Authorization", "Content-Type"],
         )
-    application.include_router(router)
+    application.include_router(router, prefix=settings.route_prefix)
     return application
 
 app = create_app()

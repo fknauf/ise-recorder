@@ -41,9 +41,11 @@ class Settings(BaseSettings):
         frozen=True
     )
 
+    route_prefix: str = "/api"
     destdir: Path = Path("./data")
     chunk_file_digits: Annotated[int, Field(ge=3, lt=10)] = 4
     cors_origins: tuple[str, ...] = ()
+
     oidc: OidcSettings | None = None
     smtp: SmtpSettings | None = None
 
