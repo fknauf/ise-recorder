@@ -15,9 +15,9 @@ from ise_record.postprocess import Result, ResultReason
 from ise_record.reporting import (
     generate_report,
     normalize_recipient,
-    send_report,
-    SmtpSink
+    send_report
 )
+from ise_record.settings import SmtpSettings
 
 def test_normalize_recipient():
     assert normalize_recipient("foo@vss.uni-hannover.de", []) == "foo@vss.uni-hannover.de"
@@ -100,7 +100,7 @@ def test_generate_report_covers_every_result_reason():
             Result(reason = reason, output_file = None)
         )
 
-        assert report.get_payload().strip() != ""
+        assert str(report.get_payload()).strip() != ""
 
 @pytest.mark.asyncio
 async def test_send_report(mocker: MockerFixture):
@@ -111,18 +111,18 @@ async def test_send_report(mocker: MockerFixture):
 
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
-    smtp_sink = SmtpSink(
+    smtp_settings = SmtpSettings(
         server = "localhost",
         port = 587,
         local_hostname = "render.example.de",
         starttls = True,
         username = "server@example.de",
-        password = "supersecret"
+        password = "supersecret",
+        sender = sender
     )
 
     await send_report(
-        smtp_sink = smtp_sink,
-        sender = sender,
+        smtp_settings = smtp_settings,
         recipient = recipient,
         job_title = job_title,
         result = result
@@ -132,12 +132,12 @@ async def test_send_report(mocker: MockerFixture):
 
     mock_send.assert_called_once_with(
         ANY,
-        hostname=smtp_sink.server,
-        port = smtp_sink.port,
-        local_hostname = smtp_sink.local_hostname,
-        start_tls = smtp_sink.starttls,
-        username = smtp_sink.username,
-        password = smtp_sink.password
+        hostname=smtp_settings.server,
+        port = smtp_settings.port,
+        local_hostname = smtp_settings.local_hostname,
+        start_tls = smtp_settings.starttls,
+        username = smtp_settings.username,
+        password = smtp_settings.password
     )
 
     sent_report = mock_send.call_args.args[0]
@@ -146,31 +146,3 @@ async def test_send_report(mocker: MockerFixture):
     assert sent_report["To"] == report["To"]
     assert sent_report["Subject"] == report["Subject"]
     assert sent_report.get_payload() == report.get_payload()
-
-@pytest.mark.asyncio
-async def test_send_report_no_smtp(mocker: MockerFixture):
-    sender = "render@example.de"
-    recipient = "lecturer@example.de"
-    job_title = "foo_1234"
-    result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
-
-    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
-
-    smtp_sink = SmtpSink(
-        server = None,
-        port = 0,
-        local_hostname = None,
-        starttls = False,
-        username = None,
-        password = None
-    )
-
-    await send_report(
-        smtp_sink = smtp_sink,
-        sender = sender,
-        recipient = recipient,
-        job_title = job_title,
-        result = result
-    )
-
-    mock_send.assert_not_called()

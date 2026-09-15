@@ -7,10 +7,12 @@ def health_check_filter(record: logging.LogRecord):
     return (
         not isinstance(record.args, tuple)
         or len(record.args) < 5
+        or not isinstance(record.args[0], str)
         or not record.args[0].startswith("127.0.0.1:")
         or record.args[1] != "GET"
         or record.args[2] != "/api/health"
-        or not (200 <= record.args[4] < 300)
+        or not isinstance(record.args[4], int)
+        or not 200 <= record.args[4] < 300
     )
 
 def setup_logging():

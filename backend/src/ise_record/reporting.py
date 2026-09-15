@@ -6,34 +6,24 @@
 from email.message import EmailMessage
 import logging
 from textwrap import dedent
-from typing import NamedTuple, List
 
 import aiosmtplib
 from email_validator import validate_email, EmailNotValidError
 
 from .postprocess import Result, ResultReason
+from .settings import SmtpSettings
 
 logger = logging.getLogger(__name__)
-
-class SmtpSink(NamedTuple):
-    """ A destination for SMTP messages (parameter object) """
-
-    server: str | None
-    port: int | None
-    starttls: bool
-    username: str | None
-    password: str | None
-    local_hostname: str | None
 
 def _is_in_domain(domain: str, normalized_address: str):
     return normalized_address.endswith(f'@{domain}') or normalized_address.endswith(f'.{domain}')
 
-def _is_whitelisted(normalized_address: str, whitelist: List[str]):
+def _is_whitelisted(normalized_address: str, whitelist: list[str]):
     if not whitelist:
         return True
     return any(_is_in_domain(d, normalized_address) for d in whitelist)
 
-def normalize_recipient(address: str | None, domain_whitelist: List[str]) -> str | None:
+def normalize_recipient(address: str | None, domain_whitelist: list[str]) -> str | None:
     """
         Normalize a request-supplied (and therefore untrusted) e-mail address. Checks if the address
         is a valid email address and if the domain is whitelisted, if domain whitelisting is
@@ -61,7 +51,7 @@ def normalize_recipient(address: str | None, domain_whitelist: List[str]) -> str
 def generate_report(
         sender: str | None,
         recipient: str | None,
-        job_title: str,
+        job_title: str | None,
         result: Result
 ) -> EmailMessage:
     """
@@ -114,8 +104,7 @@ def generate_report(
     return msg
 
 async def send_report(
-        smtp_sink: SmtpSink,
-        sender: str | None,
+        smtp_settings: SmtpSettings,
         recipient: str | None,
         job_title: str,
         result: Result
@@ -131,29 +120,27 @@ async def send_report(
     """
 
     # Generate report first just so it'll show up in debug logs.
-    msg = generate_report(sender, recipient, job_title, result)
+    msg = generate_report(
+        smtp_settings.sender if smtp_settings else None, recipient, job_title, result)
     logger.debug("Report generated: \n%s", msg)
 
-    if smtp_sink.server is None or sender is None:
-        logger.debug("Not sending report: incomplete SMTP configuration.")
-        return
     if recipient is None or recipient.strip() == "":
         logger.info("Not sending report: no recipient specified.")
         return
 
     logger.info("Sending report, result = %s", result.reason.name)
     logger.debug("SMTP through %s:%s as %s",
-                 smtp_sink.server, smtp_sink.port, smtp_sink.local_hostname)
+                 smtp_settings.server, smtp_settings.port, smtp_settings.local_hostname)
 
     try:
         await aiosmtplib.send(
             msg,
-            hostname = smtp_sink.server,
-            port = smtp_sink.port,
-            local_hostname = smtp_sink.local_hostname,
-            start_tls = smtp_sink.starttls,
-            username = smtp_sink.username,
-            password = smtp_sink.password
+            hostname = smtp_settings.server,
+            port = smtp_settings.port,
+            local_hostname = smtp_settings.local_hostname,
+            start_tls = smtp_settings.starttls,
+            username = smtp_settings.username,
+            password = smtp_settings.password
         )
     except aiosmtplib.errors.SMTPException as ex:
         logger.warning("Unable to send message: %s", ex.message)

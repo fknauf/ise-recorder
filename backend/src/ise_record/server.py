@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, AsyncGenerator, Optional
+from typing import Annotated, AsyncGenerator
 import unicodedata
 
 import aiofiles
@@ -30,7 +30,7 @@ from pydantic import BaseModel, BeforeValidator, Field
 from .auth import get_current_user_home, load_oidc_config
 from .logconfig import setup_logging
 from .postprocess import postprocess_recording
-from .reporting import normalize_recipient, send_report, SmtpSink
+from .reporting import normalize_recipient, send_report
 from .settings import Settings, get_settings
 
 def _normalize_for_filesystem(value: str) -> str:
@@ -124,7 +124,7 @@ class PostProcessingJob(BaseModel):
     # someone has a typo in the mail address or doesn't specify a recipient, so we don't reject
     # a malformed recipient here (we just don't send mail later)
     recipient: Annotated[
-        Optional[str],
+        str | None,
         Field(
             default=None,
             description="Recipient of the completion notification",
@@ -154,26 +154,21 @@ async def _postprocessing_task(
     try:
         job_result = await postprocess_recording(recording_path)
 
-        normalized_recipient = normalize_recipient(
-            job.recipient,
-            list(settings.smtp_allowed_domains)
-        )
+        if settings.smtp is not None:
+            normalized_recipient = normalize_recipient(
+                job.recipient,
+                list(settings.smtp.allowed_domains)
+            )
 
-        if normalized_recipient is not None:
-            smtp_sink = SmtpSink(
-                server = settings.smtp_server,
-                port = settings.smtp_port,
-                local_hostname = settings.smtp_local_hostname,
-                starttls = settings.smtp_starttls,
-                username = settings.smtp_username,
-                password = settings.smtp_password)
+            if normalized_recipient is not None:
+                await send_report(
+                    smtp_settings=settings.smtp,
+                    recipient=normalized_recipient,
+                    job_title=job.recording,
+                    result=job_result)
+        else:
+            logger.debug("Not sending report: SMTP not configured.")
 
-            await send_report(
-                smtp_sink=smtp_sink,
-                sender=settings.smtp_sender,
-                recipient=normalized_recipient,
-                job_title=job.recording,
-                result=job_result)
     finally:
         running_jobs.discard(recording_path)
 
@@ -205,7 +200,7 @@ def health_check():
     return { "status": "healthy" }
 
 def create_app(
-        settings: Optional[Settings] = None
+        settings: Settings | None = None
 ) -> FastAPI:
     """ Application factory. Creates a FastAPI app configured with the given settings. """
     override_settings = settings

@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 from pathlib import Path
 import threading
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
@@ -26,7 +26,7 @@ CLIENT_ID = "ise-recorder"
 
 
 def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
-    """ Generate an RSA keypair and the JWK describing its public half """
+    """ Generate an RSA key pair and the JWK describing its public half """
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     jwk = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True) # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
     jwk.update({"kid": kid, "use": "sig", "alg": "RS256"}) # pyright: ignore[reportUnknownMemberType]
@@ -41,8 +41,8 @@ class Provider:
         self.jwks_available = True
         self.jwks_fetch_count = 0
         self.signing_algorithms: list[Any] = ["RS256"]
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     @property
     def issuer(self) -> str:
@@ -169,7 +169,7 @@ def instant_jwks_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth, "JWKS_REFRESH_COOLDOWN_SECONDS", 0.0)
 
 
-def upload(client: TestClient, token: Optional[str], index: int = 0):
+def upload(client: TestClient, token: str | None, index: int = 0):
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return client.post(
         "/api/chunks",
@@ -261,7 +261,7 @@ def test_unknown_kid_is_rejected(client: TestClient, provider: Provider):
     assert upload(client, token).status_code == 401
 
 
-# --- operational behaviour -------------------------------------------------
+# --- operational behavior -------------------------------------------------
 
 def test_rotated_signing_key_is_picked_up_without_restart(
     instant_jwks_refresh: None,  # pylint: disable=unused-argument
@@ -361,7 +361,7 @@ def test_unicode_whitespace_is_a_separator_like_any_other(username: str, expecte
 
 def test_the_directory_name_does_not_depend_on_the_composition_of_the_username():
     # spelled with escapes: the two forms are indistinguishable on screen, so an editor
-    # normalising this file would turn one half of this test into a copy of the other
+    # normalizing this file would turn one half of this test into a copy of the other
     decomposed = "U\u0308bung"
     composed = "\u00dcbung"
 

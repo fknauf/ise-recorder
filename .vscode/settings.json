@@ -10,6 +10,7 @@
         "beforeunload",
         "cropdetect",
         "crswap",
+        "dcbung",
         "destdir",
         "EHLO",
         "enduml",
@@ -22,6 +23,7 @@
         "httpx",
         "janked",
         "lavfi",
+        "Leerzeichen",
         "letterboxed",
         "libc",
         "libvpx",
@@ -61,6 +63,8 @@
         "uvicorn",
         "venv",
         "vercel",
-        "vitest"
+        "vitest",
+        "Zoaktep",
+        "zwei"
     ]
 }

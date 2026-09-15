@@ -9,7 +9,7 @@
 import hashlib
 import logging
 import re
-from typing import Annotated, Any, NamedTuple, Optional
+from typing import Annotated, Any, NamedTuple
 import unicodedata
 
 from fastapi import Depends, HTTPException, Request, status
@@ -83,7 +83,7 @@ async def discover_oidc_config(settings: Settings) -> OidcConfiguration:
 async def load_oidc_config(
         app_state: Any,
         settings: Settings
-) -> Optional[OidcConfiguration]:
+) -> OidcConfiguration | None:
     """
     Return the cached provider configuration, discovering it if necessary.
 
@@ -94,7 +94,7 @@ async def load_oidc_config(
     if not settings.auth_required:
         return None
 
-    cached: Optional[OidcConfiguration] = getattr(app_state, "oidc_config", None)
+    cached: OidcConfiguration | None = getattr(app_state, "oidc_config", None)
     if cached is not None:
         return cached
 
@@ -167,7 +167,7 @@ def user_home_dir(claims: dict[str, Any]) -> str:
 async def get_current_user_home(
         request: Request,
         settings: Annotated[Settings, Depends(get_settings)],
-        credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(security_scheme)],
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
 ) -> str:
     """ Resolve the caller's home directory name, rejecting unauthenticated requests. """
     if not settings.auth_required:

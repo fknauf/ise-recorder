@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import NamedTuple, List, Optional, Tuple
+from typing import NamedTuple
 
 import aiofiles
 
@@ -47,7 +47,7 @@ class VideoProperties(NamedTuple):
         """
         return self.width > self.crop.width or self.height > self.crop.height
 
-async def _run_command(command: List[str], cwd: Optional[Path] = None) -> bytes:
+async def _run_command(command: list[str], cwd: Path | None = None) -> bytes:
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.DEVNULL,
@@ -204,7 +204,7 @@ async def concat_chunks(track_path: Path) -> ConcatenatedFile:
 
     return ConcatenatedFile(path=target_path, incomplete=incomplete)
 
-def pick_target_geometry(content: Rectangle) -> Tuple[int, int]:
+def pick_target_geometry(content: Rectangle) -> tuple[int, int]:
     """
         Picks the most appropriate out of a list of standardized output geometries.
 
@@ -305,7 +305,7 @@ def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
 async def postprocess_tracks(
         stream_dir: Path,
         overlay_dir: Path,
-        audio_dirs: List[Path],
+        audio_dirs: list[Path],
         output_path: Path
 ) -> Result:
     """

@@ -20,7 +20,7 @@ from pytest_mock import MockerFixture
 
 from ise_record.postprocess import Result, ResultReason
 from ise_record.server import create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
-from ise_record.settings import Settings
+from ise_record.settings import Settings, SmtpSettings
 
 # NAME_MAX on ext4, which is what pathvalidate caps a filename at inside SafeRecording
 NAME_MAX_BYTES = 255
@@ -56,14 +56,16 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     settings = Settings(
-        smtp_server="localhost",
-        smtp_port=587,
-        smtp_local_hostname="smtp.example.de",
-        smtp_username="server@example.de",
-        smtp_password="supersecure",
-        smtp_sender="render@example.de",
-        smtp_starttls=True,
-        smtp_allowed_domains=("example.de",),
+        smtp = SmtpSettings(
+            server="localhost",
+            port=587,
+            local_hostname="smtp.example.de",
+            username="server@example.de",
+            password="supersecure",
+            sender="render@example.de",
+            starttls=True,
+            allowed_domains=("example.de",)
+        )
     )
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
@@ -99,14 +101,16 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     settings = Settings(
-        smtp_server="localhost",
-        smtp_port=587,
-        smtp_local_hostname="smtp.example.de",
-        smtp_username="server@example.de",
-        smtp_password="supersecure",
-        smtp_sender="render@example.de",
-        smtp_starttls=True,
-        smtp_allowed_domains=("example.de",)
+        smtp = SmtpSettings(
+            server="localhost",
+            port=587,
+            local_hostname="smtp.example.de",
+            username="server@example.de",
+            password="supersecure",
+            sender="render@example.de",
+            starttls=True,
+            allowed_domains=("example.de",)
+        )
     )
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
