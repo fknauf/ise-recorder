@@ -12,7 +12,7 @@ services:
       - ISE_RECORD_API_URL=http://localhost:8000
       - ISE_RECORD_SHOW_VERSION=true
 # see compose-with-auth.yaml for a deployment with oidc authentication
-#      - ISE_RECORD_OIDC_URL=http://keycloak.localhost:8080/realms/ise
+#      - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
 #      - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
 #      - ISE_RECORD_OIDC_MAX_AGE=2505600 # 29 days
 
@@ -46,7 +46,7 @@ services:
 #      - ISE_RECORD_SMTP_ALLOWED_DOMAINS=[ "example.com", "example.org" ]
 #      - ISE_RECORD_CHUNK_FILE_DIGITS=4
 # see compose-with-auth.yaml for a deployment with oidc authentication
-#      - ISE_RECORD_OIDC__PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
-#      - ISE_RECORD_OIDC__AUDIENCE=ise-recorder
-#      - ISE_RECORD_OIDC__LEEWAY_SECONDS=30
-#      - ISE_RECORD_OIDC__HTTP_TIMEOUT_SECONDS=5
+#      - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
+#      - ISE_RECORD_OIDC_AUDIENCE=ise-recorder
+#      - ISE_RECORD_OIDC_LEEWAY_SECONDS=30
+#      - ISE_RECORD_OIDC_HTTP_TIMEOUT_SECONDS=5

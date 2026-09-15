@@ -11,9 +11,9 @@ export function proxy(request: NextRequest) {
 
   let oidcSrc = "";
 
-  if(process.env.ISE_RECORD_OIDC_URL !== undefined) {
+  if(process.env.ISE_RECORD_OIDC_PROVIDER_URL !== undefined) {
     try {
-      oidcSrc = new URL(process.env.ISE_RECORD_OIDC_URL).origin;
+      oidcSrc = new URL(process.env.ISE_RECORD_OIDC_PROVIDER_URL).origin;
     } catch(e) {
       console.error("Malformed OIDC provider URL", e);
     }

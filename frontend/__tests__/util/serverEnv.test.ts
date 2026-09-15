@@ -4,7 +4,7 @@ import type { ServerEnv } from "@/lib/utils/serverEnv";
 /**
  * Covers the deployment-configuration parsing in serverEnv.
  *
- * validateBackendUrl is not exported and getServerEnv memoises its result in a module
+ * validateBackendUrl is not exported and getServerEnv memoizes its result in a module
  * level variable, so each case imports a fresh copy of the module. vi.resetModules()
  * is unavailable in browser mode -- it reloads the page -- so a cache-busting query
  * suffix is used instead, which Vite treats as a distinct module.
@@ -17,7 +17,7 @@ vi.mock("next/server", () => ({ connection: async () => {} }));
 
 const ENV_KEYS = [
   "ISE_RECORD_API_URL",
-  "ISE_RECORD_OIDC_URL",
+  "ISE_RECORD_OIDC_PROVIDER_URL",
   "ISE_RECORD_OIDC_CLIENT_ID",
   "ISE_RECORD_OIDC_MAX_AGE",
   "ISE_RECORD_SHOW_VERSION"
@@ -117,7 +117,7 @@ test("the OpenID provider URL is passed through unvalidated", async () => {
   // Worse, rejecting it silently dropped the deployment to anonymous, which is the wrong
   // way for an authentication setting to fail. A bad value now surfaces where the user
   // can see it, as a failed sign-in.
-  const env = await envFor({ ISE_RECORD_OIDC_URL: "not a url" });
+  const env = await envFor({ ISE_RECORD_OIDC_PROVIDER_URL: "not a url" });
 
   expect(env.oidcProviderUrl).toBe("not a url");
   expect(consoleError).not.toHaveBeenCalled();
@@ -127,7 +127,7 @@ test("the OpenID provider URL is passed through unvalidated", async () => {
 
 test("the OIDC settings are passed through", async () => {
   const env = await envFor({
-    ISE_RECORD_OIDC_URL: "http://keycloak.localhost:8080/realms/ise",
+    ISE_RECORD_OIDC_PROVIDER_URL: "http://keycloak.localhost:8080/realms/ise",
     ISE_RECORD_OIDC_CLIENT_ID: "ise-recorder",
     ISE_RECORD_OIDC_MAX_AGE: "25200"
   });
@@ -199,7 +199,7 @@ test("a rejected max age disables staleness checking rather than failing the boo
   // the fallback is indistinguishable from "no max age configured" once the process is
   // running, so the console message is the only signal the admin gets
   const env = await envFor({
-    ISE_RECORD_OIDC_URL: "http://keycloak.localhost:8080/realms/ise",
+    ISE_RECORD_OIDC_PROVIDER_URL: "http://keycloak.localhost:8080/realms/ise",
     ISE_RECORD_OIDC_MAX_AGE: "29d"
   });
 

@@ -361,25 +361,6 @@ recording utility function and called at state transitions or in response to arr
 
 ## Authentication
 
-### Administration
-
-An authentication backend can be configured through the environment variables
-
-| Variable | Example | Meaning |
-| - | - | - |
-| `ISE_RECORD_API_URL`        | `https://record.example.edu/api`      | Base URL of the backend API |
-| `ISE_RECORD_OIDC_URL`       | `https://auth.example.edu/realms/ise` | URL of the OpenID Connect provider |
-| `ISE_RECORD_OIDC_CLIENT_ID` | `ise-recorder`                        | Client-ID as configured in the OIDC provider |
-| `ISE_RECORD_OIDC_MAX_AGE`   | `79200`                               | OIDC max_age in seconds |
-
-Sessions past `ISE_RECORD_OIDC_MAX_AGE` will be considered stale, i.e. ise-recorder will not assume that there is enough time left
-before its expiry to record a full lecture. My recommendation is to configure the OpenID client with long session lengths
-and max_age - something like 8-day sessions and 7-day max_age - but that'll depend on your security needs and paranoia level.
-
-ISE-Recorder will query the `openid`, `profile`, and `email` scopes.
-
-### Technical Implementation
-
 The implementation is based on `react-oidc-context`, which uses `oidc-client-ts`, so most of the work is done in a library. The main wrinkles
 for ise-recorder are
 
