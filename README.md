@@ -56,27 +56,6 @@ frontend at `/` and the backend (if you want one) at `/api`.
 In most production environments it's also strongly advised to configure
 OpenID-Connect authentication. See `compose-with-auth.yml` for a toy example.
 
-## Hack it yourself
-
-Clone repo and for the frontend run
-
-    cd frontend
-    npm install
-    npm run dev
-    # or if you want to use the postprocessing backend:
-    ISE_RECORD_API_URL=http://localhost:8000 npm run dev
-
-For the backend run
-
-    cd backend
-    python -m venv .venv
-    . .venv/bin/activate
-    pip install -e . --group dev
-    fastapi dev
-
-Both of these accept a number of environment variables for configuration. They
-are listed in `compose.yml`.
-
 ## Configuration
 
 Configuration happens through environment variables. Example values for all of
@@ -136,3 +115,24 @@ The backend has the following configuration envvars:
 | `ISE_RECORD_OIDC_AUDIENCE`              | `ise-recorder-api`                          | Audience name that the OpenID provider calls ise-recorder |
 | `ISE_RECORD_OIDC_LEEWAY_SECONDS`        | `30`                                        | Allowable clock skew between frontend and backend, used in the expiration check for access tokens |
 | `ISE_RECORD_OIDC_HTTP_TIMEOUT_SECONDS`  | `5`                                         | Timeout for OpenID discovery |
+
+## Hack it yourself
+
+Clone repo and for the frontend run
+
+    cd frontend
+    npm install
+    npm run dev
+    # or if you want to use the postprocessing backend:
+    ISE_RECORD_API_URL=http://localhost:8000 npm run dev
+
+For the backend run
+
+    cd backend
+    python -m venv .venv
+    . .venv/bin/activate
+    pip install -e . --group dev
+    fastapi dev
+
+Both of these accept a number of environment variables for configuration. They
+are listed in `compose.yml`.
