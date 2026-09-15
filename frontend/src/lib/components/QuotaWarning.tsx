@@ -1,6 +1,6 @@
 "use client";
 
-import { Content, Heading, InlineAlert } from "@adobe/react-spectrum";
+import { Content, Heading, InlineAlert } from "@react-spectrum/s2";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
 
 const mibFormatter = new Intl.NumberFormat(

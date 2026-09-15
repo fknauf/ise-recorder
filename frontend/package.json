@@ -3,18 +3,18 @@
   "version": "1.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "smoke": "next build && node scripts/ssr-smoke.mjs",
+    "smoke": "next build --webpack && node scripts/ssr-smoke.mjs",
     "smoke:dev": "node scripts/ssr-smoke.mjs --dev",
     "test": "vitest"
   },
   "dependencies": {
-    "@adobe/react-spectrum": "^3.47.5",
-    "glob": "^13.0.6",
+    "@react-spectrum/parcel-transformer-s2-icon": "^1.1.2",
+    "@react-spectrum/s2": "^1.7.1",
     "next": "^16.3.5",
     "oidc-client-ts": "^3.5.0",
     "react": "^19.3.0",
@@ -45,6 +45,7 @@
     "jsdom": "^30.0.1",
     "lodash": "^4.18.1",
     "typescript": "^6",
+    "unplugin-parcel-macros": "^0.2.0",
     "vitest": "^4.1.11",
     "vitest-browser-react": "^2.3.0"
   }

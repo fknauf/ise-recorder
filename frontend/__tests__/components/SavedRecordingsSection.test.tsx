@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
 import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
 import { useActiveRecording } from "@/lib/hooks/useActiveRecording";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 import { downloadFile } from "@/lib/utils/browserStorage";
@@ -61,7 +61,7 @@ test("SavedRecordingsSection displays recordings and reacts to clicks", async ()
   const user = userEvent.setup();
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <SavedRecordingsSection/>
     </Provider>
   );
@@ -113,7 +113,7 @@ test("SavedRecordingsSection is empty when there are no recordings", async () =>
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <SavedRecordingsSection/>
     </Provider>
   );
@@ -175,7 +175,7 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
   const user = userEvent.setup();
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <SavedRecordingsSection/>
     </Provider>
   );

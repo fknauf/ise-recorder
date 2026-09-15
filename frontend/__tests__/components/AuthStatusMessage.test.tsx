@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ReactNode, useEffect } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { AccessTokenSourceContext, SessionExpansionResult } from "@/lib/hooks/useAccessTokenSource";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
@@ -59,7 +59,7 @@ function renderMessage(
   } = {}
 ) {
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <AppStoreProvider serverEnv={{}}>
         <AccessTokenSourceContext.Provider
           value={{ authRequired, getAccessToken: async () => "token", expandSessionHeadroom }}

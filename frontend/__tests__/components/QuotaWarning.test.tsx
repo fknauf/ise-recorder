@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 
 vi.mock("@/lib/hooks/useBrowserStorage");
@@ -19,7 +19,7 @@ test("QuotaWarning shows up if quota is critical", async () => {
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <QuotaWarning thresholdBytes={2 ** 30}/>
     </Provider>
   );
@@ -42,7 +42,7 @@ test("QuotaWarning doesn't show up if quota is not critical", async () => {
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <QuotaWarning thresholdBytes={2 ** 30}/>
     </Provider>
   );
@@ -63,7 +63,7 @@ test("QuotaWarning doesn't show up if quota is unknown", async () => {
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <QuotaWarning thresholdBytes={2 ** 30}/>
     </Provider>
   );

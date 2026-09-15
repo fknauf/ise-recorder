@@ -1,6 +1,6 @@
 "use client";
-
-import { Flex, ToastContainer } from "@adobe/react-spectrum";
+import { ToastContainer } from "@react-spectrum/s2";
+import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
 import { RecorderControls } from "@/lib/components/RecorderControls";
 import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
@@ -16,27 +16,49 @@ function AutoSignin() {
   return null;
 }
 
-export function Home() {
+export default function Home() {
   const hydrated = useHydrated();
   const { authRequired } = useAccessTokenSource();
 
   return (
-    <Flex direction="column" width="100vw" height="100vh" gap="size-100">
+    <div
+      className={style({
+        display: "flex",
+        flexDirection: "column",
+        font: "body",
+        gap: 8,
+        height: "[100vh]",
+        width: "[100vw]"
+      })}
+    >
       { hydrated && authRequired && <AutoSignin/> }
-      <Flex direction="row" justifyContent="center" gap="size-500">
+      <div
+        className={style({
+          alignItems: "start",
+          display: "flex",
+          flexDirection: "row",
+          justifyContent: "center",
+          gap: 40
+        })}
+      >
         <RecorderControls/>
-        <GithubLink marginTop="size-450" size="M"/>
-      </Flex>
+        <GithubLink styles={style({ marginTop: 32 })}/>
+      </div>
 
-      <Flex direction="row" justifyContent="center" marginTop="size-200">
+      <div
+        className={style({
+          display: "flex",
+          flexDirection: "row",
+          justifyContent: "center",
+          marginTop: 16
+        })}
+      >
         <AuthStatusMessage/>
         <QuotaWarning thresholdBytes={2 ** 30}/>
-      </Flex>
+      </div>
       <PreviewSection canvasWidth={384} canvasHeight={216}/>
       <SavedRecordingsSection/>
       <ToastContainer/>
-    </Flex>
+    </div>
   );
 }
-
-export default Home;

@@ -1,12 +1,11 @@
 "use client";
 
-import { MediaDeviceUid } from "../store/store";
 import { showError } from "../utils/notifications";
 import { useAppStore } from "./useAppStore";
 import { createDeviceConstraints } from "../store/store";
 
-const trackIsFromDevice = (track: MediaStreamTrack, uid: MediaDeviceUid) =>
-  track.getSettings().groupId === uid.groupId && track.getSettings().deviceId === uid.deviceId;
+const trackIsFromDevice = (track: MediaStreamTrack, dev: MediaDeviceInfo) =>
+  track.getSettings().groupId === dev.groupId && track.getSettings().deviceId === dev.deviceId;
 
 // Extracted into a function to work around a limitation in babel's react-compiler at time of writing: as of
 // 2026-09 it can't handle && and || in try blocks.
@@ -90,14 +89,14 @@ export function useMediaDevices() {
     }
   };
 
-  const openVideoStream = async (devUid: MediaDeviceUid) => {
-    if(videoTracks.some(track => trackIsFromDevice(track, devUid))) {
+  const openVideoStream = async (dev: MediaDeviceInfo) => {
+    if(videoTracks.some(track => trackIsFromDevice(track, dev))) {
       return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: createDeviceConstraints(devUid),
+        video: createDeviceConstraints(dev),
         audio: false
       });
       const tracks = stream.getVideoTracks();
@@ -108,15 +107,15 @@ export function useMediaDevices() {
     }
   };
 
-  const openAudioStream = async (devUid: MediaDeviceUid) => {
-    if(audioTracks.some(track => trackIsFromDevice(track, devUid))) {
+  const openAudioStream = async (dev: MediaDeviceInfo) => {
+    if(audioTracks.some(track => trackIsFromDevice(track, dev))) {
       return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: false,
-        audio: createDeviceConstraints(devUid)
+        audio: createDeviceConstraints(dev)
       });
 
       addAudioTracks(stream.getAudioTracks());

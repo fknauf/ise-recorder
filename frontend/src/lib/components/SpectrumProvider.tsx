@@ -1,31 +1,23 @@
 "use client";
 
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2/Provider";
 import { useRouter } from "next/navigation";
 
-declare module "@adobe/react-spectrum" {
+// Configure the type of the `routerOptions` prop on all React Spectrum components.
+declare module "@react-spectrum/s2/Provider" {
   interface RouterConfig {
-    routerOptions: NonNullable<
-      Parameters<ReturnType<typeof useRouter>["push"]>[1]
-    >
+    routerOptions: NonNullable<Parameters<ReturnType<typeof useRouter>["push"]>[1]>
   }
 }
 
-/**
- * Provider for react-spectrum components, setting theme, locale, and routing.
- *
- * Adapted from https://react-spectrum.adobe.com/react-spectrum/routing.html
- */
 export function SpectrumProvider(
-  { children }: Readonly<{ children?: React.ReactNode }>
+  { locale, children }: Readonly<{ locale: string; children?: React.ReactNode }>
 ) {
   const router = useRouter();
 
   return (
     <Provider
-      theme={defaultTheme}
-      defaultColorScheme="dark"
-      locale="en-US"
+      locale={locale}
       router={{ navigate: router.push }}
     >
       {children}

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { isCompilableSource, reactCompilerOptions } from "./scripts/reactCompiler.mjs";
 import { playwright } from "@vitest/browser-playwright";
 import { listenForFileDownload } from "./__tests__/command-download.mjs";
+import macros from "unplugin-parcel-macros";
 
 /**
  * Run the React Compiler over src/ the way `next build` does.
@@ -61,7 +62,20 @@ export default defineConfig({
     // for deps before it's compiled, when it doesn't depend on react/compiler-runtime yet.
     include: [ "next/server", "validator/es/lib/isURL", "validator/es/lib/isInt", "react/compiler-runtime", "react-dom/server" ]
   },
-  plugins: [ reactCompiler(), react() ],
+  /**
+   * macros must come first, and not only because next.config.ts runs it first too.
+   *
+   * `@react-spectrum/s2/style` publishes no browser export condition -- only node -- because the
+   * style macro is meant to be evaluated at build time and never shipped. Without the plugin, vite
+   * cannot resolve it at all and every S2 component fails to load.
+   *
+   * The order is then forced by the React Compiler: reactCompilerOptions() parses with the "jsx"
+   * and "typescript" babel plugins but not "importAttributes", so babel cannot parse
+   * `with {type: "macro"}`. Running macros first strips those imports back out, so babel never
+   * sees the syntax it has no parser for. Swapping the two fails on every file that imports the
+   * style macro.
+   */
+  plugins: [ macros.vite(), reactCompiler(), react() ],
   test: {
     projects: [
       {

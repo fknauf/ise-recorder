@@ -1,6 +1,6 @@
 "use client";
 
-import { ToastQueue } from "@adobe/react-spectrum";
+import { ToastQueue } from "@react-spectrum/s2";
 
 export function showError(description: string, err?: unknown) {
   if(err !== undefined) {

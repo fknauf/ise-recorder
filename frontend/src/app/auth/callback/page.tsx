@@ -1,12 +1,19 @@
 "use client";
 
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
-import { Flex } from "@adobe/react-spectrum";
+import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 
 export default function AuthCallback() {
   return (
-    <Flex direction="row" justifyContent="center" marginTop="size-200">
+    <div
+      className={style({
+        display: "flex",
+        flexDirection: "row",
+        justifyContent: "center",
+        marginTop: 16
+      })}
+    >
       <AuthStatusMessage/>
-    </Flex>
+    </div>
   );
 }

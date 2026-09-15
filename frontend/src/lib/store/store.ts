@@ -22,8 +22,8 @@ export type ActiveRecording = {
 export type StateUpdate<T> = T | ((old: T) => T);
 
 export const createDeviceKey = (dev: MediaDeviceInfo) =>
-  JSON.stringify({ groupId: dev.groupId, deviceId: dev.deviceId } as MediaDeviceUid);
-export const parseDeviceKey = (devUid: string): MediaDeviceUid =>
+  JSON.stringify({ groupId: dev.groupId, deviceId: dev.deviceId });
+export const parseDeviceKey = (devUid: string): MediaDeviceInfo =>
   JSON.parse(devUid);
 
 function filterDevices(devices: MediaDeviceInfo[], kind: string) {
@@ -66,13 +66,7 @@ function applyOverrides(
   }));
 }
 
-// This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
-export interface MediaDeviceUid {
-  groupId: string
-  deviceId: string
-}
-
-export const createDeviceConstraints = (devUid: MediaDeviceUid): MediaTrackConstraints =>
+export const createDeviceConstraints = (devUid: MediaDeviceInfo): MediaTrackConstraints =>
   ({
     groupId: { exact: devUid.groupId },
     deviceId: { exact: devUid.deviceId }

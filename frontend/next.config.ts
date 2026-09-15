@@ -1,15 +1,32 @@
 import type { NextConfig } from "next";
-import { glob } from "glob";
+import macros from "unplugin-parcel-macros";
+
+const plugin = macros.webpack();
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   output: "standalone",
   reactCompiler: true,
-  transpilePackages: [
-    "@adobe/react-spectrum",
-    "@react-spectrum/*",
-    "@spectrum-icons/*"
-  ].flatMap(spec => glob.sync(`${spec}`, { cwd: "node_modules/" })),
+  webpack(config) {
+    config.plugins.push(plugin);
+    config.cache = false;
+
+    // Bundle all S2 and style-macro generated CSS into a single bundle instead of code splitting.
+    // Because atomic CSS has so much overlap between components, loading all CSS up front results in
+    // smaller bundles instead of producing duplication between pages.
+    config.optimization.splitChunks ||= {};
+    config.optimization.splitChunks.cacheGroups ||= {};
+    config.optimization.splitChunks.cacheGroups.s2 = {
+      name: "s2-styles",
+      test(module: { identifier: () => string; type: string }) {
+        return (module.type === "css/mini-extract" && module.identifier().includes("@react-spectrum/s2")) || (/macro-(.*?)\.css/).test(module.identifier());
+      },
+      chunks: "all",
+      enforce: true
+    };
+
+    return config;
+  },
   async headers() {
     return [
       {

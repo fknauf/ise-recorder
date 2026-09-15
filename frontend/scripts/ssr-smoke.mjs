@@ -79,12 +79,100 @@ const CHECKS = [
   }
 ];
 
-const ERROR_MARKERS = [ "window is not defined", "ReferenceError", "TypeError", "Internal Server Error" ];
+const ERROR_MARKERS = [
+  "window is not defined",
+  "ReferenceError",
+  "TypeError",
+  // Intl throws RangeError for a malformed locale tag, and the root layout builds one from a
+  // client-supplied header. Without this marker that failure only surfaces as a startup timeout.
+  "RangeError",
+  "Internal Server Error"
+];
+
+/**
+ * Accept-Language values the layout has to survive.
+ *
+ * The locale is hard-coded to en-US today, so all of these render identically and this check
+ * passes trivially. It is here because an earlier version derived the locale from the
+ * Accept-Language header and passed it to S2's Provider, which hands it to `new Intl.Locale()` --
+ * and that throws RangeError on anything that is not a well-formed BCP-47 tag, taking SSR down
+ * with it. "*" is explicitly allowed by RFC 9110 and is what Node's own fetch sends by default,
+ * so every request from this very script 500'd.
+ *
+ * Keep it: when internationalisation lands and the locale starts coming from the request again,
+ * "whatever the browser sends" will still not be a safe assumption, and this is the check that
+ * says so before a deployment does.
+ */
+const ACCEPT_LANGUAGE_CASES = [
+  { header: "*", why: "RFC 9110 wildcard, and Node fetch's default" },
+  { header: "de-DE,de;q=0.9,en;q=0.8", why: "ordinary browser header" },
+  { header: "*;q=0.5,de", why: "wildcard ranked ahead of a real tag" },
+  { header: "en_US", why: "underscore instead of hyphen" },
+  { header: "not a locale", why: "malformed" }
+];
+
+/** Every Accept-Language a client may legally send has to render, not 500. */
+async function checkLocaleNegotiation(name, base) {
+  const failures = [];
+
+  for(const { header, why } of ACCEPT_LANGUAGE_CASES) {
+    const label = `${name} accept-language ${JSON.stringify(header)} (${why})`;
+
+    try {
+      const response = await fetch(base, {
+        headers: { "Accept-Language": header },
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if(response.status !== 200) {
+        failures.push(`${label}: expected 200, got ${response.status}`);
+      }
+    } catch(e) {
+      failures.push(`${label}: request failed: ${String(e).slice(0, 120)}`);
+    }
+  }
+
+  return failures;
+}
+
+const CONTROL_TAG = /<(button|input|select|textarea|fieldset|optgroup|option)\b[^>]*>/gi;
+// A preceding space is what keeps this off data-disabled and aria-disabled, which S2 emits
+// freely and which are not the problem.
+const DISABLED_ATTR = /\sdisabled(?=[\s=>/])/i;
+
+/**
+ * Find form controls that the server rendered in a disabled state.
+ *
+ * Firefox restores form-control state across soft reloads, before any script runs, and that
+ * restore is one-directional: it will remove a `disabled` the markup carries, never add one.
+ * So a control shipped as disabled in the SSR'd HTML can arrive at hydration already enabled,
+ * React reports an attribute mismatch, and -- because React does not patch those up -- the
+ * control stays wrongly interactive until something else re-renders it. Measured against a
+ * standalone page: markup-disabled buttons came back enabled, markup-enabled ones were left
+ * alone. See the comment on RecordButton.
+ *
+ * Rendering a control as enabled is always safe, so the rule is simply to never assert
+ * "disabled" from the server. Where the reason is client-only state the server cannot know
+ * anyway -- tracks, OPFS, quota -- gating on useHydrated() is the fix, and it is the more
+ * honest rendering regardless of Firefox.
+ *
+ * If a genuinely always-disabled control ever needs to ship that way, this is the place to
+ * record the exception rather than delete the check.
+ */
+function findServerDisabledControls(html) {
+  return [ ...html.matchAll(CONTROL_TAG) ]
+    .map(match => match[0])
+    .filter(tag => DISABLED_ATTR.test(tag));
+}
 
 
 function startServer(env, port) {
+  // --webpack because S2's style macro runs through unplugin-parcel-macros, which is a webpack
+  // plugin: under Turbopack (the default since Next 16) next.config.ts's webpack() is ignored
+  // entirely and every S2 component fails to compile. `next start` serves whatever the build
+  // produced, so it needs no flag of its own -- see the smoke script in package.json.
   const args = USE_DEV
-    ? [ "next", "dev", "--port", String(port) ]
+    ? [ "next", "dev", "--webpack", "--port", String(port) ]
     : [ "next", "start", "--port", String(port) ];
 
   // detached so the whole process group can be killed: signalling npx alone leaves the
@@ -158,10 +246,17 @@ async function checkDeployment({ name, env }, port) {
         }
       }
 
+      for(const tag of findServerDisabledControls(html)) {
+        failures.push(`${name} ${path}: control is server-rendered as disabled, which Firefox ` +
+          "un-disables on a soft reload and React then refuses to patch up: " +
+          `${tag.length > 200 ? `${tag.slice(0, 200)}...` : tag}`);
+      }
+
       console.log(`  ${failures.length ? "✗" : "✓"} ${name} ${path} (${response.status}, ${html.length} bytes)`);
     }
 
     failures.push(...await checkContentSecurityPolicy(name, env, base));
+    failures.push(...await checkLocaleNegotiation(name, base));
 
     // A page can render fine and still have logged an SSR error that React recovered from.
     const logged = output.join("");

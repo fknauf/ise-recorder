@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { useEffect } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
+import { getSwitch } from "../helpers/spectrum";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { PreviewSection } from "@/lib/components/PreviewSection";
 import { ActiveRecording } from "@/lib/store/store";
@@ -55,7 +56,7 @@ let tracks: MediaStreamTrack[] = [];
 
 function renderSection() {
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <AppStoreProvider serverEnv={{}}>
         <StoreHandles/>
         <PreviewSection canvasWidth={64} canvasHeight={48}/>
@@ -92,8 +93,8 @@ test("every control is live while idle", () => {
   withOneDisplay();
 
   expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
-  expect(screen.getByTestId("vp-toggle-main")).not.toBeDisabled();
-  expect(screen.getByTestId("vp-toggle-overlay")).not.toBeDisabled();
+  expect(getSwitch("vp-toggle-main")).not.toBeDisabled();
+  expect(getSwitch("vp-toggle-overlay")).not.toBeDisabled();
 });
 
 test.each([
@@ -108,8 +109,8 @@ test.each([
   // changing the main display or overlay after the output files are laid out would put
   // the wrong content in them. Every non-idle state has to be locked, not just "recording".
   expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
-  expect(screen.getByTestId("vp-toggle-main")).toBeDisabled();
-  expect(screen.getByTestId("vp-toggle-overlay")).toBeDisabled();
+  expect(getSwitch("vp-toggle-main")).toBeDisabled();
+  expect(getSwitch("vp-toggle-overlay")).toBeDisabled();
 });
 
 test("controls come back once the recording is finished", () => {
@@ -129,7 +130,7 @@ test("switching off the main display clears the selection rather than reselectin
   const display = withOneDisplay();
   expect(handles.mainDisplay).toBe(display);
 
-  await userEvent.click(screen.getByTestId("vp-toggle-main"));
+  await userEvent.click(getSwitch("vp-toggle-main"));
 
   // the callback passes undefined when deselecting. Passing the track either way looks
   // identical on screen but leaves the role stuck on, and the mistake only surfaces
@@ -140,10 +141,10 @@ test("switching off the main display clears the selection rather than reselectin
 test("switching on the main display selects that track", async () => {
   const display = withOneDisplay();
 
-  await userEvent.click(screen.getByTestId("vp-toggle-main"));
+  await userEvent.click(getSwitch("vp-toggle-main"));
   expect(handles.mainDisplay).toBeUndefined();
 
-  await userEvent.click(screen.getByTestId("vp-toggle-main"));
+  await userEvent.click(getSwitch("vp-toggle-main"));
 
   expect(handles.mainDisplay).toBe(display);
 });
@@ -151,10 +152,10 @@ test("switching on the main display selects that track", async () => {
 test("switching off the overlay clears the selection", async () => {
   const display = withOneDisplay();
 
-  await userEvent.click(screen.getByTestId("vp-toggle-overlay"));
+  await userEvent.click(getSwitch("vp-toggle-overlay"));
   expect(handles.overlay).toBe(display);
 
-  await userEvent.click(screen.getByTestId("vp-toggle-overlay"));
+  await userEvent.click(getSwitch("vp-toggle-overlay"));
 
   expect(handles.overlay).toBeUndefined();
 });
@@ -162,7 +163,7 @@ test("switching off the overlay clears the selection", async () => {
 test("the two roles are independent", async () => {
   const display = withOneDisplay();
 
-  await userEvent.click(screen.getByTestId("vp-toggle-overlay"));
+  await userEvent.click(getSwitch("vp-toggle-overlay"));
 
   // turning on the overlay must not disturb the main display
   expect(handles.overlay).toBe(display);

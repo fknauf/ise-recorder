@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { AccessTokenSourceProvider } from "@/lib/hooks/useAccessTokenSource";
-import { Home } from "@/app/page";
+import Home from "@/app/page";
 
 /**
  * This file deliberately does NOT mock react-oidc-context.
@@ -22,7 +22,7 @@ afterEach(cleanup);
 
 test("an unauthenticated deployment renders with the real react-oidc-context", async () => {
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
         <AccessTokenSourceProvider>
           <Home/>
@@ -38,7 +38,7 @@ test("an unauthenticated deployment renders with the real react-oidc-context", a
 
 test("an unauthenticated deployment shows no authentication UI", async () => {
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
         <AccessTokenSourceProvider>
           <Home/>

@@ -1,10 +1,10 @@
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { ReactNode } from "react";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
-import { Home } from "@/app/page";
+import Home from "@/app/page";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 
@@ -95,7 +95,7 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
 
   const tree = render(
     <>
-      <Provider theme={defaultTheme}>
+      <Provider>
         <AccessTokenSourceContext.Provider value={tokenSource}>
           <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
             <Home/>

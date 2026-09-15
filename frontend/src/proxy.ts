@@ -19,15 +19,15 @@ export function proxy(request: NextRequest) {
     }
   }
 
-  // would like to use ${isDev ? "'unsafe-eval'" : `nonce-${nonce}`}; instead of unsafe-inline for
-  // style-src, but react spectrum requires inline styles and doesn't apply nonces at the moment.
-  // Perhaps after https://github.com/adobe/react-spectrum/issues/8273 is resolved.
+  // would like to use ${isDev ? "'unsafe-inline'" : `nonce-${nonce}`}; instead of unsafe-inline for
+  // style-src-attr, but react spectrum s2 applies an inline style in pressScale.
   const cspHeader = `
     default-src 'self';
     script-src 'nonce-${nonce}' 'strict-dynamic' 'self' ${isDev ? "'unsafe-eval'" : ""};
-    style-src 'self' 'unsafe-inline';
+    style-src 'self' '${isDev ? "unsafe-inline" : `nonce-${nonce}`}';
+    style-src-attr 'self' 'unsafe-inline';
     img-src 'self' blob: data:;
-    font-src 'self';
+    font-src 'self' https://use.typekit.net;
     object-src 'none';
     base-uri 'self';
     form-action 'self';

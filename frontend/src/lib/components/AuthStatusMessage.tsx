@@ -1,10 +1,10 @@
 "use client";
-
 import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
 import { useAuth } from "react-oidc-context";
-import { ActionButton, Content, Flex, Heading, InlineAlert, ProgressCircle, Text } from "@adobe/react-spectrum";
+import { ActionButton, Content, Heading, InlineAlert, ProgressCircle, Text } from "@react-spectrum/s2";
+import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useActiveRecording } from "../hooks/useActiveRecording";
-import Refresh from "@spectrum-icons/workflow/Refresh";
+import Refresh from "@react-spectrum/s2/icons/Refresh";
 import { useAppStore } from "../hooks/useAppStore";
 
 function AuthStatusMessageImpl() {
@@ -21,13 +21,23 @@ function AuthStatusMessageImpl() {
       <InlineAlert variant="notice">
         <Heading>Authentication Session is Stale</Heading>
         <Content>
-          <Flex direction="column">
+          <div className={style({
+            display: "flex",
+            flexDirection: "column"
+          })}
+          >
             <Text>The authentication session will expire soon.</Text>
-            <ActionButton onPress={expandSessionHeadroom} marginTop="size-100" alignSelf="center">
+            <ActionButton
+              onPress={expandSessionHeadroom}
+              styles={style({
+                marginTop: 8,
+                alignSelf: "center"
+              })}
+            >
               <Refresh/>
               <Text>Reauthenticate</Text>
             </ActionButton>
-          </Flex>
+          </div>
         </Content>
       </InlineAlert>
     );
@@ -35,7 +45,7 @@ function AuthStatusMessageImpl() {
 
   if(auth.isLoading) {
     return (
-      <InlineAlert variant="info">
+      <InlineAlert variant="informative">
         <Heading>Authentication Loading</Heading>
         <Content>
           <ProgressCircle aria-label="Authenticating" size="M" isIndeterminate/> <Text>Authenticating...</Text>

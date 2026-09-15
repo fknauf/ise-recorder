@@ -1,13 +1,14 @@
 "use client";
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
-import CallCenter from "@spectrum-icons/workflow/CallCenter";
-import MovieCamera from "@spectrum-icons/workflow/MovieCamera";
-import Circle from "@spectrum-icons/workflow/Circle";
-import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
-import Stop from "@spectrum-icons/workflow/Stop";
+import { ActionButton, Divider, Text, MenuTrigger, Menu, TextField, ProgressCircle, MenuItem } from "@react-spectrum/s2";
+import { style } from "@react-spectrum/s2/style" with { type: "macro" };
+import CallCenter from "@react-spectrum/s2/icons/CallCenter";
+import MovieCamera from "@react-spectrum/s2/icons/MovieCamera";
+import Circle from "@react-spectrum/s2/icons/Circle";
+import DeviceDesktop from "@react-spectrum/s2/icons/DeviceDesktop";
+import Stop from "@react-spectrum/s2/icons/StopProcessing";
 import isEmail from "validator/es/lib/isEmail";
-import { createDeviceKey, parseDeviceKey } from "../store/store";
+import { createDeviceKey } from "../store/store";
 import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { useLecture } from "../hooks/useLecture";
@@ -15,6 +16,7 @@ import { useServerEnv } from "../hooks/useServerEnv";
 import { ActiveRecording } from "../store/store";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
+import { useHydrated } from "../hooks/useHydrated";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -44,6 +46,7 @@ function RecordButton() {
   // So in that case we just disable the button to prevent stop signals from being sent before we're in a state to process them.
   const activeRecording = useActiveRecording();
   const mediaTracks = useMediaTracks();
+  const hydrated = useHydrated();
 
   const noTracksConfigured = mediaTracks.displayTracks.length + mediaTracks.videoTracks.length + mediaTracks.audioTracks.length === 0;
 
@@ -55,7 +58,11 @@ function RecordButton() {
   switch(activeRecording.state) {
     case "idle":
       return (
-        <ActionButton onPress={startRecording} isDisabled={noTracksConfigured}>
+        // need hydration check here to work around a Firefox limitation: On a soft reload, Firefox's
+        // form autocomplete will strip the disabled tag from the SSR-rendered button if the button
+        // was enabled before the reload, which then leads to a React hydration error. It'll never add
+        // a disabled flag, so we can sidestep it with this check.
+        <ActionButton onPress={startRecording} isDisabled={hydrated && noTracksConfigured}>
           <Circle/>
           <Text>Start Recording</Text>
         </ActionButton>
@@ -78,10 +85,10 @@ function RecordButton() {
     case "stopping":
       return (
         <ActionButton isDisabled>
-          <View paddingX="size-100">
+          <div className={style({ display: "flex", flexDirection: "row", gap: 8 })}>
             <ProgressCircle size="S" isIndeterminate aria-label="stopping..."/>
-          </View>
-          <Text>Stop Recording</Text>
+            <Text>Stop Recording</Text>
+          </div>
         </ActionButton>
       );
   }
@@ -129,13 +136,22 @@ export function RecorderControls() {
   };
 
   return (
-    <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
+    <div className={style({
+      display: "flex",
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      gap: 8,
+      marginTop: 8
+    })}
+    >
       <TextField
         label="Lecture Title"
         value={lectureTitle}
         isReadOnly={hasDisabledTrackControls}
         isDisabled={hasDisabledTrackControls}
         validate={validateLectureTitle}
+        validationBehavior="aria"
         onChange={setLectureTitle}
         autoFocus
       />
@@ -148,12 +164,21 @@ export function RecorderControls() {
             isReadOnly={hasDisabledTrackControls}
             isDisabled={hasDisabledTrackControls}
             validate={validateEmail}
+            validationBehavior="aria"
             onChange={setLecturerEmail}
           />
       }
 
-      <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" wrap>
-        <Divider orientation="vertical" size="S" marginX="size-100"/>
+      <div className={style({
+        alignContent: "start",
+        display: "flex",
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+        marginTop: 24
+      })}
+      >
+        <Divider orientation="vertical" size="S" styles={style({ marginX: 8 })}/>
 
         <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls}>
           <DeviceDesktop/>
@@ -165,8 +190,15 @@ export function RecorderControls() {
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => openVideoStream(parseDeviceKey(devUid as string))}>
-            { videoDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
+          <Menu>
+            {
+              videoDevices.map(dev =>
+                <MenuItem
+                  key={createDeviceKey(dev)}
+                  onAction={() => openVideoStream(dev)}
+                >{dev.label}
+                </MenuItem>)
+            }
           </Menu>
         </MenuTrigger>
 
@@ -175,15 +207,22 @@ export function RecorderControls() {
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>
-          <Menu onAction={devUid => openAudioStream(parseDeviceKey(devUid as string))}>
-            { audioDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
+          <Menu>
+            {
+              audioDevices.map(dev =>
+                <MenuItem
+                  key={createDeviceKey(dev)}
+                  onAction={() => openAudioStream(dev)}
+                >{dev.label}
+                </MenuItem>)
+            }
           </Menu>
         </MenuTrigger>
 
-        <Divider orientation="vertical" size="S" marginX="size-100"/>
+        <Divider orientation="vertical" size="S" styles={style({ marginX: 8 })}/>
 
         <RecordButton/>
-      </Flex>
-    </Flex>
+      </div>
+    </div>
   );
 }

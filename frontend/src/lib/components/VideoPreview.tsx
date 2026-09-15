@@ -1,6 +1,7 @@
 "use client";
 
-import { Flex, Switch } from "@adobe/react-spectrum";
+import { Switch } from "@react-spectrum/s2";
+import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { ReactNode } from "react";
 
 export interface VideoPreviewProps {
@@ -36,7 +37,12 @@ export function VideoPreview(
   };
 
   return (
-    <Flex direction="column" gap="size-100">
+    <div className={style({
+      display: "flex",
+      flexDirection: "column",
+      gap: 8
+    })}
+    >
       <video
         ref={attachStream}
         autoPlay
@@ -48,7 +54,12 @@ export function VideoPreview(
         role="img"
       />
 
-      <Flex direction="row" justifyContent="space-between">
+      <div className={style({
+        display: "flex",
+        flexDirection: "row",
+        justifyContent: "space-between"
+      })}
+      >
         <Switch
           isDisabled={switchesDisabled}
           isSelected={isMainDisplay}
@@ -65,7 +76,7 @@ export function VideoPreview(
         >
           Overlay
         </Switch>
-      </Flex>
-    </Flex>
+      </div>
+    </div>
   );
 }

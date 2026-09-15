@@ -2,7 +2,8 @@ import { expect, test, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { VideoPreview } from "@/lib/components/VideoPreview";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
+import { findSwitch } from "../helpers/spectrum";
 import { useEffect, useState } from "react";
 
 test("VideoPreview displays video track", async () => {
@@ -20,7 +21,7 @@ test("VideoPreview displays video track", async () => {
     }, []);
 
     return (
-      <Provider theme={defaultTheme}>
+      <Provider>
         {
           track &&
           <VideoPreview
@@ -103,7 +104,7 @@ test("VideoPreview handles user input", async () => {
     }, []);
 
     return (
-      <Provider theme={defaultTheme}>
+      <Provider>
         {
           track &&
           <VideoPreview
@@ -135,8 +136,8 @@ test("VideoPreview handles user input", async () => {
   expect(track).not.toBeUndefined();
   act(() => setPreviewTrack(track));
 
-  const mainToggleSwitch = await screen.findByTestId("vp-toggle-main");
-  const overlayToggleSwitch = await screen.findByTestId("vp-toggle-overlay");
+  const mainToggleSwitch = await findSwitch("vp-toggle-main");
+  const overlayToggleSwitch = await findSwitch("vp-toggle-overlay");
 
   await user.click(mainToggleSwitch);
   expect(onToggleMainDisplay).toHaveBeenLastCalledWith(false);
@@ -160,7 +161,7 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
     }, []);
 
     return (
-      <Provider theme={defaultTheme}>
+      <Provider>
         {
           track &&
           <VideoPreview
@@ -192,8 +193,8 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
   expect(track).not.toBeUndefined();
   act(() => setPreviewTrack(track));
 
-  const mainToggleSwitch = await screen.findByTestId("vp-toggle-main");
-  const overlayToggleSwitch = await screen.findByTestId("vp-toggle-overlay");
+  const mainToggleSwitch = await findSwitch("vp-toggle-main");
+  const overlayToggleSwitch = await findSwitch("vp-toggle-overlay");
 
   expect(mainToggleSwitch).toBeDisabled();
   expect(overlayToggleSwitch).toBeDisabled();

@@ -2,7 +2,8 @@ import { expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RecorderControls } from "@/lib/components/RecorderControls";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { Provider } from "@react-spectrum/s2";
+import { makeDevice } from "../helpers/mediaDevices";
 import { useServerEnv } from "@/lib/hooks/useServerEnv";
 import { useLecture } from "@/lib/hooks/useLecture";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
@@ -110,7 +111,7 @@ test("RecorderControls renders controls correctly when idle", async () => {
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -155,7 +156,7 @@ test("RecorderControls renders controls correctly when recording", async () => {
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -195,7 +196,7 @@ test("RecorderControls renders controls correctly when starting a recording", as
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -235,7 +236,7 @@ test("RecorderControls renders controls correctly when stopping a recording", as
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -275,7 +276,7 @@ test("RecorderControls hides the e-mail field when apiUrl is undefined", async (
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -297,7 +298,7 @@ test("RecorderControls handles the start recording button properly", async () =>
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -335,7 +336,7 @@ test("RecorderControls handles the stop recording button properly", async () => 
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -358,11 +359,6 @@ test("RecorderControls handles the stop recording button properly", async () => 
 });
 
 test("RecorderControls show video device menu", async () => {
-  const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-    deviceId, groupId, kind, label,
-    toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-  });
-
   const videoDevices = [
     makeDevice("c1", "1", "videoinput", "Camera 1"),
     makeDevice("c2", "2", "videoinput", "Camera 2")
@@ -378,7 +374,7 @@ test("RecorderControls show video device menu", async () => {
   );
 
   const tree = render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -394,7 +390,9 @@ test("RecorderControls show video device menu", async () => {
   expect(videoMenu[1]).toHaveTextContent("Camera 2");
 
   await user.click(videoMenu[0]);
-  expect(callbacks.openVideoStream).toHaveBeenCalledExactlyOnceWith({ groupId: "1", deviceId: "c1" });
+  // the handler captures the device it was rendered for, so the whole MediaDeviceInfo comes
+  // back rather than a separate identifier derived from it
+  expect(callbacks.openVideoStream).toHaveBeenCalledExactlyOnceWith(videoDevices[0]);
   expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
   expect(callbacks.openAudioStream).not.toHaveBeenCalled();
 
@@ -406,11 +404,6 @@ test("RecorderControls show video device menu", async () => {
 
 
 test("RecorderControls show audio device menu", async () => {
-  const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-    deviceId, groupId, kind, label,
-    toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-  });
-
   const audioDevices = [
     makeDevice("m1", "1", "audioinput", "Microphone 1"),
     makeDevice("m2", "2", "audioinput", "Microphone 2"),
@@ -427,7 +420,7 @@ test("RecorderControls show audio device menu", async () => {
   );
 
   const tree = render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -444,7 +437,7 @@ test("RecorderControls show audio device menu", async () => {
   expect(audioMenu[2]).toHaveTextContent("Microphone 3");
 
   await user.click(audioMenu[1]);
-  expect(callbacks.openAudioStream).toHaveBeenCalledExactlyOnceWith({ groupId: "2", deviceId: "m2" });
+  expect(callbacks.openAudioStream).toHaveBeenCalledExactlyOnceWith(audioDevices[1]);
   expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
   expect(callbacks.openVideoStream).not.toHaveBeenCalled();
 
@@ -465,7 +458,7 @@ test("RecorderControls handles lecture metadata", async () => {
   );
 
   const tree = render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );
@@ -512,7 +505,7 @@ const renderIdleWith = (tracks: ConfiguredTracks) => {
   );
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider>
       <RecorderControls/>
     </Provider>
   );

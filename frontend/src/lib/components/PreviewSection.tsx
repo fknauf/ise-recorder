@@ -1,7 +1,8 @@
 "use client";
 
 import { ReactNode } from "react";
-import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
+import { ActionButton, Text } from "@react-spectrum/s2";
+import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
 import { useMediaTracks } from "../hooks/useMediaTracks";
@@ -26,13 +27,35 @@ const PreviewCard = (
     children
   }: Readonly<PreviewCardProps>
 ) =>
-  <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
-    <Flex direction="column" justifyContent="center" gap="size-100" height="100%">
+  <div className={style({
+    borderStyle: "solid",
+    borderRadius: "lg",
+    borderWidth: 1,
+    borderColor: "gray-300",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    padding: 8
+  })}
+  >
+    <div className={style({
+      display: "flex",
+      flexDirection: "column",
+      gap: 8,
+      height: "100%",
+      justifyContent: "start"
+    })}
+    >
       <Text>{label}</Text>
       {children}
-      <ActionButton marginTop="auto" onPress={onRemove} isDisabled={hasDisabledButtons}>Remove</ActionButton>
-    </Flex>
-  </View>;
+    </div>
+    <ActionButton
+      onPress={onRemove}
+      isDisabled={hasDisabledButtons}
+      styles={style({ width: "100%" })}
+    >Remove
+    </ActionButton>
+  </div>;
 
 /**
  * Previews section on the main page, basically a collection of preview cards for all active streams.
@@ -64,7 +87,14 @@ export function PreviewSection(
   const hasDisabledButtons = activeRecording.state !== "idle";
 
   return (
-    <Flex direction="row" gap="size-100" justifyContent="center" wrap>
+    <div className={style({
+      display: "flex",
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      justifyContent: "center"
+    })}
+    >
       {
         // Screen capture tracks have confusing labels in chromium, so for them we just show a
         // generic label. Webcams provide the device name, which is useful to show to the user.
@@ -107,6 +137,6 @@ export function PreviewSection(
           </PreviewCard>
         )
       }
-    </Flex>
+    </div>
   );
 }

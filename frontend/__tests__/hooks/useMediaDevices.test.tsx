@@ -6,16 +6,12 @@ import { useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import userEvent from "@testing-library/user-event";
 import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
 import _ from "lodash";
+import { makeDevice } from "../helpers/mediaDevices";
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
   <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
     {children}
   </AppStoreProvider>;
-
-const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-  deviceId, groupId, kind, label,
-  toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-});
 
 const mockVideoDevices = [
   makeDevice("c1", "1", "videoinput", "Camera 1"),
@@ -369,8 +365,8 @@ test("useMediaDevices().openVideoStream works", async () => {
 
     return (
       <>
-        <button data-testid="btn1" onClick={() => openVideoStream({ groupId: "g1", deviceId: "d1" })}>Dev 1</button>
-        <button data-testid="btn2" onClick={() => openVideoStream({ groupId: "g2", deviceId: "d2" })}>Dev 2</button>
+        <button data-testid="btn1" onClick={() => openVideoStream(makeDevice("d1", "g1", "videoinput", "Dev 1"))}>Dev 1</button>
+        <button data-testid="btn2" onClick={() => openVideoStream(makeDevice("d2", "g2", "videoinput", "Dev 2"))}>Dev 2</button>
         <ul>
           {videoTracks.map((track, ix) => <li key={ix}>{track.label}</li>)}
         </ul>
@@ -477,8 +473,8 @@ test("useMediaDevices().openAudioStream works", async () => {
 
     return (
       <>
-        <button data-testid="btn1" onClick={() => openAudioStream({ groupId: "g1", deviceId: "d1" })}>Dev 1</button>
-        <button data-testid="btn2" onClick={() => openAudioStream({ groupId: "g2", deviceId: "d2" })}>Dev 2</button>
+        <button data-testid="btn1" onClick={() => openAudioStream(makeDevice("d1", "g1", "audioinput", "Dev 1"))}>Dev 1</button>
+        <button data-testid="btn2" onClick={() => openAudioStream(makeDevice("d2", "g2", "audioinput", "Dev 2"))}>Dev 2</button>
         <ul>
           {audioTracks.map((track, ix) => <li key={ix}>{track.label}</li>)}
         </ul>
