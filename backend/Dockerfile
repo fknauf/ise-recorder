@@ -9,9 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 COPY pyproject.toml ./
-RUN pip install .
+RUN mkdir data && chown 1000:1000 data && pip install .
 COPY src ./
 
+USER 1000:1000
 ENTRYPOINT [ "/app/run_server.sh" ]
 
 HEALTHCHECK \
