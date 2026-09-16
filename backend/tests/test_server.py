@@ -82,6 +82,7 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
         port=587,
         local_hostname="smtp.example.de",
         start_tls=True,
+        use_tls=False,
         username="server@example.de",
         password="supersecure"
     )

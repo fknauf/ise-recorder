@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class SmtpSettings(BaseModel):
@@ -16,9 +16,17 @@ class SmtpSettings(BaseModel):
     local_hostname: str | None = None
     username: str | None = None
     password: str | None = None
-    starttls: bool = False
+    starttls: bool | None = None
+    use_tls: bool = False
     allowed_domains: tuple[str, ...] = ()
 
+    @field_validator("use_tls")
+    @classmethod
+    def tls_modes_are_exclusive(cls, use_tls: bool, info: ValidationInfo) -> bool:
+        """ Validate that implicit TLS and STARTTLS aren't both enabled. """
+        if use_tls and info.data.get("starttls"):
+            raise ValueError("STARTTLS and implicit TLS are mutually exclusive.")
+        return use_tls
 
 class OidcSettings(BaseModel):
     """

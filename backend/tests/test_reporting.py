@@ -136,6 +136,7 @@ async def test_send_report(mocker: MockerFixture):
         port = smtp_settings.port,
         local_hostname = smtp_settings.local_hostname,
         start_tls = smtp_settings.starttls,
+        use_tls = smtp_settings.use_tls,
         username = smtp_settings.username,
         password = smtp_settings.password
     )
@@ -146,3 +147,38 @@ async def test_send_report(mocker: MockerFixture):
     assert sent_report["To"] == report["To"]
     assert sent_report["Subject"] == report["Subject"]
     assert sent_report.get_payload() == report.get_payload()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("starttls,use_tls", [
+    (None, False),    # opportunistic STARTTLS
+    (True, False),    # STARTTLS required
+    (False, False),   # plaintext
+    (False, True),    # implicit TLS
+    (None, True),     # implicit TLS, STARTTLS left to aiosmtplib to skip
+])
+async def test_send_report_forwards_the_transport_security_mode(
+    mocker: MockerFixture, starttls: bool | None, use_tls: bool
+):
+    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
+
+    smtp_settings = SmtpSettings(
+        server = "mail.example.edu",
+        sender = "render@example.de",
+        starttls = starttls,
+        use_tls = use_tls
+    )
+
+    await send_report(
+        smtp_settings = smtp_settings,
+        recipient = "lecturer@example.de",
+        job_title = "foo_1234",
+        result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
+    )
+
+    assert mock_send.call_args.kwargs["start_tls"] is starttls
+    assert mock_send.call_args.kwargs["use_tls"] is use_tls
+
+    # with no port configured aiosmtplib picks one from these two: 465 for implicit TLS, 587
+    # for STARTTLS, 25 otherwise. That delegation is what makes the README's table true.
+    assert mock_send.call_args.kwargs["port"] is None

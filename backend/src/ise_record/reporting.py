@@ -139,6 +139,7 @@ async def send_report(
             port = smtp_settings.port,
             local_hostname = smtp_settings.local_hostname,
             start_tls = smtp_settings.starttls,
+            use_tls = smtp_settings.use_tls,
             username = smtp_settings.username,
             password = smtp_settings.password
         )

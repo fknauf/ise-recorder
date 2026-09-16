@@ -105,12 +105,13 @@ The backend has the following configuration envvars:
 | `ISE_RECORD_CHUNK_FILE_DIGITS`          | `4`                                         | Length of the numerical suffix on uploaded chunks. 4 is default and enough for about 14 hours of recording. |
 | `ISE_RECORD_CORS_ORIGINS`               | `[ "https://record-ui.example.edu" ]`       | If the backend is served on a different domain than the frontend, list the frontend's base URL here. |
 | `ISE_RECORD_SMTP_SERVER`                | `mail.example.edu`                          | Hostname or IP address of the SMTP relay|
-| `ISE_RECORD_SMTP_PORT`                  | `25`                                        | Port to use. Defaults to 587 if `ISE_RECORD_SMTP_STARTTLS` is true, 25 otherwise. |
+| `ISE_RECORD_SMTP_PORT`                  | `25`                                        | Port to use. Defaults to 465 if `ISE_RECORD_SMTP_USE_TLS` is true, 587 if `ISE_RECORD_SMTP_STARTTLS` is true, 25 otherwise. |
 | `ISE_RECORD_SMTP_LOCAL_HOSTNAME`        | `record-api.example.edu`                    | Hostname of the backend server, used for HELO/EHLO |
 | `ISE_RECORD_SMTP_USERNAME`              | `user1`                                     | username for SMTP login, if required |
 | `ISE_RECORD_SMTP_PASSWORD`              | `hunter2`                                   | password for SMTP login, if required |
 | `ISE_RECORD_SMTP_SENDER`                | `ise-record@example.edu`                    | Mail address to put in the "From" header |
-| `ISE_RECORD_SMTP_STARTTLS`              | `true`                                      | Whether `ISE_RECORD_SMTP_SERVER` supports the `STARTTLS` command |
+| `ISE_RECORD_SMTP_STARTTLS`              | `false`                                     | Whether to use the STARTTLS command for encryption. If this unset, STARTTLS will be employed opportunistically. If this is set (to either true or false), `ISE_RECORD_SMTP_USE_TLS` must be false or unset.  |
+| `ISE_RECORD_SMTP_USE_TLS`               | `true`                                      | Whether to use implicit TLS for encryption. If this is true, `ISE_RECORD_SMTP_STARTTLS` must be left empty. |
 | `ISE_RECORD_SMTP_ALLOWED_DOMAINS`       | `[ "example.edu", "example.org" ]`          | Domains that the backend will send mail to. Subdomains are implicitly whitelisted. |
 | `ISE_RECORD_OIDC_PROVIDER_URL`          | `http://keycloak.localhost:8080/realms/ise` | URL of the OpenID authentication provider. Same as in the frontend. |
 | `ISE_RECORD_OIDC_AUDIENCE`              | `ise-recorder-api`                          | Audience name that the OpenID provider calls ise-recorder |

@@ -42,7 +42,8 @@ services:
 #      - ISE_RECORD_SMTP_USERNAME=user1
 #      - ISE_RECORD_SMTP_PASSWORD=supersecure
 #      - ISE_RECORD_SMTP_SENDER=ise-record@example.com
-#      - ISE_RECORD_SMTP_STARTTLS=true
+#      - ISE_RECORD_SMTP_STARTTLS=false
+#      - ISE_RECORD_SMTP_USE_TLS=true
 #      - ISE_RECORD_SMTP_ALLOWED_DOMAINS=[ "example.com", "example.org" ]
 #      - ISE_RECORD_CHUNK_FILE_DIGITS=4
 # see compose-with-auth.yaml for a deployment with oidc authentication
