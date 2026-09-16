@@ -60,6 +60,7 @@
         "unconfigured",
         "unsanitized",
         "unvalidated",
+        "userinfo",
         "uvicorn",
         "venv",
         "vercel",

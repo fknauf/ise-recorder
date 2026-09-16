@@ -18,6 +18,7 @@ import httpx2
 import jwt
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
 from pathvalidate import sanitize_filename
+from pydantic import BaseModel, ValidationError
 
 from .settings import get_settings, Settings
 
@@ -49,6 +50,8 @@ def _provider_unreachable():
 class OidcConfiguration(NamedTuple):
     """ Provider metadata discovered from the well-known endpoint, plus its key client """
     issuer: str
+    userinfo_endpoint: str | None
+    http_timeout: float
     jwk_client: jwt.PyJWKClient
 
 
@@ -76,6 +79,8 @@ async def discover_oidc_config(settings: Settings) -> OidcConfiguration:
 
     return OidcConfiguration(
         issuer=metadata["issuer"],
+        userinfo_endpoint=metadata.get("userinfo_endpoint"),
+        http_timeout=settings.oidc.http_timeout_seconds,
         jwk_client=jwk_client,
     )
 
@@ -148,20 +153,84 @@ def validate_access_token(
         raise _unauthenticated() from exc
 
 
-def user_home_dir(claims: dict[str, Any]) -> str:
+class UserInfo(BaseModel):
+    """ Models (part of) the response of the OIDC provider's userinfo_endpoint """
+    sub: str
+    preferred_username: str | None = None
+
+
+async def query_username(
+        oidc: OidcConfiguration,
+        access_token: str,
+        subject: str
+) -> str | None:
+    """ Fallback query to oidc provider if preferred_username isn't in the access token. """
+
+    if oidc.userinfo_endpoint is None:
+        return None
+
+    try:
+        async with httpx2.AsyncClient(timeout=oidc.http_timeout) as client:
+            response = await client.get(
+                oidc.userinfo_endpoint,
+                headers={ "Authorization": f"Bearer {access_token}" }
+            )
+
+            if response.status_code != 200:
+                logger.warning("Unable to query userinfo: %s", response.text[:48])
+                return None
+
+            userinfo = UserInfo.model_validate_json(response.content)
+
+            if userinfo.sub != subject:
+                logger.warning(
+                    "Discarding userinfo: endpoint returned info for %s when asked about %s",
+                    userinfo.sub, subject)
+                return None
+
+            return userinfo.preferred_username
+    except (httpx2.HTTPError, httpx2.InvalidURL, ValidationError) as e:
+        logger.warning("Unable to query openid user info %s", e)
+        return None
+
+
+async def user_home_dir(
+        claims: dict[str, Any],
+        known_home_dirs: dict[str, str],
+        access_token: str,
+        oidc: OidcConfiguration
+) -> str:
     """ Derive a filesystem-safe, human-readable per-user directory name from token claims. """
     subject = claims["sub"]
-    digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()[:12]
 
+    # ensure stability while the server is running
+    if subject in known_home_dirs:
+        return known_home_dirs[subject]
+
+    def cache_home(home: str):
+        known_home_dirs[subject] = home
+        return home
+
+    # If access token carries preferred_username, use that.
+    digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()[:12]
     raw_username = claims.get("preferred_username")
+
+    # if it doesn't, query oidc backend for userinfo. This happens e.g. with kanidm
     if not isinstance(raw_username, str):
-        return digest
+        raw_username = await query_username(oidc, access_token, subject)
+
+    # if userinfo can't be obtained, use digest alone. Cache so it doesn't change if oidc was
+    # only momentarily unavailable. That's not stable across restarts, but at this point we're
+    # in best-effort territory.
+    if not isinstance(raw_username, str):
+        return cache_home(digest)
 
     normalized_user = re.sub(r"\s+", "_", unicodedata.normalize("NFC", raw_username).strip())
     sanitized_user = sanitize_filename(normalized_user, platform="universal")[:48]
     candidate = f"{sanitized_user}-{digest}"
+    home_dir = candidate if candidate[:1] not in [ ".", "-" ] else digest
 
-    return candidate if candidate[:1] not in [ ".", "-" ] else digest
+    return cache_home(home_dir)
 
 
 async def get_current_user_home(
@@ -181,5 +250,5 @@ async def get_current_user_home(
         raise _unauthenticated()
 
     claims = validate_access_token(credentials.credentials, oidc_config, settings)
-
-    return user_home_dir(claims)
+    return await user_home_dir(
+        claims, request.app.state.home_dirs, credentials.credentials, oidc_config)

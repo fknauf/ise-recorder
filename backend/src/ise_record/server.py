@@ -217,7 +217,8 @@ def create_app(
         yield
 
     application = FastAPI(lifespan=lifespan)
-    application.state.running_jobs = set()
+    application.state.running_jobs = set[Path]()
+    application.state.home_dirs = dict[str, str]()
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings

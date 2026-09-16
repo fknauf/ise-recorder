@@ -3,6 +3,7 @@
 # pylint: disable=missing-function-docstring
 # pylint: disable=missing-module-docstring
 # pylint: disable=redefined-outer-name
+# pylint: disable=too-many-instance-attributes
 
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -18,11 +19,12 @@ import jwt
 import pytest
 
 from ise_record import auth
-from ise_record.auth import user_home_dir
+from ise_record.auth import OidcConfiguration, discover_oidc_config, user_home_dir
 from ise_record.server import create_app
 from ise_record.settings import OidcSettings, Settings
 
 CLIENT_ID = "ise-recorder"
+DEFAULT_SUBJECT = "b472c41f9b227e6596e921541f46dc9d7"
 
 
 def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
@@ -40,6 +42,13 @@ class Provider:
         self.keys: dict[str, tuple[rsa.RSAPrivateKey, dict[str, Any]]] = {}
         self.jwks_available = True
         self.jwks_fetch_count = 0
+        # None means the endpoint 404s: a provider that has nothing to say about the caller
+        self.userinfo_response: tuple[int, str, bytes] | None = None
+        self.userinfo_fetch_count = 0
+        self.userinfo_authorization: str | None = None
+        # userinfo_endpoint is only RECOMMENDED in OIDC Discovery 1.0, so a conforming
+        # provider may leave it out
+        self.advertise_userinfo = True
         self.signing_algorithms: list[Any] = ["RS256"]
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -58,13 +67,16 @@ class Provider:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # pylint: disable=invalid-name
                 if self.path.endswith("/.well-known/openid-configuration"):
-                    return provider.respond(self, {
+                    metadata: dict[str, Any] = {
                         "issuer": provider.issuer,
                         "authorization_endpoint": f"{provider.issuer}/authorize",
                         "token_endpoint": f"{provider.issuer}/token",
                         "jwks_uri": f"{provider.issuer}/jwks",
                         "id_token_signing_alg_values_supported": provider.signing_algorithms,
-                    })
+                    }
+                    if provider.advertise_userinfo:
+                        metadata["userinfo_endpoint"] = f"{provider.issuer}/userinfo"
+                    return provider.respond(self, metadata)
 
                 if self.path.endswith("/jwks"):
                     provider.jwks_fetch_count += 1
@@ -76,22 +88,47 @@ class Provider:
                         "keys": [jwk for _, jwk in provider.keys.values()]
                     })
 
+                if self.path.endswith("/userinfo"):
+                    provider.userinfo_fetch_count += 1
+                    provider.userinfo_authorization = self.headers.get("Authorization")
+                    if provider.userinfo_response is None:
+                        self.send_response(404)
+                        self.end_headers()
+                        return None
+                    return provider.respond_raw(self, *provider.userinfo_response)
+
                 self.send_response(404)
                 self.end_headers()
                 return None
 
         self._server = HTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        # serve_forever polls for the shutdown flag, and defaults to doing so twice a
+        # second -- which every test would then wait out in teardown
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self._thread.start()
 
     @staticmethod
     def respond(handler: BaseHTTPRequestHandler, body: dict[str, Any]) -> None:
-        encoded = json.dumps(body).encode()
-        handler.send_response(200)
-        handler.send_header("Content-Type", "application/json")
-        handler.send_header("Content-Length", str(len(encoded)))
+        Provider.respond_raw(handler, 200, "application/json", json.dumps(body).encode())
+
+    @staticmethod
+    def respond_raw(
+        handler: BaseHTTPRequestHandler, status: int, content_type: str, body: bytes
+    ) -> None:
+        handler.send_response(status)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Content-Length", str(len(body)))
         handler.end_headers()
-        handler.wfile.write(encoded)
+        handler.wfile.write(body)
+
+    def serve_userinfo(self, **claims: Any) -> None:
+        """ Answer UserInfo with these claims, the way a provider holding them would """
+        self.userinfo_response = (200, "application/json", json.dumps(claims).encode())
+
+    def serve_userinfo_raw(self, status: int, content_type: str, body: bytes) -> None:
+        """ Answer UserInfo with a body of our choosing, for the shapes providers get wrong """
+        self.userinfo_response = (status, content_type, body)
 
     def stop(self) -> None:
         if self._server is not None:
@@ -103,7 +140,7 @@ class Provider:
         now = datetime.now(timezone.utc)
         claims: dict[str, Any] = {
             "iss": self.issuer,
-            "sub": "b472c41f9b227e6596e921541f46dc9d7",
+            "sub": DEFAULT_SUBJECT,
             "aud": CLIENT_ID,
             "azp": CLIENT_ID,
             "client_id": CLIENT_ID,
@@ -154,6 +191,17 @@ def fresh_settings(provider: Provider, tmp_path: Path) -> Settings:
 def client(settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(settings)) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def oidc(provider: Provider) -> OidcConfiguration:
+    """ What discovery would have produced, for the tests that bypass the app. """
+    return OidcConfiguration(
+        issuer=provider.issuer,
+        userinfo_endpoint=f"{provider.issuer}/userinfo",
+        http_timeout=5.0,
+        jwk_client=jwt.PyJWKClient(f"{provider.issuer}/jwks"),
+    )
 
 
 @pytest.fixture
@@ -300,16 +348,28 @@ def test_unconfigured_deployment_stays_open(tmp_path: Path):
 
 # --- directory naming ------------------------------------------------------
 
-SUBJECT_DIGEST = hashlib.sha3_256(b"abc").hexdigest()[:12]
+def digest_of(subject: str) -> str:
+    """ The suffix auth.py derives from a subject, which is what keeps users apart. """
+    return hashlib.sha3_256(subject.encode("utf-8")).hexdigest()[:12]
+
+
+SUBJECT_DIGEST = digest_of("abc")
 
 # NAME_MAX on ext4. auth.py keeps its own, much smaller cap on the username part; this is
 # the bound the filesystem imposes on whatever comes out of it.
 NAME_MAX_BYTES = 255
 
 
-def home_dir_for(username: Any) -> str:
-    """ The directory name derived for a username, with the subject held fixed. """
-    return user_home_dir({"sub": "abc", "preferred_username": username})
+async def home_dir_for(username: Any, oidc: OidcConfiguration) -> str:
+    """
+    The directory name derived for a username, with the subject held fixed.
+
+    A username that is not a string is absent as far as auth.py is concerned, so these
+    calls reach the UserInfo endpoint. The provider fixture leaves it unconfigured, which
+    is a 404 -- the same digest fallback the old synchronous helper took directly.
+    """
+    return await user_home_dir(
+        {"sub": "abc", "preferred_username": username}, {}, "access-token", oidc)
 
 
 @pytest.mark.parametrize("username,expected_prefix", [
@@ -325,8 +385,11 @@ def home_dir_for(username: Any) -> str:
     ("a/b", "ab-"),                                   # the separator goes, the name survives
     ("CON", "CON_-"),                                 # reserved on Windows, renamed by pathvalidate
 ])
-def test_readable_username_becomes_the_directory_prefix(username: str, expected_prefix: str):
-    name = home_dir_for(username)
+@pytest.mark.asyncio
+async def test_readable_username_becomes_the_directory_prefix(
+    username: str, expected_prefix: str, oidc: OidcConfiguration
+):
+    name = await home_dir_for(username, oidc)
 
     assert name.startswith(expected_prefix)
     assert name.endswith(SUBJECT_DIGEST)
@@ -338,12 +401,15 @@ def test_readable_username_becomes_the_directory_prefix(username: str, expected_
     "...", "---", "..", "-.-.-",       # nothing usable left at all
     ".hidden", ".NET", "-rf", "-weird",  # a readable name, but not one that may lead
 ])
-def test_unusable_username_falls_back_to_the_subject_digest(username: Any):
+@pytest.mark.asyncio
+async def test_unusable_username_falls_back_to_the_subject_digest(
+    username: Any, oidc: OidcConfiguration
+):
     # the last four are a deliberate trade: rather than strip the leading character and keep
     # a readable prefix, the whole prefix is dropped. Nothing downstream validates this name
     # -- unlike a recording name, there is no pattern behind it -- so the one check at the
     # end of user_home_dir is the entire guarantee, and it is worth keeping obvious
-    assert home_dir_for(username) == SUBJECT_DIGEST
+    assert await home_dir_for(username, oidc) == SUBJECT_DIGEST
 
 
 @pytest.mark.parametrize("username,expected", [
@@ -353,20 +419,26 @@ def test_unusable_username_falls_back_to_the_subject_digest(username: Any):
     ("a\tb", "a_b-"),
     ("a\nb", "a_b-"),
 ])
-def test_unicode_whitespace_is_a_separator_like_any_other(username: str, expected: str):
+@pytest.mark.asyncio
+async def test_unicode_whitespace_is_a_separator_like_any_other(
+    username: str, expected: str, oidc: OidcConfiguration
+):
     # \s on a str pattern is Unicode-aware, which is what keeps a pasted U+3000 out of a
     # directory name -- pathvalidate would have left it there
-    assert home_dir_for(username).startswith(expected)
+    assert (await home_dir_for(username, oidc)).startswith(expected)
 
 
-def test_the_directory_name_does_not_depend_on_the_composition_of_the_username():
+@pytest.mark.asyncio
+async def test_the_directory_name_does_not_depend_on_the_composition_of_the_username(
+    oidc: OidcConfiguration
+):
     # spelled with escapes: the two forms are indistinguishable on screen, so an editor
     # normalizing this file would turn one half of this test into a copy of the other
     decomposed = "U\u0308bung"
     composed = "\u00dcbung"
 
     assert decomposed != composed
-    assert home_dir_for(decomposed) == home_dir_for(composed)
+    assert await home_dir_for(decomposed, oidc) == await home_dir_for(composed, oidc)
 
 
 @pytest.mark.parametrize("username", [
@@ -375,8 +447,11 @@ def test_the_directory_name_does_not_depend_on_the_composition_of_the_username()
     "%2e%2e%2f", "..;/", "- - - 81457m4573r 9001 - - -", "\u3000\u674e\u3000",
     "\u0308mark", 42, None,
 ])
-def test_directory_name_is_always_a_safe_single_path_segment(username: Any):
-    name = home_dir_for(username)
+@pytest.mark.asyncio
+async def test_directory_name_is_always_a_safe_single_path_segment(
+    username: Any, oidc: OidcConfiguration
+):
+    name = await home_dir_for(username, oidc)
 
     assert name, "an empty directory name would put chunks in the destination root"
     assert not name.startswith((".", "-")), "hidden on unix, an option to anything argv-shaped"
@@ -389,19 +464,224 @@ def test_directory_name_is_always_a_safe_single_path_segment(username: Any):
     assert len(name.encode("utf-8")) <= NAME_MAX_BYTES
 
 
-def test_directory_name_is_stable_for_a_subject():
+@pytest.mark.asyncio
+async def test_directory_name_is_stable_for_a_subject(oidc: OidcConfiguration):
     claims = {"sub": "abc", "preferred_username": "lecturer"}
 
-    assert user_home_dir(claims) == user_home_dir(claims)
+    # separate caches, so this is the derivation agreeing with itself rather than the
+    # second call reading back what the first one memoised
+    assert (await user_home_dir(claims, {}, "access-token", oidc)
+            == await user_home_dir(claims, {}, "access-token", oidc))
 
 
-def test_username_collisions_are_separated_by_the_digest():
+@pytest.mark.asyncio
+async def test_username_collisions_are_separated_by_the_digest(oidc: OidcConfiguration):
     # pathvalidate maps several usernames onto one string -- "DOMAIN\\user" and "DOMAINuser"
     # both come out as the latter -- so the digest is the only thing keeping them apart
-    first = user_home_dir({"sub": "user-a", "preferred_username": "same"})
-    second = user_home_dir({"sub": "user-b", "preferred_username": "same"})
+    first = await user_home_dir(
+        {"sub": "user-a", "preferred_username": "same"}, {}, "access-token", oidc)
+    second = await user_home_dir(
+        {"sub": "user-b", "preferred_username": "same"}, {}, "access-token", oidc)
 
     assert first != second
+
+
+# --- the UserInfo fallback -------------------------------------------------
+
+# Kanidm does not put profile claims in an access token even when the profile scope was
+# granted, which the spec permits -- identity claims are only promised in the id token and
+# at the UserInfo endpoint. So a token without preferred_username is not an error, and
+# these cover what auth.py makes of one.
+
+DEFAULT_SUBJECT_DIGEST = digest_of(DEFAULT_SUBJECT)
+
+
+def sole_home_dir(destdir: Path) -> str:
+    """ The one per-user directory the uploads landed in. """
+    home_dirs = {path.relative_to(destdir).parts[0] for path in destdir.rglob("chunk.*")}
+    assert len(home_dirs) == 1
+    return home_dirs.pop()
+
+
+def test_userinfo_is_not_consulted_when_the_token_carries_the_username(
+    client: TestClient, provider: Provider
+):
+    assert upload(client, provider.mint()).status_code == 201
+
+    # the round trip is per user and on the upload path, so not making it is the point
+    assert provider.userinfo_fetch_count == 0
+
+
+def test_username_comes_from_userinfo_when_the_token_omits_it(
+    client: TestClient, provider: Provider, tmp_path: Path
+):
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
+
+    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
+
+    assert sole_home_dir(tmp_path) == f"lecturer-{DEFAULT_SUBJECT_DIGEST}"
+    assert provider.userinfo_fetch_count == 1
+
+
+def test_userinfo_is_asked_with_the_callers_access_token(
+    client: TestClient, provider: Provider
+):
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
+    token = provider.mint(preferred_username=None)
+
+    assert upload(client, token).status_code == 201
+
+    # the access token is the credential for UserInfo too; nothing else would authorise us
+    assert provider.userinfo_authorization == f"Bearer {token}"
+
+
+def test_userinfo_about_a_different_subject_is_discarded(
+    client: TestClient, provider: Provider, tmp_path: Path
+):
+    # OIDC Core 5.3.2 requires this check: an answer about somebody else would otherwise
+    # put this caller's recordings in a directory named after them
+    provider.serve_userinfo(sub="somebody-else", preferred_username="mallory")
+
+    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
+
+    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+
+
+@pytest.mark.parametrize("response", [
+    (502, "text/html", b"<html><body>502 Bad Gateway</body></html>"),  # a proxy, not the OP
+    (403, "application/json", b'{"error":"insufficient_scope"}'),      # profile not granted
+    (200, "application/jwt", b"eyJhbGciOiJSUzI1NiJ9.e30.sig"),         # signed UserInfo
+    (200, "application/json", b""),                                    # nothing at all
+    (200, "application/json", b'["not", "an", "object"]'),             # json, wrong shape
+    (200, "application/json", b'{"preferred_username":"lecturer"}'),   # no sub to check
+])
+def test_unusable_userinfo_falls_back_to_the_digest(
+    client: TestClient, provider: Provider, tmp_path: Path, response: tuple[int, str, bytes]
+):
+    provider.serve_userinfo_raw(*response)
+
+    # a cosmetic directory name is not worth failing an upload over
+    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
+
+    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+
+
+def test_userinfo_with_a_non_string_username_falls_back_to_the_digest(
+    client: TestClient, provider: Provider, tmp_path: Path
+):
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username=42)
+
+    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
+
+    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+
+
+def test_unreachable_userinfo_does_not_fail_the_upload(
+    client: TestClient, provider: Provider, tmp_path: Path
+):
+    provider.serve_userinfo(sub="offline-user", preferred_username="lecturer")
+    # minted while the provider is up, and verified afterwards from the cached key set
+    token = provider.mint(sub="offline-user", preferred_username=None)
+    assert upload(client, provider.mint(), index=0).status_code == 201
+    provider.stop()
+
+    assert upload(client, token, index=1).status_code == 201
+
+    assert (tmp_path / digest_of("offline-user") / "foo" / "stream" / "chunk.0001").is_file()
+
+
+def test_username_from_userinfo_is_sanitised_like_one_from_the_token(
+    client: TestClient, provider: Provider, tmp_path: Path
+):
+    # UserInfo is a second way into user_home_dir, and must not be a way around it
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="../../etc/passwd")
+
+    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
+
+    home_dir = sole_home_dir(tmp_path)
+    assert home_dir.endswith(DEFAULT_SUBJECT_DIGEST)
+    assert "/" not in home_dir
+    assert (tmp_path / home_dir).resolve().parent == tmp_path.resolve()
+
+
+def test_userinfo_is_consulted_once_per_subject(
+    client: TestClient, provider: Provider, tmp_path: Path
+):
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
+    token = provider.mint(preferred_username=None)
+
+    for index in range(3):
+        assert upload(client, token, index=index).status_code == 201
+
+    assert provider.userinfo_fetch_count == 1
+    assert sole_home_dir(tmp_path) == f"lecturer-{DEFAULT_SUBJECT_DIGEST}"
+
+
+def test_a_recovering_provider_does_not_move_a_directory_already_in_use(
+    client: TestClient, provider: Provider, tmp_path: Path
+):
+    # UserInfo unavailable for the first chunk, so this lecture starts under the digest
+    token = provider.mint(preferred_username=None)
+    assert upload(client, token, index=0).status_code == 201
+    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
+
+    # the rest of the lecture has to keep landing beside the first chunk, or the recording
+    # is split across two directories and the postprocessing job only ever sees one
+    assert upload(client, token, index=1).status_code == 201
+
+    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+    assert provider.userinfo_fetch_count == 1
+
+
+# --- a provider that has no UserInfo endpoint ------------------------------
+
+# OIDC Discovery 1.0 lists userinfo_endpoint as RECOMMENDED, not REQUIRED, so its absence
+# is not an error and must not take the service down with it.
+
+@pytest.mark.asyncio
+async def test_discovery_records_the_userinfo_endpoint(provider: Provider, settings: Settings):
+    config = await discover_oidc_config(settings)
+
+    assert config.userinfo_endpoint == f"{provider.issuer}/userinfo"
+
+
+@pytest.mark.asyncio
+async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoint(
+    provider: Provider, settings: Settings
+):
+    provider.advertise_userinfo = False
+
+    config = await discover_oidc_config(settings)
+
+    assert config.userinfo_endpoint is None
+
+
+def test_tokens_are_still_accepted_without_a_userinfo_endpoint(
+    provider: Provider, settings: Settings, tmp_path: Path
+):
+    provider.advertise_userinfo = False
+
+    with TestClient(create_app(settings)) as client:
+        assert upload(client, provider.mint()).status_code == 201
+
+    assert sole_home_dir(tmp_path) == f"lecturer-{DEFAULT_SUBJECT_DIGEST}"
+
+
+def test_no_userinfo_endpoint_falls_back_to_the_digest_without_asking(
+    provider: Provider, settings: Settings, tmp_path: Path
+):
+    provider.advertise_userinfo = False
+    # served, but never advertised: if the endpoint were guessed at rather than taken from
+    # the discovery document, this name would show up in the directory and give it away
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
+
+    with TestClient(create_app(settings)) as client:
+        assert upload(client, provider.mint(preferred_username=None)).status_code == 201
+
+    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+    assert provider.userinfo_fetch_count == 0
 
 
 # --- the signing algorithm comes from the key set --------------------------
