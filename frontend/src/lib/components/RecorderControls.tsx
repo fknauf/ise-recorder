@@ -16,6 +16,8 @@ import { ActiveRecording } from "../store/store";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
 import { useHydrated } from "../hooks/useHydrated";
+import { UserMenu } from "./UserMenu";
+import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -125,6 +127,8 @@ export function RecorderControls() {
     refreshMediaDevices
   } = useMediaDevices();
 
+  const { authRequired } = useAccessTokenSource();
+
   const isBackendConfigured = apiUrl !== undefined;
   const hasDisabledTrackControls = activeRecording.state !== "idle";
 
@@ -136,6 +140,14 @@ export function RecorderControls() {
 
   return (
     <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
+      {
+        authRequired &&
+        <Flex direction="row" marginTop="size-300" gap="size-100">
+          <UserMenu/>
+          <Divider orientation="vertical" size="S" marginX="size-100"/>
+        </Flex>
+      }
+
       <TextField
         label="Lecture Title"
         value={lectureTitle}
