@@ -4,9 +4,10 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceContext, SessionExpansionResult } from "@/lib/hooks/useAccessTokenSource";
+import { AccessTokenSourceContext, SessionTransition } from "@/lib/hooks/useAccessTokenSource";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 import { ActiveRecording } from "@/lib/store/store";
+import { ServerEnv } from "@/lib/utils/serverEnv";
 
 /**
  * The banners above the recorder: what the user is told about their session, and when.
@@ -52,17 +53,26 @@ function StoreHandles() {
   return null;
 }
 
+// Typed rather than inferred: with the literal inline, the parameter's type narrows to
+// { apiUrl: string } and the no-backend test below cannot pass {}.
+const DEFAULT_SERVER_ENV: ServerEnv = { apiUrl: "https://record.example.edu/api" };
+
 function renderMessage(
   {
     authRequired = true,
-    expandSessionHeadroom = vi.fn(async (): Promise<SessionExpansionResult> => "still-fresh")
+    // The sign-in banner only makes sense where there is a backend to stream to, so the
+    // component reads apiUrl. Default it to configured: that is the deployment every
+    // authentication state below is interesting in.
+    serverEnv = DEFAULT_SERVER_ENV,
+    interactiveLogin = vi.fn(async () => {}),
+    expandSessionHeadroom = vi.fn(async (): Promise<SessionTransition> => "still-fresh")
   } = {}
 ) {
   render(
     <Provider theme={defaultTheme}>
-      <AppStoreProvider serverEnv={{}}>
+      <AppStoreProvider serverEnv={serverEnv}>
         <AccessTokenSourceContext.Provider
-          value={{ authRequired, getAccessToken: async () => "token", expandSessionHeadroom }}
+          value={{ authRequired, getAccessToken: async () => "token", interactiveLogin, expandSessionHeadroom }}
         >
           <StoreHandles/>
           <AuthStatusMessage/>
@@ -71,7 +81,7 @@ function renderMessage(
     </Provider>
   );
 
-  return { expandSessionHeadroom };
+  return { expandSessionHeadroom, interactiveLogin };
 }
 
 const recording = (streamingImpeded: boolean): ActiveRecording =>
@@ -166,12 +176,149 @@ test("a failed sign-in shows the reason", () => {
 });
 
 test("a failed sign-in with no message still says something", () => {
-  // not signed in, not loading and no error object: the provider never answered. The user
-  // needs a banner rather than a silently empty page.
+  // an error object with nothing in it still has to produce a banner rather than an empty
+  // one, or the user is left staring at a heading and no reason
+  oidc.auth = { isAuthenticated: false, isLoading: false, error: new Error("") };
+
   renderMessage();
 
   expect(screen.getByText(/Unknown Error/)).toBeInTheDocument();
 });
+
+
+// --- not signed in, which is not an error ----------------------------------
+
+test("merely not being signed in is offered a way in rather than reported as a failure", () => {
+  // Not signed in, not loading, no error: nothing has gone wrong, the user simply has not
+  // authenticated yet. Reporting that as "Authentication Error" -- which is what this did
+  // before sign-in stopped happening automatically on load -- tells them something broke.
+  renderMessage();
+
+  expect(screen.getByText("You are not authenticated")).toBeInTheDocument();
+  expect(screen.queryByText(/Authentication Error/i)).toBeNull();
+});
+
+
+test("the sign-in banner says what is lost by staying signed out", () => {
+  // The recording still works unauthenticated; it is only the upload that does not. Saying
+  // so is what stops the banner from reading as "you cannot use this yet".
+  renderMessage();
+
+  expect(screen.getByText(/Streaming to backend is disabled/i)).toBeInTheDocument();
+});
+
+
+test("the sign-in button starts an interactive login", async () => {
+  const { interactiveLogin } = renderMessage();
+
+  await userEvent.click(screen.getByRole("button", { name: /Authenticate/i }));
+
+  // the only control on this banner; everything else is prose
+  expect(interactiveLogin).toHaveBeenCalled();
+});
+
+
+test.each([
+  [ "signed out", { isAuthenticated: false, isLoading: false, error: undefined } ],
+  [ "signing in", { isAuthenticated: false, isLoading: true, error: undefined } ],
+  [ "failed to sign in", { isAuthenticated: false, isLoading: false, error: new Error("boom") } ],
+  [ "signed in", { isAuthenticated: true, isLoading: false, error: undefined } ]
+])("a deployment with no backend says nothing at all -- %s", (_label, authState) => {
+  // Authentication only exists here to let the recorder stream to a backend. Without an
+  // apiUrl nothing streams, so none of these states is the user's problem to solve and
+  // every one of them would be asking about something they cannot act on. Whatever OIDC
+  // is doing is the admin's business at that point, and it stays in the console.
+  oidc.auth = authState;
+
+  renderMessage({ serverEnv: {} });
+
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText(/Authenticat/i)).toBeNull();
+  expect(screen.queryByText(/not authenticated/i)).toBeNull();
+});
+
+
+test("a deployment with no backend keeps quiet about a stale session too", async () => {
+  oidc.auth = { isAuthenticated: true, isLoading: false, error: undefined };
+
+  renderMessage({ serverEnv: {} });
+  act(() => setStaleSession(true));
+
+  expect(screen.queryByText(/Stale/i)).toBeNull();
+});
+
+
+test("a real error outranks the invitation to sign in", () => {
+  // Both branches match "not authenticated"; an error the provider actually reported is
+  // the more useful thing to show.
+  oidc.auth = { isAuthenticated: false, isLoading: false, error: new Error("invalid_client") };
+
+  renderMessage();
+
+  expect(screen.getByText(/invalid_client/)).toBeInTheDocument();
+  expect(screen.queryByText("You are not authenticated")).toBeNull();
+});
+
+test("a sign-in that has not happened yet outranks a stale flag left in the store", () => {
+  // staleSession is published by a watcher that runs independently of this component, so
+  // it can still say "stale" for a session that is now gone. Offering "Reauthenticate" for
+  // a session the user does not have sends them to the wrong button.
+  oidc.auth = { isAuthenticated: false, isLoading: false, error: undefined };
+
+  renderMessage();
+  act(() => setStaleSession(true));
+
+  expect(screen.getByText("You are not authenticated")).toBeInTheDocument();
+  expect(screen.queryByText(/Stale/i)).toBeNull();
+});
+
+
+test("a retry in flight is shown as loading rather than as the error being retried", () => {
+  // The error stays in state until the retry resolves, so both are set at once. Showing
+  // the error the user just pressed a button about reads as if the retry had already
+  // failed.
+  oidc.auth = { isAuthenticated: false, isLoading: true, error: new Error("invalid_client") };
+
+  renderMessage();
+
+  expect(screen.getByText(/Authenticating/i)).toBeInTheDocument();
+  expect(screen.queryByText(/invalid_client/)).toBeNull();
+});
+
+
+// --- errors from the background renewal -------------------------------------
+
+test("a failed background renewal is surfaced while the user still counts as signed in", () => {
+  // automaticSilentRenew failing raises silentRenewError, which the provider turns into an
+  // auth error -- but it never re-dispatches the user, so isAuthenticated stays true until
+  // something else happens to. If the banner only looks at errors while signed out, a
+  // refresh token that died under the user is invisible until they try to record.
+  oidc.auth = {
+    isAuthenticated: true,
+    isLoading: false,
+    error: new Error("Token is not active")
+  };
+
+  renderMessage();
+
+  expect(screen.getByText(/Token is not active/)).toBeInTheDocument();
+});
+
+
+test("the retry button on the error banner starts an interactive login", async () => {
+  oidc.auth = {
+    isAuthenticated: false,
+    isLoading: false,
+    error: new Error("invalid_client")
+  };
+
+  const { interactiveLogin } = renderMessage();
+
+  await userEvent.click(screen.getByRole("button", { name: /Retry authentication/i }));
+
+  expect(interactiveLogin).toHaveBeenCalled();
+});
+
 
 // --- the streaming warning -------------------------------------------------
 

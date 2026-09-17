@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceContext, SessionExpansionResult, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { AccessTokenSourceContext, SessionTransition, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
 import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
 import { ServerStorageDestination } from "@/lib/utils/serverStorage";
@@ -42,11 +42,12 @@ let releaseRecordLecture: (() => void) | undefined;
 const makeTokenSource = (
   authRequired: boolean,
   token: string | undefined,
-  sessionResult: SessionExpansionResult = "still-fresh"
+  sessionResult: SessionTransition = "still-fresh"
 ): AccessTokenSource => ({
   authRequired,
   getAccessToken: vi.fn(async () => token),
-  expandSessionHeadroom: vi.fn(async (): Promise<SessionExpansionResult> => sessionResult)
+  interactiveLogin: vi.fn(async () => {}),
+  expandSessionHeadroom: vi.fn(async (): Promise<SessionTransition> => sessionResult)
 });
 
 function renderRecorder(

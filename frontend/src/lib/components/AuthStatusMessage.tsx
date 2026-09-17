@@ -6,17 +6,64 @@ import { ActionButton, Content, Flex, Heading, InlineAlert, ProgressCircle, Text
 import { useActiveRecording } from "../hooks/useActiveRecording";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import { useAppStore } from "../hooks/useAppStore";
+import { useServerEnv } from "../hooks/useServerEnv";
 
 function AuthStatusMessageImpl() {
+  const env = useServerEnv();
   const auth = useAuth();
-  const { expandSessionHeadroom } = useAccessTokenSource();
+  const { interactiveLogin, expandSessionHeadroom } = useAccessTokenSource();
   const stale = useAppStore(state => state.staleSession);
 
-  if(auth.isAuthenticated) {
-    if(!stale) {
-      return null;
-    }
+  if(env.apiUrl === undefined) {
+    return null;
+  }
 
+  if(auth.isLoading) {
+    return (
+      <InlineAlert variant="info">
+        <Heading>Authentication Loading</Heading>
+        <Content>
+          <ProgressCircle aria-label="Authenticating" size="M" isIndeterminate/> <Text>Authenticating...</Text>
+        </Content>
+      </InlineAlert>
+    );
+  }
+
+  if(auth.error !== undefined) {
+    return (
+      <InlineAlert variant="negative">
+        <Heading>Authentication Error</Heading>
+        <Content>
+          <Flex direction="column">
+            <Text>Authentication Error: {auth.error.message || "Unknown Error"}</Text>
+            <ActionButton onPress={interactiveLogin} marginTop="size-100" alignSelf="center">
+              <Refresh/>
+              <Text>Retry authentication</Text>
+            </ActionButton>
+          </Flex>
+        </Content>
+      </InlineAlert>
+    );
+  }
+
+  if(!auth.isAuthenticated) {
+    return (
+      <InlineAlert variant="notice">
+        <Heading>You are not authenticated</Heading>
+        <Content>
+          <Flex direction="column">
+            <Text>Streaming to backend is disabled.</Text>
+            <ActionButton onPress={interactiveLogin} marginTop="size-100" alignSelf="center">
+              <Refresh/>
+              <Text>Authenticate</Text>
+            </ActionButton>
+          </Flex>
+        </Content>
+      </InlineAlert>
+    );
+  }
+
+  if(stale) {
     return (
       <InlineAlert variant="notice">
         <Heading>Authentication Session is Stale</Heading>
@@ -33,25 +80,7 @@ function AuthStatusMessageImpl() {
     );
   }
 
-  if(auth.isLoading) {
-    return (
-      <InlineAlert variant="info">
-        <Heading>Authentication Loading</Heading>
-        <Content>
-          <ProgressCircle aria-label="Authenticating" size="M" isIndeterminate/> <Text>Authenticating...</Text>
-        </Content>
-      </InlineAlert>
-    );
-  }
-
-  return (
-    <InlineAlert variant="negative">
-      <Heading>Authentication Error</Heading>
-      <Content>
-        Authentication Error: {auth.error?.message ?? "Unknown Error"}
-      </Content>
-    </InlineAlert>
-  );
+  return null;
 }
 
 function StreamingImpededWarning() {

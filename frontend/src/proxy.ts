@@ -3,7 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 // Adapted from https://nextjs.org/docs/app/guides/content-security-policy
 
 export function proxy(request: NextRequest) {
+  const requestHeaders = new Headers(request.headers);
+
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  requestHeaders.set("x-nonce", nonce);
 
   const isDev = process.env.NODE_ENV === "development";
   const apiUrl = process.env.ISE_RECORD_API_URL;
@@ -41,8 +44,6 @@ export function proxy(request: NextRequest) {
     .replace(/\s{2,}/g, " ")
     .trim();
 
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
 
   const response = NextResponse.next({
@@ -51,7 +52,10 @@ export function proxy(request: NextRequest) {
     }
   });
   response.headers.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
-
+  if(process.env.ISE_RECORD_OIDC_PROVIDER_URL === undefined) {
+    // No need to embed the OIDC provider -> might as well be strict.
+    response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+  }
   return response;
 }
 

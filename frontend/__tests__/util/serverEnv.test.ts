@@ -20,6 +20,7 @@ const ENV_KEYS = [
   "ISE_RECORD_OIDC_PROVIDER_URL",
   "ISE_RECORD_OIDC_CLIENT_ID",
   "ISE_RECORD_OIDC_MAX_AGE",
+  "ISE_RECORD_OIDC_AUTO_SIGNIN",
   "ISE_RECORD_SHOW_VERSION"
 ] as const;
 
@@ -136,6 +137,31 @@ test("the OIDC settings are passed through", async () => {
   expect(env.oidcClientId).toBe("ise-recorder");
   expect(env.oidcMaxAge).toBe(25200);
 });
+
+// --- automatic sign-in ------------------------------------------------------
+
+test("automatic sign-in is off unless it is asked for", async () => {
+  // The default decides what an existing deployment does after an upgrade, so it is worth
+  // stating outright: nothing set means no redirect on load, and the user signs in from
+  // the banner when they want to.
+  expect((await envFor({})).oidcAutoSignin).toBe(false);
+});
+
+
+test("automatic sign-in is on when it is asked for", async () => {
+  expect((await envFor({ ISE_RECORD_OIDC_AUTO_SIGNIN: "true" })).oidcAutoSignin).toBe(true);
+});
+
+
+test.each([ "TRUE", "True", "1", "yes", "on", "" ])(
+  "%s does not turn automatic sign-in on",
+  async (value: string) => {
+    // Matches ISE_RECORD_SHOW_VERSION: an exact "true" and nothing else. Recorded because
+    // the failure is silent -- the admin gets no redirect and no complaint about the typo.
+    expect((await envFor({ ISE_RECORD_OIDC_AUTO_SIGNIN: value })).oidcAutoSignin).toBe(false);
+  }
+);
+
 
 test("an empty or unset max age stays undefined rather than becoming NaN", async () => {
   expect((await envFor({})).oidcMaxAge).toBeUndefined();

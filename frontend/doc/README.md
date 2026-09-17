@@ -376,3 +376,9 @@ The latter requires some extra plumbing in `useAccessTokenSource.tsx`:
 - a timer that fires when the authentication session goes past max_age and toggles `staleSession` in the store
 - event handlers that reset that timer when an event that changes the session length occurs
 - a function to explicitly refresh tokens and force the user to re-authenticate if the session is stale.
+
+Auto-Signin is configurable; unfortunately we can't do an optimistic attempt to obtain tokens in a browser that
+already has an SSO session because the OIDC cookies don't get sent in a silent attempt and so the silent attempt
+always results in failure. So users have to choose between a deployment where all users are authenticated, in which
+case auto-signin is more convenient for them, and a deployment that supports anonymous users that won't be able
+to use the backend but can still record to their browser's OPFS.

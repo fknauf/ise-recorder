@@ -46,6 +46,7 @@ export interface ServerEnv {
   oidcProviderUrl?: string
   oidcClientId?: string
   oidcMaxAge?: number
+  oidcAutoSignin?: boolean
 }
 
 let runtimeEnvironment: ServerEnv | undefined;
@@ -61,7 +62,8 @@ export async function getServerEnv(): Promise<ServerEnv> {
       apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
       oidcProviderUrl: process.env.ISE_RECORD_OIDC_PROVIDER_URL,
       oidcClientId: process.env.ISE_RECORD_OIDC_CLIENT_ID,
-      oidcMaxAge: validateMaxAge(process.env.ISE_RECORD_OIDC_MAX_AGE)
+      oidcMaxAge: validateMaxAge(process.env.ISE_RECORD_OIDC_MAX_AGE),
+      oidcAutoSignin: process.env.ISE_RECORD_OIDC_AUTO_SIGNIN === "true"
     };
   }
 

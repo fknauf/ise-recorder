@@ -10,6 +10,7 @@ import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 import { useAutoSignin } from "react-oidc-context";
 import { useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 import { useHydrated } from "@/lib/hooks/useHydrated";
+import { useServerEnv } from "@/lib/hooks/useServerEnv";
 
 function AutoSignin() {
   useAutoSignin();
@@ -18,11 +19,12 @@ function AutoSignin() {
 
 export function Home() {
   const hydrated = useHydrated();
+  const env = useServerEnv();
   const { authRequired } = useAccessTokenSource();
 
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
-      { hydrated && authRequired && <AutoSignin/> }
+      { hydrated && authRequired && env.oidcAutoSignin && <AutoSignin/> }
       <Flex direction="row" justifyContent="center" gap="size-500">
         <RecorderControls/>
         <GithubLink marginTop="size-450" size="M"/>

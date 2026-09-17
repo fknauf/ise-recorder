@@ -28,12 +28,14 @@ type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
   getAccessToken: async () => undefined,
+  interactiveLogin: async () => {},
   expandSessionHeadroom: async () => "still-fresh"
 };
 
 const authenticatedTokenSource: AccessTokenSource = {
   authRequired: true,
   getAccessToken: async () => "test-token",
+  interactiveLogin: async () => {},
   expandSessionHeadroom: async () => "still-fresh"
 };
 

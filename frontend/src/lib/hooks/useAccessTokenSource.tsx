@@ -7,13 +7,14 @@ import { useRouter } from "next/navigation";
 import { useAppStore } from "./useAppStore";
 import { useServerEnv } from "./useServerEnv";
 
-export type SessionExpansionResult =
+export type SessionTransition =
   "still-fresh" | "still-stale" | "expired" | "renewed";
 
 interface AccessTokenSource {
   authRequired: boolean
   getAccessToken: () => Promise<string | undefined>
-  expandSessionHeadroom: () => Promise<SessionExpansionResult>
+  interactiveLogin: () => Promise<void>
+  expandSessionHeadroom: () => Promise<SessionTransition>
 }
 
 interface AuthenticatedTokenSourceProviderProps {
@@ -60,6 +61,7 @@ async function sessionStaleness(
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
   getAccessToken: async () => undefined,
+  interactiveLogin: async () => {},
   expandSessionHeadroom: async () => "still-fresh"
 };
 
@@ -92,7 +94,11 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
     })
   );
 
-  const onSigninCallback = useCallback(() => router.replace("/"), [router]);
+  const onSigninCallback = useCallback(() => {
+    if(window.self === window.top) {
+      router.replace("/");
+    }
+  }, [router]);
 
   // clean up userMgr when the component is unmounted. Library does not handle it for us.
   useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
@@ -147,6 +153,14 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
     return user.access_token;
   }, [userMgr]);
 
+  const interactiveLogin = useCallback(async () => {
+    try {
+      await userMgr.signinPopup();
+    } catch(e) {
+      console.warn("Failed to authenticate", e);
+    }
+  }, [userMgr]);
+
   // Expanding the session headroom means making sure the current session isn't stale and refreshing the access token
   // manually, so we have its full length at the beginning of the recording.
   //
@@ -155,38 +169,47 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
   // tokens, but this way if a user likes access tokens that live long enough to cover a recording, then the access token
   // present at the beginning of the recording will not need renewal during the lecture.
   const expandSessionHeadroom = useCallback(async () => {
-    if((await sessionStaleness(userMgr, maxAge)).stale) {
+    const refreshSession = async (
+      fn: () => Promise<SessionTransition>,
+      defaultValue: SessionTransition,
+      errMsg: string
+    ) => {
       try {
-        await userMgr.signinPopup();
-        return "renewed";
+        return await fn();
       } catch(e) {
-        console.warn("Failed to reauthenticate stale oidc session, continuing with existing session", e);
+        console.warn(errMsg, e);
 
         const existing = await userMgr.getUser().catch(() => null);
 
         if(existing === null || existing.expired) {
           return "expired";
         }
-
-        return "still-stale";
       }
+
+      return defaultValue;
+    };
+
+    if((await sessionStaleness(userMgr, maxAge)).stale) {
+      return refreshSession(
+        () => userMgr.signinPopup().then(() => "renewed"),
+        "still-stale",
+        "Failed to reauthenticate stale oidc session, continuing with existing session"
+      );
     }
 
-    try {
-      // Force access/refresh token renewal at recording start.
-      await userMgr.signinSilent();
-    } catch(e) {
-      console.warn("Failed to force-refresh access/refresh token, continuing with existing tokens", e);
-    }
-
-    return "still-fresh";
+    return refreshSession(
+      () => userMgr.signinSilent().then(() => "still-fresh"),
+      "still-fresh",
+      "Failed to force-refresh access/refresh token, continuing with existing tokens"
+    );
   }, [maxAge, userMgr]);
 
   const value = useMemo<AccessTokenSource>(() => ({
     authRequired: true,
+    interactiveLogin,
     getAccessToken,
     expandSessionHeadroom
-  }), [getAccessToken, expandSessionHeadroom]);
+  }), [getAccessToken, interactiveLogin, expandSessionHeadroom]);
 
   return (
     <AccessTokenSourceContext.Provider value={value}>

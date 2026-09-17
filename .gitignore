@@ -52,3 +52,4 @@ __pycache__
 /backend/data
 /backend/build
 get_token.sh
+frontend/.vitest

@@ -74,6 +74,7 @@ variables for settings;
 | `ISE_RECORD_OIDC_PROVIDER_URL` | `https://auth.example.edu/realms/ise` | URL of the OpenID Connect provider, same as in the backend. |
 | `ISE_RECORD_OIDC_CLIENT_ID`    | `ise-recorder`                        | Client-ID as configured in the OIDC provider |
 | `ISE_RECORD_OIDC_MAX_AGE`      | `79200`                               | OIDC max_age in seconds |
+| `ISE_RECORD_OIDC_AUTO_SIGNIN`  | `true`                                      | If set to true, the page will attempt auto-signin with the oidc provider on page load. This is more convenient for authenticated users but disables anonymous use (i.e., no backend, browser storage only) |
 | `ISE_RECORD_SHOW_VERSION`      | `true`                                | Show a version indicator on the main page |
 
 Sessions past `ISE_RECORD_OIDC_MAX_AGE` will be considered stale, i.e.
