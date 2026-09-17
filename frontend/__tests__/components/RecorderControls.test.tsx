@@ -9,6 +9,7 @@ import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActive
 import { useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
 import { ActiveRecording } from "@/lib/store/store";
+import { AccessTokenSourceProvider } from "@/lib/hooks/useAccessTokenSource";
 
 vi.mock("@/lib/hooks/useServerEnv");
 vi.mock("@/lib/hooks/useLecture");
@@ -111,7 +112,9 @@ test("RecorderControls renders controls correctly when idle", async () => {
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -156,7 +159,9 @@ test("RecorderControls renders controls correctly when recording", async () => {
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -196,7 +201,9 @@ test("RecorderControls renders controls correctly when starting a recording", as
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -236,7 +243,9 @@ test("RecorderControls renders controls correctly when stopping a recording", as
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -276,7 +285,9 @@ test("RecorderControls hides the e-mail field when apiUrl is undefined", async (
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -298,7 +309,9 @@ test("RecorderControls handles the start recording button properly", async () =>
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -336,7 +349,9 @@ test("RecorderControls handles the stop recording button properly", async () => 
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -379,7 +394,9 @@ test("RecorderControls show video device menu", async () => {
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -428,7 +445,9 @@ test("RecorderControls show audio device menu", async () => {
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -466,7 +485,9 @@ test("RecorderControls handles lecture metadata", async () => {
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 
@@ -513,7 +534,9 @@ const renderIdleWith = (tracks: ConfiguredTracks) => {
 
   render(
     <Provider theme={defaultTheme}>
-      <RecorderControls/>
+      <AccessTokenSourceProvider>
+        <RecorderControls/>
+      </AccessTokenSourceProvider>
     </Provider>
   );
 };

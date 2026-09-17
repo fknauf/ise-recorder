@@ -142,9 +142,8 @@ export function RecorderControls() {
     <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
       {
         authRequired &&
-        <Flex direction="row" marginTop="size-300" gap="size-100">
+        <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" marginEnd="size-100">
           <UserMenu/>
-          <Divider orientation="vertical" size="S" marginX="size-100"/>
         </Flex>
       }
 
