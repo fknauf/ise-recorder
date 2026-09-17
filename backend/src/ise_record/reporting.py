@@ -8,20 +8,22 @@ import logging
 from textwrap import dedent
 
 import aiosmtplib
-from email_validator import validate_email, EmailNotValidError
+from email_validator import validate_email, EmailNotValidError, ValidatedEmail
 
 from .postprocess import Result, ResultReason
 from .settings import SmtpSettings
 
 logger = logging.getLogger(__name__)
 
-def _is_in_domain(domain: str, normalized_address: str):
-    return normalized_address.endswith(f'@{domain}') or normalized_address.endswith(f'.{domain}')
+def _is_in_domain(domain: str, validated: ValidatedEmail):
+    return any(addr.endswith(f'@{domain}') or addr.endswith(f'.{domain}')
+               for addr in (validated.normalized, validated.ascii_email)
+               if addr is not None)
 
-def _is_whitelisted(normalized_address: str, whitelist: list[str]):
+def _is_whitelisted(validated_address: ValidatedEmail, whitelist: list[str]):
     if not whitelist:
         return True
-    return any(_is_in_domain(d, normalized_address) for d in whitelist)
+    return any(_is_in_domain(d, validated_address) for d in whitelist)
 
 def normalize_recipient(address: str | None, domain_whitelist: list[str]) -> str | None:
     """
@@ -39,7 +41,7 @@ def normalize_recipient(address: str | None, domain_whitelist: list[str]) -> str
 
     try:
         validated = validate_email(address, check_deliverability=False)
-        if _is_whitelisted(validated.normalized, domain_whitelist):
+        if _is_whitelisted(validated, domain_whitelist):
             return validated.normalized
 
         logger.warning("Recipient address is not whitelisted: %s", address)
@@ -112,16 +114,14 @@ async def send_report(
     """
        Sends a report about a finished job to the specified recipient.
 
-       :param smtp_sink SMTP endpoint to connect to for sending
-       :param sender sender address that should appear in the message
+       :param smtp_settings SMTP settings used for sending
        :param recipient address of the recipient
        :param job_title job title to use in the subject line
        :param result job result data to be formatted into the message
     """
 
     # Generate report first just so it'll show up in debug logs.
-    msg = generate_report(
-        smtp_settings.sender if smtp_settings else None, recipient, job_title, result)
+    msg = generate_report(smtp_settings.sender, recipient, job_title, result)
     logger.debug("Report generated: \n%s", msg)
 
     if recipient is None or recipient.strip() == "":

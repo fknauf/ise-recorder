@@ -28,6 +28,12 @@ class SmtpSettings(BaseModel):
             raise ValueError("STARTTLS and implicit TLS are mutually exclusive.")
         return use_tls
 
+    @field_validator("allowed_domains")
+    @classmethod
+    def lower_case_allowed_domains(cls, allowed_domains: tuple[str, ...]) -> tuple[str, ...]:
+        """ Force allowed domains to lower scale for case-insensitive comparison """
+        return tuple(d.casefold() for d in allowed_domains)
+
 class OidcSettings(BaseModel):
     """
     OpenID Connect settings for authentication (if desired).
@@ -49,7 +55,7 @@ class Settings(BaseSettings):
         frozen=True
     )
 
-    route_prefix: str = ""
+    route_prefix: Annotated[str, Field(pattern=r"\A(/.*[^/])?\z")] = ""
     destdir: Path = Path("./data")
     chunk_file_digits: Annotated[int, Field(ge=3, lt=10)] = 4
     cors_origins: tuple[str, ...] = ()

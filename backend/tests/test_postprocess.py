@@ -171,7 +171,7 @@ async def test_concat_chunks_rejects_a_track_that_does_not_start_at_zero():
 async def test_concat_chunks_rejects_inconsistent_padding():
     # chunk_file_digits is a setting. If it changes between recordings a track can hold
     # both widths, and then the lexicographic sort no longer matches numeric order -- the
-    # one case that would otherwise produce a misordered file rather than a short one.
+    # one case that would otherwise produce a wrongly ordered file rather than a short one.
     incomplete, content = await concat_names([ "chunk.0000", "chunk.001" ])
 
     assert incomplete is True
@@ -351,8 +351,8 @@ async def test_postprocess_tracks(mocker: MockerFixture):
     ])
 
     mock_unlink.assert_has_calls([
-        call(Path("foo/stream/full.webm")),
-        call(Path("foo/overlay/full.webm"))
+        call(Path("foo/stream/full.webm"), missing_ok=True),
+        call(Path("foo/overlay/full.webm"), missing_ok=True)
     ])
 
 @pytest.mark.asyncio
@@ -390,7 +390,7 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
     ])
 
     mock_concat_chunks.assert_called_once_with(Path("foo/stream"))
-    mock_unlink.assert_called_once_with(Path("foo/stream/full.webm"))
+    mock_unlink.assert_called_once_with(Path("foo/stream/full.webm"), missing_ok=True)
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
@@ -443,11 +443,11 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
     ])
 
     mock_unlink.assert_has_calls([
-        call(Path("foo/stream/full.webm")),
-        call(Path("foo/overlay/full.webm")),
-        call(Path("foo/audio-0/full.webm")),
-        call(Path("foo/audio-1/full.webm")),
-        call(Path("foo/audio-2/full.webm"))
+        call(Path("foo/stream/full.webm"), missing_ok=True),
+        call(Path("foo/overlay/full.webm"), missing_ok=True),
+        call(Path("foo/audio-0/full.webm"), missing_ok=True),
+        call(Path("foo/audio-1/full.webm"), missing_ok=True),
+        call(Path("foo/audio-2/full.webm"), missing_ok=True)
     ])
 
 @pytest.mark.asyncio
@@ -502,10 +502,10 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
     ])
 
     mock_unlink.assert_has_calls([
-        call(Path("foo/stream/full.webm")),
-        call(Path("foo/audio-0/full.webm")),
-        call(Path("foo/audio-1/full.webm")),
-        call(Path("foo/audio-2/full.webm"))
+        call(Path("foo/stream/full.webm"), missing_ok=True),
+        call(Path("foo/audio-0/full.webm"), missing_ok=True),
+        call(Path("foo/audio-1/full.webm"), missing_ok=True),
+        call(Path("foo/audio-2/full.webm"), missing_ok=True)
     ])
 
 @pytest.mark.asyncio

@@ -19,11 +19,21 @@ import jwt
 import pytest
 
 from ise_record import auth
-from ise_record.auth import OidcConfiguration, discover_oidc_config, user_home_dir
+from ise_record.auth import (
+    OidcConfiguration,
+    REQUIRED_CLAIMS,
+    discover_oidc_config,
+    user_home_dir
+)
 from ise_record.server import create_app
 from ise_record.settings import OidcSettings, Settings
 
 CLIENT_ID = "ise-recorder"
+# Distinct from CLIENT_ID on purpose, and that is the normal deployment: an OIDC ID token's
+# `aud` is the client id, an access token's names the resource server, so a backend with an
+# audience of its own never sees an ID token pass. compose-with-auth.yml configures exactly
+# this pair. Only the test that is about a provider collapsing the two sets them equal.
+AUDIENCE = "ise-recorder-api"
 DEFAULT_SUBJECT = "b472c41f9b227e6596e921541f46dc9d7"
 
 
@@ -141,7 +151,7 @@ class Provider:
         claims: dict[str, Any] = {
             "iss": self.issuer,
             "sub": DEFAULT_SUBJECT,
-            "aud": CLIENT_ID,
+            "aud": AUDIENCE,
             "azp": CLIENT_ID,
             "client_id": CLIENT_ID,
             "scope": "openid profile email",
@@ -171,7 +181,7 @@ def settings(provider: Provider, tmp_path: Path) -> Settings:
         destdir=tmp_path,
         oidc=OidcSettings(
             provider_url=provider.issuer,
-            audience=CLIENT_ID
+            audience=AUDIENCE
         )
     )
 
@@ -182,7 +192,7 @@ def fresh_settings(provider: Provider, tmp_path: Path) -> Settings:
         destdir=tmp_path / "fresh",
         oidc=OidcSettings(
             provider_url=provider.issuer,
-            audience=CLIENT_ID
+            audience=AUDIENCE
         )
     )
 
@@ -273,18 +283,78 @@ def test_wrong_audience_is_rejected(client: TestClient, provider: Provider):
     assert upload(client, provider.mint(aud="some-other-app")).status_code == 401
 
 
-def test_missing_required_claim_is_rejected(client: TestClient, provider: Provider):
-    # "scope" separates an access token from an id token, which is otherwise identical
-    assert upload(client, provider.mint(scope=None)).status_code == 401
+def test_a_token_for_the_client_rather_than_the_api_is_rejected(
+    client: TestClient, provider: Provider
+):
+    # `aud` of the client id is what an OIDC ID token carries, so on a normal deployment
+    # this is the audience check refusing an ID token -- no inspection of the token's kind
+    # needed, and nothing else in this module has to care.
+    assert upload(client, provider.mint(aud=CLIENT_ID)).status_code == 401
+
+
+@pytest.mark.parametrize("claim", REQUIRED_CLAIMS)
+def test_missing_required_claim_is_rejected(
+    client: TestClient, provider: Provider, claim: str
+):
+    # mint() drops a claim whose override is None, so this asks for each required claim in
+    # turn. Parametrized over the constant itself: adding a claim to REQUIRED_CLAIMS without
+    # a provider that sends it is how this went wrong before.
+    assert upload(client, provider.mint(kid="key-1", **{claim: None})).status_code == 401
 
 
 def test_missing_subject_is_rejected(client: TestClient, provider: Provider):
     assert upload(client, provider.mint(sub=None)).status_code == 401
 
 
+def test_an_access_token_without_a_scope_claim_is_accepted(
+    client: TestClient, provider: Provider
+):
+    # "scope" was in REQUIRED_CLAIMS once. It is not a claim every provider emits -- Entra
+    # ID spells it "scp" -- and a required claim that some conforming provider omits is a
+    # deployment that cannot authenticate at all, with a bare 401 to explain it.
+    assert upload(client, provider.mint(scope=None)).status_code == 201
+
+
+def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_identifiers(
+    provider: Provider, tmp_path: Path
+):
+    """
+    A DECISION, recorded so the next reader does not take it for an oversight.
+
+    Nothing in this module inspects what kind of token it is, because normally it does not
+    have to: the audience settles it, which is what the test above shows. Some providers
+    force the resource server's audience to equal the client id -- kanidm does -- and then
+    an ID token and an access token are indistinguishable and this accepts both.
+
+    That is judged acceptable because it is not a privilege boundary. Whoever holds an ID
+    token for this client is the person who just authenticated, and can obtain an access
+    token for the same identity whenever they like; accepting one guards against a frontend
+    bug, not against an attacker.
+
+    RFC 9068's `typ: at+jwt` header is the standard fix and kanidm already sets it, but
+    Keycloak sends `typ: JWT` on its access tokens, so requiring it today would reject a
+    supported provider. Revisit when adoption is wider; the claim shapes, measured on both
+    providers, are in this file's git history.
+    """
+    collapsed = Settings(
+        destdir=tmp_path,
+        oidc=OidcSettings(provider_url=provider.issuer, audience=CLIENT_ID)
+    )
+
+    id_token_shaped = provider.mint(
+        aud=CLIENT_ID,
+        scope=None,
+        at_hash="PQhwSWwbKnhNqMPtUXQAhg",
+        nonce="nonce-abcdef0123456789"
+    )
+
+    with TestClient(create_app(collapsed)) as collapsed_client:
+        assert upload(collapsed_client, id_token_shaped).status_code == 201
+
+
 def test_unsigned_token_is_rejected(client: TestClient, provider: Provider):
     claims: dict[str, Any] = {
-        "iss": provider.issuer, "sub": "nobody", "aud": CLIENT_ID, "scope": "openid",
+        "iss": provider.issuer, "sub": "nobody", "aud": AUDIENCE, "scope": "openid",
         "iat": datetime.now(timezone.utc), "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
     }
     forged = jwt.encode(claims, key="", algorithm="none", headers={"kid": "key-1"})
@@ -294,7 +364,7 @@ def test_unsigned_token_is_rejected(client: TestClient, provider: Provider):
 def test_token_signed_by_an_unknown_key_is_rejected(client: TestClient, provider: Provider):
     stranger, _ = make_key("key-1")
     claims: dict[str, Any] = {
-        "iss": provider.issuer, "sub": "nobody", "aud": CLIENT_ID, "scope": "openid",
+        "iss": provider.issuer, "sub": "nobody", "aud": AUDIENCE, "scope": "openid",
         "iat": datetime.now(timezone.utc), "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
     }
     forged = jwt.encode(claims, stranger, algorithm="RS256", headers={"kid": "key-1"})
@@ -531,7 +601,7 @@ def test_userinfo_is_asked_with_the_callers_access_token(
 
     assert upload(client, token).status_code == 201
 
-    # the access token is the credential for UserInfo too; nothing else would authorise us
+    # the access token is the credential for UserInfo too; nothing else would authorize us
     assert provider.userinfo_authorization == f"Bearer {token}"
 
 
@@ -590,7 +660,7 @@ def test_unreachable_userinfo_does_not_fail_the_upload(
     assert (tmp_path / digest_of("offline-user") / "foo" / "stream" / "chunk.0001").is_file()
 
 
-def test_username_from_userinfo_is_sanitised_like_one_from_the_token(
+def test_username_from_userinfo_is_sanitized_like_one_from_the_token(
     client: TestClient, provider: Provider, tmp_path: Path
 ):
     # UserInfo is a second way into user_home_dir, and must not be a way around it
@@ -733,7 +803,7 @@ def test_key_claiming_an_insecure_algorithm_is_refused(
     )
     forged = jwt.encode(
         {
-            "iss": provider.issuer, "sub": "nobody", "aud": CLIENT_ID, "scope": "openid",
+            "iss": provider.issuer, "sub": "nobody", "aud": AUDIENCE, "scope": "openid",
             "iat": datetime.now(timezone.utc),
             "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
         },

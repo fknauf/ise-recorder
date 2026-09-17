@@ -36,6 +36,7 @@ services:
       - TZ=Europe/Berlin
       - ISE_RECORD_CORS_ORIGINS=[ "http://localhost:3000" ]
 #      - ISE_RECORD_DESTDIR=/app/data
+#      - ISE_RECORD_ROUTE_PREFIX=/some/path
 #      - ISE_RECORD_SMTP_SERVER=mail.example.com
 #      - ISE_RECORD_SMTP_PORT=25
 #      - ISE_RECORD_SMTP_LOCAL_HOSTNAME=ise-record.example.com

@@ -10,7 +10,8 @@ def health_check_filter(record: logging.LogRecord):
         or not isinstance(record.args[0], str)
         or not record.args[0].startswith("127.0.0.1:")
         or record.args[1] != "GET"
-        or record.args[2] != "/api/health"
+        or not isinstance(record.args[2], str)
+        or not record.args[2].endswith("/api/health")
         or not isinstance(record.args[4], int)
         or not 200 <= record.args[4] < 300
     )

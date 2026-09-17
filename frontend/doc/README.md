@@ -252,6 +252,7 @@ separated from UI updates, and that's largely the purpose of the hook/utility sp
 | `useAccessTokenSource` | provides functions concerning the authentication state, i.e. current access token retrieval and session headroom expansion, along with the information whether authentication is required at all. |
 | `useActiveRecording` | provides info whether a recording is active and details about the active recording |
 | `useBrowserStorage` | provides information about the browser's OPFS, i.e. saved recordings and quota information, and an action to delete a recording |
+| `useHydrated` | determines whether the frontend is hydrating (and needs to match SSR values exactly) or already running normally |
 | `useLecture` | provides the configured lecture title and notification email address |
 | `useMediaDevices` | provides the list of audio and video devices and actions to refresh that list and open media tracks from a device |
 | `useMediaTracks` | provides the list of open tracks, which of those are selected as main and overlay, and actions to select main and overlay track or close a track. These actions will only work when the application is not recording. |

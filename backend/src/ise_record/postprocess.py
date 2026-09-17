@@ -238,8 +238,9 @@ def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int)
     """
 
     # note: if the input stream is not cropped, scaling_x == scaling_y == 1
-    scaling_x = outer_width / crop.width
-    scaling_y = outer_height / crop.height
+    # max(...) to avoid div-by-zero
+    scaling_x = outer_width / max(crop.width, 1)
+    scaling_y = outer_height / max(crop.height, 1)
 
     if scaling_x <= scaling_y:
         # letterboxed. Slides will be vertically centered, so we can use half the vertical slack.
@@ -376,7 +377,7 @@ async def postprocess_tracks(
     finally:
         # unlink temporaries to save disk space and limit the number of expected states
         for p in inputs:
-            p.path.unlink()
+            p.path.unlink(missing_ok=True)
 
 async def postprocess_recording(recording_path: Path) -> Result:
     """

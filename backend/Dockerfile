@@ -9,6 +9,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 COPY pyproject.toml ./
+# Install dependencies separately into an image layer of their own,
+# so that they don't get re-fetched every time the image is built.
 RUN mkdir data && chown 1000:1000 data && pip install .
 COPY src ./
 
@@ -20,4 +22,4 @@ HEALTHCHECK \
     --timeout=5s \
     --start-period=30s \
     --start-interval=5s \
-    CMD wget --spider --tries=1 "http://127.0.0.1:${PORT:-8000}/api/health"
+    CMD wget --spider --tries=1 "http://127.0.0.1:${PORT:-8000}${ISE_RECORD_ROUTE_PREFIX}/api/health"

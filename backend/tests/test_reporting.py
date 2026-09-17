@@ -29,6 +29,99 @@ def test_normalize_recipient():
     assert normalize_recipient("foo@vss.uni-hannover.de", [ "vss.uni-hannover.de" ]) == "foo@vss.uni-hannover.de"
     assert normalize_recipient("foo@vss.uni-hannover.de", [ "uni-hannover.de" ]) == "foo@vss.uni-hannover.de"
 
+
+# The whitelist is a suffix match, and suffix matches are the classic way to accidentally
+# admit a domain someone else registered. These pin the boundary.
+
+@pytest.mark.parametrize("address", [
+    "foo@uni-hannover.de",       # the domain itself
+    "foo@vss.uni-hannover.de",   # a subdomain, which the README says is implied
+    "foo@a.b.uni-hannover.de",   # and one further down
+])
+def test_the_domain_and_its_subdomains_are_admitted(address: str):
+    assert normalize_recipient(address, [ "uni-hannover.de" ]) == address
+
+
+@pytest.mark.parametrize("address", [
+    # someone else's registration that merely ends in the same characters: the leading
+    # "." in the subdomain check is the only thing keeping this out
+    "foo@eviluni-hannover.de",
+    "foo@evil-uni-hannover.de",
+    # the whitelisted domain as a label of a domain someone else controls
+    "foo@uni-hannover.de.example.com",
+    # and as part of the local part, where endswith() never looks
+    "uni-hannover.de@example.com",
+])
+def test_a_domain_that_only_looks_like_the_whitelisted_one_is_refused(address: str):
+    assert normalize_recipient(address, [ "uni-hannover.de" ]) is None
+
+
+def test_an_empty_whitelist_admits_everything():
+    # Domain whitelisting is optional; unset means an unrestricted relay rather than a
+    # backend that silently refuses to notify anyone.
+    assert normalize_recipient("foo@example.com", []) == "foo@example.com"
+
+
+def test_the_whitelist_is_case_insensitive_end_to_end():
+    # An operator who writes the domain with a capital letter used to get a backend that
+    # accepted every job and sent no mail at all, with nothing but a per-job warning to
+    # show for it. SmtpSettings lowers the case on the way in, so this has to go through the
+    # settings object rather than hand normalize_recipient a literal list -- that is also
+    # exactly what _postprocessing_task does.
+    settings = SmtpSettings(
+        server="mail.example.edu",
+        sender="ise-record@example.edu",
+        allowed_domains=("Uni-Hannover.DE",)
+    )
+
+    assert settings.allowed_domains == ("uni-hannover.de",)
+
+    whitelist = list(settings.allowed_domains)
+
+    # the address side is lowercased by email_validator's normalization, so both halves of
+    # the comparison arrive in the same case whatever the lecturer typed
+    assert normalize_recipient("Foo@Uni-Hannover.DE", whitelist) == "Foo@uni-hannover.de"
+    assert normalize_recipient("Foo@VSS.Uni-Hannover.DE", whitelist) == "Foo@vss.uni-hannover.de"
+
+
+@pytest.mark.parametrize("configured_domain", [
+    "bücher.example",           # as the operator would type it
+    "xn--bcher-kva.example",    # as DNS and most tooling would show it
+    "Bücher.example",           # and neither form is case-sensitive
+])
+def test_an_internationalized_domain_matches_in_either_encoding(configured_domain: str):
+    # ValidatedEmail.normalized carries the domain in Unicode and ascii_email in punycode.
+    # Comparing against only one of them would mean the whitelist silently failed whenever
+    # the operator happened to write the other, with nothing but a per-job "not
+    # whitelisted" warning to explain it.
+    settings = SmtpSettings(
+        server="mail.example.edu",
+        sender="ise-record@example.edu",
+        allowed_domains=(configured_domain,)
+    )
+
+    assert normalize_recipient("foo@bücher.example", list(settings.allowed_domains)) \
+        == "foo@bücher.example"
+    assert normalize_recipient("foo@lesesaal.bücher.example", list(settings.allowed_domains)) \
+        == "foo@lesesaal.bücher.example"
+
+
+def test_an_ascii_only_address_is_unaffected_by_the_punycode_fallback():
+    # ascii_email is None for an address whose local part is not ASCII, and matching it
+    # must not start admitting anything the Unicode form would have refused.
+    settings = SmtpSettings(
+        server="mail.example.edu",
+        sender="ise-record@example.edu",
+        allowed_domains=("uni-hannover.de",)
+    )
+
+    whitelist = list(settings.allowed_domains)
+
+    assert normalize_recipient("foo@uni-hannover.de", whitelist) == "foo@uni-hannover.de"
+    assert normalize_recipient("foo@eviluni-hannover.de", whitelist) is None
+    assert normalize_recipient("föö@uni-hannover.de", whitelist) == "föö@uni-hannover.de"
+
+
 def test_generate_report():
     sender = "render@example.de"
     recipient = "lecturer@example.de"

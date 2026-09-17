@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 security_scheme = HTTPBearer(auto_error=False)
 
 ANONYMOUS_HOME = "."
-REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub", "scope")
+REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub")
 JWKS_CACHE_SECONDS = 1800.0
 JWKS_REFRESH_COOLDOWN_SECONDS = 30.0
 

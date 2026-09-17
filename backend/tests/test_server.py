@@ -15,6 +15,7 @@ from unittest.mock import ANY
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
 
@@ -24,6 +25,8 @@ from ise_record.settings import Settings, SmtpSettings
 
 # NAME_MAX on ext4, which is what pathvalidate caps a filename at inside SafeRecording
 NAME_MAX_BYTES = 255
+# Prefix for the route-prefix tests
+ROUTE_PREFIX = "/foo"
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
@@ -32,20 +35,22 @@ def settings(tmp_path: Path) -> Settings:
 
 @pytest.fixture
 def app(settings: Settings) -> FastAPI:
-    """
-    A fresh application per test.
-
-    Per test rather than per module because the app carries mutable state: the set of
-    recordings with a job in flight lives on app.state, and dependency overrides are
-    installed on the app too. Sharing one app makes both of those leak between tests, in
-    the order-dependent way that only shows up once someone adds the wrong test.
-    """
+    """ A fresh application per test. Necessary because app carries mutable state. """
     return create_app(settings)
 
 @pytest.fixture
 def client(app: FastAPI) -> Iterator[TestClient]:
     """ A client for the app, inside `with` so the lifespan actually runs. """
     with TestClient(app) as test_client:
+        yield test_client
+
+@pytest.fixture
+def prefixed_settings(tmp_path: Path) -> Settings:
+    return Settings(destdir=tmp_path, route_prefix=ROUTE_PREFIX)
+
+@pytest.fixture
+def prefixed_client(prefixed_settings: Settings) -> Iterator[TestClient]:
+    with TestClient(create_app(prefixed_settings)) as test_client:
         yield test_client
 
 @pytest.mark.asyncio
@@ -598,3 +603,25 @@ def test_health_endpoint(client: TestClient):
 
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+
+@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health" ])
+def test_every_endpoint_moves_under_the_prefix(prefixed_client: TestClient, endpoint: str):
+    assert prefixed_client.get(f"{ROUTE_PREFIX}{endpoint}").status_code != 404
+
+@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health" ])
+def test_nothing_is_left_behind_at_the_unprefixed_path(
+    prefixed_client: TestClient, endpoint: str
+):
+    assert prefixed_client.get(endpoint).status_code == 404
+
+@pytest.mark.parametrize("prefix", [ "foo", "/foo/", "/", " /foo" ])
+def test_a_malformed_prefix_is_refused_by_the_settings(tmp_path: Path, prefix: str):
+    with pytest.raises(ValidationError):
+        Settings(destdir=tmp_path, route_prefix=prefix)
+
+@pytest.mark.parametrize("prefix", [ "", "/foo", "/foo/bar", "/a-b_c" ])
+def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str):
+    settings = Settings(destdir=tmp_path, route_prefix=prefix)
+
+    with TestClient(create_app(settings)) as client:
+        assert client.get(f"{prefix}/api/health").status_code == 200

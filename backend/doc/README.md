@@ -131,41 +131,26 @@ This backend uses ffmpeg command-line utilities for postprocessing. The process 
 5. Combine all those into an ffmpeg command and run it in the background
 6. Clean up when finished
 
-## Reporting
-
-The backend can be configured to send out completion notifications by email. The
-configuration is read from the following environment variables:
-
-| Variable | Example | Purpose |
-| - | - | - |
-| ISE_RECORD_SMTP_SERVER          | mail.example.edu                 | Hostname or IP address of the SMTP relay |
-| ISE_RECORD_SMTP_PORT            | 25                               | Port to use. Defaults to 587 if `ISE_RECORD_SMTP_STARTTLS` is true, 25 otherwise. |
-| ISE_RECORD_SMTP_LOCAL_HOSTNAME  | record.example.edu               | Hostname of the backend server, used for HELO/EHLO |
-| ISE_RECORD_SMTP_USERNAME        | user1                            | username for login, if required |
-| ISE_RECORD_SMTP_PASSWORD        | supersecure                      | password for login, if required |
-| ISE_RECORD_SMTP_SENDER          | ise-record@example.edu           | Mail address to put in the "From" header |
-| ISE_RECORD_SMTP_STARTTLS        | true                             | Whether `ISE_RECORD_SMTP_SERVER` supports the `STARTTLS` command |
-| ISE_RECORD_SMTP_ALLOWED_DOMAINS | [ "example.edu", "example.org" ] | Domains that the backend will send mail to. Subdomains are implicitly whitelisted. |
-
 ## Authentication
 
-The backend supports optional OpenID-Connect-based authentication. This is enabled by setting the environment
-variables
+The backend supports optional OpenID-Connect-based authentication. In this mode, the backend expects an
+`Authorization: Bearer $token` header with an access token with every query, which it validates locally
+without per-request calls to the OIDC provider. At server start, it attempts to discover the OIDC provider's
+issuer and jwks endpoint, then feeds those to a PyJWT `PyJWKClient`, which handles the key retrieval and
+refreshes. The actual token validation and decoding is then also based on PyJWT.
 
-| Variable | Example |
-| - | - |
-| `ISE_RECORD_OIDC__PROVIDER_URL` | http://keycloak.localhost:8080/realms/ise |
-| `ISE_RECORD_OIDC__AUDIENCE`     | ise-recorder-users                        |
+At the moment, the backend does not attempt to distinguish between access and id tokens other than
+checking the audience claim against the configured value, i.e. the header is not inspected for
+`"typ": "at+jwt"`. This will change in the future, when all common OIDC providers mint their tokens with
+that type. Note that there exist OIDC providers where the audience check is unreliable, in particular
+kanidm, which forces client id and audience to the same value. They do set `"typ": "at+jwt"`, and that will
+ultimately be the test. For the moment, though, I don't have a reliable way to tell apart id and access
+tokens from all OIDC providers out there, and as far as I can make out, relying on the audience field
+seems to be the standard workaround. So I'm doing that for now.
 
-The frontend must be configured in a similar way, see the documentation there (or the `compose-with-auth.yml`
-sample deployment).
-
-The backend validates tokens only locally, without per-request calls to the OIDC provider. At server
-start, it attempts to discover the OIDC provider's issuer and jwks endpoint, then feeds those to a PyJWT
-`PyJWKClient`, which handles the key retrieval and refreshes. The actual token validation and decoding
-is then also based on PyJWT.
-
-The access tokens are mostly used just to establish trust, i.e. that a request is allowed to store data
-and schedule jobs. If `preferred_username` is present in the token, the backend uses `sub` and
-`preferred_username` to derive a human-readable (but unique) user-specific directory to store recordings.
-In the future, it may also read the `email` claim for reporting purposes.
+The access tokens are used to establish trust, i.e. that a request is allowed to store data and schedule
+jobs. There are no custom scopes, right now it's all-or-nothing when it comes to permissions. If
+`preferred_username` is present in the token, the backend uses `sub` and `preferred_username` to
+derive a human-readable (but unique) user-specific directory to store recordings; if it is not present,
+it will attempt to read the username from the OIDC provider's userinfo_endpoint. In the future, it may
+also read the `email` claim for reporting purposes.
