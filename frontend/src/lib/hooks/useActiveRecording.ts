@@ -6,10 +6,15 @@ import { useLecture } from "./useLecture";
 import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
-import { useAccessTokenSource } from "./useAccessTokenSource";
+import { SessionTransition, useAccessTokenSource } from "./useAccessTokenSource";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
+}
+
+// extracted into a function to work around a react compiler limitation where && and || in try blocks cause it to bail.
+function isStreamingImpeded(apiUrl: string | undefined, authRequired: boolean, sessionState: SessionTransition) {
+  return apiUrl !== undefined && authRequired && sessionState === "expired";
 }
 
 export const useActiveRecording = () => useAppStore(state => state.activeRecording);
@@ -46,55 +51,53 @@ export function useStartStopRecording() {
     }
 
     setActiveRecording({ state: "preparing" });
-    const sessionState = await expandSessionHeadroom();
-
-    if(sessionState === "renewed") {
-      // user just had to re-login. This happens rarely, so user is now slightly confused,
-      // which we don't want to record. Let him press the button again so he knows exactly
-      // where the recording starts.
-      setActiveRecording({ state: "idle" });
-      return;
-    }
-
-    const streamingImpeded =
-      apiUrl !== undefined &&
-      authRequired &&
-      sessionState === "expired";
-
-    const onStarting = (recordingName: string) => {
-      setActiveRecording({
-        state: "starting",
-        name: recordingName
-      });
-      // Prevent accidental closing of the tab while recording
-      window.addEventListener("beforeunload", preventClosing);
-    };
-
-    const onStarted = async (recordingName: string, stopFunction: () => void) => {
-      setActiveRecording({
-        state: "recording",
-        name: recordingName,
-        stop: stopFunction,
-        streamingImpeded
-      });
-
-      await updateBrowserStorage();
-    };
-
-    const onChunkWritten = (recordingName: string, filename: string, chunkSize: number) => {
-      overrideFileSize(recordingName, filename, oldSize => oldSize + chunkSize);
-      // no need to await, we can continue before the quota warning updates
-      updateQuotaInformation();
-    };
-
-    const onFinished = async () => {
-      window.removeEventListener("beforeunload", preventClosing);
-      // make sure the new file sizes are there before throwing away the overrides
-      await updateBrowserStorage();
-      resetFileSizeOverrides();
-    };
 
     try {
+      const sessionState = await expandSessionHeadroom();
+
+      if(sessionState === "renewed") {
+        // user just had to re-login. This happens rarely, so user is now slightly confused,
+        // which we don't want to record. Let him press the button again so he knows exactly
+        // where the recording starts.
+        setActiveRecording({ state: "idle" });
+        return;
+      }
+
+      const streamingImpeded = isStreamingImpeded(apiUrl, authRequired, sessionState);
+
+      const onStarting = (recordingName: string) => {
+        setActiveRecording({
+          state: "starting",
+          name: recordingName
+        });
+        // Prevent accidental closing of the tab while recording
+        window.addEventListener("beforeunload", preventClosing);
+      };
+
+      const onStarted = async (recordingName: string, stopFunction: () => void) => {
+        setActiveRecording({
+          state: "recording",
+          name: recordingName,
+          stop: stopFunction,
+          streamingImpeded
+        });
+
+        await updateBrowserStorage();
+      };
+
+      const onChunkWritten = (recordingName: string, filename: string, chunkSize: number) => {
+        overrideFileSize(recordingName, filename, oldSize => oldSize + chunkSize);
+        // no need to await, we can continue before the quota warning updates
+        updateQuotaInformation();
+      };
+
+      const onFinished = async () => {
+        window.removeEventListener("beforeunload", preventClosing);
+        // make sure the new file sizes are there before throwing away the overrides
+        await updateBrowserStorage();
+        resetFileSizeOverrides();
+      };
+
       await recordLecture(
         trackBundle,
         lectureTitle, lecturerEmail,

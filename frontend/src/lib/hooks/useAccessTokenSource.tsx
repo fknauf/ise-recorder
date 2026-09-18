@@ -76,16 +76,17 @@ function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNo
 function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
   const setStaleSession = useAppStore(store => store.setStaleSession);
   const router = useRouter();
+  const callbackUrl = typeof window === "undefined"
+    ? ""
+    : `${window.location.origin}/auth/callback`;
 
-  // Need to roll our own UserManager instead of relying on react-oidc-context so we have accesss
+  // Need to roll our own UserManager instead of relying on react-oidc-context so we have access
   // to it later. That's required for manual reauthentication and headroom expansion ahead of a recording.
   const [ userMgr ] = useState(() =>
     new UserManager({
       authority: providerUrl,
       client_id: clientId,
-      redirect_uri: typeof window === "undefined"
-        ? ""
-        : `${window.location.origin}/auth/callback`,
+      redirect_uri: callbackUrl,
       scope: "openid profile email",
       automaticSilentRenew: true,
       accessTokenExpiringNotificationTimeInSeconds: 120,
@@ -93,12 +94,6 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
       filterProtocolClaims: [ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ] // don't filter auth_time. Otherwise same as default.
     })
   );
-
-  const onSigninCallback = useCallback(() => {
-    if(window.self === window.top) {
-      router.replace("/");
-    }
-  }, [router]);
 
   // clean up userMgr when the component is unmounted. Library does not handle it for us.
   useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
@@ -155,7 +150,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 
   const interactiveLogin = useCallback(async () => {
     try {
-      await userMgr.signinPopup();
+      await userMgr.signinPopup({ popupAbortOnClose: true });
     } catch(e) {
       console.warn("Failed to authenticate", e);
     }
@@ -191,7 +186,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 
     if((await sessionStaleness(userMgr, maxAge)).stale) {
       return refreshSession(
-        () => userMgr.signinPopup().then(() => "renewed"),
+        () => userMgr.signinPopup({ popupAbortOnClose: true }).then(() => "renewed"),
         "still-stale",
         "Failed to reauthenticate stale oidc session, continuing with existing session"
       );
@@ -211,9 +206,18 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
     expandSessionHeadroom
   }), [getAccessToken, interactiveLogin, expandSessionHeadroom]);
 
+  const onSigninCallback = useCallback(() => {
+    if(window.self === window.top) {
+      router.replace("/");
+    }
+  }, [router]);
+
   return (
     <AccessTokenSourceContext.Provider value={value}>
-      <AuthProvider userManager={userMgr} onSigninCallback={onSigninCallback}>
+      <AuthProvider
+        userManager={userMgr}
+        onSigninCallback={onSigninCallback}
+      >
         {children}
       </AuthProvider>
     </AccessTokenSourceContext.Provider>
