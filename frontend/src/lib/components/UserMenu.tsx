@@ -5,14 +5,16 @@ import Login from "@spectrum-icons/workflow/Login";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import User from "@spectrum-icons/workflow/User";
 import { IdTokenClaims } from "oidc-client-ts";
+import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
 
 const userDisplayName = (claims: IdTokenClaims | undefined) =>
   claims?.preferred_username ?? claims?.name ?? claims?.email ?? "The Nameless";
 
 export function UserMenu() {
   const auth = useAuth();
+  const { signOut } = useAccessTokenSource();
 
-  const switchUser = async () => {
+  const reauthenticate = async () => {
     const prevUser = auth.user;
     const next = await auth.signinPopup({ max_age: 0, popupAbortOnClose: true });
 
@@ -37,11 +39,11 @@ export function UserMenu() {
               ? <>
                   <Flex direction="column" gap="size-200">
                     <Text>Signed in as {userDisplayName(auth.user?.profile)}</Text>
-                    <ActionButton onPress={() => auth.removeUser().catch(() => null)}>
+                    <ActionButton onPress={signOut}>
                       <LogOut/>
                       <Text>Sign out</Text>
                     </ActionButton>
-                    <ActionButton onPress={switchUser}>
+                    <ActionButton onPress={reauthenticate}>
                       <Refresh/>
                       <Text>Reauthenticate</Text>
                     </ActionButton>

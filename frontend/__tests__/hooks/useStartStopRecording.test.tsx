@@ -45,8 +45,9 @@ const makeTokenSource = (
   sessionResult: SessionTransition = "still-fresh"
 ): AccessTokenSource => ({
   authRequired,
+  autoSignin: false,
   getAccessToken: vi.fn(async () => token),
-  interactiveLogin: vi.fn(async () => {}),
+  signOut: vi.fn(async () => {}),
   expandSessionHeadroom: vi.fn(async (): Promise<SessionTransition> => sessionResult)
 });
 

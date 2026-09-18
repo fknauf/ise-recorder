@@ -12,8 +12,10 @@ export type SessionTransition =
 
 interface AccessTokenSource {
   authRequired: boolean
+  autoSignin: boolean
+
   getAccessToken: () => Promise<string | undefined>
-  interactiveLogin: () => Promise<void>
+  signOut: () => Promise<void>
   expandSessionHeadroom: () => Promise<SessionTransition>
 }
 
@@ -21,6 +23,7 @@ interface AuthenticatedTokenSourceProviderProps {
   providerUrl: string
   clientId: string
   maxAge: number | undefined
+  autoSigninConfigured: boolean
   children?: ReactNode
 }
 
@@ -60,8 +63,9 @@ async function sessionStaleness(
 // no session but also no need for one, so behave as if there always were a fresh session.
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
+  autoSignin: false,
   getAccessToken: async () => undefined,
-  interactiveLogin: async () => {},
+  signOut: async () => {},
   expandSessionHeadroom: async () => "still-fresh"
 };
 
@@ -73,7 +77,7 @@ function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNo
   );
 }
 
-function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
+function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, autoSigninConfigured, children }: Readonly<AuthenticatedTokenSourceProviderProps>) {
   const setStaleSession = useAppStore(store => store.setStaleSession);
   const router = useRouter();
   const callbackUrl = typeof window === "undefined"
@@ -94,6 +98,13 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
       filterProtocolClaims: [ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ] // don't filter auth_time. Otherwise same as default.
     })
   );
+
+  const [ autoSignin, setAutoSignin ] = useState(autoSigninConfigured);
+
+  const signOut = useCallback(async () => {
+    setAutoSignin(false);
+    await userMgr.removeUser().catch(() => null);
+  }, [userMgr, setAutoSignin]);
 
   // clean up userMgr when the component is unmounted. Library does not handle it for us.
   useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
@@ -148,14 +159,6 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
     return user.access_token;
   }, [userMgr]);
 
-  const interactiveLogin = useCallback(async () => {
-    try {
-      await userMgr.signinPopup();
-    } catch(e) {
-      console.warn("Failed to authenticate", e);
-    }
-  }, [userMgr]);
-
   // Expanding the session headroom means making sure the current session isn't stale and refreshing the access token
   // manually, so we have its full length at the beginning of the recording.
   //
@@ -201,10 +204,11 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 
   const value = useMemo<AccessTokenSource>(() => ({
     authRequired: true,
-    interactiveLogin,
+    autoSignin,
     getAccessToken,
+    signOut,
     expandSessionHeadroom
-  }), [getAccessToken, interactiveLogin, expandSessionHeadroom]);
+  }), [autoSignin, getAccessToken, signOut, expandSessionHeadroom]);
 
   const onSigninCallback = useCallback(() => {
     if(window.self === window.top) {
@@ -237,6 +241,7 @@ export function AccessTokenSourceProvider({ children }: Readonly<{ children: Rea
     return (
       <AuthenticatedTokenSourceProvider
         key={`${env.oidcProviderUrl}${env.oidcClientId}${env.oidcMaxAge}`}
+        autoSigninConfigured={env.oidcAutoSignin || false}
         providerUrl={env.oidcProviderUrl}
         clientId={env.oidcClientId}
         maxAge={env.oidcMaxAge}

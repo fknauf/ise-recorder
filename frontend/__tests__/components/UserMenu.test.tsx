@@ -2,7 +2,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { ReactNode } from "react";
 import { UserMenu } from "@/lib/components/UserMenu";
+import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 import type { IdTokenClaims, User } from "oidc-client-ts";
 
 /**
@@ -23,19 +25,25 @@ import type { IdTokenClaims, User } from "oidc-client-ts";
  * mutable box so each test can set the auth state it needs, and its methods are the real
  * subject of most assertions: what this component does is call them with the right
  * arguments and react to what they return.
+ *
+ * The stub has to export AuthProvider as well: mocking a module replaces all of it, and
+ * useAccessTokenSource -- which the menu now reads signOut from -- imports AuthProvider
+ * at module scope. Nothing here renders it.
  */
 
 interface FakeAuth {
   isAuthenticated: boolean
   user?: User
   signinPopup: ReturnType<typeof vi.fn>
-  removeUser: ReturnType<typeof vi.fn>
   events: { load: ReturnType<typeof vi.fn> }
 }
 
 const oidc = vi.hoisted(() => ({ auth: undefined as unknown as FakeAuth }));
 
-vi.mock("react-oidc-context", () => ({ useAuth: () => oidc.auth }));
+vi.mock("react-oidc-context", () => ({
+  useAuth: () => oidc.auth,
+  AuthProvider: ({ children }: { children: ReactNode }) => children
+}));
 
 /** Only the claims the menu reads; the rest of User never comes up here. */
 const aUser = (profile: Partial<IdTokenClaims>) => ({ profile }) as unknown as User;
@@ -55,21 +63,31 @@ async function renderMenu(state: { isAuthenticated?: boolean; user?: User } = {}
   const user = "user" in state ? state.user : LECTURER;
 
   const signinPopup = vi.fn(async () => null as User | null);
-  const removeUser = vi.fn(async () => {});
   const load = vi.fn(async () => {});
+  const signOut = vi.fn(async () => {});
 
-  oidc.auth = { isAuthenticated, user, signinPopup, removeUser, events: { load } };
+  oidc.auth = { isAuthenticated, user, signinPopup, events: { load } };
+
+  const tokenSource: ReturnType<typeof useAccessTokenSource> = {
+    authRequired: true,
+    autoSignin: false,
+    getAccessToken: async () => "token",
+    signOut,
+    expandSessionHeadroom: async () => "still-fresh"
+  };
 
   render(
     <Provider theme={defaultTheme}>
-      <UserMenu/>
+      <AccessTokenSourceContext.Provider value={tokenSource}>
+        <UserMenu/>
+      </AccessTokenSourceContext.Provider>
     </Provider>
   );
 
   await userEvent.click(screen.getByRole("button", { name: "User menu" }));
   await screen.findByRole("dialog");
 
-  return { signinPopup, removeUser, load };
+  return { signinPopup, load, signOut };
 }
 
 afterEach(cleanup);
@@ -114,29 +132,19 @@ test("a session with no user at all still renders rather than blanking out", asy
 
 // --- signing out -----------------------------------------------------------
 
-test("signing out drops the local session only", async () => {
-  const { signinPopup, removeUser } = await renderMenu();
+test("signing out goes through the token source", async () => {
+  // not auth.removeUser directly: signing out also has to inhibit auto sign-in for the
+  // rest of the session, and that flag lives in the token source. Dropping the user here
+  // instead would leave useAutoSignin to redirect straight back in.
+  const { signinPopup, signOut } = await renderMenu();
 
   await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
-  expect(removeUser).toHaveBeenCalled();
+  await waitFor(() => expect(signOut).toHaveBeenCalled());
   // no navigator method may be involved: signoutPopup/signoutSilent would end the SSO
   // session for every other app in the realm, and without a post-logout callback route
   // they leave useAuth() stuck on isLoading or holding an error
   expect(signinPopup).not.toHaveBeenCalled();
-});
-
-test("a sign-out that fails does not take the page down with it", async () => {
-  // removeUser is not one of the wrapped navigator methods, so unlike signinPopup it
-  // really does reject -- storage can fail. An unhandled rejection here would fail this
-  // test, which is the whole point of the catch on the handler.
-  const { removeUser } = await renderMenu();
-  removeUser.mockRejectedValue(new Error("session storage unavailable"));
-
-  await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
-
-  await waitFor(() => expect(removeUser).toHaveBeenCalled());
-  expect(screen.getByRole("dialog")).toBeInTheDocument();
 });
 
 // --- switching user --------------------------------------------------------

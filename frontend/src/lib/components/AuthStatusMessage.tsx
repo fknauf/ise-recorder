@@ -12,8 +12,10 @@ import { useServerEnv } from "../hooks/useServerEnv";
 function AuthStatusMessageImpl() {
   const env = useServerEnv();
   const auth = useAuth();
-  const { interactiveLogin, expandSessionHeadroom } = useAccessTokenSource();
+  const { expandSessionHeadroom } = useAccessTokenSource();
   const stale = useAppStore(state => state.staleSession);
+
+  const interactiveLogin = () => auth.signinPopup().catch(() => null);
 
   if(env.apiUrl === undefined) {
     return null;

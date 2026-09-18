@@ -17,8 +17,16 @@ const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, la
 // tests are about what the uploader sends, not about the redirect dance, so the OIDC
 // library is stubbed out as already-signed-in. The token itself comes from the injected
 // AccessTokenSourceContext below, which is the seam the uploader actually reads.
+//
+// useAutoSignin counts its calls: whether the page runs it at all is the whole of the
+// auto-signin gate, and the two tests at the bottom of this file assert on it.
+const oidc = vi.hoisted(() => ({ autoSigninCalls: 0 }));
+
 vi.mock("react-oidc-context", () => ({
-  useAutoSignin: () => ({ isLoading: false, isAuthenticated: true, error: undefined }),
+  useAutoSignin: () => {
+    oidc.autoSigninCalls += 1;
+    return { isLoading: false, isAuthenticated: true, error: undefined };
+  },
   useAuth: () => ({ isLoading: false, isAuthenticated: true, error: undefined }),
   AuthProvider: ({ children }: { children: ReactNode }) => children
 }));
@@ -27,15 +35,17 @@ type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
 
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
+  autoSignin: false,
   getAccessToken: async () => undefined,
-  interactiveLogin: async () => {},
+  signOut: async () => {},
   expandSessionHeadroom: async () => "still-fresh"
 };
 
 const authenticatedTokenSource: AccessTokenSource = {
   authRequired: true,
+  autoSignin: false,
   getAccessToken: async () => "test-token",
-  interactiveLogin: async () => {},
+  signOut: async () => {},
   expandSessionHeadroom: async () => "still-fresh"
 };
 
@@ -56,8 +66,25 @@ const cleanupBetweenTests = async () => {
   cleanup();
 };
 
-beforeEach(cleanupBetweenTests);
+beforeEach(async () => {
+  await cleanupBetweenTests();
+  oidc.autoSigninCalls = 0;
+});
+
 afterAll(cleanupBetweenTests);
+
+/** Just the page, for the tests that only care about what it decides to render. */
+function renderHome(tokenSource: AccessTokenSource) {
+  render(
+    <Provider theme={defaultTheme}>
+      <AccessTokenSourceContext.Provider value={tokenSource}>
+        <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
+          <Home/>
+        </AppStoreProvider>
+      </AccessTokenSourceContext.Provider>
+    </Provider>
+  );
+}
 
 /**
  * Drives a complete recording through the UI: adds sources, fills in the lecture details,
@@ -263,4 +290,27 @@ test("e2e recording a stream sends the access token to the server", async () => 
       })
     }
   );
+});
+
+// --- the auto sign-in gate -------------------------------------------------
+
+test("the page signs in automatically when the token source says to", async () => {
+  renderHome({ ...authenticatedTokenSource, autoSignin: true });
+
+  await screen.findByText("Start Recording");
+
+  expect(oidc.autoSigninCalls).toBeGreaterThan(0);
+});
+
+test("the page stops signing in automatically once the user has signed out", async () => {
+  // Sign-out is local only: the provider's SSO cookie is untouched, so useAutoSignin
+  // would redirect straight back in and the button would appear to do nothing. The token
+  // source turns its autoSignin flag off for the rest of the session, and this gate is
+  // what makes that mean anything -- reading env.oidcAutoSignin here instead would
+  // reinstate the loop.
+  renderHome({ ...authenticatedTokenSource, autoSignin: false });
+
+  await screen.findByText("Start Recording");
+
+  expect(oidc.autoSigninCalls).toBe(0);
 });

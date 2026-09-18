@@ -100,6 +100,20 @@ const oidc = vi.hoisted(() => {
       return this.signinPopupResult;
     };
 
+    removeUserCalls = 0;
+    /** Test-only: make removeUser reject, as a blocked or corrupt user store does. */
+    removeUserError: Error | null = null;
+
+    removeUser = async (): Promise<void> => {
+      this.removeUserCalls += 1;
+
+      if(this.removeUserError !== null) {
+        throw this.removeUserError;
+      }
+
+      this.user = null;
+    };
+
     stopSilentRenewCalls = 0;
 
     stopSilentRenew = () => {
@@ -628,4 +642,56 @@ test("the watcher unsubscribes from the provider on unmount", async () => {
   unmount();
 
   expect(mgr.listenerCount).toBe(0);
+});
+
+// --- signing out and the auto sign-in gate ----------------------------------
+
+/**
+ * Sign-out is local: it drops the stored user and leaves the provider's SSO session
+ * alone. That makes it a no-op in an auto-signin deployment unless something stops
+ * useAutoSignin from redirecting straight back in, which is what the autoSignin flag on
+ * the token source is for. The page reads that flag instead of the environment.
+ */
+
+test("auto sign-in is offered when the deployment configures it", async () => {
+  const { result } = await renderTokenSource({ ...authenticatedEnv, oidcAutoSignin: true });
+
+  expect(result.current.source.autoSignin).toBe(true);
+});
+
+test("auto sign-in is not offered when the deployment does not configure it", async () => {
+  const { result } = await renderTokenSource(authenticatedEnv);
+
+  expect(result.current.source.autoSignin).toBe(false);
+});
+
+test("an anonymous deployment never signs in automatically", async () => {
+  // there is nothing to sign into, and useAutoSignin outside an AuthProvider throws
+  const { result } = await renderTokenSource({ apiUrl: "http://localhost:5000" });
+
+  expect(result.current.source.autoSignin).toBe(false);
+});
+
+test("signing out drops the session and stops signing back in", async () => {
+  const { result } = await renderTokenSource({ ...authenticatedEnv, oidcAutoSignin: true });
+  userManager().user = userAged(60);
+
+  await act(() => result.current.source.signOut());
+
+  expect(userManager().removeUserCalls).toBe(1);
+  expect(result.current.source.autoSignin).toBe(false);
+});
+
+test("a sign-out whose user store refuses still stops signing back in", async () => {
+  // Otherwise a failed removeUser leaves auto sign-in armed, and the next render loop
+  // sends the user who just asked to leave straight back to the provider. The flag is
+  // cleared first and the rejection is swallowed, so signOut never rejects into the
+  // button handler either.
+  const { result } = await renderTokenSource({ ...authenticatedEnv, oidcAutoSignin: true });
+  userManager().removeUserError = new Error("session storage unavailable");
+
+  await act(() => result.current.source.signOut());
+
+  expect(userManager().removeUserCalls).toBe(1);
+  expect(result.current.source.autoSignin).toBe(false);
 });

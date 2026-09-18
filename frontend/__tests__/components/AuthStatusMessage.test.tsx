@@ -20,15 +20,20 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
 // react-oidc-context is stubbed because AuthProvider is not mounted here. The stub is a
 // mutable box rather than a fixed value so each test can set the auth state it needs, and
 // it counts calls so the anonymous case can assert the library is never consulted at all.
+//
+// signinPopup is kept beside the state rather than in it: the banner signs in through the
+// library's own wrapped method now, so it is the thing the buttons are asserted on, and
+// every test below replaces `auth` wholesale.
 const oidc = vi.hoisted(() => ({
   calls: 0,
+  signinPopup: undefined as unknown as ReturnType<typeof vi.fn>,
   auth: { isAuthenticated: false, isLoading: false, error: undefined as Error | undefined }
 }));
 
 vi.mock("react-oidc-context", () => ({
   useAuth: () => {
     oidc.calls += 1;
-    return oidc.auth;
+    return { ...oidc.auth, signinPopup: oidc.signinPopup };
   },
   AuthProvider: ({ children }: { children: ReactNode }) => children
 }));
@@ -64,7 +69,6 @@ function renderMessage(
     // component reads apiUrl. Default it to configured: that is the deployment every
     // authentication state below is interesting in.
     serverEnv = DEFAULT_SERVER_ENV,
-    interactiveLogin = vi.fn(async () => {}),
     expandSessionHeadroom = vi.fn(async (): Promise<SessionTransition> => "still-fresh")
   } = {}
 ) {
@@ -72,7 +76,13 @@ function renderMessage(
     <Provider theme={defaultTheme}>
       <AppStoreProvider serverEnv={serverEnv}>
         <AccessTokenSourceContext.Provider
-          value={{ authRequired, getAccessToken: async () => "token", interactiveLogin, expandSessionHeadroom }}
+          value={{
+            authRequired,
+            autoSignin: false,
+            getAccessToken: async () => "token",
+            signOut: async () => {},
+            expandSessionHeadroom
+          }}
         >
           <StoreHandles/>
           <AuthStatusMessage/>
@@ -81,7 +91,7 @@ function renderMessage(
     </Provider>
   );
 
-  return { expandSessionHeadroom, interactiveLogin };
+  return { expandSessionHeadroom };
 }
 
 const recording = (streamingImpeded: boolean): ActiveRecording =>
@@ -89,6 +99,7 @@ const recording = (streamingImpeded: boolean): ActiveRecording =>
 
 beforeEach(() => {
   oidc.calls = 0;
+  oidc.signinPopup = vi.fn(async () => null);
   oidc.auth = { isAuthenticated: false, isLoading: false, error: undefined };
 });
 
@@ -209,12 +220,14 @@ test("the sign-in banner says what is lost by staying signed out", () => {
 
 
 test("the sign-in button starts an interactive login", async () => {
-  const { interactiveLogin } = renderMessage();
+  renderMessage();
 
   await userEvent.click(screen.getByRole("button", { name: /Sign in/i }));
 
-  // the only control on this banner; everything else is prose
-  expect(interactiveLogin).toHaveBeenCalled();
+  // the only control on this banner; everything else is prose. It goes through the
+  // library's own signinPopup rather than a token-source method, which is what puts a
+  // failure into auth.error and so onto this banner.
+  expect(oidc.signinPopup).toHaveBeenCalled();
 });
 
 
@@ -312,11 +325,11 @@ test("the retry button on the error banner starts an interactive login", async (
     error: new Error("invalid_client")
   };
 
-  const { interactiveLogin } = renderMessage();
+  renderMessage();
 
   await userEvent.click(screen.getByRole("button", { name: /Retry authentication/i }));
 
-  expect(interactiveLogin).toHaveBeenCalled();
+  expect(oidc.signinPopup).toHaveBeenCalled();
 });
 
 

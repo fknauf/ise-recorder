@@ -60,7 +60,7 @@ services:
       - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
       - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
       - ISE_RECORD_OIDC_MAX_AGE=25200 # 7 hours
-      - ISE_RECORD_OIDC_AUTO_SIGNIN=false
+      - ISE_RECORD_OIDC_AUTO_SIGNIN=true
 
   backend:
     image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}
