@@ -36,7 +36,7 @@ export function UserMenu() {
             auth.isAuthenticated
               ? <>
                   <Flex direction="column" gap="size-200">
-                    <Text>Logged in as {userDisplayName(auth.user?.profile)}</Text>
+                    <Text>Signed in as {userDisplayName(auth.user?.profile)}</Text>
                     <ActionButton onPress={() => auth.removeUser().catch(() => null)}>
                       <LogOut/>
                       <Text>Sign out</Text>
@@ -49,7 +49,7 @@ export function UserMenu() {
                 </>
               : <>
                   <Flex direction="column" gap="size-200">
-                    <Text>Not logged in</Text>
+                    <Text>Not signed in</Text>
                     <ActionButton onPress={() => auth.signinPopup().catch(() => null)}>
                       <Login/>
                       <Text>Sign in</Text>

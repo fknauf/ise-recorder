@@ -87,7 +87,7 @@ test("the trigger says what it opens", async () => {
 test("the menu names the account you are signed in as", async () => {
   await renderMenu();
 
-  expect(screen.getByText(/Logged in as lecturer/)).toBeInTheDocument();
+  expect(screen.getByText(/Signed in as lecturer/)).toBeInTheDocument();
 });
 
 test.each([
@@ -98,10 +98,10 @@ test.each([
 ])("%s", async (_label, profile, expected) => {
   // Every one of these claims is optional in the ID token -- scope "profile" asks for
   // name, it does not guarantee it, and an IdM with no first/last name set on the account
-  // simply omits it. Falling off the end of the chain must not render "Logged in as".
+  // simply omits it. Falling off the end of the chain must not render "Signed in as".
   await renderMenu({ user: aUser(profile) });
 
-  expect(screen.getByText(`Logged in as ${expected}`)).toBeInTheDocument();
+  expect(screen.getByText(`Signed in as ${expected}`)).toBeInTheDocument();
 });
 
 test("a session with no user at all still renders rather than blanking out", async () => {
@@ -109,7 +109,7 @@ test("a session with no user at all still renders rather than blanking out", asy
   // from disagreeing for a render or two.
   await renderMenu({ user: undefined });
 
-  expect(screen.getByText("Logged in as The Nameless")).toBeInTheDocument();
+  expect(screen.getByText("Signed in as The Nameless")).toBeInTheDocument();
 });
 
 // --- signing out -----------------------------------------------------------
@@ -198,7 +198,7 @@ test("a cancelled switch with nothing to restore stays quiet", async () => {
 test("a signed-out menu offers a way in", async () => {
   await renderMenu({ isAuthenticated: false, user: undefined });
 
-  expect(screen.getByText("Not logged in")).toBeInTheDocument();
+  expect(screen.getByText("Not signed in")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Reauthenticate" })).toBeNull();
 });
