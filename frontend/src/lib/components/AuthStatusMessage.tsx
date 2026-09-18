@@ -5,6 +5,7 @@ import { useAuth } from "react-oidc-context";
 import { ActionButton, Content, Flex, Heading, InlineAlert, ProgressCircle, Text } from "@adobe/react-spectrum";
 import { useActiveRecording } from "../hooks/useActiveRecording";
 import Refresh from "@spectrum-icons/workflow/Refresh";
+import Login from "@spectrum-icons/workflow/Login";
 import { useAppStore } from "../hooks/useAppStore";
 import { useServerEnv } from "../hooks/useServerEnv";
 
@@ -54,7 +55,7 @@ function AuthStatusMessageImpl() {
           <Flex direction="column">
             <Text>Streaming to backend is disabled.</Text>
             <ActionButton onPress={interactiveLogin} marginTop="size-100" alignSelf="center">
-              <Refresh/>
+              <Login/>
               <Text>Authenticate</Text>
             </ActionButton>
           </Flex>
