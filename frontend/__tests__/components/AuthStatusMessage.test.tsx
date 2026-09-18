@@ -211,7 +211,7 @@ test("the sign-in banner says what is lost by staying signed out", () => {
 test("the sign-in button starts an interactive login", async () => {
   const { interactiveLogin } = renderMessage();
 
-  await userEvent.click(screen.getByRole("button", { name: /Authenticate/i }));
+  await userEvent.click(screen.getByRole("button", { name: /Sign in/i }));
 
   // the only control on this banner; everything else is prose
   expect(interactiveLogin).toHaveBeenCalled();

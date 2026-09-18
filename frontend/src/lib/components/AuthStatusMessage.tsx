@@ -56,7 +56,7 @@ function AuthStatusMessageImpl() {
             <Text>Streaming to backend is disabled.</Text>
             <ActionButton onPress={interactiveLogin} marginTop="size-100" alignSelf="center">
               <Login/>
-              <Text>Authenticate</Text>
+              <Text>Sign in</Text>
             </ActionButton>
           </Flex>
         </Content>
