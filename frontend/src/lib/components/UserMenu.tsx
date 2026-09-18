@@ -2,8 +2,8 @@ import { ActionButton, Button, Content, Dialog, DialogTrigger, Divider, Flex, He
 import { useAuth } from "react-oidc-context";
 import LogOut from "@spectrum-icons/workflow/LogOut";
 import Login from "@spectrum-icons/workflow/Login";
+import Refresh from "@spectrum-icons/workflow/Refresh";
 import User from "@spectrum-icons/workflow/User";
-import Shuffle from "@spectrum-icons/workflow/Shuffle";
 import { IdTokenClaims } from "oidc-client-ts";
 
 const userDisplayName = (claims: IdTokenClaims | undefined) =>
@@ -42,8 +42,8 @@ export function UserMenu() {
                       <Text>Sign out</Text>
                     </ActionButton>
                     <ActionButton onPress={switchUser}>
-                      <Shuffle/>
-                      <Text>Switch User</Text>
+                      <Refresh/>
+                      <Text>Reauthenticate</Text>
                     </ActionButton>
                   </Flex>
                 </>

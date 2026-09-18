@@ -144,7 +144,7 @@ test("a sign-out that fails does not take the page down with it", async () => {
 test("switching user forces the provider to re-authenticate", async () => {
   const { signinPopup } = await renderMenu();
 
-  await userEvent.click(screen.getByRole("button", { name: "Switch User" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reauthenticate" }));
 
   // max_age: 0 is the whole feature. Without it the SSO cookie still names the current
   // account and the provider hands the same user straight back, so the button appears to
@@ -164,7 +164,7 @@ test("a cancelled switch puts the previous session back", async () => {
   const { signinPopup, load } = await renderMenu();
   signinPopup.mockResolvedValue(null);
 
-  await userEvent.click(screen.getByRole("button", { name: "Switch User" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reauthenticate" }));
 
   await waitFor(() => expect(load).toHaveBeenCalledWith(LECTURER));
 });
@@ -175,7 +175,7 @@ test("a switch that goes through is left alone", async () => {
   const { signinPopup, load } = await renderMenu();
   signinPopup.mockResolvedValue(aUser({ preferred_username: "assistant" }));
 
-  await userEvent.click(screen.getByRole("button", { name: "Switch User" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reauthenticate" }));
 
   await waitFor(() => expect(signinPopup).toHaveBeenCalled());
   expect(load).not.toHaveBeenCalled();
@@ -185,7 +185,7 @@ test("a cancelled switch with nothing to restore stays quiet", async () => {
   const { signinPopup, load } = await renderMenu({ user: undefined });
   signinPopup.mockResolvedValue(null);
 
-  await userEvent.click(screen.getByRole("button", { name: "Switch User" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reauthenticate" }));
 
   await waitFor(() => expect(signinPopup).toHaveBeenCalled());
   // there is no previous user to re-raise, and load(undefined) would throw inside the
@@ -200,7 +200,7 @@ test("a signed-out menu offers a way in", async () => {
 
   expect(screen.getByText("Not logged in")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Switch User" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reauthenticate" })).toBeNull();
 });
 
 test("signing in asks for an ordinary sign-in", async () => {
