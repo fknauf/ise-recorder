@@ -150,7 +150,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 
   const interactiveLogin = useCallback(async () => {
     try {
-      await userMgr.signinPopup({ popupAbortOnClose: true });
+      await userMgr.signinPopup();
     } catch(e) {
       console.warn("Failed to authenticate", e);
     }
@@ -186,7 +186,7 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, child
 
     if((await sessionStaleness(userMgr, maxAge)).stale) {
       return refreshSession(
-        () => userMgr.signinPopup({ popupAbortOnClose: true }).then(() => "renewed"),
+        () => userMgr.signinPopup().then(() => "renewed"),
         "still-stale",
         "Failed to reauthenticate stale oidc session, continuing with existing session"
       );
