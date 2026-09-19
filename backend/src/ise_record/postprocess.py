@@ -347,18 +347,21 @@ async def postprocess_tracks(
             ffmpeg_maps.extend([ '-map', f'{len(inputs)}:a' ])
             inputs.append(await concat_chunks(audio_dir))
 
+        intermediate_path = output_path.with_suffix(".part.webm")
+
         render_command = [
             'ffmpeg'
         ] + [
             arg for input in inputs for arg in [ '-i', str(input.path) ]
         ] + ffmpeg_maps + [
-            '-y', str(output_path)
+            '-y', str(intermediate_path)
         ]
 
-        logger.info("Rendering %s...", output_path)
+        logger.info("Rendering %s...", intermediate_path)
         logger.debug("Render command = %s", render_command)
 
         await _run_command(render_command)
+        intermediate_path.rename(output_path)
 
         logger.info("Render completed")
 

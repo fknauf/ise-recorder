@@ -23,7 +23,8 @@ from ise_record.auth import (
     OidcConfiguration,
     REQUIRED_CLAIMS,
     discover_oidc_config,
-    user_home_dir
+    fs_safe_user_name,
+    prepare_user_home_dir
 )
 from ise_record.server import create_app
 from ise_record.settings import OidcSettings, Settings
@@ -236,6 +237,8 @@ def upload(client: TestClient, token: str | None, index: int = 0):
         files={"chunk": b"payload"},
     )
 
+def upload_chunk_path(base_dir: Path, user_segment: str, index: int = 0) -> Path:
+    return base_dir / user_segment / "foo" / "stream" / f"chunk.{index:04d}"
 
 def test_valid_token_is_accepted(client: TestClient, provider: Provider):
     assert upload(client, provider.mint()).status_code == 201
@@ -246,8 +249,8 @@ def test_chunk_lands_in_a_per_user_directory(client: TestClient, provider: Provi
 
     chunks = list(tmp_path.rglob("chunk.*"))
     assert len(chunks) == 1
-    # readable prefix from preferred_username, digest suffix from sub
-    assert chunks[0].relative_to(tmp_path).parts[0].startswith("lecturer-")
+    # tmp_path / user / recording / track / chunk.XXXX
+    assert len(chunks[0].relative_to(tmp_path).parts) == 4
 
 
 def test_different_subjects_get_different_directories(
@@ -420,17 +423,20 @@ def test_unconfigured_deployment_stays_open(tmp_path: Path):
 
 def digest_of(subject: str) -> str:
     """ The suffix auth.py derives from a subject, which is what keeps users apart. """
-    return hashlib.sha3_256(subject.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha3_256(subject.encode("utf-8")).hexdigest()
 
 
 SUBJECT_DIGEST = digest_of("abc")
+
 
 # NAME_MAX on ext4. auth.py keeps its own, much smaller cap on the username part; this is
 # the bound the filesystem imposes on whatever comes out of it.
 NAME_MAX_BYTES = 255
 
+def claims_for(username: Any) -> dict[str, Any]:
+    return {"sub": "abc", "preferred_username": username}
 
-async def home_dir_for(username: Any, oidc: OidcConfiguration) -> str:
+async def home_dir_for(tmp_path: Path, username: Any, oidc: OidcConfiguration) -> Path:
     """
     The directory name derived for a username, with the subject held fixed.
 
@@ -438,8 +444,7 @@ async def home_dir_for(username: Any, oidc: OidcConfiguration) -> str:
     calls reach the UserInfo endpoint. The provider fixture leaves it unconfigured, which
     is a 404 -- the same digest fallback the old synchronous helper took directly.
     """
-    return await user_home_dir(
-        {"sub": "abc", "preferred_username": username}, {}, "access-token", oidc)
+    return await prepare_user_home_dir(tmp_path,  claims_for(username), {}, "access-token", oidc)
 
 
 @pytest.mark.parametrize("username,expected_prefix", [
@@ -456,13 +461,18 @@ async def home_dir_for(username: Any, oidc: OidcConfiguration) -> str:
     ("CON", "CON_-"),                                 # reserved on Windows, renamed by pathvalidate
 ])
 @pytest.mark.asyncio
-async def test_readable_username_becomes_the_directory_prefix(
-    username: str, expected_prefix: str, oidc: OidcConfiguration
+async def test_readable_username_becomes_the_directory_alias(
+    username: str, expected_prefix: str, oidc: OidcConfiguration, tmp_path: Path
 ):
-    name = await home_dir_for(username, oidc)
+    home = await home_dir_for(tmp_path, username, oidc)
+    expected_alias = tmp_path / f"{expected_prefix}{home.name[:12]}"
 
-    assert name.startswith(expected_prefix)
-    assert name.endswith(SUBJECT_DIGEST)
+    assert home.name == SUBJECT_DIGEST
+    assert home.parent == tmp_path
+    assert home.exists()
+
+    assert expected_alias.exists()
+    assert expected_alias.readlink() == Path(home.name)
 
 
 @pytest.mark.parametrize("username", [
@@ -472,14 +482,17 @@ async def test_readable_username_becomes_the_directory_prefix(
     ".hidden", ".NET", "-rf", "-weird",  # a readable name, but not one that may lead
 ])
 @pytest.mark.asyncio
-async def test_unusable_username_falls_back_to_the_subject_digest(
-    username: Any, oidc: OidcConfiguration
+async def test_unusable_username_yields_no_alias_link(
+    username: Any, oidc: OidcConfiguration, tmp_path: Path
 ):
     # the last four are a deliberate trade: rather than strip the leading character and keep
     # a readable prefix, the whole prefix is dropped. Nothing downstream validates this name
     # -- unlike a recording name, there is no pattern behind it -- so the one check at the
     # end of user_home_dir is the entire guarantee, and it is worth keeping obvious
-    assert await home_dir_for(username, oidc) == SUBJECT_DIGEST
+    home = await home_dir_for(tmp_path, username, oidc)
+
+    assert home.name == SUBJECT_DIGEST
+    assert set(f.name for f in home.parent.iterdir()) == { SUBJECT_DIGEST }
 
 
 @pytest.mark.parametrize("username,expected", [
@@ -491,16 +504,24 @@ async def test_unusable_username_falls_back_to_the_subject_digest(
 ])
 @pytest.mark.asyncio
 async def test_unicode_whitespace_is_a_separator_like_any_other(
-    username: str, expected: str, oidc: OidcConfiguration
+    username: str, expected: str, oidc: OidcConfiguration, tmp_path: Path
 ):
     # \s on a str pattern is Unicode-aware, which is what keeps a pasted U+3000 out of a
     # directory name -- pathvalidate would have left it there
-    assert (await home_dir_for(username, oidc)).startswith(expected)
+    home = await home_dir_for(tmp_path, username, oidc)
+    expected_alias = tmp_path / f"{expected}{home.name[:12]}"
+
+    assert home.name == SUBJECT_DIGEST
+    assert home.parent == tmp_path
+    assert home.exists()
+
+    assert expected_alias.exists()
+    assert expected_alias.readlink() == Path(home.name)
 
 
 @pytest.mark.asyncio
 async def test_the_directory_name_does_not_depend_on_the_composition_of_the_username(
-    oidc: OidcConfiguration
+    oidc: OidcConfiguration, tmp_path: Path
 ):
     # spelled with escapes: the two forms are indistinguishable on screen, so an editor
     # normalizing this file would turn one half of this test into a copy of the other
@@ -508,20 +529,21 @@ async def test_the_directory_name_does_not_depend_on_the_composition_of_the_user
     composed = "\u00dcbung"
 
     assert decomposed != composed
-    assert await home_dir_for(decomposed, oidc) == await home_dir_for(composed, oidc)
+    assert await home_dir_for(tmp_path, decomposed, oidc) == await home_dir_for(tmp_path, composed, oidc)
 
+    assert set(d.name for d in tmp_path.iterdir()) == { SUBJECT_DIGEST, f"\u00dcbung-{SUBJECT_DIGEST[:12]}"}
 
 @pytest.mark.parametrize("username", [
-    "lecturer", "a/b", "../../etc/passwd", "..", "", "-rf", "\\\\server\\share",
+    "lecturer", "a/b", "\\\\server\\share",
     "a" * 300, "\u673a" * 200, "\U00020000" * 100, "\u00e4 \u00f6 \u00fc", "nul\x00byte",
-    "%2e%2e%2f", "..;/", "- - - 81457m4573r 9001 - - -", "\u3000\u674e\u3000",
-    "\u0308mark", 42, None,
+    "%2e%2e%2f", "\u3000\u674e\u3000",
+    "\u0308mark"
 ])
 @pytest.mark.asyncio
-async def test_directory_name_is_always_a_safe_single_path_segment(
+async def test_alias_name_is_always_a_safe_single_path_segment(
     username: Any, oidc: OidcConfiguration
 ):
-    name = await home_dir_for(username, oidc)
+    name = await fs_safe_user_name(claims_for(username), "access-token", oidc)
 
     assert name, "an empty directory name would put chunks in the destination root"
     assert not name.startswith((".", "-")), "hidden on unix, an option to anything argv-shaped"
@@ -533,25 +555,33 @@ async def test_directory_name_is_always_a_safe_single_path_segment(
     # the 48-character slice can be four bytes a character before the digest is appended
     assert len(name.encode("utf-8")) <= NAME_MAX_BYTES
 
+@pytest.mark.parametrize("username", [
+    "../../etc/passwd", "..", "", "-rf", "..;/", "- - - 81457m4573r 9001 - - -", 42, None
+])
+@pytest.mark.asyncio
+async def test_no_alias_for_broken_usernames(username: Any, oidc: OidcConfiguration):
+    name = await fs_safe_user_name(claims_for(username), "access-token", oidc)
+    assert name is None
+
 
 @pytest.mark.asyncio
-async def test_directory_name_is_stable_for_a_subject(oidc: OidcConfiguration):
+async def test_directory_name_is_stable_for_a_subject(oidc: OidcConfiguration, tmp_path: Path):
     claims = {"sub": "abc", "preferred_username": "lecturer"}
 
     # separate caches, so this is the derivation agreeing with itself rather than the
     # second call reading back what the first one memoised
-    assert (await user_home_dir(claims, {}, "access-token", oidc)
-            == await user_home_dir(claims, {}, "access-token", oidc))
+    assert (await prepare_user_home_dir(tmp_path, claims, {}, "access-token", oidc)
+            == await prepare_user_home_dir(tmp_path, claims, {}, "access-token", oidc))
 
 
 @pytest.mark.asyncio
-async def test_username_collisions_are_separated_by_the_digest(oidc: OidcConfiguration):
+async def test_username_collisions_are_separated_by_the_digest(oidc: OidcConfiguration, tmp_path: Path):
     # pathvalidate maps several usernames onto one string -- "DOMAIN\\user" and "DOMAINuser"
     # both come out as the latter -- so the digest is the only thing keeping them apart
-    first = await user_home_dir(
-        {"sub": "user-a", "preferred_username": "same"}, {}, "access-token", oidc)
-    second = await user_home_dir(
-        {"sub": "user-b", "preferred_username": "same"}, {}, "access-token", oidc)
+    first = await prepare_user_home_dir(
+        tmp_path, {"sub": "user-a", "preferred_username": "same"}, {}, "access-token", oidc)
+    second = await prepare_user_home_dir(
+        tmp_path, {"sub": "user-b", "preferred_username": "same"}, {}, "access-token", oidc)
 
     assert first != second
 
@@ -564,14 +594,6 @@ async def test_username_collisions_are_separated_by_the_digest(oidc: OidcConfigu
 # these cover what auth.py makes of one.
 
 DEFAULT_SUBJECT_DIGEST = digest_of(DEFAULT_SUBJECT)
-
-
-def sole_home_dir(destdir: Path) -> str:
-    """ The one per-user directory the uploads landed in. """
-    home_dirs = {path.relative_to(destdir).parts[0] for path in destdir.rglob("chunk.*")}
-    assert len(home_dirs) == 1
-    return home_dirs.pop()
-
 
 def test_userinfo_is_not_consulted_when_the_token_carries_the_username(
     client: TestClient, provider: Provider
@@ -589,7 +611,8 @@ def test_username_comes_from_userinfo_when_the_token_omits_it(
 
     assert upload(client, provider.mint(preferred_username=None)).status_code == 201
 
-    assert sole_home_dir(tmp_path) == f"lecturer-{DEFAULT_SUBJECT_DIGEST}"
+    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).exists()
+    assert upload_chunk_path(tmp_path, f"lecturer-{DEFAULT_SUBJECT_DIGEST[:12]}").exists()
     assert provider.userinfo_fetch_count == 1
 
 
@@ -614,7 +637,7 @@ def test_userinfo_about_a_different_subject_is_discarded(
 
     assert upload(client, provider.mint(preferred_username=None)).status_code == 201
 
-    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST }
 
 
 @pytest.mark.parametrize("response", [
@@ -633,8 +656,7 @@ def test_unusable_userinfo_falls_back_to_the_digest(
     # a cosmetic directory name is not worth failing an upload over
     assert upload(client, provider.mint(preferred_username=None)).status_code == 201
 
-    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
-
+    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).exists()
 
 def test_userinfo_with_a_non_string_username_falls_back_to_the_digest(
     client: TestClient, provider: Provider, tmp_path: Path
@@ -643,8 +665,8 @@ def test_userinfo_with_a_non_string_username_falls_back_to_the_digest(
 
     assert upload(client, provider.mint(preferred_username=None)).status_code == 201
 
-    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
-
+    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).exists()
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST }
 
 def test_unreachable_userinfo_does_not_fail_the_upload(
     client: TestClient, provider: Provider, tmp_path: Path
@@ -668,10 +690,7 @@ def test_username_from_userinfo_is_sanitized_like_one_from_the_token(
 
     assert upload(client, provider.mint(preferred_username=None)).status_code == 201
 
-    home_dir = sole_home_dir(tmp_path)
-    assert home_dir.endswith(DEFAULT_SUBJECT_DIGEST)
-    assert "/" not in home_dir
-    assert (tmp_path / home_dir).resolve().parent == tmp_path.resolve()
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST }
 
 
 def test_userinfo_is_consulted_once_per_subject(
@@ -684,7 +703,7 @@ def test_userinfo_is_consulted_once_per_subject(
         assert upload(client, token, index=index).status_code == 201
 
     assert provider.userinfo_fetch_count == 1
-    assert sole_home_dir(tmp_path) == f"lecturer-{DEFAULT_SUBJECT_DIGEST}"
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST, f"lecturer-{DEFAULT_SUBJECT_DIGEST[:12]}" }
 
 
 def test_a_recovering_provider_does_not_move_a_directory_already_in_use(
@@ -693,7 +712,7 @@ def test_a_recovering_provider_does_not_move_a_directory_already_in_use(
     # UserInfo unavailable for the first chunk, so this lecture starts under the digest
     token = provider.mint(preferred_username=None)
     assert upload(client, token, index=0).status_code == 201
-    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST }
 
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
 
@@ -701,7 +720,7 @@ def test_a_recovering_provider_does_not_move_a_directory_already_in_use(
     # is split across two directories and the postprocessing job only ever sees one
     assert upload(client, token, index=1).status_code == 201
 
-    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST }
     assert provider.userinfo_fetch_count == 1
 
 
@@ -736,7 +755,7 @@ def test_tokens_are_still_accepted_without_a_userinfo_endpoint(
     with TestClient(create_app(settings)) as client:
         assert upload(client, provider.mint()).status_code == 201
 
-    assert sole_home_dir(tmp_path) == f"lecturer-{DEFAULT_SUBJECT_DIGEST}"
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST, f"lecturer-{DEFAULT_SUBJECT_DIGEST[:12]}" }
 
 
 def test_no_userinfo_endpoint_falls_back_to_the_digest_without_asking(
@@ -750,7 +769,7 @@ def test_no_userinfo_endpoint_falls_back_to_the_digest_without_asking(
     with TestClient(create_app(settings)) as client:
         assert upload(client, provider.mint(preferred_username=None)).status_code == 201
 
-    assert sole_home_dir(tmp_path) == DEFAULT_SUBJECT_DIGEST
+    assert set(d.name for d in tmp_path.iterdir()) == { DEFAULT_SUBJECT_DIGEST }
     assert provider.userinfo_fetch_count == 0
 
 

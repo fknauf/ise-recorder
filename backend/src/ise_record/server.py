@@ -24,14 +24,15 @@ from fastapi import (
     status
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pathvalidate import sanitize_filename
 from pydantic import BaseModel, BeforeValidator, Field
 
 from .auth import get_current_user_home, load_oidc_config
 from .logconfig import setup_logging
-from .postprocess import postprocess_recording
+from .postprocess import finished_recordings, finished_recording_path, postprocess_recording
 from .reporting import normalize_recipient, send_report
-from .settings import Settings, get_settings
+from .settings import get_settings, Settings, SmtpSettings
 
 def _normalize_for_filesystem(value: str) -> str:
     return sanitize_filename(unicodedata.normalize("NFC", value), platform="universal")
@@ -82,7 +83,7 @@ class ChunkUpload(BaseModel):
 async def upload_chunk(
     upload: Annotated[ChunkUpload, Form()],
     settings: Annotated[Settings, Depends(get_settings)],
-    user_home: Annotated[str, Depends(get_current_user_home)]
+    user_home: Annotated[Path, Depends(get_current_user_home)]
 ) -> dict[str, str | int]:
     """
     POST endpoint for the upload of chunk files.
@@ -99,7 +100,7 @@ async def upload_chunk(
 
     filename = f'chunk.{upload.index:0{settings.chunk_file_digits}d}'
 
-    track_path = settings.destdir / user_home / upload.recording / upload.track
+    track_path = user_home / upload.recording / upload.track
     filepath = track_path / filename
     logger.debug("saving %s", filepath)
 
@@ -138,11 +139,11 @@ def get_running_jobs(request: Request) -> set[Path]:
 
 async def _postprocessing_task(
         job: PostProcessingJob,
-        settings: Settings,
-        user: str,
+        user_home: Path,
+        smtp_settings: SmtpSettings | None,
         running_jobs: set[Path]
 ) -> None:
-    recording_path = settings.destdir / user / job.recording
+    recording_path = user_home / job.recording
 
     # Job's already running, so don't start it a second time.
     if recording_path in running_jobs:
@@ -154,15 +155,15 @@ async def _postprocessing_task(
     try:
         job_result = await postprocess_recording(recording_path)
 
-        if settings.smtp is not None:
+        if smtp_settings is not None:
             normalized_recipient = normalize_recipient(
                 job.recipient,
-                list(settings.smtp.allowed_domains)
+                list(smtp_settings.allowed_domains)
             )
 
             if normalized_recipient is not None:
                 await send_report(
-                    smtp_settings=settings.smtp,
+                    smtp_settings=smtp_settings,
                     recipient=normalized_recipient,
                     job_title=job.recording,
                     result=job_result)
@@ -177,19 +178,19 @@ def schedule_job(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
-    user: Annotated[str, Depends(get_current_user_home)],
+    user_home: Annotated[Path, Depends(get_current_user_home)],
     running_jobs: Annotated[set[Path], Depends(get_running_jobs)]
 ):
     """ Endpoint for the scheduling of postprocessing jobs """
 
-    if not os.path.isdir(settings.destdir / user / job.recording):
+    if not os.path.isdir(user_home / job.recording):
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Recording {job.recording} does not exist'
         )
 
-    background_tasks.add_task(_postprocessing_task, job, settings, user, running_jobs)
+    background_tasks.add_task(_postprocessing_task, job, user_home, settings.smtp, running_jobs)
 
     return job
 
@@ -198,6 +199,7 @@ def health_check():
     """ Endpoint for container health checks """
     logger.debug("health check requested")
     return { "status": "healthy" }
+
 
 def create_app(
         settings: Settings | None = None
@@ -218,7 +220,7 @@ def create_app(
 
     application = FastAPI(lifespan=lifespan)
     application.state.running_jobs = set[Path]()
-    application.state.home_dirs = dict[str, str]()
+    application.state.home_dirs = dict[str, Path]()
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings

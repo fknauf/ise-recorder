@@ -9,6 +9,7 @@
 import hashlib
 import logging
 import re
+from pathlib import Path
 from typing import Annotated, Any, NamedTuple
 import unicodedata
 
@@ -26,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 security_scheme = HTTPBearer(auto_error=False)
 
-ANONYMOUS_HOME = "."
 REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub")
 JWKS_CACHE_SECONDS = 1800.0
 JWKS_REFRESH_COOLDOWN_SECONDS = 30.0
@@ -194,53 +194,85 @@ async def query_username(
         return None
 
 
-async def user_home_dir(
+async def fs_safe_user_name(
         claims: dict[str, Any],
-        known_home_dirs: dict[str, str],
         access_token: str,
         oidc: OidcConfiguration
-) -> str:
-    """ Derive a filesystem-safe, human-readable per-user directory name from token claims. """
-    subject = claims["sub"]
-
-    # ensure stability while the server is running
-    if subject in known_home_dirs:
-        return known_home_dirs[subject]
-
-    def cache_home(home: str):
-        known_home_dirs[subject] = home
-        return home
+) -> str | None:
+    """
+    Tries to create a file-system-safe, human-readable identifier for the user for use in a symlink
+    to the cryptic digest dir so someone with shell access can identify user homes.
+    """
 
     # If access token carries preferred_username, use that.
-    digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()[:12]
     raw_username = claims.get("preferred_username")
 
     # if it doesn't, query oidc backend for userinfo. This happens e.g. with kanidm
     if not isinstance(raw_username, str):
-        raw_username = await query_username(oidc, access_token, subject)
+        raw_username = await query_username(oidc, access_token, claims["sub"])
 
-    # if userinfo can't be obtained, use digest alone. Cache so it doesn't change if oidc was
-    # only momentarily unavailable. That's not stable across restarts, but at this point we're
-    # in best-effort territory.
+    # if userinfo can't be obtained, leave it.
     if not isinstance(raw_username, str):
-        return cache_home(digest)
+        return None
 
     normalized_user = re.sub(r"\s+", "_", unicodedata.normalize("NFC", raw_username).strip())
-    sanitized_user = sanitize_filename(normalized_user, platform="universal")[:48]
-    candidate = f"{sanitized_user}-{digest}"
-    home_dir = candidate if candidate[:1] not in [ ".", "-" ] else digest
+    candidate = sanitize_filename(normalized_user, platform="universal")[:48]
 
-    return cache_home(home_dir)
+    # filter out hacky user names, i.e. hidden, empty, or looks like a cmdline argument
+    # Bail out rather than try to fix because just removing these breaks file name sanitation, at
+    # least on Windows: -COM -> COM hits a reserved file name.
+    if candidate[:1] in [ ".", "-", "" ]:
+        return None
+
+    return candidate
+
+
+async def prepare_user_home_dir(
+        base_dir: Path,
+        claims: dict[str, Any],
+        known_home_dirs: dict[str, Path],
+        access_token: str,
+        oidc: OidcConfiguration
+) -> Path:
+    """
+    Prepare a stable (even when user info in the OIDC changes), user-specific home directory, and
+    also create a human-readable symlink to it that a shell user can use to identify which stable
+    dir belongs to which user.
+
+    :return path to the stable home directory.
+    """
+    subject = claims["sub"]
+
+    # If we already know the home dir, no preparation needed.
+    if subject in known_home_dirs:
+        return known_home_dirs[subject]
+
+    # Infer the stable directory name from the token subject
+    digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()
+    stable_home = base_dir / digest
+    stable_home.mkdir(exist_ok=True)
+
+    prefix = await fs_safe_user_name(claims, access_token, oidc)
+
+    # if username can't be obtained, leave it. Otherwise, append part of the digest to make it
+    # unique, then make it a symlink to the stable directory name.
+    if prefix is not None:
+        human_readable_home = base_dir / f"{prefix}-{digest[:12]}"
+        if not human_readable_home.exists():
+            human_readable_home.symlink_to(stable_home.name, target_is_directory=True)
+
+    known_home_dirs[subject] = stable_home
+    return stable_home
 
 
 async def get_current_user_home(
         request: Request,
         settings: Annotated[Settings, Depends(get_settings)],
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
-) -> str:
+) -> Path:
     """ Resolve the caller's home directory name, rejecting unauthenticated requests. """
     if not settings.auth_required:
-        return ANONYMOUS_HOME
+        return settings.destdir
 
     oidc_config = await load_oidc_config(request.app.state, settings)
     if oidc_config is None:
@@ -250,5 +282,12 @@ async def get_current_user_home(
         raise _unauthenticated()
 
     claims = validate_access_token(credentials.credentials, oidc_config, settings)
-    return await user_home_dir(
-        claims, request.app.state.home_dirs, credentials.credentials, oidc_config)
+    user_home = await prepare_user_home_dir(
+        settings.destdir,
+        claims,
+        request.app.state.home_dirs,
+        credentials.credentials,
+        oidc_config
+    )
+
+    return user_home

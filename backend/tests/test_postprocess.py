@@ -223,6 +223,7 @@ async def test_postprocess_tracks_reports_an_incomplete_track_as_partial_success
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
+    mocker.patch("pathlib.Path.rename")
 
     result = await postprocess_tracks(
         Path("foo/stream"),
@@ -325,6 +326,7 @@ async def test_postprocess_tracks(mocker: MockerFixture):
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
+    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
         Path("foo/stream"),
@@ -342,12 +344,16 @@ async def test_postprocess_tracks(mocker: MockerFixture):
         "-i", "foo/overlay/full.webm",
         "-filter_complex", generate_ffmpeg_filter(stream_props, True),
         "-map", "0:a?",
-        "-y", "foo/presentation.webm"
+        "-y", "foo/presentation.part.webm"
     ])
 
     mock_concat_chunks.assert_has_calls([
         call(Path("foo/stream")),
         call(Path("foo/overlay"))
+    ])
+
+    mock_rename.assert_has_calls([
+        call(Path("foo/presentation.part.webm"), Path("foo/presentation.webm"))
     ])
 
     mock_unlink.assert_has_calls([
@@ -370,6 +376,7 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
+    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
         Path("foo/stream"),
@@ -386,10 +393,12 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
         "-i", "foo/stream/full.webm",
         "-filter_complex", generate_ffmpeg_filter(stream_props, False),
         "-map", "0:a?",
-        "-y", "foo/presentation.webm"
+        "-y", "foo/presentation.part.webm"
     ])
 
     mock_concat_chunks.assert_called_once_with(Path("foo/stream"))
+    mock_rename.assert_called_once_with(Path("foo/presentation.part.webm"), Path("foo/presentation.webm"))
+
     mock_unlink.assert_called_once_with(Path("foo/stream/full.webm"), missing_ok=True)
 
 @pytest.mark.asyncio
@@ -404,6 +413,7 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
+    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
         Path("foo/stream"),
@@ -431,7 +441,7 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
         "-map", "2:a",
         "-map", "3:a",
         "-map", "4:a",
-        "-y", "foo/presentation.webm"
+        "-y", "foo/presentation.part.webm"
     ])
 
     mock_concat_chunks.assert_has_calls([
@@ -441,6 +451,8 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
         call(Path("foo/audio-1")),
         call(Path("foo/audio-2"))
     ])
+
+    mock_rename.assert_called_once_with(Path("foo/presentation.part.webm"), Path("foo/presentation.webm"))
 
     mock_unlink.assert_has_calls([
         call(Path("foo/stream/full.webm"), missing_ok=True),
@@ -465,6 +477,7 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
     mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
+    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
         Path("foo/stream"),
@@ -491,7 +504,7 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
         "-map", "1:a",
         "-map", "2:a",
         "-map", "3:a",
-        "-y", "foo/presentation.webm"
+        "-y", "foo/presentation.part.webm"
     ])
 
     mock_concat_chunks.assert_has_calls([
@@ -500,6 +513,8 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
         call(Path("foo/audio-1")),
         call(Path("foo/audio-2"))
     ])
+
+    mock_rename.assert_called_once_with(Path("foo/presentation.part.webm"), Path("foo/presentation.webm"))
 
     mock_unlink.assert_has_calls([
         call(Path("foo/stream/full.webm"), missing_ok=True),

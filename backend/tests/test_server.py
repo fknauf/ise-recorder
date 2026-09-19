@@ -75,8 +75,8 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
-        settings,
-        ".",
+        settings.destdir,
+        settings.smtp,
         set()
     )
 
@@ -121,8 +121,8 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
-        settings,
-        ".",
+        settings.destdir,
+        settings.smtp,
         set()
     )
 
@@ -138,8 +138,8 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
-        Settings(),
-        ".",
+        Settings().destdir,
+        None,
         set()
     )
 
@@ -154,8 +154,8 @@ async def test_a_second_job_for_a_running_recording_is_dropped(mocker: MockerFix
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
-        Settings(),
-        ".",
+        Settings().destdir,
+        None,
         { Path("data/foo") }
     )
 
@@ -167,8 +167,8 @@ async def test_a_job_for_a_different_recording_is_not_dropped(mocker: MockerFixt
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="bar", recipient=None),
-        Settings(),
-        ".",
+        Settings().destdir,
+        None,
         { Path("data/foo") }
     )
 
@@ -180,7 +180,7 @@ async def test_a_finished_job_releases_the_recording(mocker: MockerFixture):
     running_jobs: set[Path] = set()
 
     await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient=None), Settings(), ".", running_jobs
+        PostProcessingJob(recording="foo", recipient=None), Settings().destdir, None, running_jobs
     )
 
     assert running_jobs == set()
@@ -194,7 +194,7 @@ async def test_a_job_that_blows_up_still_releases_the_recording(mocker: MockerFi
 
     with pytest.raises(RuntimeError):
         await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-            PostProcessingJob(recording="foo", recipient=None), Settings(), ".", running_jobs
+            PostProcessingJob(recording="foo", recipient=None), Settings().destdir, None, running_jobs
         )
 
     assert running_jobs == set()
@@ -217,8 +217,8 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, app:
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="foo@bar.de"),
-        settings,
-        ".",
+        settings.destdir,
+        settings.smtp,
         app.state.running_jobs
     )
 
@@ -239,8 +239,8 @@ def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient=None),
-        settings,
-        ".",
+        settings.destdir,
+        settings.smtp,
         app.state.running_jobs
     )
 
@@ -294,8 +294,8 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: Mock
     mock_add_task.assert_called_once_with(
         _postprocessing_task, # pyright: ignore[reportPrivateUsage]
         PostProcessingJob(recording="foo", recipient="I made a lot of typos"),
-        settings,
-        ".",
+        settings.destdir,
+        settings.smtp,
         app.state.running_jobs
     )
 
