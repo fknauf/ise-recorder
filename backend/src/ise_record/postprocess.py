@@ -411,3 +411,19 @@ async def postprocess_recording(recording_path: Path) -> Result:
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("Postprocessing %s failed", recording_path)
         return Result(output_file=None, reason=ResultReason.FAILURE)
+
+def finished_recordings(user_home: Path) -> list[str]:
+    """ Get a list of finished recordings in the specified user home directory """
+    collected: list[str] = []
+
+    for recording_path in sorted(user_home.iterdir()):
+        candidate = recording_path / "presentation.webm"
+
+        if candidate.is_file():
+            collected.append(recording_path.name)
+
+    return collected
+
+def finished_recording_path(user_home: Path, recording: str) -> Path:
+    """ Get the full path for a post-processed recording file """
+    return user_home / recording / "presentation.webm"

@@ -24,12 +24,13 @@ from fastapi import (
     status
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pathvalidate import sanitize_filename
 from pydantic import BaseModel, BeforeValidator, Field
 
 from .auth import get_current_user_home, load_oidc_config
 from .logconfig import setup_logging
-from .postprocess import postprocess_recording
+from .postprocess import finished_recording_path, finished_recordings, postprocess_recording
 from .reporting import normalize_recipient, send_report
 from .settings import get_settings, Settings, SmtpSettings
 
@@ -199,6 +200,39 @@ def health_check():
     logger.debug("health check requested")
     return { "status": "healthy" }
 
+@router.get('/completed')
+async def get_completed_list(
+    settings: Annotated[Settings, Depends(get_settings)],
+    user_home: Annotated[Path, Depends(get_current_user_home)]
+) -> list[str]:
+    """ Endpoint to obtain a list of completed recordings for the active user """
+    if not settings.auth_required:
+        return []
+
+    return finished_recordings(user_home)
+
+@router.get('/completed/{recording}')
+async def download_completed(
+    recording: SafeRecording,
+    settings: Annotated[Settings, Depends(get_settings)],
+    user_home: Annotated[Path, Depends(get_current_user_home)]
+) -> FileResponse:
+    """ Endpoint for downloading a completed recording that the active user owns """
+
+    if not settings.auth_required:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Server is configured without authentication, downloads are disabled."
+        )
+
+    file_path = finished_recording_path(user_home, recording)
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND
+        )
+
+    return FileResponse(file_path, filename = f"{recording}.webm")
 
 def create_app(
         settings: Settings | None = None

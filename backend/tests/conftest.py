@@ -13,11 +13,22 @@ it collects test modules, which is the only point still ahead of `create_app()`.
 fixture then covers the rest: a cached Settings from an earlier test cannot leak forward.
 """
 
-import os
+# pylint: disable=missing-function-docstring
+# pylint: disable=redefined-outer-name
 
+import os
+from pathlib import Path
+from typing import Iterator
+
+from fastapi.testclient import TestClient
+import jwt
 import pytest
 
-from ise_record.settings import get_settings
+from harness import AUDIENCE, Provider
+from ise_record import auth
+from ise_record.auth import OidcConfiguration
+from ise_record.server import create_app
+from ise_record.settings import get_settings, OidcSettings, Settings
 
 # matches SettingsConfigDict(env_prefix=...); pydantic matches it case-insensitively, so
 # clearing it case-insensitively too avoids a lowercase var slipping through
@@ -39,3 +50,72 @@ def isolated_settings():
     yield
 
     get_settings.cache_clear()
+
+
+# --- a backend with authentication turned on -------------------------------
+
+# test_server.py drives an unauthenticated deployment and calls its own fixtures `settings`
+# and `client`; these are named apart from those so that a file holding both kinds of test
+# says in each signature which backend it is talking to.
+
+@pytest.fixture
+def provider() -> Iterator[Provider]:
+    """ A stand-in OpenID provider, serving discovery and JWKS over a real socket. """
+    instance = Provider()
+    instance.add_key("key-1")
+    instance.start()
+    yield instance
+    instance.stop()
+
+
+@pytest.fixture
+def auth_settings(provider: Provider, tmp_path: Path) -> Settings:
+    return Settings(
+        destdir=tmp_path,
+        oidc=OidcSettings(
+            provider_url=provider.issuer,
+            audience=AUDIENCE
+        )
+    )
+
+
+@pytest.fixture
+def fresh_auth_settings(provider: Provider, tmp_path: Path) -> Settings:
+    """ Settings for a second app, so a test can start one that shares no cached state. """
+    return Settings(
+        destdir=tmp_path / "fresh",
+        oidc=OidcSettings(
+            provider_url=provider.issuer,
+            audience=AUDIENCE
+        )
+    )
+
+
+@pytest.fixture
+def auth_client(auth_settings: Settings) -> Iterator[TestClient]:
+    with TestClient(create_app(auth_settings)) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def oidc(provider: Provider) -> OidcConfiguration:
+    """ What discovery would have produced, for the tests that bypass the app. """
+    return OidcConfiguration(
+        issuer=provider.issuer,
+        userinfo_endpoint=f"{provider.issuer}/userinfo",
+        http_timeout=5.0,
+        jwk_client=jwt.PyJWKClient(f"{provider.issuer}/jwks"),
+    )
+
+
+@pytest.fixture
+def instant_jwks_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Let an unknown kid refetch the key set immediately, instead of after the cooldown.
+
+    Rotation takes milliseconds here and half a minute in production, so without this a
+    rotation test would only be measuring PyJWKClient's rate limit. The cooldown is read
+    when the client is constructed, which is when the app starts up -- request this
+    fixture ahead of `auth_client` so it is patched by then.
+    """
+    monkeypatch.setattr(auth, "JWKS_REFRESH_COOLDOWN_SECONDS", 0.0)

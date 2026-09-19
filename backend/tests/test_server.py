@@ -11,6 +11,7 @@
 import os
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import quote
 from unittest.mock import ANY
 
 from fastapi import FastAPI
@@ -19,6 +20,7 @@ from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
 
+from harness import DEFAULT_SUBJECT_DIGEST, digest_of, Provider, upload
 from ise_record.postprocess import Result, ResultReason
 from ise_record.server import create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
 from ise_record.settings import Settings, SmtpSettings
@@ -598,17 +600,43 @@ def test_cors_preflight_jobs_forbidden(tmp_path: Path):
     assert response.status_code == 400
     assert "Access-Control-Allow-Origin" not in response.headers
 
+# An unauthenticated deployment has one shared destination directory, so there is nobody
+# to own a recording and nobody to withhold one from. Both endpoints refuse to serve rather
+# than hand every lecture to every caller -- these pin which way each of them refuses.
+
+def test_the_completed_listing_is_empty_without_authentication(
+    client: TestClient, settings: Settings
+):
+    (settings.destdir / "GVS_2025").mkdir(parents=True)
+    (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
+
+    response = client.get("/api/completed")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+def test_downloading_is_refused_without_authentication(
+    client: TestClient, settings: Settings
+):
+    (settings.destdir / "GVS_2025").mkdir(parents=True)
+    (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
+
+    response = client.get("/api/completed/GVS_2025")
+
+    assert response.status_code == 403
+    assert b"video" not in response.content
+
 def test_health_endpoint(client: TestClient):
     response = client.get("/api/health")
 
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health" ])
+@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/completed" ])
 def test_every_endpoint_moves_under_the_prefix(prefixed_client: TestClient, endpoint: str):
     assert prefixed_client.get(f"{ROUTE_PREFIX}{endpoint}").status_code != 404
 
-@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health" ])
+@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/completed" ])
 def test_nothing_is_left_behind_at_the_unprefixed_path(
     prefixed_client: TestClient, endpoint: str
 ):
@@ -625,3 +653,226 @@ def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str
 
     with TestClient(create_app(settings)) as client:
         assert client.get(f"{prefix}/api/health").status_code == 200
+
+
+# --- the endpoints under authentication ------------------------------------
+
+# Everything above drives a deployment with no provider configured, where every caller
+# shares one destination directory. With authentication on, the home directory is a Path
+# the dependency hands to the endpoint rather than a segment the endpoint joins onto
+# destdir itself -- so these are what show that a caller is confined to their own. How
+# that directory gets its name is in test_user_home.py.
+
+def schedule(auth_client: TestClient, token: str | None, recording: str = "foo"):
+    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
+    return auth_client.post("/api/jobs", headers=headers, json={"recording": recording})
+
+
+def test_scheduling_a_job_without_a_token_is_rejected(auth_client: TestClient):
+    response = schedule(auth_client, None)
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_a_job_runs_against_the_callers_own_recording(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    mock_postprocess = mocker.patch(
+        "ise_record.server.postprocess_recording",
+        autospec=True,
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS))
+
+    token = provider.mint()
+    assert upload(auth_client, token).status_code == 201
+
+    assert schedule(auth_client, token).status_code == 202
+
+    mock_postprocess.assert_called_once_with(tmp_path / DEFAULT_SUBJECT_DIGEST / "foo")
+
+
+def test_a_job_cannot_name_another_subjects_recording(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the recording name is the caller's to choose and says nothing about whose it is, so
+    # two lecturers naming a lecture alike is ordinary. What keeps them apart is that the
+    # name is resolved under the caller's own home and nowhere else.
+    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True)
+
+    assert upload(auth_client, provider.mint(sub="user-a")).status_code == 201
+
+    # a decoy at the destination root, so that this is the home directory being honored
+    # rather than the recording merely being absent everywhere: an implementation that
+    # resolved the name anywhere but under the caller's own home would find this one
+    (tmp_path / "foo" / "stream").mkdir(parents=True)
+
+    response = schedule(auth_client, provider.mint(sub="user-b"))
+
+    assert response.status_code == 400
+    mock_postprocess.assert_not_called()
+
+
+# --- the completed-recording endpoints -------------------------------------
+
+# These are the only endpoints that hand a stored name back to the auth_client and then take it
+# again as a path segment, so this is where the recording name has to work as an
+# identifier: through percent-encoding, through a auth_client that normalizes differently, and
+# without becoming a way into somebody else's home directory.
+
+def finish_recording(user_home: Path, recording: str, content: bytes = b"video") -> None:
+    """ A recording whose postprocessing ran to completion. """
+    (user_home / recording).mkdir(parents=True, exist_ok=True)
+    (user_home / recording / "presentation.webm").write_bytes(content)
+
+
+def list_completed(auth_client: TestClient, token: str | None):
+    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
+    return auth_client.get("/api/completed", headers=headers)
+
+
+def download_completed(auth_client: TestClient, token: str | None, recording: str):
+    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
+    # quote() is what any HTTP auth_client does with a non-ASCII path segment
+    return auth_client.get(f"/api/completed/{quote(recording)}", headers=headers)
+
+
+def test_listing_completed_recordings_without_a_token_is_rejected(auth_client: TestClient):
+    assert list_completed(auth_client, None).status_code == 401
+
+
+def test_downloading_without_a_token_is_rejected(auth_client: TestClient):
+    assert download_completed(auth_client, None, "foo").status_code == 401
+
+
+def test_the_listing_names_the_recordings(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+    finish_recording(home, "PSU_2026")
+
+    response = list_completed(auth_client, provider.mint())
+
+    assert response.status_code == 200
+    # the names the auth_client has to send back to /api/completed/{recording}, not the name of
+    # the file inside each of them -- which is "presentation.webm" for every recording
+    assert response.json() == [ "GVS_2025", "PSU_2026" ]
+
+
+def test_the_listing_leaves_out_recordings_that_are_not_rendered(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "rendered")
+    # uploaded but never postprocessed
+    (home / "raw" / "stream").mkdir(parents=True)
+    # postprocessing that failed partway, which is left on disk deliberately
+    (home / "failed").mkdir(parents=True)
+    (home / "failed" / "presentation.part.webm").write_bytes(b"half")
+
+    response = list_completed(auth_client, provider.mint())
+
+    assert response.json() == [ "rendered" ]
+
+
+def test_the_listing_only_shows_the_callers_own_recordings(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    finish_recording(tmp_path / digest_of("user-a"), "mine")
+    finish_recording(tmp_path / digest_of("user-b"), "theirs")
+
+    assert list_completed(auth_client, provider.mint(sub="user-a")).json() == [ "mine" ]
+    assert list_completed(auth_client, provider.mint(sub="user-b")).json() == [ "theirs" ]
+
+
+def test_a_completed_recording_can_be_downloaded(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025", b"the rendered lecture")
+
+    response = download_completed(auth_client, provider.mint(), "GVS_2025")
+
+    assert response.status_code == 200
+    assert response.content == b"the rendered lecture"
+    assert response.headers["content-type"] == "video/webm"
+    # the file on disk is called presentation.webm for everyone, so the recording name is
+    # what the browser has to save it under
+    assert response.headers["content-disposition"] == 'attachment; filename="GVS_2025.webm"'
+
+
+@pytest.mark.parametrize("recording", [
+    "Übung_3_2025",                                          # Latin with a diacritic
+    "机器学习_2025",                              # Chinese
+    "हिन्दी_2025",                  # Devanagari, combining marks
+])
+def test_a_recording_name_survives_the_round_trip_through_the_url(
+    recording: str, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the name is percent-encoded on the way out and decoded on the way back in, and
+    # SafeRecording runs over it a second time -- a stored name has to be a fixed point of
+    # that validator or the listing offers links that 404
+    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, recording)
+    token = provider.mint()
+
+    assert list_completed(auth_client, token).json() == [ recording ]
+
+    response = download_completed(auth_client, token, recording)
+
+    assert response.status_code == 200
+    assert response.content == b"video"
+    # RFC 5987, because the name does not fit in a quoted ASCII filename
+    assert response.headers["content-disposition"] == (
+        f"attachment; filename*=utf-8''{quote(recording)}.webm")
+
+
+def test_a_decomposed_name_downloads_the_composed_recording(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the counterpart of the upload test: macOS sends NFD, the recording was stored under
+    # NFC, and SafeRecording's BeforeValidator is what makes the two the same request
+    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "Übung_2025")
+
+    response = download_completed(auth_client, provider.mint(), "Übung_2025")
+
+    assert response.status_code == 200
+    assert response.content == b"video"
+
+
+def test_downloading_a_recording_that_was_never_rendered_is_a_404(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    (tmp_path / DEFAULT_SUBJECT_DIGEST / "raw" / "stream").mkdir(parents=True)
+
+    assert download_completed(auth_client, provider.mint(), "raw").status_code == 404
+
+
+def test_a_download_cannot_reach_another_subjects_recording(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    finish_recording(tmp_path / digest_of("user-a"), "GVS_2025", b"not yours")
+    # a decoy at the destination root, so a 404 here means the home directory was honored
+    # rather than the recording merely being absent everywhere
+    finish_recording(tmp_path, "GVS_2025", b"not yours either")
+
+    response = download_completed(auth_client, provider.mint(sub="user-b"), "GVS_2025")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("segment", [
+    "..", "%2e%2e", "..%2fetc", "%2e%2e%2f%2e%2e%2fetc%2fpasswd", ".hidden", "-rf",
+])
+def test_a_download_cannot_escape_the_home_directory(
+    auth_client: TestClient, provider: Provider, segment: str, tmp_path: Path
+):
+    # SafeRecording's pattern refuses a leading dot and anything with a separator in it,
+    # and a %2f is decoded before routing, so these never resolve to a path at all
+    (tmp_path / "escaped.webm").write_bytes(b"secret")
+
+    response = auth_client.get(
+        f"/api/completed/{segment}",
+        headers={"Authorization": f"Bearer {provider.mint()}"},
+    )
+
+    assert response.status_code in { 404, 422 }
+    assert b"secret" not in response.content

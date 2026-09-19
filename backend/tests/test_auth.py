@@ -1,404 +1,88 @@
+"""
+Token validation: what this service accepts as proof of who the caller is.
+
+What the service then does with that identity -- which directory the caller's recordings
+land in, and what the endpoints let them reach -- is in test_user_home.py and
+test_server.py. The fixtures and the stand-in provider are in conftest.py and harness.py.
+"""
+
 # pylint: disable=line-too-long
-# pylint: disable=missing-class-docstring
 # pylint: disable=missing-function-docstring
-# pylint: disable=missing-module-docstring
 # pylint: disable=redefined-outer-name
-# pylint: disable=too-many-instance-attributes
 
 from datetime import datetime, timedelta, timezone
-import hashlib
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
 from pathlib import Path
-import threading
-from typing import Any, Iterator
+from typing import Any
 
-from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 import jwt
 import pytest
-from pytest_mock import MockerFixture
 
-from ise_record import auth
-from ise_record.auth import (
-    OidcConfiguration,
-    REQUIRED_CLAIMS,
-    discover_oidc_config,
-    fs_safe_user_name,
-    prepare_user_home_dir
-)
-from ise_record.postprocess import Result, ResultReason
+from harness import AUDIENCE, CLIENT_ID, Provider, make_key, upload
+from ise_record.auth import discover_oidc_config, REQUIRED_CLAIMS
 from ise_record.server import create_app
 from ise_record.settings import OidcSettings, Settings
 
-CLIENT_ID = "ise-recorder"
-# Distinct from CLIENT_ID on purpose, and that is the normal deployment: an OIDC ID token's
-# `aud` is the client id, an access token's names the resource server, so a backend with an
-# audience of its own never sees an ID token pass. compose-with-auth.yml configures exactly
-# this pair. Only the test that is about a provider collapsing the two sets them equal.
-AUDIENCE = "ise-recorder-api"
-DEFAULT_SUBJECT = "b472c41f9b227e6596e921541f46dc9d7"
 
 
-def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
-    """ Generate an RSA key pair and the JWK describing its public half """
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True) # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
-    jwk.update({"kid": kid, "use": "sig", "alg": "RS256"}) # pyright: ignore[reportUnknownMemberType]
-    return private_key, jwk # pyright: ignore[reportUnknownVariableType]
+def test_valid_token_is_accepted(auth_client: TestClient, provider: Provider):
+    assert upload(auth_client, provider.mint()).status_code == 201
 
 
-class Provider:
-    """ A stand-in OpenID provider serving discovery and JWKS documents over HTTP """
-
-    def __init__(self) -> None:
-        self.keys: dict[str, tuple[rsa.RSAPrivateKey, dict[str, Any]]] = {}
-        self.jwks_available = True
-        self.jwks_fetch_count = 0
-        # None means the endpoint 404s: a provider that has nothing to say about the caller
-        self.userinfo_response: tuple[int, str, bytes] | None = None
-        self.userinfo_fetch_count = 0
-        self.userinfo_authorization: str | None = None
-        # userinfo_endpoint is only RECOMMENDED in OIDC Discovery 1.0, so a conforming
-        # provider may leave it out
-        self.advertise_userinfo = True
-        self.signing_algorithms: list[Any] = ["RS256"]
-        self._server: HTTPServer | None = None
-        self._thread: threading.Thread | None = None
-
-    @property
-    def issuer(self) -> str:
-        assert self._server is not None
-        return f"http://127.0.0.1:{self._server.server_port}"
-
-    def add_key(self, kid: str) -> None:
-        self.keys[kid] = make_key(kid)
-
-    def start(self) -> None:
-        provider = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # pylint: disable=invalid-name
-                if self.path.endswith("/.well-known/openid-configuration"):
-                    metadata: dict[str, Any] = {
-                        "issuer": provider.issuer,
-                        "authorization_endpoint": f"{provider.issuer}/authorize",
-                        "token_endpoint": f"{provider.issuer}/token",
-                        "jwks_uri": f"{provider.issuer}/jwks",
-                        "id_token_signing_alg_values_supported": provider.signing_algorithms,
-                    }
-                    if provider.advertise_userinfo:
-                        metadata["userinfo_endpoint"] = f"{provider.issuer}/userinfo"
-                    return provider.respond(self, metadata)
-
-                if self.path.endswith("/jwks"):
-                    provider.jwks_fetch_count += 1
-                    if not provider.jwks_available:
-                        self.send_response(503)
-                        self.end_headers()
-                        return None
-                    return provider.respond(self, {
-                        "keys": [jwk for _, jwk in provider.keys.values()]
-                    })
-
-                if self.path.endswith("/userinfo"):
-                    provider.userinfo_fetch_count += 1
-                    provider.userinfo_authorization = self.headers.get("Authorization")
-                    if provider.userinfo_response is None:
-                        self.send_response(404)
-                        self.end_headers()
-                        return None
-                    return provider.respond_raw(self, *provider.userinfo_response)
-
-                self.send_response(404)
-                self.end_headers()
-                return None
-
-        self._server = HTTPServer(("127.0.0.1", 0), Handler)
-        # serve_forever polls for the shutdown flag, and defaults to doing so twice a
-        # second -- which every test would then wait out in teardown
-        self._thread = threading.Thread(
-            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
-        self._thread.start()
-
-    @staticmethod
-    def respond(handler: BaseHTTPRequestHandler, body: dict[str, Any]) -> None:
-        Provider.respond_raw(handler, 200, "application/json", json.dumps(body).encode())
-
-    @staticmethod
-    def respond_raw(
-        handler: BaseHTTPRequestHandler, status: int, content_type: str, body: bytes
-    ) -> None:
-        handler.send_response(status)
-        handler.send_header("Content-Type", content_type)
-        handler.send_header("Content-Length", str(len(body)))
-        handler.end_headers()
-        handler.wfile.write(body)
-
-    def serve_userinfo(self, **claims: Any) -> None:
-        """ Answer UserInfo with these claims, the way a provider holding them would """
-        self.userinfo_response = (200, "application/json", json.dumps(claims).encode())
-
-    def serve_userinfo_raw(self, status: int, content_type: str, body: bytes) -> None:
-        """ Answer UserInfo with a body of our choosing, for the shapes providers get wrong """
-        self.userinfo_response = (status, content_type, body)
-
-    def stop(self) -> None:
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-
-    def mint(self, kid: str = "key-1", **overrides: Any) -> str:
-        """ Issue a signed access token, with claim overrides applied last """
-        now = datetime.now(timezone.utc)
-        claims: dict[str, Any] = {
-            "iss": self.issuer,
-            "sub": DEFAULT_SUBJECT,
-            "aud": AUDIENCE,
-            "azp": CLIENT_ID,
-            "client_id": CLIENT_ID,
-            "scope": "openid profile email",
-            "preferred_username": "lecturer",
-            "iat": now,
-            "exp": now + timedelta(minutes=5),
-        }
-        claims.update(overrides)
-        claims = {name: value for name, value in claims.items() if value is not None}
-
-        private_key, _ = self.keys[kid]
-        return jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
-
-
-@pytest.fixture
-def provider() -> Iterator[Provider]:
-    instance = Provider()
-    instance.add_key("key-1")
-    instance.start()
-    yield instance
-    instance.stop()
-
-
-@pytest.fixture
-def settings(provider: Provider, tmp_path: Path) -> Settings:
-    return Settings(
-        destdir=tmp_path,
-        oidc=OidcSettings(
-            provider_url=provider.issuer,
-            audience=AUDIENCE
-        )
-    )
-
-
-@pytest.fixture
-def fresh_settings(provider: Provider, tmp_path: Path) -> Settings:
-    return Settings(
-        destdir=tmp_path / "fresh",
-        oidc=OidcSettings(
-            provider_url=provider.issuer,
-            audience=AUDIENCE
-        )
-    )
-
-
-@pytest.fixture
-def client(settings: Settings) -> Iterator[TestClient]:
-    with TestClient(create_app(settings)) as test_client:
-        yield test_client
-
-
-@pytest.fixture
-def oidc(provider: Provider) -> OidcConfiguration:
-    """ What discovery would have produced, for the tests that bypass the app. """
-    return OidcConfiguration(
-        issuer=provider.issuer,
-        userinfo_endpoint=f"{provider.issuer}/userinfo",
-        http_timeout=5.0,
-        jwk_client=jwt.PyJWKClient(f"{provider.issuer}/jwks"),
-    )
-
-
-@pytest.fixture
-def instant_jwks_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Let an unknown kid refetch the key set immediately, instead of after the cooldown.
-
-    Rotation takes milliseconds here and half a minute in production, so without this a
-    rotation test would only be measuring PyJWKClient's rate limit. The cooldown is read
-    when the client is constructed, which is when the app starts up -- request this
-    fixture ahead of `client` so it is patched by then.
-    """
-    monkeypatch.setattr(auth, "JWKS_REFRESH_COOLDOWN_SECONDS", 0.0)
-
-
-def upload(client: TestClient, token: str | None, index: int = 0):
-    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    return client.post(
-        "/api/chunks",
-        headers=headers,
-        data={"recording": "foo", "track": "stream", "index": str(index)},
-        files={"chunk": b"payload"},
-    )
-
-def upload_chunk_path(base_dir: Path, user_segment: str, index: int = 0) -> Path:
-    return base_dir / user_segment / "foo" / "stream" / f"chunk.{index:04d}"
-
-
-def digest_of(subject: str) -> str:
-    """ The stable directory name auth.py derives from a subject. """
-    return hashlib.sha3_256(subject.encode("utf-8")).hexdigest()
-
-
-def alias_of(username: str, subject_digest: str) -> str:
-    """ The readable symlink auth.py puts beside the stable directory. """
-    return f"{username}-{subject_digest[:12]}"
-
-
-def home_entries(base_dir: Path) -> set[str]:
-    """
-    Everything auth.py has put in the destination root.
-
-    The interesting assertion is usually that there is nothing here beyond the digest --
-    a name derived from an untrustworthy username is exactly what these tests are about --
-    so this looks at the whole directory rather than at one expected path.
-    """
-    return {entry.name for entry in base_dir.iterdir()}
-
-
-DEFAULT_SUBJECT_DIGEST = digest_of(DEFAULT_SUBJECT)
-
-
-def test_valid_token_is_accepted(client: TestClient, provider: Provider):
-    assert upload(client, provider.mint()).status_code == 201
-
-
-def test_chunk_lands_in_a_per_user_directory(client: TestClient, provider: Provider, tmp_path: Path):
-    assert upload(client, provider.mint()).status_code == 201
-
-    # the chunk lives under the subject digest, and is reachable through the readable
-    # alias as well -- a shell user finding "lecturer-..." has to land on the real data
-    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).is_file()
-    assert upload_chunk_path(tmp_path, alias_of("lecturer", DEFAULT_SUBJECT_DIGEST)).is_file()
-    assert len(list(tmp_path.rglob("chunk.*"))) == 1
-
-
-def test_different_subjects_get_different_directories(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    assert upload(client, provider.mint(sub="user-a"), index=0).status_code == 201
-    assert upload(client, provider.mint(sub="user-b"), index=1).status_code == 201
-
-    assert upload_chunk_path(tmp_path, digest_of("user-a"), index=0).is_file()
-    assert upload_chunk_path(tmp_path, digest_of("user-b"), index=1).is_file()
-
-
-# The home directory is a Path the dependency hands to the endpoint, rather than a segment
-# the endpoint joins onto destdir itself, so the endpoints are what shows whether a caller
-# is confined to their own. /chunks is covered above -- these are /jobs, which has no
-# coverage under authentication otherwise.
-
-def schedule(client: TestClient, token: str | None, recording: str = "foo"):
-    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    return client.post("/api/jobs", headers=headers, json={"recording": recording})
-
-
-def test_scheduling_a_job_without_a_token_is_rejected(client: TestClient):
-    response = schedule(client, None)
-
+def test_missing_token_is_rejected(auth_client: TestClient):
+    response = upload(auth_client, None)
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
 
 
-def test_a_job_runs_against_the_callers_own_recording(
-    mocker: MockerFixture, client: TestClient, provider: Provider, tmp_path: Path
-):
-    mock_postprocess = mocker.patch(
-        "ise_record.server.postprocess_recording",
-        autospec=True,
-        return_value=Result(output_file=None, reason=ResultReason.SUCCESS))
-
-    token = provider.mint()
-    assert upload(client, token).status_code == 201
-
-    assert schedule(client, token).status_code == 202
-
-    mock_postprocess.assert_called_once_with(tmp_path / DEFAULT_SUBJECT_DIGEST / "foo")
+def test_garbage_token_is_rejected(auth_client: TestClient):
+    assert upload(auth_client, "not-a-jwt").status_code == 401
 
 
-def test_a_job_cannot_name_another_subjects_recording(
-    mocker: MockerFixture, client: TestClient, provider: Provider, tmp_path: Path
-):
-    # the recording name is the caller's to choose and says nothing about whose it is, so
-    # two lecturers naming a lecture alike is ordinary. What keeps them apart is that the
-    # name is resolved under the caller's own home and nowhere else.
-    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True)
-
-    assert upload(client, provider.mint(sub="user-a")).status_code == 201
-
-    # a decoy at the destination root, so that this is the home directory being honored
-    # rather than the recording merely being absent everywhere: an implementation that
-    # resolved the name anywhere but under the caller's own home would find this one
-    (tmp_path / "foo" / "stream").mkdir(parents=True)
-
-    response = schedule(client, provider.mint(sub="user-b"))
-
-    assert response.status_code == 400
-    mock_postprocess.assert_not_called()
-
-
-def test_missing_token_is_rejected(client: TestClient):
-    response = upload(client, None)
-    assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"] == "Bearer"
-
-
-def test_garbage_token_is_rejected(client: TestClient):
-    assert upload(client, "not-a-jwt").status_code == 401
-
-
-def test_expired_token_is_rejected(client: TestClient, provider: Provider):
+def test_expired_token_is_rejected(auth_client: TestClient, provider: Provider):
     stale = datetime.now(timezone.utc) - timedelta(hours=1)
     token = provider.mint(iat=stale, exp=stale + timedelta(minutes=5))
-    assert upload(client, token).status_code == 401
+    assert upload(auth_client, token).status_code == 401
 
 
-def test_wrong_issuer_is_rejected(client: TestClient, provider: Provider):
-    assert upload(client, provider.mint(iss="https://evil.example.com")).status_code == 401
+def test_wrong_issuer_is_rejected(auth_client: TestClient, provider: Provider):
+    assert upload(auth_client, provider.mint(iss="https://evil.example.com")).status_code == 401
 
 
-def test_wrong_audience_is_rejected(client: TestClient, provider: Provider):
-    assert upload(client, provider.mint(aud="some-other-app")).status_code == 401
+def test_wrong_audience_is_rejected(auth_client: TestClient, provider: Provider):
+    assert upload(auth_client, provider.mint(aud="some-other-app")).status_code == 401
 
 
 def test_a_token_for_the_client_rather_than_the_api_is_rejected(
-    client: TestClient, provider: Provider
+    auth_client: TestClient, provider: Provider
 ):
-    # `aud` of the client id is what an OIDC ID token carries, so on a normal deployment
+    # `aud` of the auth_client id is what an OIDC ID token carries, so on a normal deployment
     # this is the audience check refusing an ID token -- no inspection of the token's kind
     # needed, and nothing else in this module has to care.
-    assert upload(client, provider.mint(aud=CLIENT_ID)).status_code == 401
+    assert upload(auth_client, provider.mint(aud=CLIENT_ID)).status_code == 401
 
 
 @pytest.mark.parametrize("claim", REQUIRED_CLAIMS)
 def test_missing_required_claim_is_rejected(
-    client: TestClient, provider: Provider, claim: str
+    auth_client: TestClient, provider: Provider, claim: str
 ):
     # mint() drops a claim whose override is None, so this asks for each required claim in
     # turn. Parametrized over the constant itself: adding a claim to REQUIRED_CLAIMS without
     # a provider that sends it is how this went wrong before.
-    assert upload(client, provider.mint(kid="key-1", **{claim: None})).status_code == 401
+    assert upload(auth_client, provider.mint(kid="key-1", **{claim: None})).status_code == 401
 
 
-def test_missing_subject_is_rejected(client: TestClient, provider: Provider):
-    assert upload(client, provider.mint(sub=None)).status_code == 401
+def test_missing_subject_is_rejected(auth_client: TestClient, provider: Provider):
+    assert upload(auth_client, provider.mint(sub=None)).status_code == 401
 
 
 def test_an_access_token_without_a_scope_claim_is_accepted(
-    client: TestClient, provider: Provider
+    auth_client: TestClient, provider: Provider
 ):
     # "scope" was in REQUIRED_CLAIMS once. It is not a claim every provider emits -- Entra
     # ID spells it "scp" -- and a required claim that some conforming provider omits is a
     # deployment that cannot authenticate at all, with a bare 401 to explain it.
-    assert upload(client, provider.mint(scope=None)).status_code == 201
+    assert upload(auth_client, provider.mint(scope=None)).status_code == 201
 
 
 def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_identifiers(
@@ -409,11 +93,11 @@ def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_identifiers
 
     Nothing in this module inspects what kind of token it is, because normally it does not
     have to: the audience settles it, which is what the test above shows. Some providers
-    force the resource server's audience to equal the client id -- kanidm does -- and then
+    force the resource server's audience to equal the auth_client id -- kanidm does -- and then
     an ID token and an access token are indistinguishable and this accepts both.
 
     That is judged acceptable because it is not a privilege boundary. Whoever holds an ID
-    token for this client is the person who just authenticated, and can obtain an access
+    token for this auth_client is the person who just authenticated, and can obtain an access
     token for the same identity whenever they like; accepting one guards against a frontend
     bug, not against an attacker.
 
@@ -438,473 +122,72 @@ def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_identifiers
         assert upload(collapsed_client, id_token_shaped).status_code == 201
 
 
-def test_unsigned_token_is_rejected(client: TestClient, provider: Provider):
+def test_unsigned_token_is_rejected(auth_client: TestClient, provider: Provider):
     claims: dict[str, Any] = {
         "iss": provider.issuer, "sub": "nobody", "aud": AUDIENCE, "scope": "openid",
         "iat": datetime.now(timezone.utc), "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
     }
     forged = jwt.encode(claims, key="", algorithm="none", headers={"kid": "key-1"})
-    assert upload(client, forged).status_code == 401
+    assert upload(auth_client, forged).status_code == 401
 
 
-def test_token_signed_by_an_unknown_key_is_rejected(client: TestClient, provider: Provider):
+def test_token_signed_by_an_unknown_key_is_rejected(auth_client: TestClient, provider: Provider):
     stranger, _ = make_key("key-1")
     claims: dict[str, Any] = {
         "iss": provider.issuer, "sub": "nobody", "aud": AUDIENCE, "scope": "openid",
         "iat": datetime.now(timezone.utc), "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
     }
     forged = jwt.encode(claims, stranger, algorithm="RS256", headers={"kid": "key-1"})
-    assert upload(client, forged).status_code == 401
+    assert upload(auth_client, forged).status_code == 401
 
 
-def test_unknown_kid_is_rejected(client: TestClient, provider: Provider):
+def test_unknown_kid_is_rejected(auth_client: TestClient, provider: Provider):
     provider.add_key("key-2")
     token = provider.mint(kid="key-2")
     del provider.keys["key-2"]
 
-    assert upload(client, token).status_code == 401
+    assert upload(auth_client, token).status_code == 401
 
 
 # --- operational behavior -------------------------------------------------
 
 def test_rotated_signing_key_is_picked_up_without_restart(
     instant_jwks_refresh: None,  # pylint: disable=unused-argument
-    client: TestClient,
+    auth_client: TestClient,
     provider: Provider,
 ):
-    assert upload(client, provider.mint(), index=0).status_code == 201
+    assert upload(auth_client, provider.mint(), index=0).status_code == 201
 
     # The provider rotates: a new key appears and the old one is withdrawn.
     provider.add_key("key-2")
     del provider.keys["key-1"]
 
-    assert upload(client, provider.mint(kid="key-2"), index=1).status_code == 201
+    assert upload(auth_client, provider.mint(kid="key-2"), index=1).status_code == 201
 
 
-def test_unreachable_jwks_reports_service_unavailable(client: TestClient, provider: Provider):
+def test_unreachable_jwks_reports_service_unavailable(auth_client: TestClient, provider: Provider):
     token = provider.mint()
     provider.jwks_available = False
 
-    assert upload(client, token).status_code == 503
+    assert upload(auth_client, token).status_code == 503
 
 
-def test_jwks_is_cached_between_requests(client: TestClient, provider: Provider):
+def test_jwks_is_cached_between_requests(auth_client: TestClient, provider: Provider):
     for index in range(4):
-        assert upload(client, provider.mint(), index=index).status_code == 201
+        assert upload(auth_client, provider.mint(), index=index).status_code == 201
 
     assert provider.jwks_fetch_count == 1
 
 
+
+
+# --- a deployment with no provider configured ------------------------------
+
 def test_unconfigured_deployment_stays_open(tmp_path: Path):
-    with TestClient(create_app(Settings(destdir=tmp_path))) as client:
-        assert upload(client, None).status_code == 201
+    with TestClient(create_app(Settings(destdir=tmp_path))) as open_client:
+        assert upload(open_client, None).status_code == 201
 
     assert (tmp_path / "foo" / "stream" / "chunk.0000").is_file()
-
-
-def test_a_destination_directory_that_does_not_exist_yet_is_created(
-    provider: Provider, fresh_settings: Settings
-):
-    with TestClient(create_app(fresh_settings)) as fresh:
-        assert upload(fresh, provider.mint()).status_code == 201
-
-    assert upload_chunk_path(fresh_settings.destdir, DEFAULT_SUBJECT_DIGEST).is_file()
-
-
-# --- directory naming ------------------------------------------------------
-
-SUBJECT_DIGEST = digest_of("abc")
-
-
-# NAME_MAX on ext4. auth.py keeps its own, much smaller cap on the username part; this is
-# the bound the filesystem imposes on whatever comes out of it.
-NAME_MAX_BYTES = 255
-
-def claims_for(username: Any) -> dict[str, Any]:
-    return {"sub": "abc", "preferred_username": username}
-
-async def home_dir_for(tmp_path: Path, username: Any, oidc: OidcConfiguration) -> Path:
-    """
-    The directory name derived for a username, with the subject held fixed.
-
-    A username that is not a string is absent as far as auth.py is concerned, so these
-    calls reach the UserInfo endpoint. The provider fixture leaves it unconfigured, which
-    is a 404 -- the same digest fallback the old synchronous helper took directly.
-    """
-    return await prepare_user_home_dir(tmp_path,  claims_for(username), {}, "access-token", oidc)
-
-
-@pytest.mark.parametrize("username,expected_prefix", [
-    ("lecturer", "lecturer-"),
-    ("m.mustermann", "m.mustermann-"),
-    ("user@example.com", "user@example.com-"),        # the shape most IdPs actually hand out
-    ("mit Leerzeichen", "mit_Leerzeichen-"),          # spaces become separators, not gaps
-    ("  padded  ", "padded-"),                        # stripped before the interior collapse
-    ("zwei  Leerzeichen", "zwei_Leerzeichen-"),       # and a run of them collapses to one
-    ("\u00e4 \u00f6 \u00fc", "\u00e4_\u00f6_\u00fc-"),
-    ("\u5f20\u4e09", "\u5f20\u4e09-"),                        # CJK is carried through intact
-    ("\u0939\u093f\u0928\u094d\u0926\u0940", "\u0939\u093f\u0928\u094d\u0926\u0940-"),      # and so are combining marks, which \\w dropped
-    ("a/b", "ab-"),                                   # the separator goes, the name survives
-    ("CON", "CON_-"),                                 # reserved on Windows, renamed by pathvalidate
-])
-@pytest.mark.asyncio
-async def test_readable_username_becomes_the_directory_alias(
-    username: str, expected_prefix: str, oidc: OidcConfiguration, tmp_path: Path
-):
-    home = await home_dir_for(tmp_path, username, oidc)
-    expected_alias = tmp_path / f"{expected_prefix}{SUBJECT_DIGEST[:12]}"
-
-    assert home == tmp_path / SUBJECT_DIGEST
-    assert home.is_dir()
-
-    assert expected_alias.readlink() == Path(SUBJECT_DIGEST)
-    assert home_entries(tmp_path) == { SUBJECT_DIGEST, expected_alias.name }
-
-
-@pytest.mark.parametrize("username", [
-    None,                    # not a string at all
-    ".hidden",               # a readable name, but not one that may lead
-    "../../etc/passwd",      # flattened by pathvalidate, and then it may not lead either
-])
-@pytest.mark.asyncio
-async def test_unusable_username_yields_no_alias_link(
-    username: Any, oidc: OidcConfiguration, tmp_path: Path
-):
-    # fs_safe_user_name decides which names are refused, and the table for that is with it
-    # below; the behavior under test here is only that a refusal leaves nothing on disk --
-    # not a link under a name nobody vetted, and not a home directory somewhere else
-    home = await home_dir_for(tmp_path, username, oidc)
-
-    assert home == tmp_path / SUBJECT_DIGEST
-    assert home_entries(tmp_path) == { SUBJECT_DIGEST }
-
-
-@pytest.mark.parametrize("username,expected", [
-    ("Anna\u00a0Schmidt", "Anna_Schmidt-"),    # non-breaking space, as a web form sends it
-    ("\u3000\u674e\u3000", "\u674e-"),                 # ideographic space, as a CJK IME sends it
-    ("a\u2003b", "a_b-"),                      # em space
-    ("a\tb", "a_b-"),
-    ("a\nb", "a_b-"),
-])
-@pytest.mark.asyncio
-async def test_unicode_whitespace_is_a_separator_like_any_other(
-    username: str, expected: str, oidc: OidcConfiguration, tmp_path: Path
-):
-    # \s on a str pattern is Unicode-aware, which is what keeps a pasted U+3000 out of a
-    # directory name -- pathvalidate would have left it there
-    home = await home_dir_for(tmp_path, username, oidc)
-
-    assert home == tmp_path / SUBJECT_DIGEST
-    assert home_entries(tmp_path) == { SUBJECT_DIGEST, f"{expected}{SUBJECT_DIGEST[:12]}" }
-
-
-@pytest.mark.asyncio
-async def test_the_directory_name_does_not_depend_on_the_composition_of_the_username(
-    oidc: OidcConfiguration, tmp_path: Path
-):
-    # spelled with escapes: the two forms are indistinguishable on screen, so an editor
-    # normalizing this file would turn one half of this test into a copy of the other
-    decomposed = "U\u0308bung"
-    composed = "\u00dcbung"
-
-    assert decomposed != composed
-    assert await home_dir_for(tmp_path, decomposed, oidc) == await home_dir_for(tmp_path, composed, oidc)
-
-    # one alias, not two: the second call has to recognize the first one's name as its own
-    assert home_entries(tmp_path) == { SUBJECT_DIGEST, alias_of("\u00dcbung", SUBJECT_DIGEST) }
-
-@pytest.mark.parametrize("username", [
-    "lecturer", "a/b", "\\\\server\\share",
-    "a" * 300, "\u673a" * 200, "\U00020000" * 100, "\u00e4 \u00f6 \u00fc", "nul\x00byte",
-    "%2e%2e%2f", "\u3000\u674e\u3000",
-    "\u0308mark"
-])
-@pytest.mark.asyncio
-async def test_alias_name_is_always_a_safe_single_path_segment(
-    username: Any, oidc: OidcConfiguration
-):
-    name = await fs_safe_user_name(claims_for(username), "access-token", oidc)
-
-    assert name, "an empty directory name would put chunks in the destination root"
-    assert not name.startswith((".", "-")), "hidden on unix, an option to anything argv-shaped"
-    assert "/" not in name and "\x00" not in name
-    assert not any(character.isspace() for character in name)
-    assert (Path("/data") / name).resolve().parent == Path("/data")
-
-    # the bound that matters is bytes, not characters: NAME_MAX is 255 bytes on ext4 and
-    # the 48-character slice can be four bytes a character -- and it is the whole alias,
-    # username plus the separator plus twelve digest characters, that has to fit
-    assert len(alias_of(name, SUBJECT_DIGEST).encode("utf-8")) <= NAME_MAX_BYTES
-
-
-@pytest.mark.parametrize("username", [
-    None, 42,                                 # not a string at all
-    "", "   ", "\u3000",                   # nothing left after stripping
-    "...", "---", "..", "-.-.-", "..;/",      # nothing usable left at all
-    ".hidden", ".NET", "-rf", "-weird",       # a readable name, but not one that may lead
-    "../../etc/passwd",                       # flattened to "....etcpasswd", so it may not either
-    "- - - 81457m4573r 9001 - - -",
-])
-@pytest.mark.asyncio
-async def test_no_alias_for_broken_usernames(username: Any, oidc: OidcConfiguration):
-    # a deliberate trade: rather than strip the leading character and keep a readable
-    # prefix, the whole alias is dropped. Nothing downstream validates this name -- unlike
-    # a recording name, there is no pattern behind it -- so this one check is the entire
-    # guarantee, and it is worth keeping obvious. Dropping the alias costs nothing: the
-    # home directory does not depend on it.
-    assert await fs_safe_user_name(claims_for(username), "access-token", oidc) is None
-
-
-@pytest.mark.asyncio
-async def test_the_home_directory_survives_a_change_of_username(
-    oidc: OidcConfiguration, tmp_path: Path
-):
-    # the point of naming the directory after the subject: whether the IdP renames someone,
-    # or merely answers a UserInfo query today that it failed to answer yesterday, the
-    # recordings already on disk have to stay where the service will look for them
-    before = await prepare_user_home_dir(
-        tmp_path, claims_for("lecturer"), {}, "access-token", oidc)
-
-    # an empty cache is a restart: nothing is being read back from the first call
-    after = await prepare_user_home_dir(
-        tmp_path, claims_for("dozentin"), {}, "access-token", oidc)
-
-    assert before == after == tmp_path / SUBJECT_DIGEST
-
-    # the new alias joins the old one rather than replacing it -- both are readable, and
-    # nothing that a shell user or an old log refers to stops resolving
-    assert home_entries(tmp_path) == {
-        SUBJECT_DIGEST,
-        alias_of("lecturer", SUBJECT_DIGEST),
-        alias_of("dozentin", SUBJECT_DIGEST),
-    }
-    assert (tmp_path / alias_of("dozentin", SUBJECT_DIGEST)).readlink() == Path(SUBJECT_DIGEST)
-
-
-@pytest.mark.asyncio
-async def test_an_alias_name_that_is_already_taken_is_left_alone(
-    oidc: OidcConfiguration, tmp_path: Path
-):
-    # the name the alias wants is exactly what the release before this one used for the
-    # real home directory, so on the first start after an upgrade it is occupied. The
-    # recordings under it are not migrated, but the upgrade must not trip over them.
-    occupied = tmp_path / alias_of("lecturer", SUBJECT_DIGEST)
-    (occupied / "old-recording").mkdir(parents=True)
-
-    home = await prepare_user_home_dir(
-        tmp_path, claims_for("lecturer"), {}, "access-token", oidc)
-
-    assert home == tmp_path / SUBJECT_DIGEST
-    assert not occupied.is_symlink()
-    assert (occupied / "old-recording").is_dir()
-
-
-@pytest.mark.asyncio
-async def test_username_collisions_are_separated_by_the_digest(oidc: OidcConfiguration, tmp_path: Path):
-    # pathvalidate maps several usernames onto one string -- "DOMAIN\\user" and "DOMAINuser"
-    # both come out as the latter -- so the digest is the only thing keeping them apart
-    first = await prepare_user_home_dir(
-        tmp_path, {"sub": "user-a", "preferred_username": "same"}, {}, "access-token", oidc)
-    second = await prepare_user_home_dir(
-        tmp_path, {"sub": "user-b", "preferred_username": "same"}, {}, "access-token", oidc)
-
-    assert first != second
-
-
-# --- the UserInfo fallback -------------------------------------------------
-
-# Kanidm does not put profile claims in an access token even when the profile scope was
-# granted, which the spec permits -- identity claims are only promised in the id token and
-# at the UserInfo endpoint. So a token without preferred_username is not an error, and
-# these cover what auth.py makes of one.
-
-def test_userinfo_is_not_consulted_when_the_token_carries_the_username(
-    client: TestClient, provider: Provider
-):
-    assert upload(client, provider.mint()).status_code == 201
-
-    # the round trip is per user and on the upload path, so not making it is the point
-    assert provider.userinfo_fetch_count == 0
-
-
-def test_username_comes_from_userinfo_when_the_token_omits_it(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
-
-    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
-
-    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).is_file()
-    assert upload_chunk_path(tmp_path, alias_of("lecturer", DEFAULT_SUBJECT_DIGEST)).is_file()
-    assert provider.userinfo_fetch_count == 1
-
-
-def test_userinfo_is_asked_with_the_callers_access_token(
-    client: TestClient, provider: Provider
-):
-    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
-    token = provider.mint(preferred_username=None)
-
-    assert upload(client, token).status_code == 201
-
-    # the access token is the credential for UserInfo too; nothing else would authorize us
-    assert provider.userinfo_authorization == f"Bearer {token}"
-
-
-def test_userinfo_about_a_different_subject_is_discarded(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    # OIDC Core 5.3.2 requires this check: an answer about somebody else would otherwise
-    # put this caller's recordings in a directory named after them
-    provider.serve_userinfo(sub="somebody-else", preferred_username="mallory")
-
-    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
-
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST }
-
-
-@pytest.mark.parametrize("response", [
-    (502, "text/html", b"<html><body>502 Bad Gateway</body></html>"),  # a proxy, not the OP
-    (403, "application/json", b'{"error":"insufficient_scope"}'),      # profile not granted
-    (200, "application/jwt", b"eyJhbGciOiJSUzI1NiJ9.e30.sig"),         # signed UserInfo
-    (200, "application/json", b""),                                    # nothing at all
-    (200, "application/json", b'["not", "an", "object"]'),             # json, wrong shape
-    (200, "application/json", b'{"preferred_username":"lecturer"}'),   # no sub to check
-])
-def test_unusable_userinfo_falls_back_to_the_digest(
-    client: TestClient, provider: Provider, tmp_path: Path, response: tuple[int, str, bytes]
-):
-    provider.serve_userinfo_raw(*response)
-
-    # a cosmetic directory name is not worth failing an upload over
-    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
-
-    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).is_file()
-    # and a name this module could not make sense of is not worth guessing at either
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST }
-
-
-def test_userinfo_with_a_non_string_username_falls_back_to_the_digest(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username=42)
-
-    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
-
-    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).is_file()
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST }
-
-
-def test_unreachable_userinfo_does_not_fail_the_upload(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    provider.serve_userinfo(sub="offline-user", preferred_username="lecturer")
-    # minted while the provider is up, and verified afterwards from the cached key set
-    token = provider.mint(sub="offline-user", preferred_username=None)
-    assert upload(client, provider.mint(), index=0).status_code == 201
-    provider.stop()
-
-    assert upload(client, token, index=1).status_code == 201
-
-    assert upload_chunk_path(tmp_path, digest_of("offline-user"), index=1).is_file()
-    # the first caller got an alias; this one gets a home directory and nothing else
-    assert home_entries(tmp_path) == {
-        DEFAULT_SUBJECT_DIGEST,
-        alias_of("lecturer", DEFAULT_SUBJECT_DIGEST),
-        digest_of("offline-user"),
-    }
-
-
-def test_username_from_userinfo_is_sanitized_like_one_from_the_token(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    # UserInfo is a second way into fs_safe_user_name, and must not be a way around it
-    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="../../etc/passwd")
-
-    assert upload(client, provider.mint(preferred_username=None)).status_code == 201
-
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST }
-
-
-def test_userinfo_is_consulted_once_per_subject(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
-    token = provider.mint(preferred_username=None)
-
-    for index in range(3):
-        assert upload(client, token, index=index).status_code == 201
-
-    assert provider.userinfo_fetch_count == 1
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST, alias_of("lecturer", DEFAULT_SUBJECT_DIGEST) }
-
-
-def test_a_recovering_provider_does_not_move_a_directory_already_in_use(
-    client: TestClient, provider: Provider, tmp_path: Path
-):
-    # UserInfo unavailable for the first chunk, so this lecture starts under the digest
-    token = provider.mint(preferred_username=None)
-    assert upload(client, token, index=0).status_code == 201
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST }
-
-    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
-
-    # the rest of the lecture has to keep landing beside the first chunk, or the recording
-    # is split across two directories and the postprocessing job only ever sees one
-    assert upload(client, token, index=1).status_code == 201
-
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST }
-    assert provider.userinfo_fetch_count == 1
-
-
-# --- a provider that has no UserInfo endpoint ------------------------------
-
-# OIDC Discovery 1.0 lists userinfo_endpoint as RECOMMENDED, not REQUIRED, so its absence
-# is not an error and must not take the service down with it.
-
-@pytest.mark.asyncio
-async def test_discovery_records_the_userinfo_endpoint(provider: Provider, settings: Settings):
-    config = await discover_oidc_config(settings)
-
-    assert config.userinfo_endpoint == f"{provider.issuer}/userinfo"
-
-
-@pytest.mark.asyncio
-async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoint(
-    provider: Provider, settings: Settings
-):
-    provider.advertise_userinfo = False
-
-    config = await discover_oidc_config(settings)
-
-    assert config.userinfo_endpoint is None
-
-
-def test_tokens_are_still_accepted_without_a_userinfo_endpoint(
-    provider: Provider, settings: Settings, tmp_path: Path
-):
-    provider.advertise_userinfo = False
-
-    with TestClient(create_app(settings)) as client:
-        assert upload(client, provider.mint()).status_code == 201
-
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST, alias_of("lecturer", DEFAULT_SUBJECT_DIGEST) }
-
-
-def test_no_userinfo_endpoint_falls_back_to_the_digest_without_asking(
-    provider: Provider, settings: Settings, tmp_path: Path
-):
-    provider.advertise_userinfo = False
-    # served, but never advertised: if the endpoint were guessed at rather than taken from
-    # the discovery document, this name would show up in the directory and give it away
-    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
-
-    with TestClient(create_app(settings)) as client:
-        assert upload(client, provider.mint(preferred_username=None)).status_code == 201
-
-    assert home_entries(tmp_path) == { DEFAULT_SUBJECT_DIGEST }
-    assert provider.userinfo_fetch_count == 0
-
 
 # --- the signing algorithm comes from the key set --------------------------
 
@@ -915,28 +198,28 @@ def test_no_userinfo_endpoint_falls_back_to_the_digest_without_asking(
     None,
 ])
 def test_metadata_algorithm_list_is_not_consulted(
-    client: TestClient, provider: Provider, advertised: Any
+    auth_client: TestClient, provider: Provider, advertised: Any
 ):
     # Whatever the discovery document claims, the key set decides. A provider advertising
     # nothing usable for id tokens must not stop valid access tokens being verified.
     provider.signing_algorithms = advertised
 
-    assert upload(client, provider.mint()).status_code == 201
+    assert upload(auth_client, provider.mint()).status_code == 201
 
 
-def test_key_without_an_alg_member_still_verifies(client: TestClient, provider: Provider):
+def test_key_without_an_alg_member_still_verifies(auth_client: TestClient, provider: Provider):
     # RFC 7517 makes "alg" optional; PyJWT infers RS256 from kty=RSA.
     del provider.keys["key-1"][1]["alg"]
 
-    assert upload(client, provider.mint()).status_code == 201
+    assert upload(auth_client, provider.mint()).status_code == 201
 
 
 def test_key_claiming_an_insecure_algorithm_is_refused(
-    client: TestClient, provider: Provider, fresh_settings: Settings
+    auth_client: TestClient, provider: Provider, fresh_auth_settings: Settings
 ):
     # Prime the cache with the real key, then have the provider serve a symmetric key under
     # the same kid. PyJWK would bind HS256 to it; the denylist must refuse it.
-    assert upload(client, provider.mint(), index=0).status_code == 201
+    assert upload(auth_client, provider.mint(), index=0).status_code == 201
 
     # The served key is the one the token below is signed with, so the only thing standing
     # between the forgery and a 201 is the denylist. A mismatched key would make this test
@@ -963,5 +246,29 @@ def test_key_claiming_an_insecure_algorithm_is_refused(
     )
 
     # A fresh app, so the poisoned key set is fetched rather than read from the cache.
-    with TestClient(create_app(fresh_settings)) as fresh:
+    with TestClient(create_app(fresh_auth_settings)) as fresh:
         assert upload(fresh, forged).status_code == 401
+
+
+# --- provider metadata -----------------------------------------------------
+
+# OIDC Discovery 1.0 lists userinfo_endpoint as RECOMMENDED, not REQUIRED, so its absence
+# is not an error and must not take the service down with it. What the service then does
+# without one is in test_user_home.py.
+
+@pytest.mark.asyncio
+async def test_discovery_records_the_userinfo_endpoint(provider: Provider, auth_settings: Settings):
+    config = await discover_oidc_config(auth_settings)
+
+    assert config.userinfo_endpoint == f"{provider.issuer}/userinfo"
+
+
+@pytest.mark.asyncio
+async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoint(
+    provider: Provider, auth_settings: Settings
+):
+    provider.advertise_userinfo = False
+
+    config = await discover_oidc_config(auth_settings)
+
+    assert config.userinfo_endpoint is None

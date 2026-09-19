@@ -37,6 +37,9 @@ build-backend = "setuptools.build_meta"
 addopts = [
     "--import-mode=importlib",
 ]
+# importlib import mode does not put the test directory on sys.path, so the modules the
+# test files share -- the stand-in OpenID provider and friends -- would not be importable.
+pythonpath = [ "tests" ]
 
 [tool.pyright]
 useLibraryCodeForTypes = true

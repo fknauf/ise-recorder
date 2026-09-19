@@ -15,12 +15,16 @@
         "crswap",
         "dcbung",
         "destdir",
+        "dozentin",
         "EHLO",
         "enduml",
+        "etcpasswd",
         "eviluni",
         "fastapi",
+        "fetc",
         "ffprobe",
         "filtergraph",
+        "fpasswd",
         "gapless",
         "getopt",
         "ghlink",
@@ -55,6 +59,7 @@
         "pyproject",
         "pytest",
         "PYTHONDONTWRITEBYTECODE",
+        "pythonpath",
         "PYTHONUNBUFFERED",
         "reauthentication",
         "rinderher",
@@ -71,8 +76,10 @@
         "venv",
         "vercel",
         "vitest",
+        "Übung",
         "ücher",
         "Zoaktep",
-        "zwei"
+        "zwei",
+        "हिन्दी"
     ]
 }
