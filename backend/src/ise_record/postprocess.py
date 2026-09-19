@@ -381,6 +381,8 @@ async def postprocess_tracks(
         # unlink temporaries to save disk space and limit the number of expected states
         for p in inputs:
             p.path.unlink(missing_ok=True)
+        # intermediate intentionally not unlinked because it's harder to recreate. Admin/user may
+        # want to inspect the abortive results. A rerender will overwrite it anyway.
 
 async def postprocess_recording(recording_path: Path) -> Result:
     """

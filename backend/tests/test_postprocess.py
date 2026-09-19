@@ -523,6 +523,73 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
         call(Path("foo/audio-2/full.webm"), missing_ok=True)
     ])
 
+# The tests above mock Path.rename, so they pin the arguments ffmpeg is handed and nothing
+# else. These two run the same code against a real directory, because the reason for the
+# intermediate name is a property of the directory afterwards: presentation.webm is what a
+# lecturer downloads and what the completed-recordings listing offers, so it must never be
+# a file ffmpeg is still writing into, or stopped writing into halfway.
+
+STREAM_PROPS = VideoProperties(
+    width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
+
+async def fake_concat(track_path: Path) -> ConcatenatedFile:
+    """ A concatenation that leaves a real (empty) file where postprocess_tracks expects one. """
+    full = track_path / "full.webm"
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(b"")
+    return ConcatenatedFile(path=full, incomplete=False)
+
+def render_target(command: list[str]) -> Path:
+    """ The file ffmpeg was told to write, which is the argument after -y. """
+    return Path(command[command.index("-y") + 1])
+
+@pytest.mark.asyncio
+async def test_the_rendered_file_gets_its_final_name_only_once_it_is_complete(
+    mocker: MockerFixture, tmp_path: Path
+):
+    output_path = tmp_path / "presentation.webm"
+    render_targets: list[Path] = []
+
+    async def fake_render(command: list[str], cwd: Path | None = None) -> bytes: # pylint: disable=unused-argument
+        render_targets.append(render_target(command))
+        render_target(command).write_bytes(b"rendered")
+        return b""
+
+    mocker.patch("ise_record.postprocess.concat_chunks", wraps=fake_concat)
+    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=STREAM_PROPS))
+    mocker.patch("ise_record.postprocess._run_command", wraps=fake_render)
+
+    result = await postprocess_tracks(
+        tmp_path / "stream", tmp_path / "overlay", [], output_path)
+
+    assert result == Result(output_file=output_path, reason=ResultReason.SUCCESS)
+    # ffmpeg wrote somewhere else, and the finished file arrived under its final name by
+    # a rename -- which is atomic, so no reader ever sees a partial presentation.webm
+    assert render_targets == [ tmp_path / "presentation.part.webm" ]
+    assert output_path.read_bytes() == b"rendered"
+    assert not list(tmp_path.glob("*.part.*"))
+
+@pytest.mark.asyncio
+async def test_a_failed_render_leaves_nothing_under_the_final_name(
+    mocker: MockerFixture, tmp_path: Path
+):
+    output_path = tmp_path / "presentation.webm"
+
+    async def fake_render(command: list[str], cwd: Path | None = None) -> bytes: # pylint: disable=unused-argument
+        # ffmpeg had started writing before it gave up, which is the case the rename exists for
+        render_target(command).write_bytes(b"half a video")
+        raise CalledProcessError(1, command, b"", b"boom")
+
+    mocker.patch("ise_record.postprocess.concat_chunks", wraps=fake_concat)
+    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=STREAM_PROPS))
+    mocker.patch("ise_record.postprocess._run_command", wraps=fake_render)
+
+    result = await postprocess_tracks(
+        tmp_path / "stream", tmp_path / "overlay", [], output_path)
+
+    assert result == Result(output_file=None, reason=ResultReason.FAILURE)
+    assert not output_path.exists()
+
 @pytest.mark.asyncio
 async def test_postprocess_recordings(mocker: MockerFixture):
     rec_path = Path("foo")

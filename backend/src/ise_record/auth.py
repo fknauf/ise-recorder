@@ -250,7 +250,7 @@ async def prepare_user_home_dir(
     # Infer the stable directory name from the token subject
     digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()
     stable_home = base_dir / digest
-    stable_home.mkdir(exist_ok=True)
+    stable_home.mkdir(exist_ok=True, parents=True)
 
     prefix = await fs_safe_user_name(claims, access_token, oidc)
 
@@ -258,7 +258,7 @@ async def prepare_user_home_dir(
     # unique, then make it a symlink to the stable directory name.
     if prefix is not None:
         human_readable_home = base_dir / f"{prefix}-{digest[:12]}"
-        if not human_readable_home.exists():
+        if not human_readable_home.exists(follow_symlinks=False):
             human_readable_home.symlink_to(stable_home.name, target_is_directory=True)
 
     known_home_dirs[subject] = stable_home

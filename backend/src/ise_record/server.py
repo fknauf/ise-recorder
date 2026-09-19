@@ -24,13 +24,12 @@ from fastapi import (
     status
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from pathvalidate import sanitize_filename
 from pydantic import BaseModel, BeforeValidator, Field
 
 from .auth import get_current_user_home, load_oidc_config
 from .logconfig import setup_logging
-from .postprocess import finished_recordings, finished_recording_path, postprocess_recording
+from .postprocess import postprocess_recording
 from .reporting import normalize_recipient, send_report
 from .settings import get_settings, Settings, SmtpSettings
 
