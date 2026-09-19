@@ -6,19 +6,14 @@
     startup; signing keys are fetched and refreshed by PyJWKClient.
 """
 
-import hashlib
 import logging
-import re
-from pathlib import Path
-from typing import Annotated, Any, NamedTuple
-import unicodedata
+from typing import Any, Annotated, NamedTuple
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends ,HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx2
 import jwt
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
-from pathvalidate import sanitize_filename
 from pydantic import BaseModel, ValidationError
 
 from .settings import get_settings, Settings
@@ -104,6 +99,10 @@ async def load_oidc_config(
         return cached
 
     try:
+        # a subtlety here: Because of this await, another request could come between here and the
+        # point where the oidc config is cached in app_state and do a second oidc discovery. This
+        # is fine because they discover the same configuration, and also we attempt this once at
+        # application start, so the race only manifests if the OIDC provider is unreachable then.
         config = await discover_oidc_config(settings)
     except (httpx2.HTTPError, KeyError, ValueError):
         logger.exception("OpenID discovery failed; authenticated endpoints will return 503")
@@ -193,87 +192,14 @@ async def query_username(
         logger.warning("Unable to query openid user info %s", e)
         return None
 
-
-async def fs_safe_user_name(
-        claims: dict[str, Any],
-        access_token: str,
-        oidc: OidcConfiguration
-) -> str | None:
-    """
-    Tries to create a file-system-safe, human-readable identifier for the user for use in a symlink
-    to the cryptic digest dir so someone with shell access can identify user homes.
-    """
-
-    # If access token carries preferred_username, use that.
-    raw_username = claims.get("preferred_username")
-
-    # if it doesn't, query oidc backend for userinfo. This happens e.g. with kanidm
-    if not isinstance(raw_username, str):
-        raw_username = await query_username(oidc, access_token, claims["sub"])
-
-    # if userinfo can't be obtained, leave it.
-    if not isinstance(raw_username, str):
-        return None
-
-    normalized_user = re.sub(r"\s+", "_", unicodedata.normalize("NFC", raw_username).strip())
-    candidate = sanitize_filename(normalized_user, platform="universal")[:48]
-
-    # filter out hacky user names, i.e. hidden, empty, or looks like a cmdline argument
-    # Bail out rather than try to fix because just removing these breaks file name sanitation, at
-    # least on Windows: -COM -> COM hits a reserved file name.
-    if candidate[:1] in [ ".", "-", "" ]:
-        return None
-
-    return candidate
-
-
-async def prepare_user_home_dir(
-        base_dir: Path,
-        claims: dict[str, Any],
-        known_home_dirs: dict[str, Path],
-        access_token: str,
-        oidc: OidcConfiguration
-) -> Path:
-    """
-    Prepare a stable (even when user info in the OIDC changes), user-specific home directory, and
-    also create a human-readable symlink to it that a shell user can use to identify which stable
-    dir belongs to which user.
-
-    :return path to the stable home directory.
-    """
-    subject = claims["sub"]
-
-    # If we already know the home dir, no preparation needed.
-    if subject in known_home_dirs:
-        return known_home_dirs[subject]
-
-    # Infer the stable directory name from the token subject
-    digest = hashlib.sha3_256(subject.encode("utf-8")).hexdigest()
-    stable_home = base_dir / digest
-    stable_home.mkdir(exist_ok=True, parents=True)
-
-    prefix = await fs_safe_user_name(claims, access_token, oidc)
-
-    # if username can't be obtained, leave it. Otherwise, append part of the digest to make it
-    # unique, then make it a symlink to the stable directory name.
-    if prefix is not None:
-        human_readable_home = base_dir / f"{prefix}-{digest[:12]}"
-        if not human_readable_home.exists(follow_symlinks=False):
-            human_readable_home.symlink_to(stable_home.name, target_is_directory=True)
-
-    known_home_dirs[subject] = stable_home
-    return stable_home
-
-
-async def get_current_user_home(
+async def get_user_info(
         request: Request,
         settings: Annotated[Settings, Depends(get_settings)],
-        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
-) -> Path:
-    """ Resolve the caller's home directory name, rejecting unauthenticated requests. """
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)]
+) -> UserInfo | None:
     if not settings.auth_required:
-        return settings.destdir
-
+        return None
+    
     oidc_config = await load_oidc_config(request.app.state, settings)
     if oidc_config is None:
         raise _provider_unreachable()
@@ -281,13 +207,26 @@ async def get_current_user_home(
     if credentials is None:
         raise _unauthenticated()
 
-    claims = validate_access_token(credentials.credentials, oidc_config, settings)
-    user_home = await prepare_user_home_dir(
-        settings.destdir,
-        claims,
-        request.app.state.home_dirs,
-        credentials.credentials,
-        oidc_config
-    )
+    token = credentials.credentials
+    claims = validate_access_token(token, oidc_config, settings)
+    subject = claims.get("sub")
 
-    return user_home
+    if not isinstance(subject, str):
+        raise _unauthenticated()
+
+    cached_users: dict[str, UserInfo] | None = getattr(request.app.state, "cached_users", None)
+
+    if cached_users is None:
+        cached_users = dict[str, UserInfo]()
+        request.app.state.cached_users = cached_users
+    elif subject in cached_users:
+        return cached_users[subject]
+
+    username = claims.get("preferred_username")
+    if not isinstance(username, str):
+        username = await query_username(oidc_config, token, subject)
+
+    user_info = UserInfo(sub=subject, preferred_username=username)
+    cached_users[subject] = user_info
+
+    return user_info

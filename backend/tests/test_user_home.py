@@ -30,7 +30,9 @@ from harness import (
     upload,
     upload_chunk_path,
 )
-from ise_record.auth import fs_safe_user_name, OidcConfiguration, prepare_user_home_dir
+
+from ise_record.auth import UserInfo
+from ise_record.user_home import fs_safe_user_name, prepare_user_home_dir
 from ise_record.server import create_app
 from ise_record.settings import Settings
 
@@ -76,10 +78,10 @@ SUBJECT_DIGEST = digest_of("abc")
 # the bound the filesystem imposes on whatever comes out of it.
 NAME_MAX_BYTES = 255
 
-def claims_for(username: Any) -> dict[str, Any]:
-    return {"sub": "abc", "preferred_username": username}
+def user_for(username: Any) -> UserInfo:
+    return UserInfo.model_construct(sub="abc", preferred_username=username)
 
-async def home_dir_for(tmp_path: Path, username: Any, oidc: OidcConfiguration) -> Path:
+async def home_dir_for(tmp_path: Path, username: Any) -> Path:
     """
     The directory name derived for a username, with the subject held fixed.
 
@@ -87,7 +89,7 @@ async def home_dir_for(tmp_path: Path, username: Any, oidc: OidcConfiguration) -
     calls reach the UserInfo endpoint. The provider fixture leaves it unconfigured, which
     is a 404 -- the same digest fallback the old synchronous helper took directly.
     """
-    return await prepare_user_home_dir(tmp_path,  claims_for(username), {}, "access-token", oidc)
+    return await prepare_user_home_dir(user_for(username), tmp_path)
 
 
 @pytest.mark.parametrize("username,expected_prefix", [
@@ -105,9 +107,9 @@ async def home_dir_for(tmp_path: Path, username: Any, oidc: OidcConfiguration) -
 ])
 @pytest.mark.asyncio
 async def test_readable_username_becomes_the_directory_alias(
-    username: str, expected_prefix: str, oidc: OidcConfiguration, tmp_path: Path
+    username: str, expected_prefix: str, tmp_path: Path
 ):
-    home = await home_dir_for(tmp_path, username, oidc)
+    home = await home_dir_for(tmp_path, username)
     expected_alias = tmp_path / f"{expected_prefix}{SUBJECT_DIGEST[:12]}"
 
     assert home == tmp_path / SUBJECT_DIGEST
@@ -124,12 +126,12 @@ async def test_readable_username_becomes_the_directory_alias(
 ])
 @pytest.mark.asyncio
 async def test_unusable_username_yields_no_alias_link(
-    username: Any, oidc: OidcConfiguration, tmp_path: Path
+    username: Any, tmp_path: Path
 ):
     # fs_safe_user_name decides which names are refused, and the table for that is with it
     # below; the behavior under test here is only that a refusal leaves nothing on disk --
     # not a link under a name nobody vetted, and not a home directory somewhere else
-    home = await home_dir_for(tmp_path, username, oidc)
+    home = await home_dir_for(tmp_path, username)
 
     assert home == tmp_path / SUBJECT_DIGEST
     assert home_entries(tmp_path) == { SUBJECT_DIGEST }
@@ -144,11 +146,11 @@ async def test_unusable_username_yields_no_alias_link(
 ])
 @pytest.mark.asyncio
 async def test_unicode_whitespace_is_a_separator_like_any_other(
-    username: str, expected: str, oidc: OidcConfiguration, tmp_path: Path
+    username: str, expected: str, tmp_path: Path
 ):
     # \s on a str pattern is Unicode-aware, which is what keeps a pasted U+3000 out of a
     # directory name -- pathvalidate would have left it there
-    home = await home_dir_for(tmp_path, username, oidc)
+    home = await home_dir_for(tmp_path, username)
 
     assert home == tmp_path / SUBJECT_DIGEST
     assert home_entries(tmp_path) == { SUBJECT_DIGEST, f"{expected}{SUBJECT_DIGEST[:12]}" }
@@ -156,7 +158,7 @@ async def test_unicode_whitespace_is_a_separator_like_any_other(
 
 @pytest.mark.asyncio
 async def test_the_directory_name_does_not_depend_on_the_composition_of_the_username(
-    oidc: OidcConfiguration, tmp_path: Path
+    tmp_path: Path
 ):
     # spelled with escapes: the two forms are indistinguishable on screen, so an editor
     # normalizing this file would turn one half of this test into a copy of the other
@@ -164,7 +166,7 @@ async def test_the_directory_name_does_not_depend_on_the_composition_of_the_user
     composed = "\u00dcbung"
 
     assert decomposed != composed
-    assert await home_dir_for(tmp_path, decomposed, oidc) == await home_dir_for(tmp_path, composed, oidc)
+    assert await home_dir_for(tmp_path, decomposed) == await home_dir_for(tmp_path, composed)
 
     # one alias, not two: the second call has to recognize the first one's name as its own
     assert home_entries(tmp_path) == { SUBJECT_DIGEST, alias_of("\u00dcbung", SUBJECT_DIGEST) }
@@ -177,9 +179,9 @@ async def test_the_directory_name_does_not_depend_on_the_composition_of_the_user
 ])
 @pytest.mark.asyncio
 async def test_alias_name_is_always_a_safe_single_path_segment(
-    username: Any, oidc: OidcConfiguration
+    username: Any
 ):
-    name = await fs_safe_user_name(claims_for(username), "access-token", oidc)
+    name = await fs_safe_user_name(username)
 
     assert name, "an empty directory name would put chunks in the destination root"
     assert not name.startswith((".", "-")), "hidden on unix, an option to anything argv-shaped"
@@ -194,36 +196,34 @@ async def test_alias_name_is_always_a_safe_single_path_segment(
 
 
 @pytest.mark.parametrize("username", [
-    None, 42,                                 # not a string at all
-    "", "   ", "\u3000",                   # nothing left after stripping
+    None,                                     # not a string at all
+    "", "   ", "\u3000",                      # nothing left after stripping
     "...", "---", "..", "-.-.-", "..;/",      # nothing usable left at all
     ".hidden", ".NET", "-rf", "-weird",       # a readable name, but not one that may lead
     "../../etc/passwd",                       # flattened to "....etcpasswd", so it may not either
     "- - - 81457m4573r 9001 - - -",
 ])
 @pytest.mark.asyncio
-async def test_no_alias_for_broken_usernames(username: Any, oidc: OidcConfiguration):
+async def test_no_alias_for_broken_usernames(username: Any):
     # a deliberate trade: rather than strip the leading character and keep a readable
     # prefix, the whole alias is dropped. Nothing downstream validates this name -- unlike
     # a recording name, there is no pattern behind it -- so this one check is the entire
     # guarantee, and it is worth keeping obvious. Dropping the alias costs nothing: the
     # home directory does not depend on it.
-    assert await fs_safe_user_name(claims_for(username), "access-token", oidc) is None
+    assert await fs_safe_user_name(username) is None
 
 
 @pytest.mark.asyncio
 async def test_the_home_directory_survives_a_change_of_username(
-    oidc: OidcConfiguration, tmp_path: Path
+    tmp_path: Path
 ):
     # the point of naming the directory after the subject: whether the IdP renames someone,
     # or merely answers a UserInfo query today that it failed to answer yesterday, the
     # recordings already on disk have to stay where the service will look for them
-    before = await prepare_user_home_dir(
-        tmp_path, claims_for("lecturer"), {}, "access-token", oidc)
+    before = await prepare_user_home_dir(user_for("lecturer"), tmp_path)
 
     # an empty cache is a restart: nothing is being read back from the first call
-    after = await prepare_user_home_dir(
-        tmp_path, claims_for("dozentin"), {}, "access-token", oidc)
+    after = await prepare_user_home_dir(user_for("dozentin"), tmp_path)
 
     assert before == after == tmp_path / SUBJECT_DIGEST
 
@@ -239,7 +239,7 @@ async def test_the_home_directory_survives_a_change_of_username(
 
 @pytest.mark.asyncio
 async def test_an_alias_name_that_is_already_taken_is_left_alone(
-    oidc: OidcConfiguration, tmp_path: Path
+    tmp_path: Path
 ):
     # the name the alias wants is exactly what the release before this one used for the
     # real home directory, so on the first start after an upgrade it is occupied. The
@@ -247,8 +247,7 @@ async def test_an_alias_name_that_is_already_taken_is_left_alone(
     occupied = tmp_path / alias_of("lecturer", SUBJECT_DIGEST)
     (occupied / "old-recording").mkdir(parents=True)
 
-    home = await prepare_user_home_dir(
-        tmp_path, claims_for("lecturer"), {}, "access-token", oidc)
+    home = await prepare_user_home_dir(user_for("lecturer"), tmp_path)
 
     assert home == tmp_path / SUBJECT_DIGEST
     assert not occupied.is_symlink()
@@ -256,13 +255,13 @@ async def test_an_alias_name_that_is_already_taken_is_left_alone(
 
 
 @pytest.mark.asyncio
-async def test_username_collisions_are_separated_by_the_digest(oidc: OidcConfiguration, tmp_path: Path):
+async def test_username_collisions_are_separated_by_the_digest(tmp_path: Path):
     # pathvalidate maps several usernames onto one string -- "DOMAIN\\user" and "DOMAINuser"
     # both come out as the latter -- so the digest is the only thing keeping them apart
     first = await prepare_user_home_dir(
-        tmp_path, {"sub": "user-a", "preferred_username": "same"}, {}, "access-token", oidc)
+        UserInfo.model_construct(sub="user-a", preferred_username="same"), tmp_path)
     second = await prepare_user_home_dir(
-        tmp_path, {"sub": "user-b", "preferred_username": "same"}, {}, "access-token", oidc)
+        UserInfo.model_construct(sub="user-b", preferred_username="same"), tmp_path)
 
     assert first != second
 

@@ -28,11 +28,12 @@ from fastapi.responses import FileResponse
 from pathvalidate import sanitize_filename
 from pydantic import BaseModel, BeforeValidator, Field
 
-from .auth import get_current_user_home, load_oidc_config
+from .auth import load_oidc_config
 from .logconfig import setup_logging
 from .postprocess import finished_recording_path, finished_recordings, postprocess_recording
 from .reporting import normalize_recipient, send_report
 from .settings import get_settings, Settings, SmtpSettings
+from .user_home import get_current_user_home
 
 def _normalize_for_filesystem(value: str) -> str:
     return sanitize_filename(unicodedata.normalize("NFC", value), platform="universal")
@@ -253,7 +254,6 @@ def create_app(
 
     application = FastAPI(lifespan=lifespan)
     application.state.running_jobs = set[Path]()
-    application.state.home_dirs = dict[str, Path]()
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings
