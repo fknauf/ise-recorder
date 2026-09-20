@@ -18,12 +18,11 @@ from fastapi.testclient import TestClient
 import jwt
 import pytest
 
-from harness import AUDIENCE, CLIENT_ID, Provider, make_key, upload
 from ise_record.auth import discover_oidc_config, REQUIRED_CLAIMS
 from ise_record.server import create_app
 from ise_record.settings import OidcSettings, Settings
 
-
+from .harness import AUDIENCE, CLIENT_ID, Provider, make_key, upload
 
 def test_valid_token_is_accepted(auth_client: TestClient, provider: Provider):
     assert upload(auth_client, provider.mint()).status_code == 201

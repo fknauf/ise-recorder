@@ -29,8 +29,9 @@ from pathvalidate import sanitize_filename
 from pydantic import BaseModel, BeforeValidator, Field
 
 from .auth import load_oidc_config
+from .download_totp import DownloadableRecording, get_downloadable_recordings, verify_download_totp
 from .logconfig import setup_logging
-from .postprocess import finished_recording_path, finished_recordings, postprocess_recording
+from .postprocess import postprocess_recording, OUTPUT_FILENAME
 from .reporting import normalize_recipient, send_report
 from .settings import get_settings, Settings, SmtpSettings
 from .user_home import get_current_user_home
@@ -201,32 +202,54 @@ def health_check():
     logger.debug("health check requested")
     return { "status": "healthy" }
 
+def _downloads_disabled():
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Server is configured without authentication, downloads are disabled."
+    )
+
 @router.get('/completed')
 async def get_completed_list(
     settings: Annotated[Settings, Depends(get_settings)],
-    user_home: Annotated[Path, Depends(get_current_user_home)]
-) -> list[str]:
+    user_home: Annotated[Path, Depends(get_current_user_home)],
+    recordings: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)]
+):
     """ Endpoint to obtain a list of completed recordings for the active user """
     if not settings.auth_required:
-        return []
+        raise _downloads_disabled()
 
-    return finished_recordings(user_home)
+    return {
+        "user": user_home.name,
+        "recordings": [
+            {
+                "name": rec.name,
+                "size": rec.size,
+                "totp": rec.totp
+            }
+            for rec in recordings
+        ]
+    }
 
-@router.get('/completed/{recording}')
+@router.get('/completed/{user_digest}/{recording}')
 async def download_completed(
+    request: Request,
     recording: SafeRecording,
-    settings: Annotated[Settings, Depends(get_settings)],
-    user_home: Annotated[Path, Depends(get_current_user_home)]
+    user_digest: Annotated[str, Field(pattern=r"\A[0-9a-f]+\z")],
+    totp: Annotated[str, Field(pattern=r"[0-9]+")],
+    settings: Annotated[Settings, Depends(get_settings)]
 ) -> FileResponse:
     """ Endpoint for downloading a completed recording that the active user owns """
 
     if not settings.auth_required:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Server is configured without authentication, downloads are disabled."
-        )
+        raise _downloads_disabled()
 
-    file_path = finished_recording_path(user_home, recording)
+    file_path = settings.destdir / user_digest / recording / OUTPUT_FILENAME
+
+    if not verify_download_totp(totp, file_path, request.app.state):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="TOTP could not be verified"
+        )
 
     if not file_path.exists():
         raise HTTPException(

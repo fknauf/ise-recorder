@@ -20,7 +20,12 @@ from typing import Any
 from fastapi.testclient import TestClient
 import pytest
 
-from harness import (
+from ise_record.auth import UserInfo
+from ise_record.user_home import fs_safe_user_name, prepare_user_home_dir
+from ise_record.server import create_app
+from ise_record.settings import Settings
+
+from .harness import (
     alias_of,
     DEFAULT_SUBJECT,
     DEFAULT_SUBJECT_DIGEST,
@@ -30,12 +35,6 @@ from harness import (
     upload,
     upload_chunk_path,
 )
-
-from ise_record.auth import UserInfo
-from ise_record.user_home import fs_safe_user_name, prepare_user_home_dir
-from ise_record.server import create_app
-from ise_record.settings import Settings
-
 
 # --- the chunk endpoint, as the visible end of all this --------------------
 

@@ -1,3 +1,12 @@
+"""
+Functionality concerning the per-user home directories where recordings are stored, i.e. to make
+sure they're filesystem-safe, stable, and human-readable at the same time.
+
+The general concept here is that there's a stable main directory that's a hex hash of the oidc
+subject, and a human-readable symlink to it that's a filesystem-safe mangling of the oidc
+preferred_username claim suffixed with the first few characters of the hash so it's unique even
+if preferred usernames overlap.
+"""
 import hashlib
 from pathlib import Path
 import re

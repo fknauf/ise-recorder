@@ -14,6 +14,11 @@ from typing import NamedTuple
 
 import aiofiles
 
+MAIN_TRACK_NAME = "stream"
+OVERLAY_TRACK_NAME = "overlay"
+AUDIO_TRACK_GLOB = "audio-*"
+OUTPUT_FILENAME = "presentation.webm"
+
 logger = logging.getLogger(__name__)
 
 class ResultReason(Enum):
@@ -73,7 +78,7 @@ def determine_crop_area(
         stream_height: int,
         raw_crop: Rectangle
 ) -> Rectangle:
-    """ 
+    """
         Determine the effective cropping area for a stream. Will select the full
         stream rectangle if an insignificant area would be cropped.
 
@@ -209,7 +214,7 @@ def pick_target_geometry(content: Rectangle) -> tuple[int, int]:
         Picks the most appropriate out of a list of standardized output geometries.
 
         :param content area of the main stream that's going to be used
-        :returns target width and height 
+        :returns target width and height
     """
     candidates = [
         (1280, 720),  # 16:9
@@ -226,7 +231,7 @@ def pick_target_geometry(content: Rectangle) -> tuple[int, int]:
 def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int) -> str:
     """
         Generate a scaling filter appropriate for the overlay stream.
-         
+
         This is meant to make good use of inserted black bars around the main stream, if there are
         any, and otherwise to keep the overlay usefully visible while not hiding important parts
         of the slides.
@@ -396,10 +401,10 @@ async def postprocess_recording(recording_path: Path) -> Result:
         logger.warning("Scheduled postprocessing for non-existent recording %s", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
-    stream_dir = recording_path / "stream"
-    overlay_dir = recording_path / "overlay"
-    audio_dirs = sorted(recording_path.glob('audio-*'), key=lambda p: (len(p.name), p.name))
-    output_path = recording_path / 'presentation.webm'
+    stream_dir = recording_path / MAIN_TRACK_NAME
+    overlay_dir = recording_path / OVERLAY_TRACK_NAME
+    audio_dirs = sorted(recording_path.glob(AUDIO_TRACK_GLOB), key=lambda p: (len(p.name), p.name))
+    output_path = recording_path / OUTPUT_FILENAME
 
     if not stream_dir.is_dir():
         logger.info("%s has no main display stream, nothing to do.", recording_path)
@@ -411,19 +416,3 @@ async def postprocess_recording(recording_path: Path) -> Result:
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("Postprocessing %s failed", recording_path)
         return Result(output_file=None, reason=ResultReason.FAILURE)
-
-def finished_recordings(user_home: Path) -> list[str]:
-    """ Get a list of finished recordings in the specified user home directory """
-    collected: list[str] = []
-
-    for recording_path in sorted(user_home.iterdir()):
-        candidate = recording_path / "presentation.webm"
-
-        if candidate.is_file():
-            collected.append(recording_path.name)
-
-    return collected
-
-def finished_recording_path(user_home: Path, recording: str) -> Path:
-    """ Get the full path for a post-processed recording file """
-    return user_home / recording / "presentation.webm"

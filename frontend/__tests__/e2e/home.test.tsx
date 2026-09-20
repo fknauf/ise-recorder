@@ -93,7 +93,7 @@ function renderHome(tokenSource: AccessTokenSource) {
  * for one behind an OpenID provider.
  */
 async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: string) {
-  window.fetch = vi.fn().mockResolvedValue(Response.json("", { status: 201 }));
+  window.fetch = vi.fn().mockResolvedValue(Response.json({ user: "deadbeef", recordings: [] }, { status: 201 }));
 
   let x = 0;
 
@@ -265,7 +265,17 @@ test("e2e recording a stream works", async () => {
 test("e2e recording a stream sends the access token to the server", async () => {
   const recordingName = await recordAStream(authenticatedTokenSource, "BAR_202");
 
-  expect(window.fetch).toHaveBeenCalledTimes(3);
+  expect(window.fetch).toHaveBeenCalledTimes(4);
+  expect(window.fetch).toHaveBeenCalledWith(
+    "http://localhost:5000/api/completed",
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer test-token"
+      }
+    }
+  );
   expect(window.fetch).toHaveBeenCalledWith(
     "http://localhost:5000/api/chunks",
     {

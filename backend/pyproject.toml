@@ -12,6 +12,7 @@ dependencies = [
     "pathvalidate~=3.3",
     "pydantic-settings~=2.15",
     "PyJWT[crypto]~=2.14",
+    "PyOTP~=2.10",
     "python-multipart~=0.0",
     "uvicorn~=0.53",
 ]
@@ -37,9 +38,6 @@ build-backend = "setuptools.build_meta"
 addopts = [
     "--import-mode=importlib",
 ]
-# importlib import mode does not put the test directory on sys.path, so the modules the
-# test files share -- the stand-in OpenID provider and friends -- would not be importable.
-pythonpath = [ "tests" ]
 
 [tool.pyright]
 useLibraryCodeForTypes = true

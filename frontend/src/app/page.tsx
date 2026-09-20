@@ -10,6 +10,7 @@ import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 import { useAutoSignin } from "react-oidc-context";
 import { useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 import { useHydrated } from "@/lib/hooks/useHydrated";
+import { PreprocessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
 
 function AutoSignin() {
   useAutoSignin();
@@ -36,6 +37,7 @@ export function Home() {
       </Flex>
       <PreviewSection canvasWidth={384} canvasHeight={216}/>
       <SavedRecordingsSection/>
+      <PreprocessedRecordingsSection/>
       <ToastContainer/>
     </Flex>
   );

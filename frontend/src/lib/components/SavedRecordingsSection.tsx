@@ -1,11 +1,12 @@
 "use client";
 
-import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
+import { ActionButton, Text } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
 import { downloadFile, RecordingFileList } from "../utils/browserStorage";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
 import { useActiveRecording } from "../hooks/useActiveRecording";
+import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -32,43 +33,41 @@ export function SavedRecordingsSection() {
 
   const isDisabled = (r: RecordingFileList) => r.name === activeRecording.name;
 
+  if(savedRecordings.length === 0) {
+    return null;
+  }
+
   return (
-    <Flex direction="row" gap="size-100" wrap>
+    <RecordingCardSection title="Browser-Local Raw Recordings">
       {
         savedRecordings.map(rec =>
-          <View
+          <RecordingCard
+            title={rec.name}
             key={`saved-recording-${rec.name}`}
-            borderWidth="thin"
-            borderColor="light"
-            borderRadius="medium"
-            padding="size-100"
-            data-testid="sr-card"
+            testid="sr-card"
           >
-            <Flex direction="column" justifyContent="center" gap="size-100">
-              <Text>{rec.name}</Text>
-              {
-                rec.files.map(({ name: filename, size }) =>
-                  <ActionButton
-                    key={`download-${filename}`}
-                    isDisabled={isDisabled(rec)}
-                    onPress={() => downloadFile(rec.name, filename)}
-                  >
-                    <Download/>
-                    <Text>Download {filename} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
-                  </ActionButton>
-                )
-              }
-              <ActionButton
-                isDisabled={isDisabled(rec)}
-                onPress={() => removeSavedRecording(rec.name)}
-              >
-                <Delete/>
-                <Text>Remove</Text>
-              </ActionButton>
-            </Flex>
-          </View>
+            {
+              rec.files.map(({ name: filename, size }) =>
+                <ActionButton
+                  key={`download-${filename}`}
+                  isDisabled={isDisabled(rec)}
+                  onPress={() => downloadFile(rec.name, filename)}
+                >
+                  <Download/>
+                  <Text>Download {filename} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
+                </ActionButton>
+              )
+            }
+            <ActionButton
+              isDisabled={isDisabled(rec)}
+              onPress={() => removeSavedRecording(rec.name)}
+            >
+              <Delete/>
+              <Text>Remove</Text>
+            </ActionButton>
+          </RecordingCard>
         )
       }
-    </Flex>
+    </RecordingCardSection>
   );
 }

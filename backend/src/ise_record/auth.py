@@ -197,9 +197,14 @@ async def get_user_info(
         settings: Annotated[Settings, Depends(get_settings)],
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)]
 ) -> UserInfo | None:
+    """
+    Get information about the logged-in user, or None if no auth is required. Throws 401 if auth is
+    required but the user is not authenticated and 503 if the oidc provider was not reachable.
+    """
+
     if not settings.auth_required:
         return None
-    
+
     oidc_config = await load_oidc_config(request.app.state, settings)
     if oidc_config is None:
         raise _provider_unreachable()

@@ -24,11 +24,12 @@ from fastapi.testclient import TestClient
 import jwt
 import pytest
 
-from harness import AUDIENCE, Provider
 from ise_record import auth
 from ise_record.auth import OidcConfiguration
 from ise_record.server import create_app
 from ise_record.settings import get_settings, OidcSettings, Settings
+
+from .harness import AUDIENCE, Provider
 
 # matches SettingsConfigDict(env_prefix=...); pydantic matches it case-insensitively, so
 # clearing it case-insensitively too avoids a lowercase var slipping through
