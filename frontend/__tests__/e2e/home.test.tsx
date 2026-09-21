@@ -8,6 +8,11 @@ import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 
+const mockUseAccessTokenSource = vi.fn();
+vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
+  useAccessTokenSource: () => mockUseAccessTokenSource()
+}));
+
 const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
   deviceId, groupId, kind, label,
   toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
@@ -75,13 +80,13 @@ afterAll(cleanupBetweenTests);
 
 /** Just the page, for the tests that only care about what it decides to render. */
 function renderHome(tokenSource: AccessTokenSource) {
+  mockUseAccessTokenSource.mockReturnValue(tokenSource);
+
   render(
     <Provider theme={defaultTheme}>
-      <AccessTokenSourceContext.Provider value={tokenSource}>
-        <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-          <Home/>
-        </AppStoreProvider>
-      </AccessTokenSourceContext.Provider>
+      <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
+        <Home/>
+      </AppStoreProvider>
     </Provider>
   );
 }
@@ -122,14 +127,14 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
     return () => clearInterval(timer);
   };
 
+  mockUseAccessTokenSource.mockReturnValue(tokenSource);
+
   const tree = render(
     <>
       <Provider theme={defaultTheme}>
-        <AccessTokenSourceContext.Provider value={tokenSource}>
-          <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-            <Home/>
-          </AppStoreProvider>
-        </AccessTokenSourceContext.Provider>
+        <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
+          <Home/>
+        </AppStoreProvider>
       </Provider>
       <canvas width={384} height={216} data-testid="display-src" ref={animate}/>
       <canvas width={384} height={216} data-testid="video-src" ref={animate}/>

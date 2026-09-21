@@ -10,6 +10,13 @@ import { useServerEnv } from "./useServerEnv";
 export type SessionTransition =
   "still-fresh" | "still-stale" | "expired" | "renewed";
 
+interface AccessTokenSourceContextData {
+  userMgr: UserManager | undefined
+  maxAge: number | undefined
+  autoSignin: boolean
+  disableAutoSignin: () => void
+}
+
 interface AccessTokenSource {
   authRequired: boolean
   autoSignin: boolean
@@ -32,7 +39,7 @@ interface Staleness {
   recheckMillis?: number
 }
 
-export const AccessTokenSourceContext = createContext<AccessTokenSource | undefined>(undefined);
+export const AccessTokenSourceContext = createContext<AccessTokenSourceContextData | undefined>(undefined);
 
 async function sessionStaleness(
   userMgr: UserManager,
@@ -61,17 +68,16 @@ async function sessionStaleness(
 
 // Stub token source for yolo mode: no auth required, can't provide tokens, there's technically
 // no session but also no need for one, so behave as if there always were a fresh session.
-const anonymousTokenSource: AccessTokenSource = {
-  authRequired: false,
+const anonymousCtxData: AccessTokenSourceContextData = {
+  userMgr: undefined,
+  maxAge: undefined,
   autoSignin: false,
-  getAccessToken: async () => undefined,
-  signOut: async () => {},
-  expandSessionHeadroom: async () => "still-fresh"
+  disableAutoSignin: () => {}
 };
 
 function AnonymousTokenSourceProvider({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <AccessTokenSourceContext.Provider value={anonymousTokenSource}>
+    <AccessTokenSourceContext.Provider value={anonymousCtxData}>
       {children}
     </AccessTokenSourceContext.Provider>
   );
@@ -100,11 +106,6 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, autoS
   );
 
   const [ autoSignin, setAutoSignin ] = useState(autoSigninConfigured);
-
-  const signOut = useCallback(async () => {
-    setAutoSignin(false);
-    await userMgr.removeUser().catch(() => null);
-  }, [userMgr, setAutoSignin]);
 
   // clean up userMgr when the component is unmounted. Library does not handle it for us.
   useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
@@ -149,72 +150,18 @@ function AuthenticatedTokenSourceProvider({ providerUrl, clientId, maxAge, autoS
     };
   }, [maxAge, setStaleSession, userMgr]);
 
-  const getAccessToken = useCallback(async () => {
-    const user = await userMgr.getUser();
-
-    if(user === null || user.expired) {
-      return undefined;
-    }
-
-    return user.access_token;
-  }, [userMgr]);
-
-  // Expanding the session headroom means making sure the current session isn't stale and refreshing the access token
-  // manually, so we have its full length at the beginning of the recording.
-  //
-  // If the current session is past max_age, this will force the user to reauthenticate and get a fresh session.
-  // Refreshing the access token is best-effort and not all that necessary in normal deployments with short-lived access
-  // tokens, but this way if a user likes access tokens that live long enough to cover a recording, then the access token
-  // present at the beginning of the recording will not need renewal during the lecture.
-  const expandSessionHeadroom = useCallback(async () => {
-    const refreshSession = async (
-      fn: () => Promise<SessionTransition>,
-      defaultValue: SessionTransition,
-      errMsg: string
-    ) => {
-      try {
-        return await fn();
-      } catch(e) {
-        console.warn(errMsg, e);
-
-        const existing = await userMgr.getUser().catch(() => null);
-
-        if(existing === null || existing.expired) {
-          return "expired";
-        }
-      }
-
-      return defaultValue;
-    };
-
-    if((await sessionStaleness(userMgr, maxAge)).stale) {
-      return refreshSession(
-        () => userMgr.signinPopup().then(() => "renewed"),
-        "still-stale",
-        "Failed to reauthenticate stale oidc session, continuing with existing session"
-      );
-    }
-
-    return refreshSession(
-      () => userMgr.signinSilent().then(() => "still-fresh"),
-      "still-fresh",
-      "Failed to force-refresh access/refresh token, continuing with existing tokens"
-    );
-  }, [maxAge, userMgr]);
-
-  const value = useMemo<AccessTokenSource>(() => ({
-    authRequired: true,
-    autoSignin,
-    getAccessToken,
-    signOut,
-    expandSessionHeadroom
-  }), [autoSignin, getAccessToken, signOut, expandSessionHeadroom]);
-
   const onSigninCallback = useCallback(() => {
     if(window.self === window.top) {
       router.replace("/");
     }
   }, [router]);
+
+  const value = useMemo<AccessTokenSourceContextData>(() => ({
+    userMgr,
+    maxAge,
+    autoSignin,
+    disableAutoSignin: () => setAutoSignin(false)
+  }), [userMgr, maxAge, autoSignin]);
 
   return (
     <AccessTokenSourceContext.Provider value={value}>
@@ -259,11 +206,87 @@ export function AccessTokenSourceProvider({ children }: Readonly<{ children: Rea
 }
 
 export function useAccessTokenSource(): AccessTokenSource {
-  const tokenSource = useContext(AccessTokenSourceContext);
+  const ctxData = useContext(AccessTokenSourceContext);
 
-  if(tokenSource === undefined) {
+  if(ctxData === undefined) {
     throw new Error("useAccessTokenSource must be used within AccessTokenSourceProvider");
   }
 
-  return tokenSource;
+  const { userMgr, maxAge, autoSignin, disableAutoSignin } = ctxData;
+
+  if(userMgr === undefined) {
+    return {
+      authRequired: false,
+      autoSignin: false,
+      getAccessToken: async () => undefined,
+      signOut: async () => {},
+      expandSessionHeadroom: async () => "still-fresh"
+    };
+  }
+
+  const signOut = useCallback(async () => {
+    disableAutoSignin()
+    await userMgr.removeUser().catch(() => null);
+  }, [ userMgr, disableAutoSignin ]);
+
+  const getAccessToken = useCallback(async () => {
+    const user = await userMgr.getUser();
+
+    if(user === null || user.expired) {
+      return undefined;
+    }
+
+    return user.access_token;
+  }, [ userMgr ]);
+
+  // Expanding the session headroom means making sure the current session isn't stale and refreshing the access token
+  // manually, so we have its full length at the beginning of the recording.
+  //
+  // If the current session is past max_age, this will force the user to reauthenticate and get a fresh session.
+  // Refreshing the access token is best-effort and not all that necessary in normal deployments with short-lived access
+  // tokens, but this way if a user likes access tokens that live long enough to cover a recording, then the access token
+  // present at the beginning of the recording will not need renewal during the lecture.
+  const expandSessionHeadroom = useCallback(async () => {
+    const refreshSession = async (
+      fn: () => Promise<SessionTransition>,
+      defaultValue: SessionTransition,
+      errMsg: string
+    ) => {
+      try {
+        return await fn();
+      } catch(e) {
+        console.warn(errMsg, e);
+
+        const existing = await userMgr.getUser().catch(() => null);
+
+        if(existing === null || existing.expired) {
+          return "expired";
+        }
+      }
+
+      return defaultValue;
+    };
+
+    if((await sessionStaleness(userMgr, maxAge)).stale) {
+      return refreshSession(
+        () => userMgr.signinPopup().then(() => "renewed"),
+        "still-stale",
+        "Failed to reauthenticate stale oidc session, continuing with existing session"
+      );
+    }
+
+    return refreshSession(
+      () => userMgr.signinSilent().then(() => "still-fresh"),
+      "still-fresh",
+      "Failed to force-refresh access/refresh token, continuing with existing tokens"
+    );
+  }, [maxAge, userMgr]);
+
+  return {
+    authRequired: true,
+    autoSignin,
+    getAccessToken,
+    signOut,
+    expandSessionHeadroom
+  };
 }

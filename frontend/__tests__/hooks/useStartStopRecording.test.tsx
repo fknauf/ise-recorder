@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceContext, SessionTransition, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { SessionTransition, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
 import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
 import { ServerStorageDestination } from "@/lib/utils/serverStorage";
@@ -22,6 +22,11 @@ vi.mock("@/lib/utils/notifications", () => ({
   showMessage: vi.fn()
 }));
 vi.mock("@/lib/utils/browserStorage");
+
+const mockUseAccessTokenSource = vi.fn();
+vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
+  useAccessTokenSource: () => mockUseAccessTokenSource()
+}));
 
 type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
 
@@ -55,11 +60,11 @@ function renderRecorder(
   tokenSource: AccessTokenSource,
   serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" }
 ) {
+  mockUseAccessTokenSource.mockReturnValue(tokenSource);
+
   const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
     <AppStoreProvider serverEnv={serverEnv}>
-      <AccessTokenSourceContext.Provider value={tokenSource}>
-        {children}
-      </AccessTokenSourceContext.Provider>
+      {children}
     </AppStoreProvider>;
 
   return renderHook(() => ({

@@ -38,6 +38,11 @@ vi.mock("react-oidc-context", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => children
 }));
 
+const mockUseAccessTokenSource = vi.fn();
+vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
+  useAccessTokenSource: () => mockUseAccessTokenSource()
+}));
+
 let setStaleSession: (stale: boolean) => void;
 let setActiveRecording: (recording: ActiveRecording) => void;
 
@@ -72,21 +77,20 @@ function renderMessage(
     expandSessionHeadroom = vi.fn(async (): Promise<SessionTransition> => "still-fresh")
   } = {}
 ) {
+  mockUseAccessTokenSource.mockReturnValue({
+      authRequired,
+      autoSignin: false,
+      getAccessToken: async () => "token",
+      signOut: async () => {},
+      expandSessionHeadroom
+    }
+  );
+
   render(
     <Provider theme={defaultTheme}>
       <AppStoreProvider serverEnv={serverEnv}>
-        <AccessTokenSourceContext.Provider
-          value={{
-            authRequired,
-            autoSignin: false,
-            getAccessToken: async () => "token",
-            signOut: async () => {},
-            expandSessionHeadroom
-          }}
-        >
-          <StoreHandles/>
-          <AuthStatusMessage/>
-        </AccessTokenSourceContext.Provider>
+        <StoreHandles/>
+        <AuthStatusMessage/>
       </AppStoreProvider>
     </Provider>
   );

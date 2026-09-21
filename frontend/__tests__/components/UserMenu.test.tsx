@@ -45,6 +45,11 @@ vi.mock("react-oidc-context", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => children
 }));
 
+const mockUseAccessTokenSource = vi.fn();
+vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
+  useAccessTokenSource: () => mockUseAccessTokenSource()
+}));
+
 /** Only the claims the menu reads; the rest of User never comes up here. */
 const aUser = (profile: Partial<IdTokenClaims>) => ({ profile }) as unknown as User;
 
@@ -76,11 +81,11 @@ async function renderMenu(state: { isAuthenticated?: boolean; user?: User } = {}
     expandSessionHeadroom: async () => "still-fresh"
   };
 
+  mockUseAccessTokenSource.mockReturnValue(tokenSource);
+
   render(
     <Provider theme={defaultTheme}>
-      <AccessTokenSourceContext.Provider value={tokenSource}>
-        <UserMenu/>
-      </AccessTokenSourceContext.Provider>
+      <UserMenu/>
     </Provider>
   );
 
