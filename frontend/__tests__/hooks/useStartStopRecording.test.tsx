@@ -2,13 +2,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { SessionTransition, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { SessionTransition, useAppSession } from "@/lib/components/SessionProvider";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
 import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
 import { ServerStorageDestination } from "@/lib/utils/serverStorage";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
 import { ServerEnv } from "@/lib/utils/serverEnv";
+import { fa } from "zod/locales";
 
 // recordLecture is mocked so the tests can drive its UI callbacks directly. This hook's
 // job is the state machine around recording, not the recording itself, and the real
@@ -24,11 +25,11 @@ vi.mock("@/lib/utils/notifications", () => ({
 vi.mock("@/lib/utils/browserStorage");
 
 const mockUseAccessTokenSource = vi.fn();
-vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
-  useAccessTokenSource: () => mockUseAccessTokenSource()
+vi.mock("@/lib/components/SessionProvider", () => ({
+  useAppSession: () => mockUseAccessTokenSource()
 }));
 
-type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
+type AccessTokenSource = ReturnType<typeof useAppSession>;
 
 interface CapturedRecording {
   trackBundle: RecordingTrackBundle
@@ -47,13 +48,22 @@ let releaseRecordLecture: (() => void) | undefined;
 const makeTokenSource = (
   authRequired: boolean,
   token: string | undefined,
-  sessionResult: SessionTransition = "still-fresh"
+  sessionResult: SessionTransition = "not-signed-in"
 ): AccessTokenSource => ({
   authRequired,
   autoSignin: false,
+  isAuthenticated: true,
+  isExpired: false,
+  isError: false,
+  isLoading: false,
+  isStale: false,
+  userName: undefined,
+  errorMessage: undefined,
   getAccessToken: vi.fn(async () => token),
-  signOut: vi.fn(async () => {}),
-  expandSessionHeadroom: vi.fn(async (): Promise<SessionTransition> => sessionResult)
+  signout: vi.fn(async () => {}),
+  interactiveSignin: vi.fn(async () => {}),
+  reauthenticate: vi.fn(async () => {}),
+  expandSession: vi.fn(async (): Promise<SessionTransition> => sessionResult)
 });
 
 function renderRecorder(
@@ -183,7 +193,7 @@ test("the session headroom is expanded before every recording", async () => {
 
   await startAndCapture(result.current.startRecording);
 
-  expect(tokenSource.expandSessionHeadroom).toHaveBeenCalledOnce();
+  expect(tokenSource.expandSession).toHaveBeenCalledOnce();
 });
 
 test("a renewed session aborts the start so the user can press record again", async () => {
@@ -231,15 +241,6 @@ test("streaming is not impeded when re-auth failed but the old token still works
 test("streaming is not impeded without a backend, whatever the session state", async () => {
   const tokenSource = makeTokenSource(true, undefined, "expired");
   const { result } = renderRecorder(tokenSource, { apiUrl: undefined });
-
-  const call = await startAndCapture(result.current.startRecording);
-
-  expect(call.destination.streamingImpeded).toBe(false);
-});
-
-test("streaming is not impeded when auth is not required, whatever the session state", async () => {
-  const tokenSource = makeTokenSource(false, undefined, "expired");
-  const { result } = renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 

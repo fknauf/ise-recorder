@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceProvider, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 
 /**
@@ -174,9 +174,9 @@ const userAged = (ageSeconds: number, overrides: Partial<{ access_token: string;
 function providerWrapper(serverEnv: ServerEnv) {
   const Wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
     <AppStoreProvider serverEnv={serverEnv}>
-      <AccessTokenSourceProvider>
+      <SessionProvider>
         {children}
-      </AccessTokenSourceProvider>
+      </SessionProvider>
     </AppStoreProvider>;
 
   Wrapper.displayName = "TokenSourceTestWrapper";
@@ -185,8 +185,7 @@ function providerWrapper(serverEnv: ServerEnv) {
 
 async function renderTokenSource(serverEnv: ServerEnv) {
   const rendered = renderHook(() => ({
-    source: useAccessTokenSource(),
-    staleSession: useAppStore(state => state.staleSession)
+    source: useAppSession()
   }), { wrapper: providerWrapper(serverEnv) });
 
   // The staleness watcher kicks off an async check on mount. Settle it inside act()
@@ -217,7 +216,7 @@ test("useAccessTokenSource refuses to work outside a provider", () => {
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
-    expect(() => renderHook(() => useAccessTokenSource()))
+    expect(() => renderHook(() => useAppSession()))
       .toThrow("useAccessTokenSource must be used within AccessTokenSourceProvider");
   } finally {
     consoleError.mockRestore();
@@ -231,7 +230,7 @@ test("an unconfigured deployment yields an anonymous token source", async () => 
 
   expect(result.current.source.authRequired).toBe(false);
   expect(await result.current.source.getAccessToken()).toBeUndefined();
-  expect(await result.current.source.expandSessionHeadroom()).toBe("still-fresh");
+  expect(await result.current.source.expandSession()).toBe("still-fresh");
   // no OpenID provider means no UserManager at all
   expect(oidc.instances.length).toBe(0);
 });
@@ -245,7 +244,7 @@ test("a provider URL without a client ID is a configuration error", () => {
       oidcClientId: undefined
     });
 
-    expect(() => renderHook(() => useAccessTokenSource(), { wrapper }))
+    expect(() => renderHook(() => useAppSession(), { wrapper }))
       .toThrow("OpenID provider configured but no client ID supplied");
   } finally {
     consoleError.mockRestore();
@@ -308,7 +307,7 @@ test("auth_time survives whatever claim filtering the UserManager is configured 
   renderTokenSource(authenticatedEnv);
 
   // oidc-client-ts filters auth_time out of user.profile by default, which silently
-  // disables staleness detection entirely: no notice, and expandSessionHeadroom always
+  // disables staleness detection entirely: no notice, and expandSession always
   // takes the silent-refresh branch instead of the popup. This asserts the setting
   // keeps it, whatever form the setting takes.
   const filtered = oidc.applyClaimFilter(
@@ -322,9 +321,9 @@ test("auth_time survives whatever claim filtering the UserManager is configured 
 // --- how staleness is decided ----------------------------------------------
 //
 // sessionIsStale is no longer part of the interface, so the decision is observed
-// through the branch expandSessionHeadroom takes: a stale session goes to the popup,
+// through the branch expandSession takes: a stale session goes to the popup,
 // a fresh one to the silent refresh. The plain younger/older cases live in the
-// expandSessionHeadroom section below; these are the edge cases.
+// expandSession section below; these are the edge cases.
 
 test("no session at all is treated as stale", async () => {
   const { result } = await renderTokenSource(authenticatedEnv);
@@ -333,7 +332,7 @@ test("no session at all is treated as stale", async () => {
   mgr.user = null;
   mgr.signinPopupResult = userAged(0);
 
-  await result.current.source.expandSessionHeadroom();
+  await result.current.source.expandSession();
 
   expect(mgr.signinPopupCalls).toBe(1);
   expect(mgr.signinSilentCalls).toBe(0);
@@ -346,7 +345,7 @@ test("a deployment without max_age never treats a session as stale", async () =>
   mgr.user = userAged(10 * MAX_AGE_SECONDS);
   mgr.signinSilentResult = userAged(0);
 
-  await result.current.source.expandSessionHeadroom();
+  await result.current.source.expandSession();
 
   expect(mgr.signinSilentCalls).toBe(1);
   expect(mgr.signinPopupCalls).toBe(0);
@@ -360,7 +359,7 @@ test("a provider that omits auth_time never treats a session as stale", async ()
   mgr.user = { ...aged, profile: { iat: aged.profile.iat } };
   mgr.signinSilentResult = userAged(0);
 
-  await result.current.source.expandSessionHeadroom();
+  await result.current.source.expandSession();
 
   expect(mgr.signinSilentCalls).toBe(1);
   expect(mgr.signinPopupCalls).toBe(0);
@@ -377,13 +376,13 @@ test("the token's own issue time wins when the local clock lags behind the provi
   mgr.user = userAged(60, { iat: nowSeconds() + 10 * MAX_AGE_SECONDS });
   mgr.signinPopupResult = userAged(0);
 
-  await result.current.source.expandSessionHeadroom();
+  await result.current.source.expandSession();
 
   expect(mgr.signinPopupCalls).toBe(1);
   expect(mgr.signinSilentCalls).toBe(0);
 });
 
-// --- expandSessionHeadroom -------------------------------------------------
+// --- expandSession -------------------------------------------------
 
 test("a fresh session is refreshed silently rather than through a popup", async () => {
   const { result } = await renderTokenSource(authenticatedEnv);
@@ -392,7 +391,7 @@ test("a fresh session is refreshed silently rather than through a popup", async 
   mgr.user = userAged(60);
   mgr.signinSilentResult = userAged(0, { access_token: "fresh-token" });
 
-  expect(await result.current.source.expandSessionHeadroom()).toBe("still-fresh");
+  expect(await result.current.source.expandSession()).toBe("still-fresh");
   expect(mgr.signinSilentCalls).toBe(1);
   expect(mgr.signinPopupCalls).toBe(0);
 });
@@ -404,7 +403,7 @@ test("a stale session is renewed through a popup rather than silently", async ()
   mgr.user = userAged(MAX_AGE_SECONDS + 600);
   mgr.signinPopupResult = userAged(0);
 
-  expect(await result.current.source.expandSessionHeadroom()).toBe("renewed");
+  expect(await result.current.source.expandSession()).toBe("renewed");
   expect(mgr.signinPopupCalls).toBe(1);
   expect(mgr.signinSilentCalls).toBe(0);
 });
@@ -419,7 +418,7 @@ test("a declined popup leaves a still-usable token reported as still-stale", asy
     mgr.user = userAged(MAX_AGE_SECONDS + 600);
     mgr.signinPopupResult = new Error("popup closed by user");
 
-    expect(await result.current.source.expandSessionHeadroom()).toBe("still-stale");
+    expect(await result.current.source.expandSession()).toBe("still-stale");
     expect(consoleWarn).toHaveBeenCalled();
   } finally {
     consoleWarn.mockRestore();
@@ -436,7 +435,7 @@ test("a declined popup on an expired token is reported as expired", async () => 
     mgr.user = { ...userAged(MAX_AGE_SECONDS + 600), expired: true };
     mgr.signinPopupResult = new Error("popup closed by user");
 
-    expect(await result.current.source.expandSessionHeadroom()).toBe("expired");
+    expect(await result.current.source.expandSession()).toBe("expired");
   } finally {
     consoleWarn.mockRestore();
   }
@@ -452,7 +451,7 @@ test("a failed popup with nobody signed in is reported as expired", async () => 
     mgr.user = null;
     mgr.signinPopupResult = new Error("provider unreachable");
 
-    expect(await result.current.source.expandSessionHeadroom()).toBe("expired");
+    expect(await result.current.source.expandSession()).toBe("expired");
   } finally {
     consoleWarn.mockRestore();
   }
@@ -472,7 +471,7 @@ test("a hiccup refreshing a fresh session does not make it look stale", async ()
     // The refresh is advisory -- failing it says nothing about how old the session is,
     // so it must not be reported as staleness. Sharing one catch across both branches
     // is what would break this.
-    expect(await result.current.source.expandSessionHeadroom()).toBe("still-fresh");
+    expect(await result.current.source.expandSession()).toBe("still-fresh");
   } finally {
     consoleWarn.mockRestore();
   }
@@ -483,11 +482,11 @@ test("a hiccup refreshing a fresh session does not make it look stale", async ()
 /**
  * getUser rejects when the browser refuses storage access, or when the stored entry is
  * damaged enough that JSON.parse throws. Neither is common, but the consequence used to
- * be out of proportion: expandSessionHeadroom is awaited outside any try in
+ * be out of proportion: expandSession is awaited outside any try in
  * startRecording, so the rejection escaped as an unhandled rejection and left the
  * recorder wedged in "preparing" with no message and no way back but a reload.
  *
- * The contract these pin: expandSessionHeadroom always resolves, and an unreadable store
+ * The contract these pin: expandSession always resolves, and an unreadable store
  * is treated as nobody being signed in.
  */
 
@@ -499,7 +498,7 @@ test("an unreadable user store is treated as a stale session rather than crashin
   mgr.signinPopupResult = userAged(0);
 
   // stale rather than fresh: it must prompt for authentication, not skip the check
-  expect(await result.current.source.expandSessionHeadroom()).toBe("renewed");
+  expect(await result.current.source.expandSession()).toBe("renewed");
   expect(mgr.signinPopupCalls).toBe(1);
 });
 
@@ -516,7 +515,7 @@ test("an unreadable user store during popup recovery is reported as expired", as
     mgr.getUserError = new Error("SyntaxError: Unexpected end of JSON input");
     mgr.signinPopupResult = new Error("popup closed by user");
 
-    expect(await result.current.source.expandSessionHeadroom()).toBe("expired");
+    expect(await result.current.source.expandSession()).toBe("expired");
   } finally {
     consoleWarn.mockRestore();
   }
@@ -534,7 +533,7 @@ test("the staleness watcher flips to stale when the user store becomes unreadabl
     mgr.emitUserLoaded();
   });
 
-  expect(result.current.staleSession).toBe(false);
+  expect(result.current.source.isStale).toBe(false);
 
   mgr.getUserError = new Error("storage unavailable");
 
@@ -544,7 +543,7 @@ test("the staleness watcher flips to stale when the user store becomes unreadabl
 
   // the watcher re-checks on provider events; a rejection there would leave the last
   // verdict standing and an unhandled rejection behind
-  expect(result.current.staleSession).toBe(true);
+  expect(result.current.source.isStale).toBe(true);
 });
 
 // --- the staleness watcher -------------------------------------------------
@@ -554,7 +553,7 @@ test("the watcher publishes session staleness to the store on mount", async () =
   userManager().user = userAged(MAX_AGE_SECONDS + 600);
 
   await waitFor(() => {
-    expect(result.current.staleSession).toBe(true);
+    expect(result.current.source.isStale).toBe(true);
   });
 });
 
@@ -563,7 +562,7 @@ test("the watcher republishes when the provider raises userLoaded", async () => 
   const mgr = userManager();
 
   mgr.user = userAged(MAX_AGE_SECONDS + 600);
-  await waitFor(() => expect(result.current.staleSession).toBe(true));
+  await waitFor(() => expect(result.current.source.isStale).toBe(true));
 
   // a re-auth elsewhere establishes a new session; the banner must clear without
   // waiting out the poll interval
@@ -571,7 +570,7 @@ test("the watcher republishes when the provider raises userLoaded", async () => 
   mgr.emitUserLoaded();
 
   await waitFor(() => {
-    expect(result.current.staleSession).toBe(false);
+    expect(result.current.source.isStale).toBe(false);
   });
 });
 
@@ -598,19 +597,19 @@ test("the watcher flips the session to stale exactly when it ages out", async ()
     // re-evaluate now that there is a user, so the timer is armed
     userManager().emitUserLoaded();
     await act(async () => {});
-    expect(result.current.staleSession).toBe(false);
+    expect(result.current.source.isStale).toBe(false);
 
     // one second short of the deadline, nothing has changed
     await act(async () => {
       await vi.advanceTimersByTimeAsync((remainingSeconds - 1) * 1000);
     });
-    expect(result.current.staleSession).toBe(false);
+    expect(result.current.source.isStale).toBe(false);
 
     // and then it flips, without waiting out any polling interval
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
-    expect(result.current.staleSession).toBe(true);
+    expect(result.current.source.isStale).toBe(true);
   } finally {
     vi.useRealTimers();
   }
@@ -627,7 +626,7 @@ test("a session that can never age out arms no timer at all", async () => {
     await act(async () => {});
 
     expect(vi.getTimerCount()).toBe(0);
-    expect(result.current.staleSession).toBe(false);
+    expect(result.current.source.isStale).toBe(false);
   } finally {
     vi.useRealTimers();
   }
@@ -676,7 +675,7 @@ test("signing out drops the session and stops signing back in", async () => {
   const { result } = await renderTokenSource({ ...authenticatedEnv, oidcAutoSignin: true });
   userManager().user = userAged(60);
 
-  await act(() => result.current.source.signOut());
+  await act(() => result.current.source.signout());
 
   expect(userManager().removeUserCalls).toBe(1);
   expect(result.current.source.autoSignin).toBe(false);
@@ -690,7 +689,7 @@ test("a sign-out whose user store refuses still stops signing back in", async ()
   const { result } = await renderTokenSource({ ...authenticatedEnv, oidcAutoSignin: true });
   userManager().removeUserError = new Error("session storage unavailable");
 
-  await act(() => result.current.source.signOut());
+  await act(() => result.current.source.signout());
 
   expect(userManager().removeUserCalls).toBe(1);
   expect(result.current.source.autoSignin).toBe(false);

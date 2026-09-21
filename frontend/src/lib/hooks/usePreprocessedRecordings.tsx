@@ -1,5 +1,5 @@
 import useSWR from "swr";
-import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
+import { useAppSession } from "../components/SessionProvider";
 import { useCallback } from "react";
 import * as z from "zod";
 import { useServerEnv } from "./useServerEnv";
@@ -26,7 +26,7 @@ const DownloadableRecordingsSchema = z.object({
 
 export function usePreprocessedRecordings() {
   const { apiUrl } = useServerEnv();
-  const { getAccessToken } = useAccessTokenSource();
+  const { getAccessToken } = useAppSession();
 
   const fetcher = useCallback(async (key: string): Promise<DownloadableRecordings | null> => {
     const token = await getAccessToken();

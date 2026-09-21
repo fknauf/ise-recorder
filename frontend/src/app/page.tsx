@@ -8,9 +8,10 @@ import { PreviewSection } from "@/lib/components/PreviewSection";
 import { GithubLink } from "@/lib/components/GithubLink";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 import { useAutoSignin } from "react-oidc-context";
-import { useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { useAppSession } from "@/lib/components/SessionProvider";
 import { useHydrated } from "@/lib/hooks/useHydrated";
 import { PreprocessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
+import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 
 function AutoSignin() {
   useAutoSignin();
@@ -19,7 +20,7 @@ function AutoSignin() {
 
 export function Home() {
   const hydrated = useHydrated();
-  const { autoSignin } = useAccessTokenSource();
+  const { autoSignin } = useAppSession();
 
   return (
     <Flex direction="column" width="100vw" height="100vh" gap="size-100">
@@ -33,6 +34,7 @@ export function Home() {
 
       <Flex direction="row" justifyContent="center" marginTop="size-200">
         <AuthStatusMessage/>
+        <StreamingImpededWarning/>
         <QuotaWarning thresholdBytes={2 ** 30}/>
       </Flex>
       <PreviewSection canvasWidth={384} canvasHeight={216}/>

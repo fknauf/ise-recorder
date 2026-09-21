@@ -1,6 +1,6 @@
 "use client";
 
-import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
+import { useAppSession } from "./SessionProvider";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { ActionButton, Link, Text } from "@adobe/react-spectrum";
 import Download from "@spectrum-icons/workflow/Download";
@@ -60,10 +60,10 @@ function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string
 }
 
 export function PreprocessedRecordingsSection() {
-  const { authRequired } = useAccessTokenSource();
+  const { isAuthenticated, isExpired } = useAppSession();
   const { apiUrl } = useServerEnv();
 
-  if(apiUrl === undefined || !authRequired) {
+  if(apiUrl === undefined || !isAuthenticated || isExpired) {
     return null;
   }
 

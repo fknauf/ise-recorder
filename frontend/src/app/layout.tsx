@@ -3,7 +3,7 @@ import "./globals.css";
 import { SpectrumProvider } from "@/lib/components/SpectrumProvider";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { getServerEnv } from "@/lib/utils/serverEnv";
-import { AccessTokenSourceProvider } from "@/lib/hooks/useAccessTokenSource";
+import { SessionProvider } from "@/lib/components/SessionProvider";
 
 export const metadata: Metadata = {
   title: "ISE-Recorder",
@@ -20,9 +20,9 @@ export default async function RootLayout(
       <body>
         <SpectrumProvider>
           <AppStoreProvider serverEnv={env}>
-            <AccessTokenSourceProvider>
+            <SessionProvider>
               {children}
-            </AccessTokenSourceProvider>
+            </SessionProvider>
           </AppStoreProvider>
         </SpectrumProvider>
       </body>

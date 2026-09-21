@@ -17,7 +17,7 @@ import { useMediaTracks } from "../hooks/useMediaTracks";
 import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
 import { useHydrated } from "../hooks/useHydrated";
 import { UserMenu } from "./UserMenu";
-import { useAccessTokenSource } from "../hooks/useAccessTokenSource";
+import { useAppSession } from "./SessionProvider";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -127,7 +127,7 @@ export function RecorderControls() {
     refreshMediaDevices
   } = useMediaDevices();
 
-  const { authRequired } = useAccessTokenSource();
+  const { authRequired } = useAppSession();
 
   const isBackendConfigured = apiUrl !== undefined;
   const hasDisabledTrackControls = activeRecording.state !== "idle";

@@ -98,7 +98,6 @@ export interface AppStoreState {
   adjustedSavedRecordings: readonly RecordingFileList[]
   quota: number | undefined
   usage: number | undefined
-  staleSession: boolean
 
   // For use in async functions and event handlers, when the store value might change between
   // invocation of the hook that provides the handler and invocation of the handler. Returned
@@ -120,7 +119,6 @@ export interface AppStoreState {
   resetFileSizeOverrides: () => void
   updateBrowserStorage: () => Promise<void>
   updateQuotaInformation: () => Promise<void>
-  setStaleSession: (stale: StateUpdate<boolean>) => void
 }
 
 const unselectTrack = (state: AppStoreState, track: MediaStreamTrack): Partial<AppStoreState> =>
@@ -149,7 +147,6 @@ const createRawAppStore = (
   adjustedSavedRecordings: [],
   quota: undefined,
   usage: undefined,
-  staleSession: false,
 
   selectFromStore: selector => selector(get()),
 
@@ -260,10 +257,7 @@ const createRawAppStore = (
       savedRecordings: recordings,
       adjustedSavedRecordings: applyOverrides(recordings, state.fileSizeOverrides)
     }));
-  },
-
-  setStaleSession: (stale: StateUpdate<boolean>) =>
-    set(state => ({ staleSession: applyStateUpdate(state.staleSession, stale) }))
+  }
 });
 
 export const createAppStore = (

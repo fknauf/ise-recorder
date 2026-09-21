@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
-import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { useAppSession } from "@/lib/components/SessionProvider";
 
 const mockUseAccessTokenSource = vi.fn();
 vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
@@ -36,22 +36,40 @@ vi.mock("react-oidc-context", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => children
 }));
 
-type AccessTokenSource = ReturnType<typeof useAccessTokenSource>;
+type AccessTokenSource = ReturnType<typeof useAppSession>;
 
 const anonymousTokenSource: AccessTokenSource = {
   authRequired: false,
   autoSignin: false,
+  isAuthenticated: false,
+  isExpired: false,
+  isError: false,
+  isLoading: false,
+  isStale: false,
+  userName: undefined,
+  errorMessage: undefined,
   getAccessToken: async () => undefined,
-  signOut: async () => {},
-  expandSessionHeadroom: async () => "still-fresh"
+  signout: async () => {},
+  interactiveSignin: async () => {},
+  reauthenticate: async () => {},
+  expandSession: async () => "not-signed-in"
 };
 
 const authenticatedTokenSource: AccessTokenSource = {
   authRequired: true,
   autoSignin: false,
+  isAuthenticated: true,
+  isError: false,
+  isExpired: false,
+  isLoading: false,
+  isStale: false,
+  userName: "lecturer",
+  errorMessage: undefined,
   getAccessToken: async () => "test-token",
-  signOut: async () => {},
-  expandSessionHeadroom: async () => "still-fresh"
+  signout: async () => {},
+  interactiveSignin: async () => {},
+  reauthenticate: async () => {},
+  expandSession: async () => "still-fresh"
 };
 
 const cleanupBetweenTests = async () => {

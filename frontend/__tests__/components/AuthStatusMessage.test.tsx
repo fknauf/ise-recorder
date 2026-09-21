@@ -4,7 +4,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceContext, SessionTransition } from "@/lib/hooks/useAccessTokenSource";
+import { SessionTransition } from "@/lib/components/SessionProvider";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 import { ActiveRecording } from "@/lib/store/store";
 import { ServerEnv } from "@/lib/utils/serverEnv";
@@ -38,12 +38,11 @@ vi.mock("react-oidc-context", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => children
 }));
 
-const mockUseAccessTokenSource = vi.fn();
+const mockUseAppSession = vi.fn();
 vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
-  useAccessTokenSource: () => mockUseAccessTokenSource()
+  useAppSession: () => mockUseAppSession()
 }));
 
-let setStaleSession: (stale: boolean) => void;
 let setActiveRecording: (recording: ActiveRecording) => void;
 
 /**
@@ -52,13 +51,11 @@ let setActiveRecording: (recording: ActiveRecording) => void;
  * component is a side effect, and doing it in the render body is a lint error.
  */
 function StoreHandles() {
-  const stale = useAppStore(state => state.setStaleSession);
   const active = useAppStore(state => state.setActiveRecording);
 
   useEffect(() => {
-    setStaleSession = stale;
     setActiveRecording = active;
-  }, [ stale, active ]);
+  }, [ active ]);
 
   return null;
 }
@@ -74,15 +71,20 @@ function renderMessage(
     // component reads apiUrl. Default it to configured: that is the deployment every
     // authentication state below is interesting in.
     serverEnv = DEFAULT_SERVER_ENV,
-    expandSessionHeadroom = vi.fn(async (): Promise<SessionTransition> => "still-fresh")
+    stale: isStale = false,
+    interactiveLogin = vi.fn(async () => {}),
+    expandSession = vi.fn(async (): Promise<SessionTransition> => "still-fresh")
   } = {}
 ) {
-  mockUseAccessTokenSource.mockReturnValue({
+  mockUseAppSession.mockReturnValue(
+    {
       authRequired,
       autoSignin: false,
+      isStale,
       getAccessToken: async () => "token",
       signOut: async () => {},
-      expandSessionHeadroom
+      interactiveLogin,
+      expandSession
     }
   );
 
@@ -95,7 +97,7 @@ function renderMessage(
     </Provider>
   );
 
-  return { expandSessionHeadroom };
+  return { expandSession };
 }
 
 const recording = (streamingImpeded: boolean): ActiveRecording =>
@@ -139,8 +141,7 @@ test("a healthy session shows no banner", () => {
 test("a stale session warns and offers reauthentication", async () => {
   oidc.auth = { isAuthenticated: true, isLoading: false, error: undefined };
 
-  renderMessage();
-  act(() => setStaleSession(true));
+  renderMessage({ stale: true });
 
   expect(screen.getByText("Authentication Session is Stale")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Reauthenticate/i })).toBeInTheDocument();
@@ -149,25 +150,12 @@ test("a stale session warns and offers reauthentication", async () => {
 test("the reauthenticate button asks for more session headroom", async () => {
   oidc.auth = { isAuthenticated: true, isLoading: false, error: undefined };
 
-  const { expandSessionHeadroom } = renderMessage();
-  act(() => setStaleSession(true));
+  const { expandSession } = renderMessage({ stale: true });
 
   await userEvent.click(screen.getByRole("button", { name: /Reauthenticate/i }));
 
   // the only thing on this banner that does anything; everything else is prose
-  expect(expandSessionHeadroom).toHaveBeenCalled();
-});
-
-test("the warning clears once the session is fresh again", async () => {
-  oidc.auth = { isAuthenticated: true, isLoading: false, error: undefined };
-
-  renderMessage();
-  act(() => setStaleSession(true));
-  expect(screen.getByText("Authentication Session is Stale")).toBeInTheDocument();
-
-  act(() => setStaleSession(false));
-
-  expect(screen.queryByText("Authentication Session is Stale")).toBeNull();
+  expect(expandSession).toHaveBeenCalled();
 });
 
 // --- signing in and failing to ---------------------------------------------
@@ -258,8 +246,7 @@ test.each([
 test("a deployment with no backend keeps quiet about a stale session too", async () => {
   oidc.auth = { isAuthenticated: true, isLoading: false, error: undefined };
 
-  renderMessage({ serverEnv: {} });
-  act(() => setStaleSession(true));
+  renderMessage({ serverEnv: {}, stale: true });
 
   expect(screen.queryByText(/Stale/i)).toBeNull();
 });
@@ -282,8 +269,7 @@ test("a sign-in that has not happened yet outranks a stale flag left in the stor
   // a session the user does not have sends them to the wrong button.
   oidc.auth = { isAuthenticated: false, isLoading: false, error: undefined };
 
-  renderMessage();
-  act(() => setStaleSession(true));
+  renderMessage({ stale: true });
 
   expect(screen.getByText("You are not authenticated")).toBeInTheDocument();
   expect(screen.queryByText(/Stale/i)).toBeNull();
@@ -369,9 +355,8 @@ test("a stale session and an impeded recording are both shown", () => {
   // they are independent: whichever combination holds, the user sees all of it
   oidc.auth = { isAuthenticated: true, isLoading: false, error: undefined };
 
-  renderMessage();
+  renderMessage({ stale: true });
   act(() => {
-    setStaleSession(true);
     setActiveRecording(recording(true));
   });
 

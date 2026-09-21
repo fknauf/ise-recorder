@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
-import { AccessTokenSourceProvider } from "@/lib/hooks/useAccessTokenSource";
+import { SessionProvider } from "@/lib/hooks/useRawSession";
 import { Home } from "@/app/page";
 
 /**
@@ -24,9 +24,9 @@ test("an unauthenticated deployment renders with the real react-oidc-context", a
   render(
     <Provider theme={defaultTheme}>
       <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-        <AccessTokenSourceProvider>
+        <SessionProvider>
           <Home/>
-        </AccessTokenSourceProvider>
+        </SessionProvider>
       </AppStoreProvider>
     </Provider>
   );
@@ -40,9 +40,9 @@ test("an unauthenticated deployment shows no authentication UI", async () => {
   render(
     <Provider theme={defaultTheme}>
       <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-        <AccessTokenSourceProvider>
+        <SessionProvider>
           <Home/>
-        </AccessTokenSourceProvider>
+        </SessionProvider>
       </AppStoreProvider>
     </Provider>
   );

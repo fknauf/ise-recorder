@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { ReactNode } from "react";
 import { UserMenu } from "@/lib/components/UserMenu";
-import { AccessTokenSourceContext, useAccessTokenSource } from "@/lib/hooks/useAccessTokenSource";
+import { useAppSession } from "@/lib/components/SessionProvider";
 import type { IdTokenClaims, User } from "oidc-client-ts";
 
 /**
@@ -46,7 +46,7 @@ vi.mock("react-oidc-context", () => ({
 }));
 
 const mockUseAccessTokenSource = vi.fn();
-vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
+vi.mock("@/lib/components/SessionProvider", () => ({
   useAccessTokenSource: () => mockUseAccessTokenSource()
 }));
 
@@ -69,16 +69,25 @@ async function renderMenu(state: { isAuthenticated?: boolean; user?: User } = {}
 
   const signinPopup = vi.fn(async () => null as User | null);
   const load = vi.fn(async () => {});
-  const signOut = vi.fn(async () => {});
+  const signout = vi.fn(async () => {});
 
   oidc.auth = { isAuthenticated, user, signinPopup, events: { load } };
 
-  const tokenSource: ReturnType<typeof useAccessTokenSource> = {
+  const tokenSource: ReturnType<typeof useAppSession> = {
     authRequired: true,
     autoSignin: false,
+    isStale: false,
+    isAuthenticated,
+    isError: false,
+    isExpired: user?.expired,
+    isLoading: false,
+    userName: user?.profile.preferred_username ?? user?.profile.name ?? user?.profile.email ?? "The Nameless One",
+    errorMessage: undefined,
     getAccessToken: async () => "token",
-    signOut,
-    expandSessionHeadroom: async () => "still-fresh"
+    signout,
+    interactiveSignin: async () => {},
+    reauthenticate: async () => {},
+    expandSession: async () => "still-fresh"
   };
 
   mockUseAccessTokenSource.mockReturnValue(tokenSource);
@@ -92,7 +101,7 @@ async function renderMenu(state: { isAuthenticated?: boolean; user?: User } = {}
   await userEvent.click(screen.getByRole("button", { name: "User menu" }));
   await screen.findByRole("dialog");
 
-  return { signinPopup, load, signOut };
+  return { signinPopup, load, signOut: signout };
 }
 
 afterEach(cleanup);

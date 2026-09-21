@@ -6,15 +6,15 @@ import { useLecture } from "./useLecture";
 import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
-import { SessionTransition, useAccessTokenSource } from "./useAccessTokenSource";
+import { SessionTransition, useAppSession } from "../components/SessionProvider";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
 }
 
 // extracted into a function to work around a react compiler limitation where && and || in try blocks cause it to bail.
-function isStreamingImpeded(apiUrl: string | undefined, authRequired: boolean, sessionState: SessionTransition) {
-  return apiUrl !== undefined && authRequired && sessionState === "expired";
+function isStreamingImpeded(apiUrl: string | undefined, sessionState: SessionTransition) {
+  return apiUrl !== undefined && sessionState === "expired";
 }
 
 export const useActiveRecording = () => useAppStore(state => state.activeRecording);
@@ -39,10 +39,9 @@ export function useStartStopRecording() {
   } = useServerEnv();
 
   const {
-    authRequired,
     getAccessToken,
-    expandSessionHeadroom
-  } = useAccessTokenSource();
+    expandSession
+  } = useAppSession();
 
   const startRecording = async () => {
     const activeRecording = selectFromStore(state => state.activeRecording);
@@ -53,7 +52,7 @@ export function useStartStopRecording() {
     setActiveRecording({ state: "preparing" });
 
     try {
-      const sessionState = await expandSessionHeadroom();
+      const sessionState = await expandSession();
 
       if(sessionState === "renewed") {
         // user just had to re-login. This happens rarely, so user is now slightly confused,
@@ -63,7 +62,7 @@ export function useStartStopRecording() {
         return;
       }
 
-      const streamingImpeded = isStreamingImpeded(apiUrl, authRequired, sessionState);
+      const streamingImpeded = isStreamingImpeded(apiUrl, sessionState);
 
       const onStarting = (recordingName: string) => {
         setActiveRecording({
