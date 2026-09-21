@@ -9,7 +9,6 @@ import { ServerStorageDestination } from "@/lib/utils/serverStorage";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
 import { ServerEnv } from "@/lib/utils/serverEnv";
-import { fa } from "zod/locales";
 
 // recordLecture is mocked so the tests can drive its UI callbacks directly. This hook's
 // job is the state machine around recording, not the recording itself, and the real
@@ -54,11 +53,10 @@ const makeTokenSource = (
   autoSignin: false,
   isAuthenticated: true,
   isExpired: false,
-  isError: false,
   isLoading: false,
   isStale: false,
   userName: undefined,
-  errorMessage: undefined,
+  error: undefined,
   getAccessToken: vi.fn(async () => token),
   signout: vi.fn(async () => {}),
   interactiveSignin: vi.fn(async () => {}),

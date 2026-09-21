@@ -16,8 +16,7 @@ export interface AppSession {
   isLoading: boolean
   isExpired: boolean | undefined
   isStale: boolean
-  isError: boolean
-  errorMessage: string | undefined
+  error: Error | undefined
   userName: string | undefined
 
   getAccessToken: () => Promise<string | undefined>
@@ -147,9 +146,8 @@ function AuthenticatedSessionContextBridge(
         isAuthenticated,
         isLoading,
         isExpired: user?.expired,
-        isError: error !== undefined,
-        errorMessage: error?.message,
         isStale: stale,
+        error,
         userName,
         getAccessToken,
         signout,
@@ -290,11 +288,10 @@ function AnonymousSessionProvider(
         autoSignin: false,
         isAuthenticated: false,
         isLoading: false,
-        isError: false,
         isExpired: false,
         isStale: false,
         userName: undefined,
-        errorMessage: undefined,
+        error: undefined,
         getAccessToken: async () => undefined,
         signout: async () => {},
         interactiveSignin: async () => {},

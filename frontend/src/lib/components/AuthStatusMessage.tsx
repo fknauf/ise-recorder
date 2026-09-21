@@ -7,19 +7,21 @@ import Login from "@spectrum-icons/workflow/Login";
 import { useServerEnv } from "../hooks/useServerEnv";
 
 export function AuthStatusMessage() {
-  const env = useServerEnv();
+  const {
+    apiUrl
+  } = useServerEnv();
+
   const {
     authRequired,
     isAuthenticated,
     isLoading,
-    isError,
-    errorMessage,
+    error,
     isStale,
     interactiveSignin,
     expandSession
   } = useAppSession();
 
-  if(env.apiUrl === undefined || !authRequired) {
+  if(apiUrl === undefined || !authRequired) {
     return null;
   }
 
@@ -34,13 +36,13 @@ export function AuthStatusMessage() {
     );
   }
 
-  if(isError) {
+  if(error !== undefined) {
     return (
       <InlineAlert variant="negative">
         <Heading>Authentication Error</Heading>
         <Content>
           <Flex direction="column">
-            <Text>Authentication Error: {errorMessage || "Unknown Error"}</Text>
+            <Text>Authentication Error: {error.message || "Unknown Error"}</Text>
             <ActionButton onPress={interactiveSignin} marginTop="size-100" alignSelf="center">
               <Refresh/>
               <Text>Retry authentication</Text>

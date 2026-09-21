@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
-import { SessionProvider } from "@/lib/hooks/useRawSession";
+import { SessionProvider } from "@/lib/components/SessionProvider";
 import { Home } from "@/app/page";
 
 /**

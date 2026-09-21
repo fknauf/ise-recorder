@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
-import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
+import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 
@@ -143,8 +143,10 @@ vi.mock("oidc-client-ts", () => ({ UserManager: oidc.FakeUserManager }));
 
 // AuthProvider would drive the real sign-in flow; useRouter needs an app-router context
 // that renderHook does not provide.
+const mockUseAuth = vi.fn();
 vi.mock("react-oidc-context", () => ({
-  AuthProvider: ({ children }: { children: ReactNode }) => children
+  AuthProvider: ({ children }: { children: ReactNode }) => children,
+  useAuth: () => mockUseAuth()
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() })
@@ -211,13 +213,13 @@ afterEach(() => {
   localStorage.clear();
 });
 
-test("useAccessTokenSource refuses to work outside a provider", () => {
+test("useAppSession refuses to work outside a provider", () => {
   // React logs the render failure; the throw itself is what we are asserting on.
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
     expect(() => renderHook(() => useAppSession()))
-      .toThrow("useAccessTokenSource must be used within AccessTokenSourceProvider");
+      .toThrow("useAppSession must be used within AccessTokenSourceProvider");
   } finally {
     consoleError.mockRestore();
   }
