@@ -122,7 +122,7 @@ const MockAuthContext = createContext<MockAuthContextData | null>(null);
 
 vi.mock("react-oidc-context", () => ({
   AuthProvider: (
-    { userManager, onSigninCallback, children }: { userManager: typeof oidc.instances[0], onSigninCallback: () => void, children: ReactNode }
+    { userManager, onSigninCallback, children }: { userManager: typeof oidc.instances[0]; onSigninCallback: () => void; children: ReactNode }
   ) => {
     const [ counter, setCounter ] = useState(0);
 
@@ -133,7 +133,7 @@ vi.mock("react-oidc-context", () => ({
       simulateSignin: () => onSigninCallback()
     }}>
       {children}
-    </MockAuthContext.Provider>
+    </MockAuthContext.Provider>;
   },
   useAuth: () => {
     const ctxData = useContext(MockAuthContext);
@@ -164,7 +164,8 @@ const authenticatedEnv: ServerEnv = {
   apiUrl: "http://localhost:5000",
   oidcProviderUrl: "http://keycloak.localhost:8080/realms/ise",
   oidcClientId: "ise-recorder",
-  oidcMaxAge: MAX_AGE_SECONDS
+  oidcMaxAge: MAX_AGE_SECONDS,
+  oidcAutoSignin: false
 };
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);

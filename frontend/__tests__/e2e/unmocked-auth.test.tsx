@@ -4,6 +4,7 @@ import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { SessionProvider } from "@/lib/components/SessionProvider";
 import { Home } from "@/app/page";
+import { ServerEnv } from "@/lib/utils/serverEnv";
 
 /**
  * This file deliberately does NOT mock react-oidc-context.
@@ -21,10 +22,12 @@ import { Home } from "@/app/page";
 afterEach(cleanup);
 
 test("an unauthenticated deployment renders with the real react-oidc-context", async () => {
+  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" };
+
   render(
     <Provider theme={defaultTheme}>
-      <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-        <SessionProvider>
+      <AppStoreProvider serverEnv={serverEnv}>
+        <SessionProvider serverEnv={serverEnv}>
           <Home/>
         </SessionProvider>
       </AppStoreProvider>
@@ -37,10 +40,12 @@ test("an unauthenticated deployment renders with the real react-oidc-context", a
 });
 
 test("an unauthenticated deployment shows no authentication UI", async () => {
+  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" };
+
   render(
     <Provider theme={defaultTheme}>
-      <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-        <SessionProvider>
+      <AppStoreProvider serverEnv={serverEnv}>
+        <SessionProvider serverEnv={serverEnv}>
           <Home/>
         </SessionProvider>
       </AppStoreProvider>
