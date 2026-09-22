@@ -8,9 +8,9 @@ import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
 
-const mockUseAccessTokenSource = vi.fn();
-vi.mock("@/lib/hooks/useAccessTokenSource", () => ({
-  useAccessTokenSource: () => mockUseAccessTokenSource()
+const mockUseAppSession = vi.fn();
+vi.mock("@/lib/components/SessionProvider", () => ({
+  useAppSession: () => mockUseAppSession()
 }));
 
 const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
@@ -43,11 +43,10 @@ const anonymousTokenSource: AccessTokenSource = {
   autoSignin: false,
   isAuthenticated: false,
   isExpired: false,
-  isError: false,
   isLoading: false,
   isStale: false,
   userName: undefined,
-  errorMessage: undefined,
+  error: undefined,
   getAccessToken: async () => undefined,
   signout: async () => {},
   interactiveSignin: async () => {},
@@ -59,12 +58,11 @@ const authenticatedTokenSource: AccessTokenSource = {
   authRequired: true,
   autoSignin: false,
   isAuthenticated: true,
-  isError: false,
   isExpired: false,
   isLoading: false,
   isStale: false,
   userName: "lecturer",
-  errorMessage: undefined,
+  error: undefined,
   getAccessToken: async () => "test-token",
   signout: async () => {},
   interactiveSignin: async () => {},
@@ -98,7 +96,7 @@ afterAll(cleanupBetweenTests);
 
 /** Just the page, for the tests that only care about what it decides to render. */
 function renderHome(tokenSource: AccessTokenSource) {
-  mockUseAccessTokenSource.mockReturnValue(tokenSource);
+  mockUseAppSession.mockReturnValue(tokenSource);
 
   render(
     <Provider theme={defaultTheme}>
@@ -145,7 +143,7 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
     return () => clearInterval(timer);
   };
 
-  mockUseAccessTokenSource.mockReturnValue(tokenSource);
+  mockUseAppSession.mockReturnValue(tokenSource);
 
   const tree = render(
     <>
