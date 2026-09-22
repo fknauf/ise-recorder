@@ -112,7 +112,7 @@ test("RecorderControls renders controls correctly when idle", async () => {
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -159,7 +159,7 @@ test("RecorderControls renders controls correctly when recording", async () => {
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -201,7 +201,7 @@ test("RecorderControls renders controls correctly when starting a recording", as
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -243,7 +243,7 @@ test("RecorderControls renders controls correctly when stopping a recording", as
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -285,7 +285,7 @@ test("RecorderControls hides the e-mail field when apiUrl is undefined", async (
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -309,7 +309,7 @@ test("RecorderControls handles the start recording button properly", async () =>
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -349,7 +349,7 @@ test("RecorderControls handles the stop recording button properly", async () => 
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -394,7 +394,7 @@ test("RecorderControls show video device menu", async () => {
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -445,7 +445,7 @@ test("RecorderControls show audio device menu", async () => {
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -485,7 +485,7 @@ test("RecorderControls handles lecture metadata", async () => {
 
   const tree = render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>
@@ -534,7 +534,7 @@ const renderIdleWith = (tracks: ConfiguredTracks) => {
 
   render(
     <Provider theme={defaultTheme}>
-      <SessionProvider>
+      <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
     </Provider>

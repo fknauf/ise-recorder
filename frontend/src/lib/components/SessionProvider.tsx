@@ -4,7 +4,8 @@ import { createContext, ReactNode, useContext, useEffect, useState } from "react
 import { AuthProvider, useAuth } from "react-oidc-context";
 import { UserManager } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
-import { useServerEnv } from "../hooks/useServerEnv";
+import { ServerEnv } from "../utils/serverEnv";
+import { determineSessionStaleness } from "../utils/session";
 
 export type SessionTransition =
   "still-fresh" | "still-stale" | "expired" | "renewed" | "not-signed-in";
@@ -26,11 +27,6 @@ export interface AppSession {
   expandSession: () => Promise<SessionTransition>
 }
 
-interface SessionStaleness {
-  stale: boolean
-  recheckMillis?: number
-}
-
 interface SessionProviderProps {
   providerUrl: string
   clientId: string
@@ -41,7 +37,7 @@ interface SessionProviderProps {
 
 interface SessionContextBridgeProps {
   autoSigninConfigured: boolean
-  stale: boolean
+  isStale: boolean
   recheckStaleness: () => Promise<boolean>
   children: ReactNode
 }
@@ -51,7 +47,7 @@ const SessionContext = createContext<AppSession | null>(null);
 function AuthenticatedSessionContextBridge(
   {
     autoSigninConfigured,
-    stale,
+    isStale,
     recheckStaleness,
     children
   }: Readonly<SessionContextBridgeProps>
@@ -62,17 +58,16 @@ function AuthenticatedSessionContextBridge(
     isLoading,
     error,
     user,
-    events: authEvents,
+    events,
     removeUser,
     signinPopup,
     signinSilent
   } = useAuth();
 
-  const signedIn = isAuthenticated && user?.expired === false;
   const userName = user?.profile.preferred_username ?? user?.profile.name ?? user?.profile.email ?? "The Nameless One";
 
   const getAccessToken = async () => {
-    if(!signedIn) {
+    if(!isAuthenticated || user?.expired !== false) {
       return undefined;
     }
 
@@ -93,7 +88,7 @@ function AuthenticatedSessionContextBridge(
     const next = await signinPopup({ max_age: 0, popupAbortOnClose: true });
 
     if(next === null && prevUser) {
-      await authEvents.load(prevUser);
+      await events.load(prevUser);
     }
   };
 
@@ -146,7 +141,7 @@ function AuthenticatedSessionContextBridge(
         isAuthenticated,
         isLoading,
         isExpired: user?.expired,
-        isStale: stale,
+        isStale,
         error,
         userName,
         getAccessToken,
@@ -159,31 +154,6 @@ function AuthenticatedSessionContextBridge(
       {children}
     </SessionContext.Provider>
   );
-}
-
-async function determineSessionStaleness(
-  userMgr: UserManager,
-  maxAge: number | undefined
-): Promise<SessionStaleness> {
-  const user = await userMgr.getUser().catch(() => null);
-
-  if(user === null) {
-    return { stale: true };
-  }
-
-  if(maxAge === undefined || user.profile.auth_time === undefined) {
-    return { stale: false };
-  }
-
-  const staleAtMillis = (user.profile.auth_time + maxAge) * 1000;
-  // adjust for clock drift: normally, Date.now() is after the current access token's iat. If not, then
-  // the server clock and our clock are misaligned. Use iat then because it's closer to the server's now.
-  const approxNowMillis = Math.max(user.profile.iat * 1000, Date.now());
-  const remainingMillis = staleAtMillis - approxNowMillis;
-
-  return remainingMillis > 0
-    ? { stale: false, recheckMillis: remainingMillis }
-    : { stale: true };
 }
 
 function AuthenticatedSessionProvider({ providerUrl, clientId, maxAge, autoSigninConfigured, children }: Readonly<SessionProviderProps>) {
@@ -269,7 +239,7 @@ function AuthenticatedSessionProvider({ providerUrl, clientId, maxAge, autoSigni
     >
       <AuthenticatedSessionContextBridge
         autoSigninConfigured={autoSigninConfigured}
-        stale={stale}
+        isStale={stale}
         recheckStaleness={recheckStaleness}
       >
         {children}
@@ -304,23 +274,25 @@ function AnonymousSessionProvider(
   );
 }
 
-export function SessionProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const env = useServerEnv();
+interface ServerProviderProps {
+  serverEnv: ServerEnv
+  children: ReactNode
+}
 
+export function SessionProvider({ serverEnv, children }: Readonly<ServerProviderProps>) {
   // Support openid authentication and legacy yolo-who-needs-authentication mode. Split into two
   // impl components to conform to React hook rules.
-  if(env.oidcProviderUrl !== undefined) {
-    if(env.oidcClientId === undefined) {
+  if(serverEnv.oidcProviderUrl !== undefined) {
+    if(serverEnv.oidcClientId === undefined) {
       throw Error("OpenID provider configured but no client ID supplied");
     }
 
     return (
       <AuthenticatedSessionProvider
-        key={`${env.oidcProviderUrl}${env.oidcClientId}${env.oidcMaxAge}`}
-        autoSigninConfigured={env.oidcAutoSignin || false}
-        providerUrl={env.oidcProviderUrl}
-        clientId={env.oidcClientId}
-        maxAge={env.oidcMaxAge}
+        autoSigninConfigured={serverEnv.oidcAutoSignin || false}
+        providerUrl={serverEnv.oidcProviderUrl}
+        clientId={serverEnv.oidcClientId}
+        maxAge={serverEnv.oidcMaxAge}
       >
         {children}
       </AuthenticatedSessionProvider>

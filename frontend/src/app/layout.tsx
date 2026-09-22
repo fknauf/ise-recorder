@@ -20,7 +20,7 @@ export default async function RootLayout(
       <body>
         <SpectrumProvider>
           <AppStoreProvider serverEnv={env}>
-            <SessionProvider>
+            <SessionProvider serverEnv={env}>
               {children}
             </SessionProvider>
           </AppStoreProvider>
