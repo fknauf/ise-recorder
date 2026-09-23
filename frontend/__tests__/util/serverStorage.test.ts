@@ -320,6 +320,83 @@ test("schedule postprocessing to broken server", async () => {
   }
 });
 
+// The rerender button refreshes the listing only when the job was accepted, so the result
+// is part of the contract now rather than only the notification.
+
+test("schedule postprocessing reports an accepted job", async () => {
+  const destination: ServerStorageDestination = {
+    apiUrl: "http://record.example.com",
+    streamingImpeded: false,
+    getAccessToken: accessToken
+  };
+
+  window.fetch = vi.fn().mockImplementation(async () => Response.json("", { status: 202 }));
+
+  await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com")).resolves.toBe(true);
+});
+
+test("schedule postprocessing reports a refused job", async () => {
+  const destination: ServerStorageDestination = {
+    apiUrl: "http://record.example.com",
+    streamingImpeded: false,
+    getAccessToken: accessToken
+  };
+
+  // what the backend answers for a recording that does not exist
+  window.fetch = vi.fn().mockImplementation(async () =>
+    Response.json({ detail: "Recording FOO does not exist" }, { status: 400 }));
+
+  await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com")).resolves.toBe(false);
+  expect(vi.mocked(showError)).toHaveBeenCalled();
+});
+
+test("schedule postprocessing without retries gives up after one attempt", async () => {
+  useRetryClock();
+
+  const destination: ServerStorageDestination = {
+    apiUrl: "http://record.example.com",
+    streamingImpeded: false,
+    getAccessToken: accessToken
+  };
+
+  window.fetch = vi.fn().mockImplementation(async () => Response.json("", { status: 503 }));
+
+  const before = Date.now();
+  const scheduled = await settleRetries(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", { retries: 0, intervalMillis: 5000 })
+  );
+
+  expect(scheduled).toBe(false);
+  expect(window.fetch).toHaveBeenCalledOnce();
+  // no backoff before giving up, or the rerender button would stay disabled for nothing
+  expect(Date.now() - before).toBe(0);
+});
+
+test("schedule postprocessing without a backend reports nothing scheduled", async () => {
+  const destination: ServerStorageDestination = {
+    apiUrl: undefined,
+    streamingImpeded: false,
+    getAccessToken: accessToken
+  };
+
+  window.fetch = vi.fn();
+
+  await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com")).resolves.toBeFalsy();
+});
+
+test("schedule postprocessing after impeded streaming reports nothing scheduled", async () => {
+  const destination: ServerStorageDestination = {
+    apiUrl: "http://record.example.com",
+    streamingImpeded: true,
+    getAccessToken: accessToken
+  };
+
+  window.fetch = vi.fn();
+
+  await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com")).resolves.toBeFalsy();
+  expect(window.fetch).not.toHaveBeenCalled();
+});
+
 test("chunk upload is unauthenticated if no access token is available", async () => {
   const destination: ServerStorageDestination = {
     apiUrl: "http://record.example.com",

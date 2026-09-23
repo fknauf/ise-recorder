@@ -223,6 +223,8 @@ async def get_recordings_list(
     if not settings.auth_required:
         raise _downloads_disabled()
 
+    running_job_names = [ job.name for job in sorted(running_jobs) ]
+
     return {
         "user": user_home.name,
         "completed": [
@@ -231,13 +233,13 @@ async def get_recordings_list(
                 "size": rec.size,
                 "totp": rec.totp
             }
-            for rec in recordings
+            for rec in recordings if rec.name not in running_job_names
         ],
         "rendering": [
             {
-                "name": job.name
+                "name": name
             }
-            for job in sorted(running_jobs)
+            for name in running_job_names
         ]
     }
 

@@ -1,13 +1,23 @@
 import { expect, test, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { PreprocessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
-import { useProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
+import { useProcessedRecordings, useRefreshProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
+import { schedulePostprocessing } from "@/lib/utils/serverStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
 
 vi.mock("@/lib/hooks/useProcessedRecordings");
+vi.mock("@/lib/utils/serverStorage");
+
+// the rerender button reads the recipient from the lecture form, which lives in the app
+// store; a factory keeps the store out of these tests
+const mockUseLecture = vi.fn();
+vi.mock("@/lib/hooks/useLecture", () => ({
+  useLecture: () => mockUseLecture()
+}));
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -25,6 +35,9 @@ const USER_DIGEST = "8f14e45fceea167a";
 type AppSession = ReturnType<typeof useAppSession>;
 
 const MiB = 2 ** 20;
+const LECTURER_EMAIL = "lecturer@example.edu";
+const getAccessToken = async () => "test-token";
+const refreshProcessedRecordings = vi.fn();
 
 const LISTING = {
   user: USER_DIGEST,
@@ -55,12 +68,25 @@ function renderSection(
     isStale: false,
     error: undefined,
     userName: "lecturer",
-    getAccessToken: async () => "test-token",
+    getAccessToken,
     signout: async () => {},
     interactiveSignin: async () => {},
     reauthenticate: async () => {},
     expandSession: async () => "still-fresh"
   } satisfies AppSession);
+
+  mockUseLecture.mockReturnValue({
+    lectureTitle: "",
+    lecturerEmail: LECTURER_EMAIL,
+    setLectureTitle: vi.fn(),
+    setLecturerEmail: vi.fn()
+  });
+
+  refreshProcessedRecordings.mockReset();
+  refreshProcessedRecordings.mockResolvedValue(undefined);
+  vi.mocked(useRefreshProcessedRecordings).mockReturnValue(refreshProcessedRecordings);
+  vi.mocked(schedulePostprocessing).mockReset();
+  vi.mocked(schedulePostprocessing).mockResolvedValue(true);
 
   vi.mocked(useProcessedRecordings).mockReturnValue(
     { data, error } as ReturnType<typeof useProcessedRecordings>
@@ -177,6 +203,131 @@ test("a stale listing's rendering cards are withdrawn with the rest while the er
 
   expect(cards()).toHaveLength(0);
   expect(renderingCards()).toHaveLength(0);
+});
+
+// --- rerendering a finished recording --------------------------------------
+
+const rerenderButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Rerender/ });
+
+test("each finished recording offers a rerender", () => {
+  renderSection();
+
+  expect(cards()).toHaveLength(2);
+  cards().forEach(card => expect(rerenderButton(card)).toBeEnabled());
+});
+
+test("a rerender schedules a job for that recording with the form's recipient", async () => {
+  renderSection();
+
+  await userEvent.click(rerenderButton(cards()[1]));
+
+  // the recipient is whatever the lecture form holds now, not whoever got the first
+  // report: the backend keeps no record of that
+  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(
+    { apiUrl: API_URL, streamingImpeded: false, getAccessToken },
+    "PSU_2026",
+    LECTURER_EMAIL,
+    // somebody is sitting in front of the button and can press it again; a retry loop
+    // would only leave them looking at a disabled button for no visible reason
+    expect.objectContaining({ retries: 0 })
+  );
+});
+
+test("a scheduled rerender refreshes the listing so the card turns into a rendering one", async () => {
+  renderSection();
+
+  await userEvent.click(rerenderButton(cards()[0]));
+
+  await waitFor(() => expect(refreshProcessedRecordings).toHaveBeenCalledOnce());
+});
+
+test("a rerender the backend refused leaves the listing alone and the button usable", async () => {
+  // schedulePostprocessing has already told the lecturer why; there is nothing new to fetch
+  renderSection();
+  vi.mocked(schedulePostprocessing).mockResolvedValue(false);
+
+  await userEvent.click(rerenderButton(cards()[0]));
+
+  await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
+  expect(refreshProcessedRecordings).not.toHaveBeenCalled();
+});
+
+test("the rerender button is disabled while the job request is in flight", async () => {
+  // otherwise an impatient second press schedules a duplicate: the backend drops it, but
+  // the lecturer gets two confirmations for one rerender
+  let answer: (scheduled: boolean) => void = () => {};
+
+  renderSection();
+
+  vi.mocked(schedulePostprocessing).mockReturnValue(new Promise(resolve => {
+    answer = resolve;
+  }));
+
+  await userEvent.click(rerenderButton(cards()[0]));
+
+  expect(rerenderButton(cards()[0])).toBeDisabled();
+  // only the pressed card is busy
+  expect(rerenderButton(cards()[1])).toBeEnabled();
+
+  await userEvent.click(rerenderButton(cards()[0]));
+  expect(schedulePostprocessing).toHaveBeenCalledOnce();
+
+  answer(false);
+
+  await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
+});
+
+test("the rerender button stays disabled until the refreshed listing is in", async () => {
+  // the refresh is what turns the card into a rendering one; re-enabling the button before
+  // it lands leaves a window for a duplicate press on a card that is about to go away
+  let refreshed: () => void = () => {};
+
+  renderSection();
+
+  refreshProcessedRecordings.mockReturnValue(new Promise<void>(resolve => {
+    refreshed = resolve;
+  }));
+
+  await userEvent.click(rerenderButton(cards()[0]));
+
+  await waitFor(() => expect(refreshProcessedRecordings).toHaveBeenCalledOnce());
+  expect(rerenderButton(cards()[0])).toBeDisabled();
+
+  refreshed();
+
+  await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
+});
+
+test("a rerender that blows up unexpectedly still gives the button back", async () => {
+  // schedulePostprocessing reports its own failures rather than throwing, so this is the
+  // case nobody planned for -- and a button stuck disabled until reload is the worst way
+  // for it to show
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  renderSection();
+  vi.mocked(schedulePostprocessing).mockRejectedValue(new Error("boom"));
+
+  await userEvent.click(rerenderButton(cards()[0]));
+
+  await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
+  expect(refreshProcessedRecordings).not.toHaveBeenCalled();
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("GVS_2025"), expect.any(Error));
+
+  warn.mockRestore();
+});
+
+test("a refresh that blows up unexpectedly still gives the button back", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  renderSection();
+  refreshProcessedRecordings.mockRejectedValue(new Error("boom"));
+
+  await userEvent.click(rerenderButton(cards()[0]));
+
+  await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
+  expect(warn).toHaveBeenCalled();
+
+  warn.mockRestore();
 });
 
 test("nothing is rendered before the first listing arrives", () => {

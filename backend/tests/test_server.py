@@ -4,6 +4,7 @@
 # pylint: disable=missing-module-docstring
 # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
+# pylint: disable=too-many-lines
 # pylint: disable=protected-access
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
@@ -759,15 +760,15 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     assert "user" in data
     assert "completed" in data
     assert isinstance(data["completed"], list)
-    assert len(data["completed"]) == 2
+    assert len(data["completed"]) == 2 # type: ignore
 
     assert data["completed"][0]["name"] == "GVS_2025"
     assert data["completed"][0]["size"] == 5
-    assert verify_download_totp(data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm", auth_client.app.state)
+    assert verify_download_totp(data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm", auth_client.app.state) # type: ignore
 
     assert data["completed"][1]["name"] == "PSU_2026"
     assert data["completed"][1]["size"] == 5
-    assert verify_download_totp(data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm", auth_client.app.state)
+    assert verify_download_totp(data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm", auth_client.app.state) # type: ignore
 
 
 def test_the_listing_leaves_out_recordings_that_are_not_rendered(
@@ -831,6 +832,42 @@ def test_a_recording_in_postprocessing_is_listed_as_rendering(
     assert data["rendering"] == [ { "name": "ABC_2026" }, { "name": "PSU_2026" } ]
     # only the name: there is no file to size and nothing to download yet
     assert [ r["name"] for r in data["completed"] ] == [ "GVS_2025" ]
+
+
+def test_a_recording_being_rerendered_is_only_listed_as_rendering(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the previous render stays on disk until the new one replaces it, so without the
+    # filter the recording would show up twice: a download card and a spinner side by side
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+    finish_recording(home, "PSU_2026")
+    running_jobs_of(auth_client, home).add(home / "PSU_2026")
+
+    data = list_recordings(auth_client, provider.mint()).json()
+
+    assert [ r["name"] for r in data["completed"] ] == [ "GVS_2025" ]
+    assert data["rendering"] == [ { "name": "PSU_2026" } ]
+
+
+def test_a_rerendered_recording_is_offered_for_download_again_once_the_job_is_done(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the job leaving the set is all it takes; a failed rerender leaves the previous render
+    # in place, so this holds either way
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+    running_jobs_of(auth_client, home).add(home / "GVS_2025")
+    token = provider.mint()
+
+    assert list_recordings(auth_client, token).json()["completed"] == []
+
+    running_jobs_of(auth_client, home).discard(home / "GVS_2025")
+
+    data = list_recordings(auth_client, token).json()
+
+    assert [ r["name"] for r in data["completed"] ] == [ "GVS_2025" ]
+    assert data["rendering"] == []
 
 
 def test_the_listing_only_shows_the_callers_own_rendering_jobs(

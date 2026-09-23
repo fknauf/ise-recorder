@@ -132,7 +132,9 @@ export async function schedulePostprocessing(
 
   if(result.status === "ok") {
     showSuccess(`Recording "${recording}" finished; postprocessing scheduled.`);
+    return true;
   } else {
     showError(`Failed to schedule postprocessing: ${result.errorMessage}`);
+    return false;
   }
 }

@@ -4,9 +4,13 @@ import { useAppSession } from "./SessionProvider";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { ActionButton, Content, Flex, Heading, InlineAlert, Link, ProgressCircle, Text } from "@adobe/react-spectrum";
 import Download from "@spectrum-icons/workflow/Download";
+import Refresh from "@spectrum-icons/workflow/Refresh";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { DownloadableRecording, RenderingRecording, useProcessedRecordings } from "../hooks/useProcessedRecordings";
+import { DownloadableRecording, RenderingRecording, useProcessedRecordings, useRefreshProcessedRecordings } from "../hooks/useProcessedRecordings";
 import * as z from "zod";
+import { schedulePostprocessing } from "../utils/serverStorage";
+import { useLecture } from "../hooks/useLecture";
+import { useState } from "react";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -17,11 +21,37 @@ const mibFormatter = new Intl.NumberFormat(
   }
 );
 
-const ProcessedRecordingCard = (
+function ProcessedRecordingCard(
   { apiUrl, user, recording }: Readonly<{ apiUrl: string; user: string; recording: DownloadableRecording }>
-) =>
-  <RecordingCard title={recording.name} testid="prec-card">
-    <Flex direction="column">
+) {
+  const { getAccessToken } = useAppSession();
+  const { lecturerEmail } = useLecture();
+  const refreshProcessedRecordings = useRefreshProcessedRecordings();
+  const [ busy, setBusy ] = useState(false);
+
+  const rerender = async () => {
+    setBusy(true);
+
+    try {
+      const scheduled = await schedulePostprocessing(
+        { apiUrl, streamingImpeded: false, getAccessToken },
+        recording.name,
+        lecturerEmail,
+        { retries: 0, intervalMillis: 5000 }
+      );
+
+      if(scheduled) {
+        await refreshProcessedRecordings();
+      }
+    } catch(e) {
+      console.warn(`Failed to schedule re-render for ${recording.name}`, e);
+    }
+
+    setBusy(false);
+  };
+
+  return (
+    <RecordingCard title={recording.name} testid="prec-card">
       <Link
         variant="primary"
         key={recording.name}
@@ -34,8 +64,18 @@ const ProcessedRecordingCard = (
           <Text>Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)</Text>
         </ActionButton>
       </Link>
-    </Flex>
-  </RecordingCard>;
+
+      <ActionButton
+        width="100%"
+        onPress={rerender}
+        isDisabled={busy}
+      >
+        <Refresh/>
+        <Text>Rerender</Text>
+      </ActionButton>
+    </RecordingCard>
+  );
+}
 
 const RenderingRecordingCard = (
   { recording }: Readonly<{ recording: RenderingRecording }>
