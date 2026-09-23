@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, AsyncGenerator
+from typing import Annotated, Any, AsyncGenerator
 import unicodedata
 
 import aiofiles
@@ -213,7 +213,7 @@ async def get_completed_list(
     settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
     recordings: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)]
-):
+) -> dict[str, Any]:
     """ Endpoint to obtain a list of completed recordings for the active user """
     if not settings.auth_required:
         raise _downloads_disabled()

@@ -7,7 +7,7 @@ import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
 
-vi.mock("@/lib/hooks/usePreprocessedRecordings");
+vi.mock("@/lib/hooks/useProcessedRecordings");
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
