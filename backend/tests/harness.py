@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 import threading
 from typing import Any
+from urllib.parse import quote
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
@@ -182,6 +183,24 @@ def upload(client: TestClient, token: str | None, index: int = 0):
 def upload_chunk_path(base_dir: Path, user_segment: str, index: int = 0) -> Path:
     """ Where `upload` puts its chunk, given the directory it is filed under. """
     return base_dir / user_segment / "foo" / "stream" / f"chunk.{index:04d}"
+
+
+def finish_recording(user_home: Path, recording: str, content: bytes = b"video") -> None:
+    """ A recording whose postprocessing ran to completion. """
+    (user_home / recording).mkdir(parents=True, exist_ok=True)
+    (user_home / recording / "presentation.webm").write_bytes(content)
+
+
+def list_completed(client: TestClient, token: str | None):
+    """ Ask for the caller's downloadable recordings, with or without a token. """
+    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
+    return client.get("/api/completed", headers=headers)
+
+
+def download_completed(client: TestClient, user_digest: str, recording: str, totp: str | None):
+    """ Follow a download link, as the browser would when the lecturer clicks one. """
+    params = {"totp": totp} if totp is not None else None
+    return client.get(f"/api/completed/{user_digest}/{quote(recording)}", params=params)
 
 
 # --- the directory scheme, restated ----------------------------------------

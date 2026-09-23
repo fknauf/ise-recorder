@@ -1,6 +1,5 @@
 import useSWR from "swr";
 import { useAppSession } from "../components/SessionProvider";
-import { useCallback } from "react";
 import * as z from "zod";
 import { useServerEnv } from "./useServerEnv";
 
@@ -28,7 +27,7 @@ export function usePreprocessedRecordings() {
   const { apiUrl } = useServerEnv();
   const { getAccessToken } = useAppSession();
 
-  const fetcher = useCallback(async (key: string): Promise<DownloadableRecordings | null> => {
+  const fetcher = async (key: string): Promise<DownloadableRecordings | null> => {
     const token = await getAccessToken();
 
     if(token === undefined) {
@@ -46,17 +45,11 @@ export function usePreprocessedRecordings() {
     const response = await fetch(`${apiUrl}${key}`, request);
 
     if(!response.ok) {
-      console.error(`Unable to fetch list of processed recordings, server responded ${response.status}, ${await response.text()}`);
-      return null;
+      throw new Error(`Unable to fetch list of processed recordings, server responded ${response.status}, ${await response.text()}`);
     }
 
-    try {
-      return DownloadableRecordingsSchema.parse(await response.json());
-    } catch(e) {
-      console.error("Unable to fetch list of processed recordings: server sent malformed response", e);
-      return null;
-    }
-  }, [ apiUrl, getAccessToken ]);
+    return DownloadableRecordingsSchema.parse(await response.json());
+  };
 
   return useSWR(
     apiUrl !== undefined ? "/api/completed" : null,
@@ -67,7 +60,7 @@ export function usePreprocessedRecordings() {
       refreshWhenHidden: false,
       refreshWhenOffline: false,
       shouldRetryOnError: true,
-      errorRetryInterval: 60000
+      errorRetryInterval: 5000
     }
   );
 }

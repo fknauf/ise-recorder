@@ -1,8 +1,8 @@
 import { UserManager } from "oidc-client-ts";
 
 export interface SessionStaleness {
-  stale: boolean;
-  recheckMillis?: number;
+  stale: boolean
+  recheckMillis?: number
 }
 
 export async function determineSessionStaleness(
@@ -10,11 +10,11 @@ export async function determineSessionStaleness(
   maxAge: number | undefined): Promise<SessionStaleness> {
   const user = await userMgr.getUser().catch(() => null);
 
-  if (user === null) {
+  if(user === null) {
     return { stale: true };
   }
 
-  if (maxAge === undefined || user.profile.auth_time === undefined) {
+  if(maxAge === undefined || user.profile.auth_time === undefined) {
     return { stale: false };
   }
 

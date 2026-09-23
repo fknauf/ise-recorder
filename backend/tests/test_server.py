@@ -25,7 +25,15 @@ from ise_record.postprocess import Result, ResultReason
 from ise_record.server import create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
 from ise_record.settings import Settings, SmtpSettings
 
-from .harness import DEFAULT_SUBJECT_DIGEST, digest_of, Provider, upload
+from .harness import (
+    DEFAULT_SUBJECT_DIGEST,
+    digest_of,
+    download_completed,
+    finish_recording,
+    list_completed,
+    Provider,
+    upload,
+)
 
 # NAME_MAX on ext4, which is what pathvalidate caps a filename at inside SafeRecording
 NAME_MAX_BYTES = 255
@@ -719,22 +727,9 @@ def test_a_job_cannot_name_another_subjects_recording(
 # again as a path segment, so this is where the recording name has to work as an
 # identifier: through percent-encoding, through a auth_client that normalizes differently, and
 # without becoming a way into somebody else's home directory.
-
-def finish_recording(user_home: Path, recording: str, content: bytes = b"video") -> None:
-    """ A recording whose postprocessing ran to completion. """
-    (user_home / recording).mkdir(parents=True, exist_ok=True)
-    (user_home / recording / "presentation.webm").write_bytes(content)
-
-
-def list_completed(auth_client: TestClient, token: str | None):
-    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    return auth_client.get("/api/completed", headers=headers)
-
-
-def download_completed(auth_client: TestClient, user_digest: str, recording: str, totp: str | None):
-    params = { "totp": totp } if totp is not None else None
-    return auth_client.get(f"/api/completed/{user_digest}/{quote(recording)}", params=params)
-
+#
+# What the one-time password in the download link is scoped to and how long it lasts is
+# the download_totp module's own contract, and lives in test_download_totp.py.
 
 def test_listing_completed_recordings_without_a_token_is_rejected(auth_client: TestClient):
     assert list_completed(auth_client, None).status_code == 401
@@ -858,3 +853,36 @@ def test_a_decomposed_name_downloads_the_composed_recording(
 
     assert response.status_code == 200
     assert response.content == b"video"
+
+
+@pytest.mark.parametrize("user_digest", [ "..", "not-hex", "AAAA", "" ])
+def test_a_user_directory_that_is_not_a_digest_is_refused(
+    user_digest: str, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+
+    server_list = list_completed(auth_client, provider.mint()).json()
+
+    # the segment is joined onto destdir, so anything but a lowercase hex digest has to be
+    # refused before it reaches the filesystem
+    response = download_completed(
+        auth_client, user_digest, "GVS_2025", server_list["recordings"][0]["totp"]
+    )
+
+    assert response.status_code in (404, 422)
+    assert b"video" not in response.content
+
+
+def test_downloading_is_forbidden_without_authentication(
+    client: TestClient, settings: Settings
+):
+    # the counterpart of the listing test above, on the route that actually serves bytes:
+    # an unauthenticated deployment has one shared destdir and nobody to own a recording
+    (settings.destdir / "GVS_2025").mkdir(parents=True)
+    (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
+
+    response = client.get("/api/completed/deadbeef/GVS_2025", params={"totp": "0000000000"})
+
+    assert response.status_code == 403
+    assert b"video" not in response.content

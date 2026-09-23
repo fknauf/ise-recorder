@@ -2,7 +2,7 @@
 
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "react-oidc-context";
-import { UserManager } from "oidc-client-ts";
+import { User, UserManager } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
 import { ServerEnv } from "../utils/serverEnv";
 import { determineSessionStaleness } from "../utils/session";
@@ -36,6 +36,7 @@ interface SessionProviderProps {
 }
 
 interface SessionContextBridgeProps {
+  userManager: UserManager
   autoSigninConfigured: boolean
   isStale: boolean
   recheckStaleness: () => Promise<boolean>
@@ -46,6 +47,7 @@ const SessionContext = createContext<AppSession | null>(null);
 
 function AuthenticatedSessionContextBridge(
   {
+    userManager,
     autoSigninConfigured,
     isStale,
     recheckStaleness,
@@ -67,16 +69,22 @@ function AuthenticatedSessionContextBridge(
   const userName = user?.profile.preferred_username ?? user?.profile.name ?? user?.profile.email ?? "The Nameless One";
 
   const getAccessToken = async () => {
-    if(!isAuthenticated || user?.expired !== false) {
+    const freshUser = await userManager.getUser().catch(() => null);
+
+    if(freshUser === undefined || freshUser === null || freshUser?.expired) {
       return undefined;
     }
 
-    return user.access_token;
+    return freshUser.access_token;
   };
 
   const signout = async () => {
     setAutoSignin(false);
-    await removeUser();
+    try {
+      await removeUser();
+    } catch(e) {
+      console.error("Failed to sign out", e);
+    }
   };
 
   const interactiveSignin = async () => {
@@ -101,18 +109,20 @@ function AuthenticatedSessionContextBridge(
   // present at the beginning of the recording will not need renewal during the lecture.
   const expandSession = async () => {
     const refreshSession = async (
-      fn: () => Promise<SessionTransition>,
+      fn: () => Promise<User | null>,
+      successValue: SessionTransition,
       defaultValue: SessionTransition,
       errMsg: string
     ) => {
-      try {
-        return await fn();
-      } catch(e) {
-        console.warn(errMsg, e);
+      if(await fn() !== null) {
+        return successValue;
+      }
 
-        if(user === undefined || user === null || user.expired) {
-          return "expired";
-        }
+      console.warn(errMsg);
+
+      const freshUser = await userManager.getUser().catch(() => null);
+      if(freshUser === null || freshUser.expired) {
+        return "expired";
       }
 
       return defaultValue;
@@ -120,14 +130,16 @@ function AuthenticatedSessionContextBridge(
 
     if(await recheckStaleness()) {
       return refreshSession(
-        () => signinPopup().then(() => "renewed"),
+        signinPopup,
+        "renewed",
         "still-stale",
         "Failed to reauthenticate stale oidc session, continuing with existing session"
       );
     }
 
     return refreshSession(
-      () => signinSilent().then(() => "still-fresh"),
+      signinSilent,
+      "still-fresh",
       "still-fresh",
       "Failed to force-refresh access/refresh token, continuing with existing tokens"
     );
@@ -238,6 +250,7 @@ function AuthenticatedSessionProvider({ providerUrl, clientId, maxAge, autoSigni
       onSigninCallback={onSigninCallback}
     >
       <AuthenticatedSessionContextBridge
+        userManager={userMgr}
         autoSigninConfigured={autoSigninConfigured}
         isStale={stale}
         recheckStaleness={recheckStaleness}

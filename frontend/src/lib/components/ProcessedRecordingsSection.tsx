@@ -2,10 +2,11 @@
 
 import { useAppSession } from "./SessionProvider";
 import { useServerEnv } from "../hooks/useServerEnv";
-import { ActionButton, Link, Text } from "@adobe/react-spectrum";
+import { ActionButton, Content, Heading, InlineAlert, Link, Text } from "@adobe/react-spectrum";
 import Download from "@spectrum-icons/workflow/Download";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
 import { DownloadableRecording, usePreprocessedRecordings } from "../hooks/usePreprocessedRecordings";
+import * as z from "zod";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -36,21 +37,49 @@ function ProcessedRecordingCard(
   );
 }
 
-function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string }>) {
-  const { data: response } = usePreprocessedRecordings();
+function prettifyError(error: unknown) {
+  if(error instanceof z.ZodError) {
+    return z.prettifyError(error);
+  }
 
-  if(!response) {
+  if(error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unknown error";
+}
+
+function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string }>) {
+  const { data, error } = usePreprocessedRecordings();
+  const sectionTitle = "Server-Side Processed Recordings";
+
+  if(error !== undefined) {
+    return (
+      <RecordingCardSection title={sectionTitle}>
+        <InlineAlert variant="negative">
+          <Heading>
+            Error fetching list of processed recordings
+          </Heading>
+          <Content>
+            {prettifyError(error)}
+          </Content>
+        </InlineAlert>
+      </RecordingCardSection>
+    );
+  }
+
+  if(!data) {
     return null;
   }
 
   return (
-    <RecordingCardSection title="Server-Side Processed Recordings">
+    <RecordingCardSection title={sectionTitle}>
       {
-        response.recordings.map(rec =>
+        data.recordings.map(rec =>
           <ProcessedRecordingCard
             key={rec.name}
             apiUrl={apiUrl}
-            user={response.user}
+            user={data.user}
             recording={rec}
           />
         )
