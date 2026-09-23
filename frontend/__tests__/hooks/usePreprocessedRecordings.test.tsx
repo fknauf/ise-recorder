@@ -170,8 +170,27 @@ test("a fresh token is requested for every poll rather than captured once", asyn
 // section's job and not the hook's; and refreshInterval is suspended while an error is
 // cached, so the error-retry chain -- not the minute poll -- is what keeps trying.
 
+test("re-rendering does not set off another request", async () => {
+  respondWith(() => jsonResponse(LISTING));
+
+  const { result, rerender } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.data).toEqual(LISTING));
+
+  // The fetcher is built fresh on every render rather than memoised, which is fine because
+  // SWR reads it through a ref at revalidation time -- and is what keeps the retry chain
+  // on the current getAccessToken. It would not be fine if its identity reached the key.
+  rerender();
+  rerender();
+
+  await act(async () => {});
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
 test("a rejected listing surfaces the status and the server's explanation", async () => {
-  respondWith(() => new Response("token has expired", { status: 401 }));
+  // what FastAPI answers an HTTPException with
+  respondWith(() => jsonResponse({ detail: "Not authenticated" }, 401));
 
   const { result } = renderPreprocessedRecordings();
 
@@ -181,7 +200,39 @@ test("a rejected listing surfaces the status and the server's explanation", asyn
   // backend is down", "you are not allowed" and "it sent nonsense" actually happened
   expect(result.current.error).toBeInstanceOf(Error);
   expect(result.current.error.message).toContain("401");
-  expect(result.current.error.message).toContain("token has expired");
+  expect(result.current.error.message).toContain("Not authenticated");
+});
+
+test("a body that is not JSON is left out rather than put on screen", async () => {
+  // a gateway between the browser and the backend answers in HTML, not in FastAPI's
+  // shape. The status alone is the useful part; the page would fill the alert.
+  respondWith(() => new Response(
+    "<!doctype html><html><head><title>502 Bad Gateway</title></head><body><h1>502</h1></body></html>",
+    { status: 502, headers: { "Content-Type": "text/html" } }
+  ));
+
+  const { result } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(result.current.error.message).toContain("502");
+  expect(result.current.error.message).not.toContain("<");
+});
+
+// A JSON body is not necessarily a FastAPI body. Anything in front of the backend can
+// answer JSON of its own shape, and reading `detail` off it without checking what came
+// back puts "undefined" in front of the lecturer. FastAPI itself has a second shape too:
+// a RequestValidationError's detail is an array of issue objects, which interpolates as
+// "[object Object]". Requiring a string covers both.
+test.fails("a JSON body with no string detail is left out rather than stringified", async () => {
+  respondWith(() => jsonResponse({ error: "upstream refused" }, 503));
+
+  const { result } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(result.current.error.message).toContain("503");
+  expect(result.current.error.message).not.toContain("undefined");
 });
 
 test("a malformed listing is a failure rather than something to render", async () => {

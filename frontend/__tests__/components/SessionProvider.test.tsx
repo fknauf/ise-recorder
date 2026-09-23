@@ -425,6 +425,21 @@ test("getAccessToken returns nothing for an expired user", async () => {
   expect(await result.current.getAccessToken()).toBeUndefined();
 });
 
+test("getAccessToken yields nothing when the user store cannot be read", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60)));
+
+  // every chunk upload during a lecture goes through this, and serverStorage treats a
+  // rejection as a failed request rather than as an unauthenticated one -- so a browser
+  // that blocks storage mid-recording would turn into upload errors instead of a
+  // streaming-impeded warning
+  mgr.getUserError = new Error("SecurityError: storage is not available");
+
+  expect(await result.current.getAccessToken()).toBeUndefined();
+});
+
 // A recording holds on to one getAccessToken for its whole length -- useStartStopRecording
 // builds the ServerStorageDestination once and every chunk upload calls through it, for
 // ninety minutes. Silent renewal replaces the user several times over that span, so the
@@ -538,6 +553,30 @@ test("the token's own issue time wins when the local clock lags behind the provi
 
   expect(mgr.signinPopupCalls).toBe(1);
   expect(mgr.signinSilentCalls).toBe(0);
+});
+
+test("a silent refresh that fails on a dead token is reported as expired", async () => {
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    const { result } = await renderAppSession(authenticatedEnv);
+    const mgr = userManager();
+
+    // Within max_age, so the session is not stale and the silent branch is taken -- but
+    // the access token died while the laptop was asleep and the refresh cannot revive it.
+    // This is the case the whole impeded path exists for, and the silent branch reports it
+    // through the only value that differs from its success value.
+    await act(() => mgr.events.load(userAged(60, { expired: true })));
+    mgr.signinSilentResult = new Error("refresh token rejected");
+
+    await act(async () => {
+      expect(await result.current.expandSession()).toBe("expired");
+    });
+
+    expect(mgr.signinPopupCalls).toBe(0);
+  } finally {
+    consoleWarn.mockRestore();
+  }
 });
 
 // react-oidc-context wraps every navigator method: it catches, dispatches an ERROR into

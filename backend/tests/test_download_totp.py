@@ -15,9 +15,13 @@ offers) lives in test_server.py; this file is about the mechanism itself.
 import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Iterator
 
 from fastapi.testclient import TestClient
 import pytest
+
+from ise_record.server import create_app
+from ise_record.settings import Settings
 
 from ise_record.download_totp import ( # pyright: ignore[reportPrivateUsage]
     _generate_download_totp,
@@ -198,3 +202,30 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
 
     assert response.status_code == 401
     assert b"video" not in response.content
+
+
+# conftest's auth_client covers the authenticated backend; the one below runs without
+# authentication, which is the deployment this last test is about.
+
+@pytest.fixture
+def open_settings(tmp_path: Path) -> Settings:
+    return Settings(destdir=tmp_path)
+
+
+@pytest.fixture
+def open_client(open_settings: Settings) -> Iterator[TestClient]:
+    with TestClient(create_app(open_settings)) as test_client:
+        yield test_client
+
+
+def test_an_unauthenticated_deployment_mints_nothing(
+    open_client: TestClient, open_settings: Settings
+):
+    # The listing is refused without authentication, but the dependency that builds it runs
+    # first. Walking one shared destdir there would mint a generator for every lecture on
+    # the server, for a response that hands none of them out.
+    (open_settings.destdir / "GVS_2025").mkdir(parents=True)
+    (open_settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
+
+    assert open_client.get("/api/completed").status_code == 403
+    assert getattr(open_client.app.state, "download_totp_factories", {}) == {}

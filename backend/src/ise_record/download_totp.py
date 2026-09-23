@@ -19,9 +19,10 @@ from fastapi import Depends, Request
 import pyotp
 
 from .postprocess import OUTPUT_FILENAME
+from .settings import Settings, get_settings
 from .user_home import get_current_user_home
 
-logger = logging.Logger(__name__)
+logger = logging.getLogger(__name__)
 
 def _recording_key(file_path: Path) -> str:
     return f"{str(file_path.absolute())}"
@@ -72,12 +73,15 @@ class DownloadableRecording(NamedTuple):
 
 def get_downloadable_recordings(
     request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)]
 ) -> list[DownloadableRecording]:
     """
     obtain a list of recordings that are downloadable for the authenticated user along with a TOTP
     for each file.
     """
+    if not settings.auth_required:
+        return []
 
     collected: list[DownloadableRecording] = []
 

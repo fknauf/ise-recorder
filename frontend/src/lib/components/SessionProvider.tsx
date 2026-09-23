@@ -71,7 +71,7 @@ function AuthenticatedSessionContextBridge(
   const getAccessToken = async () => {
     const freshUser = await userManager.getUser().catch(() => null);
 
-    if(freshUser === undefined || freshUser === null || freshUser?.expired) {
+    if(freshUser === null || freshUser?.expired) {
       return undefined;
     }
 

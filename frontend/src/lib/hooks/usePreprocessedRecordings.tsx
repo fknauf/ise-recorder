@@ -45,7 +45,11 @@ export function usePreprocessedRecordings() {
     const response = await fetch(`${apiUrl}${key}`, request);
 
     if(!response.ok) {
-      throw new Error(`Unable to fetch list of processed recordings, server responded ${response.status}, ${await response.text()}`);
+      // parse detail from fastapi response if possible, omit detail otherwise.
+      const detail = await response.json()
+        .then(json => ` ${json["detail"]}`)
+        .catch(() => "");
+      throw new Error(`Unable to fetch list of processed recordings, server responded ${response.status}${detail}`);
     }
 
     return DownloadableRecordingsSchema.parse(await response.json());
