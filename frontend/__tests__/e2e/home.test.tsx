@@ -114,7 +114,7 @@ function renderHome(tokenSource: AccessTokenSource) {
  * for one behind an OpenID provider.
  */
 async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: string) {
-  window.fetch = vi.fn().mockResolvedValue(Response.json({ user: "deadbeef", recordings: [] }, { status: 201 }));
+  window.fetch = vi.fn().mockResolvedValue(Response.json({ user: "deadbeef", completed: [], rendering: [] }, { status: 201 }));
 
   let x = 0;
 
@@ -286,9 +286,18 @@ test("e2e recording a stream works", async () => {
 test("e2e recording a stream sends the access token to the server", async () => {
   const recordingName = await recordAStream(authenticatedTokenSource, "BAR_202");
 
-  expect(window.fetch).toHaveBeenCalledTimes(4);
+  // the listing is fetched once when the section mounts and once more when the recording
+  // finishes, so the new lecture shows up as rendering without waiting for the minute poll
+  expect(window.fetch).toHaveBeenCalledTimes(5);
+
+  const urls = vi.mocked(window.fetch).mock.calls.map(([ url ]) => url);
+
+  expect(urls.filter(url => url === "http://localhost:5000/api/recordings")).toHaveLength(2);
+  // after the job, not merely somewhere: a refresh before it would find nothing rendering
+  expect(urls.lastIndexOf("http://localhost:5000/api/recordings"))
+    .toBeGreaterThan(urls.indexOf("http://localhost:5000/api/jobs"));
   expect(window.fetch).toHaveBeenCalledWith(
-    "http://localhost:5000/api/completed",
+    "http://localhost:5000/api/recordings",
     {
       method: "GET",
       headers: {

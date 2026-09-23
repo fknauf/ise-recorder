@@ -4,6 +4,7 @@
    This module defines the HTTP API endpoints and validates inputs.
 """
 
+from collections import defaultdict
 from contextlib import asynccontextmanager
 import logging
 import os
@@ -135,9 +136,12 @@ class PostProcessingJob(BaseModel):
         )
     ]
 
-def get_running_jobs(request: Request) -> set[Path]:
+def get_running_jobs(
+        request: Request,
+        user_home: Annotated[Path, Depends(get_current_user_home)]
+) -> set[Path]:
     """ Recordings that currently have a postprocessing job in flight. """
-    return request.app.state.running_jobs
+    return request.app.state.per_user_running_jobs[user_home]
 
 async def _postprocessing_task(
         job: PostProcessingJob,
@@ -208,29 +212,36 @@ def _downloads_disabled():
         detail="Server is configured without authentication, downloads are disabled."
     )
 
-@router.get('/completed')
-async def get_completed_list(
+@router.get('/recordings')
+async def get_recordings_list(
     settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
-    recordings: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)]
+    recordings: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)],
+    running_jobs: Annotated[set[Path], Depends(get_running_jobs)]
 ) -> dict[str, Any]:
-    """ Endpoint to obtain a list of completed recordings for the active user """
+    """ Endpoint to obtain a list of completed and rendering recordings for the active user """
     if not settings.auth_required:
         raise _downloads_disabled()
 
     return {
         "user": user_home.name,
-        "recordings": [
+        "completed": [
             {
                 "name": rec.name,
                 "size": rec.size,
                 "totp": rec.totp
             }
             for rec in recordings
+        ],
+        "rendering": [
+            {
+                "name": job.name
+            }
+            for job in sorted(running_jobs)
         ]
     }
 
-@router.get('/completed/{user_digest}/{recording}')
+@router.get('/recordings/{user_digest}/{recording}')
 async def download_completed(
     request: Request,
     recording: SafeRecording,
@@ -276,7 +287,7 @@ def create_app(
         yield
 
     application = FastAPI(lifespan=lifespan)
-    application.state.running_jobs = set[Path]()
+    application.state.per_user_running_jobs = defaultdict[Path, set[Path]](set)
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings

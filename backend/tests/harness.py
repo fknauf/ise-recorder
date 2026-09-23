@@ -191,16 +191,16 @@ def finish_recording(user_home: Path, recording: str, content: bytes = b"video")
     (user_home / recording / "presentation.webm").write_bytes(content)
 
 
-def list_completed(client: TestClient, token: str | None):
-    """ Ask for the caller's downloadable recordings, with or without a token. """
+def list_recordings(client: TestClient, token: str | None):
+    """ Ask for the caller's completed and rendering recordings, with or without a token. """
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    return client.get("/api/completed", headers=headers)
+    return client.get("/api/recordings", headers=headers)
 
 
 def download_completed(client: TestClient, user_digest: str, recording: str, totp: str | None):
     """ Follow a download link, as the browser would when the lecturer clicks one. """
     params = {"totp": totp} if totp is not None else None
-    return client.get(f"/api/completed/{user_digest}/{quote(recording)}", params=params)
+    return client.get(f"/api/recordings/{user_digest}/{quote(recording)}", params=params)
 
 
 # --- the directory scheme, restated ----------------------------------------

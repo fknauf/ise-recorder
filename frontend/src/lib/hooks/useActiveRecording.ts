@@ -7,6 +7,7 @@ import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
 import { SessionTransition, useAppSession } from "../components/SessionProvider";
+import { useRefreshProcessedRecordings } from "./useProcessedRecordings";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
@@ -26,6 +27,7 @@ export function useStartStopRecording() {
   const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
   const updateQuotaInformation = useAppStore(state => state.updateQuotaInformation);
   const overrideFileSize = useAppStore(state => state.overrideFileSize);
+  const refreshProcessedRecordings = useRefreshProcessedRecordings();
 
   const {
     lectureTitle,
@@ -95,6 +97,7 @@ export function useStartStopRecording() {
         // make sure the new file sizes are there before throwing away the overrides
         await updateBrowserStorage();
         resetFileSizeOverrides();
+        refreshProcessedRecordings();
       };
 
       await recordLecture(

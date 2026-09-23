@@ -10,7 +10,7 @@
 
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, cast
 from urllib.parse import quote
 from unittest.mock import ANY
 
@@ -30,7 +30,7 @@ from .harness import (
     digest_of,
     download_completed,
     finish_recording,
-    list_completed,
+    list_recordings,
     Provider,
     upload,
 )
@@ -231,7 +231,7 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, app:
         PostProcessingJob(recording="foo", recipient="foo@bar.de"),
         settings.destdir,
         settings.smtp,
-        app.state.running_jobs
+        app.state.per_user_running_jobs[settings.destdir]
     )
 
 def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client: TestClient, app: FastAPI, settings: Settings):
@@ -253,7 +253,7 @@ def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client
         PostProcessingJob(recording="foo", recipient=None),
         settings.destdir,
         settings.smtp,
-        app.state.running_jobs
+        app.state.per_user_running_jobs[settings.destdir]
     )
 
 def test_schedule_postprocessing_error(mocker: MockerFixture, client: TestClient, settings: Settings):
@@ -308,7 +308,7 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: Mock
         PostProcessingJob(recording="foo", recipient="I made a lot of typos"),
         settings.destdir,
         settings.smtp,
-        app.state.running_jobs
+        app.state.per_user_running_jobs[settings.destdir]
     )
 
 
@@ -614,13 +614,13 @@ def test_cors_preflight_jobs_forbidden(tmp_path: Path):
 # to own a recording and nobody to withhold one from. Both endpoints refuse to serve rather
 # than hand every lecture to every caller -- these pin which way each of them refuses.
 
-def test_the_completed_listing_is_forbidden_without_authentication(
+def test_the_recordings_listing_is_forbidden_without_authentication(
     client: TestClient, settings: Settings
 ):
     (settings.destdir / "GVS_2025").mkdir(parents=True)
     (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
 
-    response = client.get("/api/completed")
+    response = client.get("/api/recordings")
 
     assert response.status_code == 403
 
@@ -630,7 +630,7 @@ def test_downloading_is_refused_without_user(
     (settings.destdir / "GVS_2025").mkdir(parents=True)
     (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
 
-    response = client.get("/api/completed/GVS_2025")
+    response = client.get("/api/recordings/GVS_2025")
 
     assert response.status_code == 404
     assert b"video" not in response.content
@@ -641,11 +641,11 @@ def test_health_endpoint(client: TestClient):
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/completed" ])
+@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/recordings" ])
 def test_every_endpoint_moves_under_the_prefix(prefixed_client: TestClient, endpoint: str):
     assert prefixed_client.get(f"{ROUTE_PREFIX}{endpoint}").status_code != 404
 
-@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/completed" ])
+@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/recordings" ])
 def test_nothing_is_left_behind_at_the_unprefixed_path(
     prefixed_client: TestClient, endpoint: str
 ):
@@ -731,8 +731,8 @@ def test_a_job_cannot_name_another_subjects_recording(
 # What the one-time password in the download link is scoped to and how long it lasts is
 # the download_totp module's own contract, and lives in test_download_totp.py.
 
-def test_listing_completed_recordings_without_a_token_is_rejected(auth_client: TestClient):
-    assert list_completed(auth_client, None).status_code == 401
+def test_listing_recordings_without_a_token_is_rejected(auth_client: TestClient):
+    assert list_recordings(auth_client, None).status_code == 401
 
 
 def test_downloading_without_a_totp_is_rejected(auth_client: TestClient):
@@ -748,26 +748,26 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     finish_recording(home, "GVS_2025")
     finish_recording(home, "PSU_2026")
 
-    response = list_completed(auth_client, provider.mint())
+    response = list_recordings(auth_client, provider.mint())
 
     assert response.status_code == 200
-    # the names the auth_client has to send back to /api/completed/{recording}, not the name of
+    # the names the auth_client has to send back to /api/recordings/{recording}, not the name of
     # the file inside each of them -- which is "presentation.webm" for every recording
     data = response.json()
 
     assert isinstance(data, dict)
     assert "user" in data
-    assert "recordings" in data
-    assert isinstance(data["recordings"], list)
-    assert len(data["recordings"]) == 2
+    assert "completed" in data
+    assert isinstance(data["completed"], list)
+    assert len(data["completed"]) == 2
 
-    assert data["recordings"][0]["name"] == "GVS_2025"
-    assert data["recordings"][0]["size"] == 5
-    assert verify_download_totp(data["recordings"][0]["totp"], home / "GVS_2025" / "presentation.webm", auth_client.app.state)
+    assert data["completed"][0]["name"] == "GVS_2025"
+    assert data["completed"][0]["size"] == 5
+    assert verify_download_totp(data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm", auth_client.app.state)
 
-    assert data["recordings"][1]["name"] == "PSU_2026"
-    assert data["recordings"][1]["size"] == 5
-    assert verify_download_totp(data["recordings"][1]["totp"], home / "PSU_2026" / "presentation.webm", auth_client.app.state)
+    assert data["completed"][1]["name"] == "PSU_2026"
+    assert data["completed"][1]["size"] == 5
+    assert verify_download_totp(data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm", auth_client.app.state)
 
 
 def test_the_listing_leaves_out_recordings_that_are_not_rendered(
@@ -781,9 +781,9 @@ def test_the_listing_leaves_out_recordings_that_are_not_rendered(
     (home / "failed").mkdir(parents=True)
     (home / "failed" / "presentation.part.webm").write_bytes(b"half")
 
-    response = list_completed(auth_client, provider.mint())
+    response = list_recordings(auth_client, provider.mint())
 
-    assert [ r["name"] for r in response.json()["recordings"] ] == [ "rendered" ]
+    assert [ r["name"] for r in response.json()["completed"] ] == [ "rendered" ]
 
 
 def test_the_listing_only_shows_the_callers_own_recordings(
@@ -792,8 +792,98 @@ def test_the_listing_only_shows_the_callers_own_recordings(
     finish_recording(tmp_path / digest_of("user-a"), "mine")
     finish_recording(tmp_path / digest_of("user-b"), "theirs")
 
-    assert [ r["name"] for r in list_completed(auth_client, provider.mint(sub="user-a")).json()["recordings"] ] == [ "mine" ]
-    assert [ r["name"] for r in list_completed(auth_client, provider.mint(sub="user-b")).json()["recordings"] ] == [ "theirs" ]
+    assert [ r["name"] for r in list_recordings(auth_client, provider.mint(sub="user-a")).json()["completed"] ] == [ "mine" ]
+    assert [ r["name"] for r in list_recordings(auth_client, provider.mint(sub="user-b")).json()["completed"] ] == [ "theirs" ]
+
+
+# The listing also names the recordings that are still being postprocessed, so the frontend
+# can show that a lecture is on its way rather than missing. What it reads is the per-user
+# set of running jobs that _postprocessing_task maintains; a TestClient runs background tasks
+# to completion before it returns, so the set is seeded by hand to catch a job mid-flight.
+
+def running_jobs_of(auth_client: TestClient, home: Path) -> set[Path]:
+    app = cast(FastAPI, auth_client.app)
+    return app.state.per_user_running_jobs[home]
+
+
+def test_the_listing_reports_nothing_rendering_when_no_job_is_running(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+
+    data = list_recordings(auth_client, provider.mint()).json()
+
+    # present and empty rather than absent, because the frontend schema requires the field
+    assert data["rendering"] == []
+
+
+def test_a_recording_in_postprocessing_is_listed_as_rendering(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+    running_jobs_of(auth_client, home).update({ home / "PSU_2026", home / "ABC_2026" })
+
+    data = list_recordings(auth_client, provider.mint()).json()
+
+    # a set has no order of its own, and the frontend renders the list as it comes, so the
+    # cards would shuffle between polls without the sort
+    assert data["rendering"] == [ { "name": "ABC_2026" }, { "name": "PSU_2026" } ]
+    # only the name: there is no file to size and nothing to download yet
+    assert [ r["name"] for r in data["completed"] ] == [ "GVS_2025" ]
+
+
+def test_the_listing_only_shows_the_callers_own_rendering_jobs(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home_a = tmp_path / digest_of("user-a")
+    running_jobs_of(auth_client, home_a).add(home_a / "mine")
+
+    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["rendering"] == [ { "name": "mine" } ]
+    assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["rendering"] == []
+
+
+def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the scheduling and the listing endpoint have to agree on which set a job goes into;
+    # a job filed anywhere else would render without ever showing up in the listing
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    seen_while_running: list[set[Path]] = []
+
+    async def fake_postprocess(_recording_path: Path) -> Result:
+        seen_while_running.append(set(running_jobs_of(auth_client, home)))
+        return Result(output_file=None, reason=ResultReason.SUCCESS)
+
+    mocker.patch("ise_record.server.postprocess_recording", autospec=True, side_effect=fake_postprocess)
+
+    token = provider.mint()
+    assert upload(auth_client, token).status_code == 201
+    assert schedule(auth_client, token).status_code == 202
+
+    assert seen_while_running == [ { home / "foo" } ]
+    # and gone again once it finished, or the card would spin forever
+    assert list_recordings(auth_client, token).json()["rendering"] == []
+
+
+def test_another_users_job_does_not_block_a_recording_of_the_same_name(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the running-job sets are per user; this pins that a job in one of them does not count
+    # as a duplicate for anybody else
+    home_a = tmp_path / digest_of("user-a")
+    running_jobs_of(auth_client, home_a).add(home_a / "foo")
+
+    mock_postprocess = mocker.patch(
+        "ise_record.server.postprocess_recording",
+        autospec=True,
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS))
+
+    token = provider.mint(sub="user-b")
+    assert upload(auth_client, token).status_code == 201
+    assert schedule(auth_client, token).status_code == 202
+
+    mock_postprocess.assert_called_once_with(tmp_path / digest_of("user-b") / "foo")
 
 
 def test_a_completed_recording_can_be_downloaded(
@@ -801,9 +891,9 @@ def test_a_completed_recording_can_be_downloaded(
 ):
     finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025", b"the rendered lecture")
 
-    server_list = list_completed(auth_client, provider.mint()).json()
+    server_list = list_recordings(auth_client, provider.mint()).json()
 
-    response = download_completed(auth_client, server_list["user"], "GVS_2025", server_list["recordings"][0]["totp"])
+    response = download_completed(auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"])
 
     assert response.status_code == 200
     assert response.content == b"the rendered lecture"
@@ -827,11 +917,11 @@ def test_a_recording_name_survives_the_round_trip_through_the_url(
     finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, recording)
     token = provider.mint()
 
-    server_list = list_completed(auth_client, token).json()
+    server_list = list_recordings(auth_client, token).json()
 
-    assert server_list["recordings"][0]["name"] == recording
+    assert server_list["completed"][0]["name"] == recording
 
-    response = download_completed(auth_client, server_list["user"], recording, server_list["recordings"][0]["totp"])
+    response = download_completed(auth_client, server_list["user"], recording, server_list["completed"][0]["totp"])
 
     assert response.status_code == 200
     assert response.content == b"video"
@@ -847,9 +937,9 @@ def test_a_decomposed_name_downloads_the_composed_recording(
     # NFC, and SafeRecording's BeforeValidator is what makes the two the same request
     finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "Übung_2025")
 
-    server_list = list_completed(auth_client, provider.mint()).json()
+    server_list = list_recordings(auth_client, provider.mint()).json()
 
-    response = download_completed(auth_client, server_list["user"], "U\u0308bung_2025", server_list["recordings"][0]["totp"])
+    response = download_completed(auth_client, server_list["user"], "U\u0308bung_2025", server_list["completed"][0]["totp"])
 
     assert response.status_code == 200
     assert response.content == b"video"
@@ -862,12 +952,12 @@ def test_a_user_directory_that_is_not_a_digest_is_refused(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     finish_recording(home, "GVS_2025")
 
-    server_list = list_completed(auth_client, provider.mint()).json()
+    server_list = list_recordings(auth_client, provider.mint()).json()
 
     # the segment is joined onto destdir, so anything but a lowercase hex digest has to be
     # refused before it reaches the filesystem
     response = download_completed(
-        auth_client, user_digest, "GVS_2025", server_list["recordings"][0]["totp"]
+        auth_client, user_digest, "GVS_2025", server_list["completed"][0]["totp"]
     )
 
     assert response.status_code in (404, 422)
@@ -882,7 +972,7 @@ def test_downloading_is_forbidden_without_authentication(
     (settings.destdir / "GVS_2025").mkdir(parents=True)
     (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
 
-    response = client.get("/api/completed/deadbeef/GVS_2025", params={"totp": "0000000000"})
+    response = client.get("/api/recordings/deadbeef/GVS_2025", params={"totp": "0000000000"})
 
     assert response.status_code == 403
     assert b"video" not in response.content

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { useProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
+import { useProcessedRecordings, useRefreshProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
@@ -39,10 +39,11 @@ const session = (getAccessToken: AppSession["getAccessToken"]): AppSession => ({
 
 const LISTING = {
   user: "8f14e45fceea167a",
-  recordings: [
+  completed: [
     { name: "GVS_2025", size: 1024, totp: "0123456789" },
     { name: "PSU_2026", size: 2048, totp: "9876543210" }
-  ]
+  ],
+  rendering: [ { name: "ABC_2026" } ]
 };
 
 /**
@@ -109,7 +110,7 @@ test("the listing is fetched from the configured backend with the access token",
 
   const [ url, request ] = fetchMock.mock.calls[0];
 
-  expect(url).toBe(`${API_URL}/api/completed`);
+  expect(url).toBe(`${API_URL}/api/recordings`);
   expect(request.method).toBe("GET");
   // the listing is per-user, so it has to be authenticated -- unlike the download itself,
   // which carries a TOTP in the query string because a link cannot set a header
@@ -120,7 +121,7 @@ test("nothing is fetched when the deployment has no backend", async () => {
   const { result } = renderPreprocessedRecordings({ serverEnv: {} });
 
   // the null SWR key is what disables the poll; without it the hook would retry against
-  // "undefined/api/completed" every minute for the whole session
+  // "undefined/api/recordings" every minute for the whole session
   await waitFor(() => expect(result.current.isLoading).toBe(false));
 
   expect(fetchMock).not.toHaveBeenCalled();
@@ -238,7 +239,7 @@ test("a JSON body with no string detail is left out rather than stringified", as
 test("a malformed listing is a failure rather than something to render", async () => {
   // size as a string is what a backend change would most plausibly produce, and it would
   // otherwise reach the MiB formatter as NaN
-  respondWith(() => jsonResponse({ user: "u", recordings: [ { name: "x", size: "1024", totp: "1" } ] }));
+  respondWith(() => jsonResponse({ user: "u", completed: [ { name: "x", size: "1024", totp: "1" } ], rendering: [] }));
 
   const { result } = renderPreprocessedRecordings();
 
@@ -305,4 +306,90 @@ test("a recovered poll clears the error so the minute refresh resumes", async ()
   // is what hands the polling back from the retry chain to the interval
   await waitFor(() => expect(result.current.error).toBeUndefined());
   expect(result.current.data).toEqual(LISTING);
+});
+
+// --- the listing's shape ---------------------------------------------------
+
+test("a listing in the old shape of /api/completed is refused rather than half-rendered", async () => {
+  // what a backend that has not been updated alongside the frontend answers: `recordings`
+  // in place of `completed`, and no `rendering` at all
+  respondWith(() => jsonResponse({ user: "u", recordings: [ { name: "x", size: 1024, totp: "1" } ] }));
+
+  const { result } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(result.current.error).toBeInstanceOf(z.ZodError);
+});
+
+test("a listing without the rendering entries is refused", async () => {
+  respondWith(() => jsonResponse({ user: "u", completed: [] }));
+
+  const { result } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(result.current.error).toBeInstanceOf(z.ZodError);
+});
+
+test("a rendering entry without a name is refused", async () => {
+  respondWith(() => jsonResponse({ user: "u", completed: [], rendering: [ {} ] }));
+
+  const { result } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(result.current.error).toBeInstanceOf(z.ZodError);
+});
+
+// --- refreshing from outside the section -----------------------------------
+//
+// useRefreshProcessedRecordings is what the recorder calls once a recording is finished.
+// It goes through the mutate of the nearest SWRConfig, so it has to reach the same cache
+// the listing lives in -- here the fresh-Map wrapper's, which the global mutate would miss.
+
+test("a refresh fetches the listing again without waiting for the poll", async () => {
+  mockServerEnv.mockReturnValue({ apiUrl: API_URL });
+  mockUseAppSession.mockReturnValue(session(async () => "test-token"));
+
+  const after = { ...LISTING, rendering: [ ...LISTING.rendering, { name: "NEW_2026" } ] };
+
+  respondWith(() => jsonResponse(LISTING));
+
+  const { result } = renderHook(
+    () => ({ listing: useProcessedRecordings(), refresh: useRefreshProcessedRecordings() }),
+    { wrapper: swrWrapper() }
+  );
+
+  await waitFor(() => expect(result.current.listing.data).toEqual(LISTING));
+
+  respondWith(() => jsonResponse(after));
+
+  await act(async () => {
+    await result.current.refresh();
+  });
+
+  await waitFor(() => expect(result.current.listing.data).toEqual(after));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+test("a refresh from outside the listing's cache does not reach it", async () => {
+  // the counterpart of the above: the refresh is scoped to its SWRConfig. A recorder
+  // mounted under a different cache than the section would refresh nothing, which is
+  // what the e2e test guards against for the real page.
+  mockServerEnv.mockReturnValue({ apiUrl: API_URL });
+  mockUseAppSession.mockReturnValue(session(async () => "test-token"));
+
+  respondWith(() => jsonResponse(LISTING));
+
+  const listing = renderHook(useProcessedRecordings, { wrapper: swrWrapper() });
+  const elsewhere = renderHook(useRefreshProcessedRecordings, { wrapper: swrWrapper() });
+
+  await waitFor(() => expect(listing.result.current.data).toEqual(LISTING));
+
+  await act(async () => {
+    await elsewhere.result.current();
+  });
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

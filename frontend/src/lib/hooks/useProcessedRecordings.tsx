@@ -1,7 +1,9 @@
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { useAppSession } from "../components/SessionProvider";
 import * as z from "zod";
 import { useServerEnv } from "./useServerEnv";
+
+const RECORDINGS_KEY = "/api/recordings";
 
 export interface DownloadableRecording {
   name: string
@@ -9,17 +11,25 @@ export interface DownloadableRecording {
   totp: string
 }
 
+export interface RenderingRecording {
+  name: string
+}
+
 export interface DownloadableRecordings {
   user: string
-  recordings: DownloadableRecording[]
+  completed: DownloadableRecording[]
+  rendering: RenderingRecording[]
 }
 
 const DownloadableRecordingsSchema = z.object({
   user: z.string(),
-  recordings: z.array(z.object({
+  completed: z.array(z.object({
     name: z.string(),
     size: z.number(),
     totp: z.string()
+  })),
+  rendering: z.array(z.object({
+    name: z.string()
   }))
 });
 
@@ -55,7 +65,7 @@ export function useProcessedRecordings() {
   };
 
   return useSWR(
-    apiUrl !== undefined ? "/api/completed" : null,
+    apiUrl !== undefined ? RECORDINGS_KEY : null,
     fetcher,
     {
       fallbackData: null,
@@ -66,4 +76,9 @@ export function useProcessedRecordings() {
       errorRetryInterval: 5000
     }
   );
+}
+
+export function useRefreshProcessedRecordings() {
+  const { mutate } = useSWRConfig();
+  return () => mutate(RECORDINGS_KEY);
 }

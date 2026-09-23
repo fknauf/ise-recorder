@@ -22,6 +22,12 @@ vi.mock("@/lib/utils/notifications", () => ({
   showMessage: vi.fn()
 }));
 vi.mock("@/lib/utils/browserStorage");
+// what the refresh does to the SWR cache is useProcessedRecordings.test.tsx's business;
+// here it only matters that finishing a recording asks for it
+const refreshProcessedRecordings = vi.fn();
+vi.mock("@/lib/hooks/useProcessedRecordings", () => ({
+  useRefreshProcessedRecordings: () => refreshProcessedRecordings
+}));
 
 const mockUseAccessTokenSource = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -101,6 +107,7 @@ beforeEach(() => {
   localStorage.clear();
 
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
+  refreshProcessedRecordings.mockClear();
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 1234 });
 
   vi.mocked(recordLecture).mockImplementation(async (
@@ -366,6 +373,27 @@ test("arriving chunks accumulate into the file size overrides and refresh the qu
     expect(result.current.store.adjustedSavedRecordings)
       .toStrictEqual([ { name: "REC_1", files: [ { name: "stream.webm", size: 0 } ] } ]);
   });
+});
+
+test("finishing a recording refreshes the server-side listing", async () => {
+  // by the time onFinished runs, the postprocessing job has been scheduled, so a fresh
+  // listing already names the recording as rendering. The minute poll would leave the
+  // lecturer looking at a list without it for up to a minute.
+  const { result } = renderRecorder(makeTokenSource(true, "test-token"));
+  const call = await startAndCapture(result.current.startRecording);
+
+  await act(async () => {
+    await call.onStarting("REC_1");
+    await call.onStarted("REC_1", vi.fn());
+  });
+
+  expect(refreshProcessedRecordings).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await call.onFinished("REC_1");
+  });
+
+  expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
 });
 
 // --- stopping --------------------------------------------------------------

@@ -28,10 +28,11 @@ const MiB = 2 ** 20;
 
 const LISTING = {
   user: USER_DIGEST,
-  recordings: [
+  completed: [
     { name: "GVS_2025", size: 1.25 * MiB, totp: "0123456789" },
     { name: "PSU_2026", size: 3.5 * MiB, totp: "9876543210" }
-  ]
+  ],
+  rendering: [] as { name: string }[]
 };
 
 function renderSection(
@@ -95,7 +96,7 @@ test("the download link carries the user, the recording and its TOTP", () => {
   // user directory the backend resolves under, not the display name.
   expect(link).toHaveAttribute(
     "href",
-    `${API_URL}/api/completed/${USER_DIGEST}/GVS_2025?totp=0123456789`
+    `${API_URL}/api/recordings/${USER_DIGEST}/GVS_2025?totp=0123456789`
   );
   // without this the browser navigates away from the recorder, which may be mid-recording
   expect(link).toHaveAttribute("download");
@@ -108,21 +109,74 @@ test("a non-ASCII recording name reaches the backend percent-encoded", () => {
   // way out -- and the backend decoding it and running SafeRecording over it again, which
   // the round-trip test on the Python side pins from the other end.
   renderSection({
-    data: { user: USER_DIGEST, recordings: [ { name: "Übung_2025", size: MiB, totp: "1111111111" } ] }
+    data: { user: USER_DIGEST, completed: [ { name: "Übung_2025", size: MiB, totp: "1111111111" } ], rendering: [] }
   });
 
   const link = within(cards()[0]).getByRole("link") as HTMLAnchorElement;
 
   expect(new URL(link.href).pathname)
-    .toBe(`/api/completed/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}`);
+    .toBe(`/api/recordings/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}`);
   expect(new URL(link.href).searchParams.get("totp")).toBe("1111111111");
 });
 
 test("an empty backend renders the section without any cards", () => {
-  renderSection({ data: { user: USER_DIGEST, recordings: [] } });
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [] } });
 
   expect(screen.getByText("Server-Side Processed Recordings")).toBeInTheDocument();
   expect(cards()).toHaveLength(0);
+});
+
+// --- recordings the backend is still rendering -----------------------------
+
+const renderingCards = () => screen.queryAllByTestId("rendering-card");
+
+const RENDERING_LISTING = {
+  ...LISTING,
+  rendering: [ { name: "ABC_2026" }, { name: "XYZ_2026" } ]
+};
+
+test("a recording that is still rendering gets a card that says so", () => {
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [ { name: "ABC_2026" } ] } });
+
+  expect(renderingCards()).toHaveLength(1);
+  expect(within(renderingCards()[0]).getByText("ABC_2026")).toBeInTheDocument();
+  expect(within(renderingCards()[0]).getByText("Rendering...")).toBeInTheDocument();
+  expect(within(renderingCards()[0]).getByRole("progressbar", { name: "Rendering" })).toBeInTheDocument();
+  // not counted among the downloads
+  expect(cards()).toHaveLength(0);
+});
+
+test("a recording that is still rendering offers no download", () => {
+  // there is no file yet and no TOTP to put in the link, so anything clickable would 404
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [ { name: "ABC_2026" } ] } });
+
+  expect(within(renderingCards()[0]).queryByRole("link")).toBeNull();
+  expect(within(renderingCards()[0]).queryByRole("button")).toBeNull();
+});
+
+test("the rendering cards follow the finished ones", () => {
+  renderSection({ data: RENDERING_LISTING });
+
+  expect(cards()).toHaveLength(2);
+  expect(renderingCards()).toHaveLength(2);
+
+  expect(within(renderingCards()[0]).getByText("ABC_2026")).toBeInTheDocument();
+  expect(within(renderingCards()[1]).getByText("XYZ_2026")).toBeInTheDocument();
+
+  // the two kinds carry different test ids, so the order between them is the DOM's
+  const lastFinished = cards()[1];
+  const firstRendering = renderingCards()[0];
+
+  expect(lastFinished.compareDocumentPosition(firstRendering) & Node.DOCUMENT_POSITION_FOLLOWING)
+    .toBeTruthy();
+});
+
+test("a stale listing's rendering cards are withdrawn with the rest while the error is showing", () => {
+  // a spinner for a job the section can no longer see the end of would spin indefinitely
+  renderSection({ data: RENDERING_LISTING, error: new Error("server responded 500, ") });
+
+  expect(cards()).toHaveLength(0);
+  expect(renderingCards()).toHaveLength(0);
 });
 
 test("nothing is rendered before the first listing arrives", () => {
@@ -189,15 +243,15 @@ test("a stale listing is withdrawn while the error is showing", () => {
 test("a backend that sent nonsense is reported in words rather than as a JSON dump", () => {
   // A ZodError's own message is the stringified issue array, several lines of JSON. It is
   // an Error, so an instanceof check alone would put that straight on screen.
-  const schema = z.object({ recordings: z.array(z.object({ size: z.number() })) });
-  const error = schema.safeParse({ recordings: [ { size: "1024" } ] }).error;
+  const schema = z.object({ completed: z.array(z.object({ size: z.number() })) });
+  const error = schema.safeParse({ completed: [ { size: "1024" } ] }).error;
 
   renderSection({ error });
 
   const alert = screen.getByRole("alert");
 
   expect(within(alert).getByText(/expected number, received string/)).toBeInTheDocument();
-  expect(within(alert).getByText(/recordings\[0\].size/)).toBeInTheDocument();
+  expect(within(alert).getByText(/completed\[0\].size/)).toBeInTheDocument();
   // the raw message would have brought the whole issue array with it
   expect(alert.textContent).not.toContain('"code"');
 });

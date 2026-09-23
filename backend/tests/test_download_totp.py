@@ -33,7 +33,7 @@ from .harness import (
     digest_of,
     download_completed,
     finish_recording,
-    list_completed,
+    list_recordings,
     Provider,
 )
 
@@ -139,8 +139,8 @@ def test_a_totp_is_scoped_to_the_one_recording_it_was_issued_for(
     finish_recording(home, "GVS_2025")
     finish_recording(home, "PSU_2026", b"the other lecture")
 
-    server_list = list_completed(auth_client, provider.mint()).json()
-    by_name = { rec["name"]: rec["totp"] for rec in server_list["recordings"] }
+    server_list = list_recordings(auth_client, provider.mint()).json()
+    by_name = { rec["name"]: rec["totp"] for rec in server_list["completed"] }
 
     response = download_completed(auth_client, server_list["user"], "PSU_2026", by_name["GVS_2025"])
 
@@ -154,12 +154,12 @@ def test_a_totp_does_not_open_another_subjects_recording(
     finish_recording(tmp_path / digest_of("user-a"), "shared_name")
     finish_recording(tmp_path / digest_of("user-b"), "shared_name", b"not yours")
 
-    server_list = list_completed(auth_client, provider.mint(sub="user-a")).json()
+    server_list = list_recordings(auth_client, provider.mint(sub="user-a")).json()
 
     # the user directory is a path segment the caller supplies, so the OTP has to be tied
     # to the full path rather than to the recording name both of them happen to use
     response = download_completed(
-        auth_client, digest_of("user-b"), "shared_name", server_list["recordings"][0]["totp"]
+        auth_client, digest_of("user-b"), "shared_name", server_list["completed"][0]["totp"]
     )
 
     assert response.status_code == 401
@@ -174,10 +174,10 @@ def test_a_recording_that_was_never_listed_cannot_be_downloaded(
     finish_recording(home, "never_listed", b"secret lecture")
 
     # only one of them is ever listed, so the other never gets a generator
-    server_list = list_completed(auth_client, provider.mint()).json()
+    server_list = list_recordings(auth_client, provider.mint()).json()
 
     response = download_completed(
-        auth_client, server_list["user"], "never_listed", server_list["recordings"][0]["totp"]
+        auth_client, server_list["user"], "never_listed", server_list["completed"][0]["totp"]
     )
 
     assert response.status_code == 401
@@ -190,7 +190,7 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     finish_recording(home, "GVS_2025")
 
-    server_list = list_completed(auth_client, provider.mint()).json()
+    server_list = list_recordings(auth_client, provider.mint()).json()
 
     key = str((home / "GVS_2025" / "presentation.webm").absolute())
     generator = auth_client.app.state.download_totp_factories[key]
@@ -227,5 +227,5 @@ def test_an_unauthenticated_deployment_mints_nothing(
     (open_settings.destdir / "GVS_2025").mkdir(parents=True)
     (open_settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
 
-    assert open_client.get("/api/completed").status_code == 403
+    assert open_client.get("/api/recordings").status_code == 403
     assert getattr(open_client.app.state, "download_totp_factories", {}) == {}

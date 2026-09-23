@@ -2,10 +2,10 @@
 
 import { useAppSession } from "./SessionProvider";
 import { useServerEnv } from "../hooks/useServerEnv";
-import { ActionButton, Content, Heading, InlineAlert, Link, Text } from "@adobe/react-spectrum";
+import { ActionButton, Content, Flex, Heading, InlineAlert, Link, ProgressCircle, Text } from "@adobe/react-spectrum";
 import Download from "@spectrum-icons/workflow/Download";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { DownloadableRecording, useProcessedRecordings } from "../hooks/useProcessedRecordings";
+import { DownloadableRecording, RenderingRecording, useProcessedRecordings } from "../hooks/useProcessedRecordings";
 import * as z from "zod";
 
 const mibFormatter = new Intl.NumberFormat(
@@ -17,25 +17,35 @@ const mibFormatter = new Intl.NumberFormat(
   }
 );
 
-function ProcessedRecordingCard(
+const ProcessedRecordingCard = (
   { apiUrl, user, recording }: Readonly<{ apiUrl: string; user: string; recording: DownloadableRecording }>
-) {
-  return (
-    <RecordingCard title={recording.name} testid="prec-card">
+) =>
+  <RecordingCard title={recording.name} testid="prec-card">
+    <Flex direction="column">
       <Link
         variant="primary"
         key={recording.name}
-        href={`${apiUrl}/api/completed/${user}/${recording.name}?totp=${recording.totp}`}
+        href={`${apiUrl}/api/recordings/${user}/${recording.name}?totp=${recording.totp}`}
         download={true}
+        width="100%"
       >
-        <ActionButton>
+        <ActionButton width="100%">
           <Download/>
           <Text>Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)</Text>
         </ActionButton>
       </Link>
-    </RecordingCard>
-  );
-}
+    </Flex>
+  </RecordingCard>;
+
+const RenderingRecordingCard = (
+  { recording }: Readonly<{ recording: RenderingRecording }>
+) =>
+  <RecordingCard title={recording.name} testid="rendering-card">
+    <Flex direction="row" gap="size-100" alignItems="center" justifyContent="center" marginTop="size-100">
+      <ProgressCircle size="S" aria-label="Rendering" isIndeterminate/>
+      <Text>Rendering...</Text>
+    </Flex>
+  </RecordingCard>;
 
 function prettifyError(error: unknown) {
   if(error instanceof z.ZodError) {
@@ -75,13 +85,18 @@ function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string
   return (
     <RecordingCardSection title={sectionTitle}>
       {
-        data.recordings.map(rec =>
+        data.completed.map(rec =>
           <ProcessedRecordingCard
             key={rec.name}
             apiUrl={apiUrl}
             user={data.user}
             recording={rec}
           />
+        )
+      }
+      {
+        data.rendering.map(rec =>
+          <RenderingRecordingCard key={rec.name} recording={rec}/>
         )
       }
     </RecordingCardSection>
