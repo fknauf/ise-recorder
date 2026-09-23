@@ -23,7 +23,7 @@ const DownloadableRecordingsSchema = z.object({
   }))
 });
 
-export function usePreprocessedRecordings() {
+export function useProcessedRecordings() {
   const { apiUrl } = useServerEnv();
   const { getAccessToken } = useAppSession();
 

@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { PreprocessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
-import { usePreprocessedRecordings } from "@/lib/hooks/usePreprocessedRecordings";
+import { useProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
@@ -61,8 +61,8 @@ function renderSection(
     expandSession: async () => "still-fresh"
   } satisfies AppSession);
 
-  vi.mocked(usePreprocessedRecordings).mockReturnValue(
-    { data, error } as ReturnType<typeof usePreprocessedRecordings>
+  vi.mocked(useProcessedRecordings).mockReturnValue(
+    { data, error } as ReturnType<typeof useProcessedRecordings>
   );
 
   render(

@@ -2,7 +2,7 @@
 
 ## UI sketch
 
-![UI sketch](ui-sketch.png)
+![UI sketch](ui-sketch.svg)
 
 ## Use Cases
 
@@ -13,8 +13,11 @@
 :Admin:
 
 User --_> (Record lecture)
-User --_> (Download finished\nrecording)
-User --_> (Delete recording)
+User --_> (Download finished\nraw recording)
+User --_> (Delete raw recording)
+User --_> (Download\nprocessed recording)
+User --_> (Rerender\nprocessed recording)
+User --_> (Delete\nprocessed recording)
 Admin --_> (Configure\npostprocessing)
 
 @enduml
@@ -55,19 +58,42 @@ Admin --_> (Configure\npostprocessing)
     - User clicks "Stop Recording"
     - System relabels "Stop Recording" to "Start Recording", re-enables controls, enables the Download and Remove buttons on the new recording, and schedules a postprocessing job for the new recording with the backend.
 
-### UC2: Download recording
+### UC2: Download raw recording
 
 - System displays a list of recordings under the main UI
 - User clicks "Download" button on the first recording
 - System starts a download of the corresponding file
 
-### UC3: Delete recording
+### UC3: Delete raw recording
 
 - System displays quota warning a list of recordings under the main UI
 - User clicks "Remove" button on a recording
 - System cleans up the space and removes the recording and quota warning from the UI
 
-### UC4: Configure postprocessing backend
+### UC4: Download processed recording
+
+- Precondition: System has finished rendering an uploaded recording
+- System displays a download button in the "server-side processed recordings" section
+- User clicks that button
+- System starts a download of the corresponding file
+
+### UC5: Rerender processed recording
+
+- Precondition: System has finished uploading a recording and the recording is not
+  currently being processed
+- System displays a rerender button in the "server-side processed recordings" section
+- User clicks that button
+- System starts rerendering the recording. Until the rerendering is finished, system
+  replaces all buttons in that recording's card with "Rendering..." and an
+  indeterminate progress indicator
+- When the rerendering is finished, the card reverts to the normal download/rerender/purge
+  layout. The download button will then result in a download of the new rendered file.
+
+### UC6: Delete processed recording
+
+- Precondition: System has finished uploading a recording
+
+### UC-ADMIN1: Configure postprocessing backend
 
 - Admin sets `ISE_RECORD_API_URL` environment variable to the backend endpoint URL during deployment
 - Admin configures the use of his OpenID backend (see section below)
@@ -132,7 +158,6 @@ classDiagram
         boolean obtainedDevicePermissions
         number? quota
         number? usage
-        boolean staleSession
     }
     AppStoreState *--> "1" ServerEnv: serverEnv
     AppStoreState --> "*" MediaDeviceInfo: videoDevices
@@ -198,7 +223,6 @@ The state broadly covers the following tasks:
 | `savedRecordings` | list of finished recordings as present in the OPFS, i.e. without adjustments from `fileSizeOverrides` |
 | `adjustedSavedRecordings` | `savedRecordings` with adjustments from `fileSizeOverrides`. Displayed in the UI. |
 | `usage`, `quota` | displayed in the quota warning, and determines if that warning is shown |
-| `staleSession` | indicates that the authentication session is past the configured max_age |
 
 The state is modified through a number of supplied mutation functions that guarantee state consistency. In particular:
 
@@ -217,6 +241,7 @@ controls["RecorderControls"]:3 ghlink["GithubLink"]
 quota["QuotaWarning"]:2 auth_status["AuthStatusMessage"]:2
 previews["PreviewSection (contains VideoPreview and AudioPreview)"]:4
 recordings["SavedRecordingsSection"]:4
+recordings["ProcessedRecordingsSection"]:4
 ```
 
 | View | Function |
@@ -229,6 +254,7 @@ recordings["SavedRecordingsSection"]:4
 | `VideoPreview` | Preview of a configured video or screen capture stream, with controls to select main and overlay streams |
 | `AudioPreview` | Displays the spectrum of the captured audio stream, so the user can easily identify whether the captured device is actually capturing sound. |
 | `SavedRecordingsSection` | Shows the list of finished recordings; recordings can be downloaded or deleted |
+| `ProcessedRecordingsSection` | Shows the list of server-side, processed recordings for download |
 
 Views are exclusively focused on displaying data and triggering actions. Both the displayed data and the trigger action functions
 are obtained from hooks, so the views themselves are quite thin.
@@ -249,13 +275,14 @@ separated from UI updates, and that's largely the purpose of the hook/utility sp
 
 | Hook | Purpose |
 | - | - |
-| `useAccessTokenSource` | provides functions concerning the authentication state, i.e. current access token retrieval and session headroom expansion, along with the information whether authentication is required at all. |
+| `useAppSession` | provides functions concerning the authentication state, e.g.. current access token retrieval, sign-out, sign-in, session headroom expansion, along with the information whether authentication is required at all. |
 | `useActiveRecording` | provides info whether a recording is active and details about the active recording |
 | `useBrowserStorage` | provides information about the browser's OPFS, i.e. saved recordings and quota information, and an action to delete a recording |
 | `useHydrated` | determines whether the frontend is hydrating (and needs to match SSR values exactly) or already running normally |
 | `useLecture` | provides the configured lecture title and notification email address |
 | `useMediaDevices` | provides the list of audio and video devices and actions to refresh that list and open media tracks from a device |
 | `useMediaTracks` | provides the list of open tracks, which of those are selected as main and overlay, and actions to select main and overlay track or close a track. These actions will only work when the application is not recording. |
+| `useProcessedRecordings` | Fetches the list of server-side processed recordings along with information needed to download them |
 | `useServerEnv` | provides the server-side configuration (no actions) |
 | `useStartStopRecording` | action functions to start and stop recording |
 
@@ -368,12 +395,12 @@ for ise-recorder are
 - support for not requiring authentication at all
 - the need to ensure that the user will not be asked to reauthenticate mid-recording
 
-The former is the reason that `AccessTokenSourceProvider` exists: this wraps `react-oidc-context`'s `AuthProvider` if authentication is required
+The former is the reason that `SessionProvider` exists: this wraps `react-oidc-context`'s `AuthProvider` if authentication is required
 and provides a dummy interface that says "user is authenticated and will be forever" otherwise.
 
-The latter requires some extra plumbing in `useAccessTokenSource.tsx`:
+The latter requires some extra plumbing in `SessionProvider.tsx`:
 
-- a timer that fires when the authentication session goes past max_age and toggles `staleSession` in the store
+- a timer that fires when the authentication session goes past max_age and toggles a staleness indicator
 - event handlers that reset that timer when an event that changes the session length occurs
 - a function to explicitly refresh tokens and force the user to re-authenticate if the session is stale.
 

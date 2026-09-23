@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { usePreprocessedRecordings } from "@/lib/hooks/usePreprocessedRecordings";
+import { useProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
@@ -73,7 +73,7 @@ function renderPreprocessedRecordings(
   mockServerEnv.mockReturnValue(serverEnv);
   mockUseAppSession.mockReturnValue(session(getAccessToken));
 
-  return renderHook(usePreprocessedRecordings, { wrapper: swrWrapper() });
+  return renderHook(useProcessedRecordings, { wrapper: swrWrapper() });
 }
 
 /**

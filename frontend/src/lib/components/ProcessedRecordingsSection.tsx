@@ -5,7 +5,7 @@ import { useServerEnv } from "../hooks/useServerEnv";
 import { ActionButton, Content, Heading, InlineAlert, Link, Text } from "@adobe/react-spectrum";
 import Download from "@spectrum-icons/workflow/Download";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { DownloadableRecording, usePreprocessedRecordings } from "../hooks/usePreprocessedRecordings";
+import { DownloadableRecording, useProcessedRecordings } from "../hooks/useProcessedRecordings";
 import * as z from "zod";
 
 const mibFormatter = new Intl.NumberFormat(
@@ -50,7 +50,7 @@ function prettifyError(error: unknown) {
 }
 
 function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string }>) {
-  const { data, error } = usePreprocessedRecordings();
+  const { data, error } = useProcessedRecordings();
   const sectionTitle = "Server-Side Processed Recordings";
 
   if(error !== undefined) {

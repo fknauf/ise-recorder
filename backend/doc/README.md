@@ -98,6 +98,7 @@ is useful for primitive monitoring such as docker health checks.
 | File | Purpose |
 | - | - |
 | `src/ise_record/auth.py` | OpenID-Connect authentication (discovery and token verification) |
+| `src/ise_record/download_totp.py` | Download authentication mechanism (see below) |
 | `src/ise_record/logconfig.py` | Logging configuration (e.g., filtering out health checks from the log) |
 | `src/ise_record/postprocess.py` | Postprocessing logic |
 | `src/ise_record/reporting.py` | Notification sending |
@@ -154,3 +155,12 @@ jobs. There are no custom scopes, right now it's all-or-nothing when it comes to
 derive a human-readable (but unique) user-specific directory to store recordings; if it is not present,
 it will attempt to read the username from the OIDC provider's userinfo_endpoint. In the future, it may
 also read the `email` claim for reporting purposes.
+
+## Downloads
+
+Because browsers can't (easily) be made to attach bearer tokens to download requests, we use a
+TOTP-based mechanism to authenticate downloads. When the frontend asks for a list of available processed
+recordings, the backend generates a TOTP for each file in the list and sends it along with the list of
+available files. The frontend attaches the TOTP to the download link as a GET parameter, and the backend
+allows downloads only with a matching TOTP. The OTPs are valid for two minutes, and the frontend keeps
+polling the backend for new OTPs every minute.
