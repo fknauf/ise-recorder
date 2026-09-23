@@ -661,6 +661,38 @@ test("a hiccup refreshing a fresh session does not make it look stale", async ()
   }
 });
 
+// --- signing in ------------------------------------------------------------
+
+test("an interactive sign-in establishes a session", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  mgr.signinPopupResult = userAged(0, { access_token: "signed-in" });
+
+  await act(() => result.current.interactiveSignin());
+
+  expect(result.current.isAuthenticated).toBe(true);
+  expect(await result.current.getAccessToken()).toBe("signed-in");
+  // unlike reauthenticate, this is an ordinary sign-in: a user who still has a session
+  // with the provider should come straight back rather than be made to type a password
+  expect(mgr.signinPopupArgs.at(-1)).not.toMatchObject({ max_age: 0 });
+});
+
+test("a declined sign-in leaves the user signed out rather than rejecting", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  mgr.signinPopupResult = null;
+
+  // UserMenu and AuthStatusMessage hand this straight to onPress, so a rejection here
+  // becomes an unhandled one with nothing to catch it
+  await act(async () => {
+    await expect(result.current.interactiveSignin()).resolves.toBeUndefined();
+  });
+
+  expect(result.current.isAuthenticated).toBe(false);
+});
+
 // --- reauthenticate --------------------------------------------------------
 
 test("reauthenticate forces a fresh authentication rather than reusing the SSO session", async () => {

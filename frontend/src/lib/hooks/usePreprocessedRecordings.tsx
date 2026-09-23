@@ -46,9 +46,8 @@ export function usePreprocessedRecordings() {
 
     if(!response.ok) {
       // parse detail from fastapi response if possible, omit detail otherwise.
-      const detail = await response.json()
-        .then(json => ` ${json["detail"]}`)
-        .catch(() => "");
+      const body = await response.json().catch(() => null);
+      const detail = typeof body?.detail === "string" ? ` ${body.detail}` : "";
       throw new Error(`Unable to fetch list of processed recordings, server responded ${response.status}${detail}`);
     }
 

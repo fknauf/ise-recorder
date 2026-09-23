@@ -224,7 +224,7 @@ test("a body that is not JSON is left out rather than put on screen", async () =
 // back puts "undefined" in front of the lecturer. FastAPI itself has a second shape too:
 // a RequestValidationError's detail is an array of issue objects, which interpolates as
 // "[object Object]". Requiring a string covers both.
-test.fails("a JSON body with no string detail is left out rather than stringified", async () => {
+test("a JSON body with no string detail is left out rather than stringified", async () => {
   respondWith(() => jsonResponse({ error: "upstream refused" }, 503));
 
   const { result } = renderPreprocessedRecordings();
