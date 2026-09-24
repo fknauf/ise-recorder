@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, Request
-from .postprocess import postprocess_recording
-from .reporting import normalize_recipient, send_report
-from .settings import SmtpSettings
-from .user_home import get_current_user_home
+
+from ise_record.core.postprocess import postprocess_recording
+from ise_record.core.reporting import normalize_recipient, send_report
+from ise_record.settings import SmtpSettings
+
+from ise_record.glue.user_home import get_current_user_home
 
 logger = logging.getLogger(__name__)
 

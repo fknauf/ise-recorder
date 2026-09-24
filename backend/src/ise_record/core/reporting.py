@@ -10,8 +10,9 @@ from textwrap import dedent
 import aiosmtplib
 from email_validator import validate_email, EmailNotValidError, ValidatedEmail
 
-from .postprocess import Result, ResultReason
-from .settings import SmtpSettings
+from ise_record.settings import SmtpSettings
+
+from ise_record.core.postprocess import Result, ResultReason
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ def generate_report(
         result: Result
 ) -> EmailMessage:
     """
-        Generate a report from a job result for e-mail sending 
+        Generate a report from a job result for e-mail sending
 
         :param sender e-mail address for the From header
         :param recipient e-mail address for the To header

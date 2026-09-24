@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from ise_record.download_totp import DownloadTotpAuthority
-from ise_record.recording_lists import (
+from ise_record.core.download_totp import DownloadTotpAuthority
+from ise_record.glue.recording_lists import (
     _get_downloadable_recording_paths, # pyright: ignore[reportPrivateUsage]
     get_downloadable_recordings,
     get_purgeable_recordings,

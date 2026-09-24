@@ -32,7 +32,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import jwt
 
-from ise_record.download_totp import DownloadTotpAuthority
+from ise_record.core.download_totp import DownloadTotpAuthority
 
 CLIENT_ID = "ise-recorder"
 # Distinct from CLIENT_ID on purpose, and that is the normal deployment: an OIDC ID token's

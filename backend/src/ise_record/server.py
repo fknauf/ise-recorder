@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import shutil
 from typing import Annotated, Any, AsyncGenerator, Callable, NoReturn
-import unicodedata
 
 import aiofiles
 from fastapi import (
@@ -21,30 +20,28 @@ from fastapi import (
     FastAPI,
     Form,
     HTTPException,
-    UploadFile,
     status
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pathvalidate import sanitize_filename
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import Field
 
-from .auth import UserInfo, get_user_info, load_oidc_config
-from .download_totp import DownloadTotpAuthority, get_download_totp
-from .jobs import postprocessing_task, get_running_jobs
-from .logconfig import setup_logging
-from .postprocess import OUTPUT_FILENAME
-from .recording_lists import (
+from ise_record.core.auth import UserInfo
+from ise_record.core.download_totp import DownloadTotpAuthority
+from ise_record.core.logconfig import setup_logging
+from ise_record.core.postprocess import OUTPUT_FILENAME
+from ise_record.glue.auth import get_user_info, load_oidc_client, OidcServerState
+from ise_record.glue.download_totp import get_download_totp
+from ise_record.glue.jobs import postprocessing_task, get_running_jobs
+from ise_record.glue.models import ChunkUpload, PostProcessingJob, SafeRecording
+from ise_record.glue.recording_lists import (
     DownloadableRecording,
     get_downloadable_recordings,
     get_purgeable_recordings,
     get_unprocessed_recordings
 )
-from .settings import get_settings, Settings
-from .user_home import get_current_user_home
-
-def _normalize_for_filesystem(value: str) -> str:
-    return sanitize_filename(unicodedata.normalize("NFC", value), platform="universal")
+from ise_record.glue.user_home import get_current_user_home
+from ise_record.settings import get_settings, Settings
 
 def _require_authentication(
         settings: Annotated[Settings, Depends(get_settings)]
@@ -55,47 +52,9 @@ def _require_authentication(
             detail="Server is configured without authentication"
         )
 
-SafeRecording = Annotated[
-    str,
-    BeforeValidator(_normalize_for_filesystem),
-    Field(
-        pattern=r"\A[\p{L}\p{N}_][\p{L}\p{M}\p{N}._-]*\z",
-        min_length=1,
-        description="Name of the recording. Usually consists of Lecture Title and Timestamp",
-        examples=["PSU_2026-02-13T164309.313Z"],
-    )
-]
-
 setup_logging()
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
-
-class ChunkUpload(BaseModel):
-    """ An uploaded chunk with metadata """
-
-    recording: SafeRecording
-    track: Annotated[
-        str,
-        Field(
-            pattern=r"\A[a-z][a-z0-9-]*\z",
-            description="Name of the track, e.g. stream, overlay, audio-0",
-            examples=["stream", "overlay", "audio-0"]
-        )
-    ]
-    index: Annotated[
-        int,
-        Field(
-            ge=0,
-            description="Running number of the chunk in the track. Start at 0.",
-            examples=[0]
-        )
-    ]
-    chunk: Annotated[
-        UploadFile,
-        Field(
-            description="video/audio blob to store, as file"
-        )
-    ]
 
 @router.post('/chunks', status_code=status.HTTP_201_CREATED)
 async def upload_chunk(
@@ -135,22 +94,6 @@ async def upload_chunk(
         "filename": filename
     }
 
-
-class PostProcessingJob(BaseModel):
-    """ DTO for a postprocessing job the client wants to schedule """
-
-    recording: SafeRecording
-    # backend will validate before sending email. We want the postprocessing to work even if
-    # someone has a typo in the mail address or doesn't specify a recipient, so we don't reject
-    # a malformed recipient here (we just don't send mail later)
-    recipient: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Recipient of the completion notification",
-            examples=["mustermann@vss.uni-hannover.de", None]
-        )
-    ]
 
 @router.post('/jobs', status_code=status.HTTP_202_ACCEPTED)
 def schedule_job(
@@ -321,12 +264,14 @@ def create_app(
         if settings.auth_required:
             # Attempt to load openid config at application start instead of first request. This
             # isn't strictly necessary but will log an error if the openid provider is unreachable.
-            await load_oidc_config(application.state, settings)
+            await load_oidc_client(application.state, settings)
         else:
             logger.warning("no OpenID provider configured -- endpoints are unauthenticated")
         yield
 
     application = FastAPI(lifespan=lifespan)
+
+    application.state.oidc = OidcServerState()
     application.state.cached_home_dirs = dict[str, Path]()
     application.state.per_user_running_jobs = defaultdict[Path, set[Path]](set)
     application.state.download_totp = DownloadTotpAuthority()

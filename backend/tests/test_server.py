@@ -21,8 +21,8 @@ from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.jobs import postprocessing_task
-from ise_record.postprocess import Result, ResultReason
+from ise_record.glue.jobs import postprocessing_task
+from ise_record.core.postprocess import Result, ResultReason
 from ise_record.server import create_app
 from ise_record.settings import Settings
 
@@ -582,7 +582,7 @@ def test_a_job_runs_against_the_callers_own_recording(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     mock_postprocess = mocker.patch(
-        "ise_record.jobs.postprocess_recording",
+        "ise_record.glue.jobs.postprocess_recording",
         autospec=True,
         return_value=Result(output_file=None, reason=ResultReason.SUCCESS))
 
@@ -600,7 +600,7 @@ def test_a_job_cannot_name_another_subjects_recording(
     # the recording name is the caller's to choose and says nothing about whose it is, so
     # two lecturers naming a lecture alike is ordinary. What keeps them apart is that the
     # name is resolved under the caller's own home and nowhere else.
-    mock_postprocess = mocker.patch("ise_record.jobs.postprocess_recording", autospec=True)
+    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
 
     assert upload(auth_client, provider.mint(sub="user-a")).status_code == 201
 
@@ -781,7 +781,7 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
         seen_while_running.append(set(running_jobs_of(auth_client, home)))
         return Result(output_file=None, reason=ResultReason.SUCCESS)
 
-    mocker.patch("ise_record.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess)
+    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess)
 
     token = provider.mint()
     assert upload(auth_client, token).status_code == 201

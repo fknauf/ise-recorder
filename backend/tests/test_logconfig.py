@@ -7,7 +7,7 @@ from typing import Any, Iterator
 
 import pytest
 
-from ise_record.logconfig import health_check_filter, setup_logging
+from ise_record.core.logconfig import health_check_filter, setup_logging
 
 # What uvicorn.access logs for every request:
 #

@@ -45,7 +45,7 @@ import pytest
 from pathvalidate import sanitize_filename
 from pydantic import BaseModel, ValidationError
 
-from ise_record.server import SafeRecording, _normalize_for_filesystem
+from ise_record.glue.models import SafeRecording, _normalize_for_filesystem
 
 
 class Name(BaseModel):

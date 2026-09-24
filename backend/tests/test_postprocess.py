@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.postprocess import (
+from ise_record.core.postprocess import (
     _run_command, # pyright: ignore[reportPrivateUsage]
     ConcatenatedFile,
     concat_chunks,
@@ -218,9 +218,9 @@ async def test_postprocess_tracks_reports_an_incomplete_track_as_partial_success
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mocker.patch("ise_record.postprocess._run_command")
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mocker.patch("ise_record.core.postprocess._run_command")
+    mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
     mocker.patch("pathlib.Path.rename")
@@ -244,11 +244,11 @@ async def test_postprocess_tracks_reports_failure_over_incompleteness(mocker: Mo
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
     mocker.patch(
-        "ise_record.postprocess._run_command",
+        "ise_record.core.postprocess._run_command",
         side_effect=CalledProcessError(1, "ffmpeg", b"", b"boom")
     )
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
 
@@ -321,9 +321,9 @@ async def test_postprocess_tracks(mocker: MockerFixture):
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
-    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mock_run_command = mocker.patch("ise_record.core.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
     mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
@@ -371,9 +371,9 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
-    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mock_run_command = mocker.patch("ise_record.core.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
     mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
@@ -411,9 +411,9 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
-    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mock_run_command = mocker.patch("ise_record.core.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", return_value=True)
     mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
@@ -475,9 +475,9 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
 
     stream_props = VideoProperties(width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080))
 
-    mock_run_command = mocker.patch("ise_record.postprocess._run_command")
-    mock_concat_chunks = mocker.patch("ise_record.postprocess.concat_chunks", wraps=mock_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=stream_props))
+    mock_run_command = mocker.patch("ise_record.core.postprocess._run_command")
+    mock_concat_chunks = mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=mock_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props))
     mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
     mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
     mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
@@ -558,9 +558,9 @@ async def test_the_rendered_file_gets_its_final_name_only_once_it_is_complete(
         render_target(command).write_bytes(b"rendered")
         return b""
 
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=fake_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=STREAM_PROPS))
-    mocker.patch("ise_record.postprocess._run_command", wraps=fake_render)
+    mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=fake_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=STREAM_PROPS))
+    mocker.patch("ise_record.core.postprocess._run_command", wraps=fake_render)
 
     result = await postprocess_tracks(
         tmp_path / "stream", tmp_path / "overlay", [], output_path)
@@ -583,9 +583,9 @@ async def test_a_failed_render_leaves_nothing_under_the_final_name(
         render_target(command).write_bytes(b"half a video")
         raise CalledProcessError(1, command, b"", b"boom")
 
-    mocker.patch("ise_record.postprocess.concat_chunks", wraps=fake_concat)
-    mocker.patch("ise_record.postprocess.video_properties", AsyncMock(return_value=STREAM_PROPS))
-    mocker.patch("ise_record.postprocess._run_command", wraps=fake_render)
+    mocker.patch("ise_record.core.postprocess.concat_chunks", wraps=fake_concat)
+    mocker.patch("ise_record.core.postprocess.video_properties", AsyncMock(return_value=STREAM_PROPS))
+    mocker.patch("ise_record.core.postprocess._run_command", wraps=fake_render)
 
     result = await postprocess_tracks(
         tmp_path / "stream", tmp_path / "overlay", [], output_path)
@@ -605,7 +605,7 @@ async def test_postprocess_recordings(mocker: MockerFixture):
 
     mock_is_dir = mocker.patch("pathlib.Path.is_dir", return_value=True, autospec=True)
     mock_glob = mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
-    mock_postprocess_tracks = mocker.patch("ise_record.postprocess.postprocess_tracks", return_value=expected_result, autospec=True)
+    mock_postprocess_tracks = mocker.patch("ise_record.core.postprocess.postprocess_tracks", return_value=expected_result, autospec=True)
 
     result = await postprocess_recording(rec_path)
 
@@ -632,7 +632,7 @@ async def test_postprocess_recordings_nonexistent(mocker: MockerFixture):
 
     mock_is_dir = mocker.patch("pathlib.Path.is_dir", return_value=False, autospec=True)
     mocker.patch("pathlib.Path.glob", return_value=[], autospec=True)
-    mock_postprocess_tracks = mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
+    mock_postprocess_tracks = mocker.patch("ise_record.core.postprocess.postprocess_tracks", autospec=True)
 
     result = await postprocess_recording(rec_path)
 
@@ -656,7 +656,7 @@ async def test_postprocess_recordings_missing_main(mocker: MockerFixture):
 
     mock_is_dir = mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
     mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
-    mock_postprocess_tracks = mocker.patch("ise_record.postprocess.postprocess_tracks", autospec=True)
+    mock_postprocess_tracks = mocker.patch("ise_record.core.postprocess.postprocess_tracks", autospec=True)
 
     result = await postprocess_recording(rec_path)
 
@@ -675,7 +675,7 @@ async def test_audio_tracks_are_ordered_by_number_not_by_name(
     # sort audio-1, audio-2, ..., audio-9, audio-10 instead of audio-1, audio-10, audio-2
 
     mock_tracks = mocker.patch(
-        "ise_record.postprocess.postprocess_tracks",
+        "ise_record.core.postprocess.postprocess_tracks",
         autospec=True,
         return_value=Result(reason=ResultReason.SUCCESS, output_file=None)
     )

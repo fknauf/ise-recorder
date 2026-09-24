@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 import jwt
 import pytest
 
-from ise_record.auth import discover_oidc_config, REQUIRED_CLAIMS
+from ise_record.core.auth import OidcClient, REQUIRED_CLAIMS
 from ise_record.server import create_app
 from ise_record.settings import OidcSettings, Settings
 
@@ -257,9 +257,14 @@ def test_key_claiming_an_insecure_algorithm_is_refused(
 
 @pytest.mark.asyncio
 async def test_discovery_records_the_userinfo_endpoint(provider: Provider, auth_settings: Settings):
-    config = await discover_oidc_config(auth_settings)
+    client = await OidcClient.discover(
+        provider_url=auth_settings.oidc.provider_url,
+        audience=auth_settings.oidc.audience,
+        leeway_seconds=auth_settings.oidc.leeway_seconds,
+        http_timeout_seconds=auth_settings.oidc.http_timeout_seconds
+    )
 
-    assert config.userinfo_endpoint == f"{provider.issuer}/userinfo"
+    assert client.userinfo_endpoint == f"{provider.issuer}/userinfo"
 
 
 @pytest.mark.asyncio
@@ -268,6 +273,11 @@ async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoin
 ):
     provider.advertise_userinfo = False
 
-    config = await discover_oidc_config(auth_settings)
+    client = await OidcClient.discover(
+        provider_url=auth_settings.oidc.provider_url,
+        audience=auth_settings.oidc.audience,
+        leeway_seconds=auth_settings.oidc.leeway_seconds,
+        http_timeout_seconds=auth_settings.oidc.http_timeout_seconds
+    )
 
-    assert config.userinfo_endpoint is None
+    assert client.userinfo_endpoint is None

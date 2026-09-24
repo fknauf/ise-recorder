@@ -11,7 +11,7 @@ import pytest
 from pytest_mock import MockerFixture
 import rerender # pyright: ignore[reportMissingTypeStubs]
 
-from ise_record.postprocess import Result, ResultReason
+from ise_record.core.postprocess import Result, ResultReason
 
 @pytest.mark.asyncio
 async def test_rerender(mocker: MockerFixture):

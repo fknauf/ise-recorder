@@ -9,7 +9,7 @@ from argparse import ArgumentParser
 import logging
 from pathlib import Path
 
-from ise_record.postprocess import postprocess_recording
+from ise_record.core.postprocess import postprocess_recording
 
 async def main():
     """

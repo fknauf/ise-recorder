@@ -24,8 +24,8 @@ from fastapi.testclient import TestClient
 import jwt
 import pytest
 
-from ise_record import auth
-from ise_record.auth import OidcConfiguration
+from ise_record.core import auth
+from ise_record.core.auth import OidcClient
 from ise_record.server import create_app
 from ise_record.settings import get_settings, OidcSettings, Settings
 
@@ -99,12 +99,14 @@ def auth_client(auth_settings: Settings) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def oidc(provider: Provider) -> OidcConfiguration:
+def oidc(provider: Provider) -> OidcClient:
     """ What discovery would have produced, for the tests that bypass the app. """
-    return OidcConfiguration(
+    return OidcClient(
         issuer=provider.issuer,
+        audience=AUDIENCE,
         userinfo_endpoint=f"{provider.issuer}/userinfo",
-        http_timeout=5.0,
+        leeway_seconds=30.0,
+        http_timeout_seconds=5.0,
         jwk_client=jwt.PyJWKClient(f"{provider.issuer}/jwks"),
     )
 

@@ -9,11 +9,13 @@ from typing import Annotated, NamedTuple
 
 from fastapi import Depends
 
-from .download_totp import DownloadTotpAuthority, get_download_totp
-from .jobs import get_running_jobs_snapshot
-from .postprocess import MAIN_TRACK_NAME, OUTPUT_FILENAME
-from .settings import Settings, get_settings
-from .user_home import get_current_user_home
+from ise_record.core.download_totp import DownloadTotpAuthority
+from ise_record.core.postprocess import MAIN_TRACK_NAME, OUTPUT_FILENAME
+from ise_record.settings import Settings, get_settings
+
+from ise_record.glue.download_totp import get_download_totp
+from ise_record.glue.jobs import get_running_jobs_snapshot
+from ise_record.glue.user_home import get_current_user_home
 
 def get_unprocessed_recordings(
     settings: Annotated[Settings, Depends(get_settings)],

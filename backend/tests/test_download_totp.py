@@ -17,7 +17,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from ise_record.download_totp import DownloadTotpAuthority
+from ise_record.core.download_totp import DownloadTotpAuthority
 
 from .harness import (
     download_totp_of,

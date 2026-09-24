@@ -14,7 +14,6 @@ import hashlib
 import logging
 from pathlib import Path
 
-from fastapi import Request
 import pyotp
 
 logger = logging.getLogger(__name__)
@@ -64,7 +63,3 @@ class DownloadTotpAuthority:
 
         key = _recording_key(file_path)
         self.factories.pop(key, None)
-
-async def get_download_totp(request: Request) -> DownloadTotpAuthority:
-    """ FastAPI dependable to obtain the TOTP authority """
-    return request.app.state.download_totp

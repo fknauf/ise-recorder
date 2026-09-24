@@ -11,8 +11,8 @@ from unittest.mock import ANY
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.postprocess import Result, ResultReason
-from ise_record.reporting import (
+from ise_record.core.postprocess import Result, ResultReason
+from ise_record.core.reporting import (
     generate_report,
     normalize_recipient,
     send_report

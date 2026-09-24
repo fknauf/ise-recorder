@@ -20,8 +20,8 @@ from typing import Any
 from fastapi.testclient import TestClient
 import pytest
 
-from ise_record.auth import UserInfo
-from ise_record.user_home import fs_safe_user_name, prepare_user_home_dir
+from ise_record.core.auth import UserInfo
+from ise_record.core.user_home import fs_safe_user_name, prepare_user_home_dir
 from ise_record.server import create_app
 from ise_record.settings import Settings
 
@@ -78,7 +78,7 @@ SUBJECT_DIGEST = digest_of("abc")
 NAME_MAX_BYTES = 255
 
 def user_for(username: Any) -> UserInfo:
-    return UserInfo.model_construct(sub="abc", preferred_username=username)
+    return UserInfo(sub="abc", preferred_username=username)
 
 async def home_dir_for(tmp_path: Path, username: Any) -> Path:
     """
@@ -258,9 +258,9 @@ async def test_username_collisions_are_separated_by_the_digest(tmp_path: Path):
     # pathvalidate maps several usernames onto one string -- "DOMAIN\\user" and "DOMAINuser"
     # both come out as the latter -- so the digest is the only thing keeping them apart
     first = await prepare_user_home_dir(
-        UserInfo.model_construct(sub="user-a", preferred_username="same"), tmp_path)
+        UserInfo(sub="user-a", preferred_username="same"), tmp_path)
     second = await prepare_user_home_dir(
-        UserInfo.model_construct(sub="user-b", preferred_username="same"), tmp_path)
+        UserInfo(sub="user-b", preferred_username="same"), tmp_path)
 
     assert first != second
 
