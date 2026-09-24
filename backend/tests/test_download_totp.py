@@ -14,21 +14,13 @@ offers) lives in test_server.py; this file is about the mechanism itself.
 
 import datetime
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Iterator
 
 from fastapi.testclient import TestClient
-import pytest
 
-from ise_record.server import create_app
-from ise_record.settings import Settings
-
-from ise_record.download_totp import ( # pyright: ignore[reportPrivateUsage]
-    _generate_download_totp,
-    verify_download_totp,
-)
+from ise_record.download_totp import DownloadTotpAuthority
 
 from .harness import (
+    download_totp_of,
     DEFAULT_SUBJECT_DIGEST,
     digest_of,
     download_completed,
@@ -40,68 +32,59 @@ from .harness import (
 
 # --- the module on its own -------------------------------------------------
 
-# The generator only ever touches `app.state`, so a bare namespace stands in for the
-# application here. That keeps the properties below stated over one function call each,
-# rather than over a listing request that would also drag in auth and the filesystem.
+def test_an_otp_verifies_for_the_file_it_was_issued_for(tmp_path: Path):
+    download_totp = DownloadTotpAuthority()
+    totp = download_totp.generate(tmp_path / "GVS_2025" / "presentation.webm")
 
-@pytest.fixture
-def app_state() -> SimpleNamespace:
-    return SimpleNamespace()
+    assert download_totp.verify(totp, tmp_path / "GVS_2025" / "presentation.webm")
 
 
-def test_an_otp_verifies_for_the_file_it_was_issued_for(app_state: SimpleNamespace, tmp_path: Path):
-    totp = _generate_download_totp(tmp_path / "GVS_2025" / "presentation.webm", app_state)
-
-    assert verify_download_totp(totp, tmp_path / "GVS_2025" / "presentation.webm", app_state)
-
-
-def test_an_otp_does_not_verify_for_a_different_file(app_state: SimpleNamespace, tmp_path: Path):
+def test_an_otp_does_not_verify_for_a_different_file(tmp_path: Path):
     # two OTPs generated in the same interval would be identical if the files shared a
     # secret, which is the failure this rules out rather than merely the key lookup
-    totp = _generate_download_totp(tmp_path / "GVS_2025" / "presentation.webm", app_state)
+    download_totp = DownloadTotpAuthority()
+    totp = download_totp.generate(tmp_path / "GVS_2025" / "presentation.webm")
 
-    assert not verify_download_totp(totp, tmp_path / "PSU_2026" / "presentation.webm", app_state)
+    assert not download_totp.verify(totp, tmp_path / "PSU_2026" / "presentation.webm")
 
 
-def test_a_file_that_was_never_issued_an_otp_verifies_nothing(
-    app_state: SimpleNamespace, tmp_path: Path
-):
+def test_a_file_that_was_never_issued_an_otp_verifies_nothing(tmp_path: Path):
     # no generator, so there is nothing to check against. Ten digits of guessing is the
     # point, but only if the absence of a secret is a refusal rather than an accident.
+    download_totp = DownloadTotpAuthority()
     unlisted = tmp_path / "never_listed" / "presentation.webm"
 
-    assert not verify_download_totp("0000000000", unlisted, app_state)
+    assert not download_totp.verify("0000000000", unlisted)
 
 
-def test_verifying_for_an_unknown_file_leaves_no_generator_behind(
-    app_state: SimpleNamespace, tmp_path: Path
-):
+def test_verifying_for_an_unknown_file_leaves_no_generator_behind(tmp_path: Path):
     # otherwise an attacker could mint a secret for any path they name, and every failed
     # guess would also grow the cache for the lifetime of the process
-    verify_download_totp("0000000000", tmp_path / "attacker_named" / "presentation.webm", app_state)
+    download_totp = DownloadTotpAuthority()
+    download_totp.verify("0000000000", tmp_path / "attacker_named" / "presentation.webm")
 
-    assert app_state.download_totp_factories == {}
+    assert not download_totp.factories
 
 
-def test_the_secret_survives_across_listings(app_state: SimpleNamespace, tmp_path: Path):
+def test_the_secret_survives_across_listings(tmp_path: Path):
+    download_totp = DownloadTotpAuthority()
     path = tmp_path / "GVS_2025" / "presentation.webm"
 
-    first = _generate_download_totp(path, app_state)
-    _generate_download_totp(path, app_state)
+    first = download_totp.generate(path)
+    download_totp.generate(path)
 
     # the frontend polls the listing every minute, so a link rendered one poll ago is
     # still on the page when the lecturer clicks it. Rotating the secret per listing would
     # break exactly that click, and only sometimes.
-    assert verify_download_totp(first, path, app_state)
+    assert download_totp.verify(first, path)
 
 
-def test_an_otp_is_long_enough_and_short_lived_enough_to_carry_the_link(
-    app_state: SimpleNamespace, tmp_path: Path
-):
+def test_an_otp_is_long_enough_and_short_lived_enough_to_carry_the_link(tmp_path: Path):
+    download_totp = DownloadTotpAuthority()
     path = tmp_path / "GVS_2025" / "presentation.webm"
-    _generate_download_totp(path, app_state)
+    download_totp.generate(path)
 
-    generator = app_state.download_totp_factories[str(path.absolute())]
+    generator = download_totp.factories[str(path.absolute())]
 
     # These two numbers are the security margin of the whole scheme: how long a link that
     # leaked -- over a shoulder, through a proxy log, or in the browser history of a
@@ -111,20 +94,19 @@ def test_an_otp_is_long_enough_and_short_lived_enough_to_carry_the_link(
     assert generator.interval == 120
 
 
-def test_an_otp_from_an_earlier_interval_no_longer_verifies(
-    app_state: SimpleNamespace, tmp_path: Path
-):
+def test_an_otp_from_an_earlier_interval_no_longer_verifies(tmp_path: Path):
+    download_totp = DownloadTotpAuthority()
     path = tmp_path / "GVS_2025" / "presentation.webm"
-    _generate_download_totp(path, app_state)
+    download_totp.generate(path)
 
-    generator = app_state.download_totp_factories[str(path.absolute())]
+    generator = download_totp.factories[str(path.absolute())]
     # dating an OTP back rather than moving the clock keeps this independent of how the
     # app measures time
     three_intervals = datetime.timedelta(seconds=3 * generator.interval)
     three_intervals_ago = datetime.datetime.now() - three_intervals
     stale = generator.at(three_intervals_ago)
 
-    assert not verify_download_totp(stale, path, app_state)
+    assert not download_totp.verify(stale, path)
 
 
 # --- through the endpoints -------------------------------------------------
@@ -193,7 +175,7 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
     server_list = list_recordings(auth_client, provider.mint()).json()
 
     key = str((home / "GVS_2025" / "presentation.webm").absolute())
-    generator = auth_client.app.state.download_totp_factories[key]
+    generator = download_totp_of(auth_client).factories[key]
     three_intervals = datetime.timedelta(seconds=3 * generator.interval)
     three_intervals_ago = datetime.datetime.now() - three_intervals
     stale = generator.at(three_intervals_ago)
@@ -202,30 +184,3 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
 
     assert response.status_code == 401
     assert b"video" not in response.content
-
-
-# conftest's auth_client covers the authenticated backend; the one below runs without
-# authentication, which is the deployment this last test is about.
-
-@pytest.fixture
-def open_settings(tmp_path: Path) -> Settings:
-    return Settings(destdir=tmp_path)
-
-
-@pytest.fixture
-def open_client(open_settings: Settings) -> Iterator[TestClient]:
-    with TestClient(create_app(open_settings)) as test_client:
-        yield test_client
-
-
-def test_an_unauthenticated_deployment_mints_nothing(
-    open_client: TestClient, open_settings: Settings
-):
-    # The listing is refused without authentication, but the dependency that builds it runs
-    # first. Walking one shared destdir there would mint a generator for every lecture on
-    # the server, for a response that hands none of them out.
-    (open_settings.destdir / "GVS_2025").mkdir(parents=True)
-    (open_settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
-
-    assert open_client.get("/api/recordings").status_code == 403
-    assert getattr(open_client.app.state, "download_totp_factories", {}) == {}

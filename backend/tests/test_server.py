@@ -4,14 +4,13 @@
 # pylint: disable=missing-module-docstring
 # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
-# pylint: disable=too-many-lines
 # pylint: disable=protected-access
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
 
 import os
 from pathlib import Path
-from typing import Iterator, cast
+from typing import Iterator
 from urllib.parse import quote
 from unittest.mock import ANY
 
@@ -21,12 +20,15 @@ from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.download_totp import verify_download_totp
+from ise_record.jobs import postprocessing_task
 from ise_record.postprocess import Result, ResultReason
-from ise_record.server import create_app, _postprocessing_task, PostProcessingJob # pyright: ignore[reportPrivateUsage]
-from ise_record.settings import Settings, SmtpSettings
+from ise_record.server import create_app
+from ise_record.settings import Settings
 
 from .harness import (
+    abandon_recording,
+    download_totp_of,
+    running_jobs_of,
     DEFAULT_SUBJECT_DIGEST,
     digest_of,
     download_completed,
@@ -66,153 +68,7 @@ def prefixed_client(prefixed_settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(prefixed_settings)) as test_client:
         yield test_client
 
-@pytest.mark.asyncio
-async def test_postprocessing_task_with_report(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
-
-    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
-    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
-
-    settings = Settings(
-        smtp = SmtpSettings(
-            server="localhost",
-            port=587,
-            local_hostname="smtp.example.de",
-            username="server@example.de",
-            password="supersecure",
-            sender="render@example.de",
-            starttls=True,
-            allowed_domains=("example.de",)
-        )
-    )
-
-    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
-        settings.destdir,
-        settings.smtp,
-        set()
-    )
-
-    mock_postprocess.assert_called_once_with(Path("data/foo"))
-    mock_send.assert_called_once_with(
-        ANY,
-        hostname="localhost",
-        port=587,
-        local_hostname="smtp.example.de",
-        start_tls=True,
-        use_tls=False,
-        username="server@example.de",
-        password="supersecure"
-    )
-
-    sent_report = mock_send.call_args[0][0]
-
-    assert "foo" in sent_report["Subject"]
-    assert "render@example.de" == sent_report["From"]
-    assert "lecturer@example.de" == sent_report["To"]
-    assert "foo/presentation.webm" in sent_report.get_payload()
-
-@pytest.mark.asyncio
-async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
-
-    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
-    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
-
-    settings = Settings(
-        smtp = SmtpSettings(
-            server="localhost",
-            port=587,
-            local_hostname="smtp.example.de",
-            username="server@example.de",
-            password="supersecure",
-            sender="render@example.de",
-            starttls=True,
-            allowed_domains=("example.de",)
-        )
-    )
-
-    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient=None),
-        settings.destdir,
-        settings.smtp,
-        set()
-    )
-
-    mock_postprocess.assert_called_once_with(Path("data/foo"))
-    mock_send.assert_not_called()
-
-@pytest.mark.asyncio
-async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
-
-    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=expected_result)
-    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
-
-    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient="lecturer@example.de"),
-        Settings().destdir,
-        None,
-        set()
-    )
-
-    mock_postprocess.assert_called_once_with(Path("data/foo"))
-    mock_send.assert_not_called()
-
-@pytest.mark.asyncio
-async def test_a_second_job_for_a_running_recording_is_dropped(mocker: MockerFixture):
-    # the frontend retries a job it got no response to, so a duplicate arrives by accident
-    # rather than by malice. Two renders would write over each other's assembled tracks.
-    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True)
-
-    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient=None),
-        Settings().destdir,
-        None,
-        { Path("data/foo") }
-    )
-
-    mock_postprocess.assert_not_called()
-
-@pytest.mark.asyncio
-async def test_a_job_for_a_different_recording_is_not_dropped(mocker: MockerFixture):
-    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=Result(reason=ResultReason.SUCCESS, output_file=None))
-
-    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="bar", recipient=None),
-        Settings().destdir,
-        None,
-        { Path("data/foo") }
-    )
-
-    mock_postprocess.assert_called_once_with(Path("data/bar"))
-
-@pytest.mark.asyncio
-async def test_a_finished_job_releases_the_recording(mocker: MockerFixture):
-    mocker.patch("ise_record.server.postprocess_recording", autospec=True, return_value=Result(reason=ResultReason.SUCCESS, output_file=None))
-    running_jobs: set[Path] = set()
-
-    await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient=None), Settings().destdir, None, running_jobs
-    )
-
-    assert running_jobs == set()
-
-@pytest.mark.asyncio
-async def test_a_job_that_blows_up_still_releases_the_recording(mocker: MockerFixture):
-    # otherwise one unexpected failure locks that recording out of postprocessing until
-    # the server is restarted, and rerender.py is the only way back
-    mocker.patch("ise_record.server.postprocess_recording", autospec=True, side_effect=RuntimeError("boom"))
-    running_jobs: set[Path] = set()
-
-    with pytest.raises(RuntimeError):
-        await _postprocessing_task( # pyright: ignore[reportPrivateUsage]
-            PostProcessingJob(recording="foo", recipient=None), Settings().destdir, None, running_jobs
-        )
-
-    assert running_jobs == set()
-
-def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, app: FastAPI, settings: Settings):
+def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
@@ -228,14 +84,17 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, app:
     assert response.status_code == 202
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
-        _postprocessing_task, # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient="foo@bar.de"),
-        settings.destdir,
+        postprocessing_task,
+        settings.destdir / "foo",
+        "foo@bar.de",
         settings.smtp,
-        app.state.per_user_running_jobs[settings.destdir]
+        ANY
     )
+    # the very set the listing reads, not merely an equal one: every empty set is equal to
+    # every other, so only identity shows the job is registered where it will be looked for
+    assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
 
-def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client: TestClient, app: FastAPI, settings: Settings):
+def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client: TestClient, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
@@ -250,12 +109,15 @@ def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client
     assert response.status_code == 202
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
-        _postprocessing_task, # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient=None),
-        settings.destdir,
+        postprocessing_task,
+        settings.destdir / "foo",
+        None,
         settings.smtp,
-        app.state.per_user_running_jobs[settings.destdir]
+        ANY
     )
+    # the very set the listing reads, not merely an equal one: every empty set is equal to
+    # every other, so only identity shows the job is registered where it will be looked for
+    assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
 
 def test_schedule_postprocessing_error(mocker: MockerFixture, client: TestClient, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=False)
@@ -289,7 +151,7 @@ def test_schedule_postprocessing_input_validation(mocker: MockerFixture, client:
     assert response.status_code == 422
     mock_add_task.assert_not_called()
 
-def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: MockerFixture, client: TestClient, app: FastAPI, settings: Settings):
+def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: MockerFixture, client: TestClient, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
@@ -305,12 +167,15 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: Mock
     assert response.status_code == 202
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
-        _postprocessing_task, # pyright: ignore[reportPrivateUsage]
-        PostProcessingJob(recording="foo", recipient="I made a lot of typos"),
-        settings.destdir,
+        postprocessing_task,
+        settings.destdir / "foo",
+        "I made a lot of typos",
         settings.smtp,
-        app.state.per_user_running_jobs[settings.destdir]
+        ANY
     )
+    # the very set the listing reads, not merely an equal one: every empty set is equal to
+    # every other, so only identity shows the job is registered where it will be looked for
+    assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
 
 
 def test_chunk_upload(client: TestClient, settings: Settings):
@@ -636,6 +501,29 @@ def test_downloading_is_refused_without_user(
     assert response.status_code == 404
     assert b"video" not in response.content
 
+def test_two_apps_share_no_state(tmp_path: Path):
+    # each app gets instances of its own, rather than one dict living on a class or module
+    first = create_app(Settings(destdir=tmp_path))
+    second = create_app(Settings(destdir=tmp_path))
+
+    assert first.state.cached_home_dirs is not second.state.cached_home_dirs
+    assert first.state.per_user_running_jobs is not second.state.per_user_running_jobs
+    assert first.state.download_totp.factories is not second.state.download_totp.factories
+
+
+def test_requests_do_not_replace_the_app_state(client: TestClient, app: FastAPI):
+    # the listing and /jobs both resolve get_running_jobs, and a job registers in the set it
+    # was handed; a request that swapped the dict out would strand it there
+    running_jobs = app.state.per_user_running_jobs
+    download_totp = app.state.download_totp
+
+    client.post("/api/jobs", json={ "recording": "missing" })
+    client.get("/api/recordings")
+
+    assert app.state.per_user_running_jobs is running_jobs
+    assert app.state.download_totp is download_totp
+
+
 def test_health_endpoint(client: TestClient):
     response = client.get("/api/health")
 
@@ -689,7 +577,7 @@ def test_a_job_runs_against_the_callers_own_recording(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     mock_postprocess = mocker.patch(
-        "ise_record.server.postprocess_recording",
+        "ise_record.jobs.postprocess_recording",
         autospec=True,
         return_value=Result(output_file=None, reason=ResultReason.SUCCESS))
 
@@ -707,7 +595,7 @@ def test_a_job_cannot_name_another_subjects_recording(
     # the recording name is the caller's to choose and says nothing about whose it is, so
     # two lecturers naming a lecture alike is ordinary. What keeps them apart is that the
     # name is resolved under the caller's own home and nowhere else.
-    mock_postprocess = mocker.patch("ise_record.server.postprocess_recording", autospec=True)
+    mock_postprocess = mocker.patch("ise_record.jobs.postprocess_recording", autospec=True)
 
     assert upload(auth_client, provider.mint(sub="user-a")).status_code == 201
 
@@ -755,6 +643,7 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     # the names the auth_client has to send back to /api/recordings/{recording}, not the name of
     # the file inside each of them -- which is "presentation.webm" for every recording
     data = response.json()
+    download_totp = download_totp_of(auth_client)
 
     assert isinstance(data, dict)
     assert "user" in data
@@ -764,11 +653,11 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
 
     assert data["completed"][0]["name"] == "GVS_2025"
     assert data["completed"][0]["size"] == 5
-    assert verify_download_totp(data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm", auth_client.app.state) # type: ignore
+    assert download_totp.verify(data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm") # type: ignore
 
     assert data["completed"][1]["name"] == "PSU_2026"
     assert data["completed"][1]["size"] == 5
-    assert verify_download_totp(data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm", auth_client.app.state) # type: ignore
+    assert download_totp.verify(data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm") # type: ignore
 
 
 def test_the_listing_leaves_out_recordings_that_are_not_rendered(
@@ -801,11 +690,6 @@ def test_the_listing_only_shows_the_callers_own_recordings(
 # can show that a lecture is on its way rather than missing. What it reads is the per-user
 # set of running jobs that _postprocessing_task maintains; a TestClient runs background tasks
 # to completion before it returns, so the set is seeded by hand to catch a job mid-flight.
-
-def running_jobs_of(auth_client: TestClient, home: Path) -> set[Path]:
-    app = cast(FastAPI, auth_client.app)
-    return app.state.per_user_running_jobs[home]
-
 
 def test_the_listing_reports_nothing_rendering_when_no_job_is_running(
     auth_client: TestClient, provider: Provider, tmp_path: Path
@@ -892,7 +776,7 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
         seen_while_running.append(set(running_jobs_of(auth_client, home)))
         return Result(output_file=None, reason=ResultReason.SUCCESS)
 
-    mocker.patch("ise_record.server.postprocess_recording", autospec=True, side_effect=fake_postprocess)
+    mocker.patch("ise_record.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess)
 
     token = provider.mint()
     assert upload(auth_client, token).status_code == 201
@@ -903,24 +787,60 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
     assert list_recordings(auth_client, token).json()["rendering"] == []
 
 
-def test_another_users_job_does_not_block_a_recording_of_the_same_name(
-    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+# The listing's third list: recordings whose postprocessing never produced anything. Which
+# recordings count is get_unprocessed_recordings' business, in test_recording_lists.py;
+# these pin what the endpoint makes of it.
+
+def test_the_listing_reports_unprocessed_recordings_by_name(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    # the running-job sets are per user; this pins that a job in one of them does not count
-    # as a duplicate for anybody else
-    home_a = tmp_path / digest_of("user-a")
-    running_jobs_of(auth_client, home_a).add(home_a / "foo")
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "DONE_2025")
+    abandon_recording(home, "GVS_2025")
 
-    mock_postprocess = mocker.patch(
-        "ise_record.server.postprocess_recording",
-        autospec=True,
-        return_value=Result(output_file=None, reason=ResultReason.SUCCESS))
+    data = list_recordings(auth_client, provider.mint()).json()
 
-    token = provider.mint(sub="user-b")
-    assert upload(auth_client, token).status_code == 201
-    assert schedule(auth_client, token).status_code == 202
+    # only the name: there is nothing to download, and the Rerender button needs no more
+    assert data["unprocessed"] == [ { "name": "GVS_2025" } ]
+    assert [ r["name"] for r in data["completed"] ] == [ "DONE_2025" ]
+    assert data["rendering"] == []
 
-    mock_postprocess.assert_called_once_with(tmp_path / digest_of("user-b") / "foo")
+
+def test_the_listing_reports_no_unprocessed_recordings_when_there_are_none(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "DONE_2025")
+
+    # present and empty rather than absent, because the frontend schema requires the field
+    assert list_recordings(auth_client, provider.mint()).json()["unprocessed"] == []
+
+
+def test_the_listing_only_shows_the_callers_own_unprocessed_recordings(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    abandon_recording(tmp_path / digest_of("user-a"), "mine")
+    abandon_recording(tmp_path / digest_of("user-b"), "theirs")
+
+    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["unprocessed"] == [ { "name": "mine" } ]
+    assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["unprocessed"] == [ { "name": "theirs" } ]
+
+
+def test_a_rerendered_recording_moves_from_unprocessed_to_rendering(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # what the lecturer sees after pressing Rerender on a failed card: the card turns into
+    # a spinner rather than showing up twice
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    recording_dir = abandon_recording(home, "GVS_2025")
+    token = provider.mint()
+
+    assert list_recordings(auth_client, token).json()["unprocessed"] == [ { "name": "GVS_2025" } ]
+
+    running_jobs_of(auth_client, home).add(recording_dir)
+    data = list_recordings(auth_client, token).json()
+
+    assert data["unprocessed"] == []
+    assert data["rendering"] == [ { "name": "GVS_2025" } ]
 
 
 def test_a_completed_recording_can_be_downloaded(

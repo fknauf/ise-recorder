@@ -55,6 +55,7 @@
         "partialize",
         "pathvalidate",
         "pillarboxed",
+        "postprocessings",
         "pycache",
         "pydantic",
         "pylint",

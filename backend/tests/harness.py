@@ -20,14 +20,19 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import os
 from pathlib import Path
 import threading
+import time
 from typing import Any
 from urllib.parse import quote
 
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import jwt
+
+from ise_record.download_totp import DownloadTotpAuthority
 
 CLIENT_ID = "ise-recorder"
 # Distinct from CLIENT_ID on purpose, and that is the normal deployment: an OIDC ID token's
@@ -191,10 +196,57 @@ def finish_recording(user_home: Path, recording: str, content: bytes = b"video")
     (user_home / recording / "presentation.webm").write_bytes(content)
 
 
+MINUTE = 60
+
+
+def age(path: Path, seconds: float) -> None:
+    """ Backdate a file's modification time, which is what the staleness check reads. """
+    then = time.time() - seconds
+    os.utime(path, (then, then))
+
+
+def write_chunks(recording_dir: Path, ages: list[float], track: str = "stream") -> None:
+    """ One chunk per entry, chunk.0000 first, each last written `age` seconds ago. """
+    track_dir = recording_dir / track
+    track_dir.mkdir(parents=True, exist_ok=True)
+
+    for index, seconds in enumerate(ages):
+        chunk = track_dir / f"chunk.{index:04d}"
+        chunk.write_bytes(b"chunk")
+        age(chunk, seconds)
+
+
+def abandon_recording(user_home: Path, recording: str, minutes: float = 30) -> Path:
+    """ A recording whose last chunk arrived long enough ago that nobody is streaming it. """
+    recording_dir = user_home / recording
+    write_chunks(recording_dir, [ (minutes + 2) * MINUTE, (minutes + 1) * MINUTE, minutes * MINUTE ])
+    return recording_dir
+
+
 def list_recordings(client: TestClient, token: str | None):
     """ Ask for the caller's completed and rendering recordings, with or without a token. """
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return client.get("/api/recordings", headers=headers)
+
+
+def app_of(client: TestClient) -> FastAPI:
+    """ The application behind a client, typed -- TestClient only promises an ASGI app. """
+    return client.app  # type: ignore[return-value]
+
+
+def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
+    """
+    The set of recordings `user_home` has a postprocessing job in flight for.
+
+    A TestClient runs background tasks to completion before it returns, so a test that wants
+    to catch a job mid-flight seeds this set by hand.
+    """
+    return app_of(client).state.per_user_running_jobs[user_home]
+
+
+def download_totp_of(client: TestClient) -> DownloadTotpAuthority:
+    """ The authority that issued the OTPs in this client's listings. """
+    return app_of(client).state.download_totp
 
 
 def download_completed(client: TestClient, user_digest: str, recording: str, totp: str | None):

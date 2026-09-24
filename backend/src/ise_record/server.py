@@ -6,7 +6,6 @@
 
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
 import logging
 import os
 from pathlib import Path
@@ -21,7 +20,6 @@ from fastapi import (
     FastAPI,
     Form,
     HTTPException,
-    Request,
     UploadFile,
     status
 )
@@ -31,11 +29,16 @@ from pathvalidate import sanitize_filename
 from pydantic import BaseModel, BeforeValidator, Field
 
 from .auth import load_oidc_config
-from .download_totp import DownloadableRecording, get_downloadable_recordings, verify_download_totp
+from .download_totp import DownloadTotpAuthority, get_download_totp
+from .jobs import postprocessing_task, get_running_jobs
 from .logconfig import setup_logging
-from .postprocess import postprocess_recording, OUTPUT_FILENAME, MAIN_TRACK_NAME
-from .reporting import normalize_recipient, send_report
-from .settings import get_settings, Settings, SmtpSettings
+from .postprocess import OUTPUT_FILENAME
+from .recording_lists import (
+    DownloadableRecording,
+    get_downloadable_recordings,
+    get_unprocessed_recordings
+)
+from .settings import get_settings, Settings
 from .user_home import get_current_user_home
 
 def _normalize_for_filesystem(value: str) -> str:
@@ -121,6 +124,7 @@ async def upload_chunk(
         "filename": filename
     }
 
+
 class PostProcessingJob(BaseModel):
     """ DTO for a postprocessing job the client wants to schedule """
 
@@ -137,49 +141,6 @@ class PostProcessingJob(BaseModel):
         )
     ]
 
-def get_running_jobs(
-        request: Request,
-        user_home: Annotated[Path, Depends(get_current_user_home)]
-) -> set[Path]:
-    """ Recordings that currently have a postprocessing job in flight. """
-    return request.app.state.per_user_running_jobs[user_home]
-
-async def _postprocessing_task(
-        job: PostProcessingJob,
-        user_home: Path,
-        smtp_settings: SmtpSettings | None,
-        running_jobs: set[Path]
-) -> None:
-    recording_path = user_home / job.recording
-
-    # Job's already running, so don't start it a second time.
-    if recording_path in running_jobs:
-        logger.warning("Already postprocessing %s, ignoring duplicate job", recording_path)
-        return
-
-    running_jobs.add(recording_path)
-
-    try:
-        job_result = await postprocess_recording(recording_path)
-
-        if smtp_settings is not None:
-            normalized_recipient = normalize_recipient(
-                job.recipient,
-                list(smtp_settings.allowed_domains)
-            )
-
-            if normalized_recipient is not None:
-                await send_report(
-                    smtp_settings=smtp_settings,
-                    recipient=normalized_recipient,
-                    job_title=job.recording,
-                    result=job_result)
-        else:
-            logger.debug("Not sending report: SMTP not configured.")
-
-    finally:
-        running_jobs.discard(recording_path)
-
 @router.post('/jobs', status_code=status.HTTP_202_ACCEPTED)
 def schedule_job(
     job: PostProcessingJob,
@@ -190,14 +151,22 @@ def schedule_job(
 ):
     """ Endpoint for the scheduling of postprocessing jobs """
 
-    if not os.path.isdir(user_home / job.recording):
+    recording_path = user_home / job.recording
+
+    if not recording_path.is_dir():
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Recording {job.recording} does not exist'
         )
 
-    background_tasks.add_task(_postprocessing_task, job, user_home, settings.smtp, running_jobs)
+    background_tasks.add_task(
+        postprocessing_task,
+        recording_path,
+        job.recipient,
+        settings.smtp,
+        running_jobs
+    )
 
     return job
 
@@ -213,57 +182,11 @@ def _downloads_disabled():
         detail="Server is configured without authentication, downloads are disabled."
     )
 
-def get_unprocessed_recordings(
-    settings: Annotated[Settings, Depends(get_settings)],
-    user_home: Annotated[Path, Depends(get_current_user_home)],
-    running_jobs: Annotated[set[Path], Depends(get_running_jobs)]
-) -> list[Path]:
-    """
-    Identify recordings that haven't been processed, aren't being processed, aren't still being
-    streamed and are processable (i.e., have a main stream).
-
-    These will be shown in the UI as failed postprocessings with a button that allows rescheduling
-    the post-processing job. They should only show up in the event that something went wrong, e.g.
-    a streaming lecturer lost connectivity before the postprocessing could be scheduled.
-    """
-    if not settings.auth_required:
-        return []
-
-    running_job_names = { job.name for job in running_jobs }
-
-    def is_unprocessed(recording_dir: Path) -> bool:
-        output_path = recording_dir / OUTPUT_FILENAME
-        main_track_dir = recording_dir / MAIN_TRACK_NAME
-
-        # - name in running_job_names -> is currently rendering
-        # - presentation.webm exists -> preprocessing finished
-        # - main track doesn't exist -> not renderable.
-        if (
-            recording_dir.name in running_job_names
-            or output_path.exists()
-            or not main_track_dir.is_dir()
-        ):
-            return False
-
-        chunks = sorted(main_track_dir.glob("chunk.*"), reverse=True)
-
-        # no chunks in main track -> not renderable
-        if len(chunks) == 0:
-            return False
-
-        # if the newest chunk is older than 5 minutes, the recording isn't still being streamed.
-        cutoff = datetime.now() - timedelta(minutes=5)
-        latest = chunks[0]
-
-        return latest.stat().st_mtime < cutoff.timestamp()
-
-    return sorted(dir for dir in user_home.iterdir() if is_unprocessed(dir))
-
 @router.get('/recordings')
 async def get_recordings_list(
     settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
-    recordings: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)],
+    completed: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)],
     running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
     unprocessed: Annotated[list[Path], Depends(get_unprocessed_recordings)]
 ) -> dict[str, Any]:
@@ -281,7 +204,7 @@ async def get_recordings_list(
                 "size": rec.size,
                 "totp": rec.totp
             }
-            for rec in recordings if rec.name not in running_job_names
+            for rec in completed if rec.name not in running_job_names
         ],
         "rendering": [
             {
@@ -299,11 +222,11 @@ async def get_recordings_list(
 
 @router.get('/recordings/{user_digest}/{recording}')
 async def download_completed(
-    request: Request,
     recording: SafeRecording,
     user_digest: Annotated[str, Field(pattern=r"\A[0-9a-f]+\z")],
     totp: Annotated[str, Field(pattern=r"[0-9]+")],
-    settings: Annotated[Settings, Depends(get_settings)]
+    settings: Annotated[Settings, Depends(get_settings)],
+    download_totp: Annotated[DownloadTotpAuthority, Depends(get_download_totp)]
 ) -> FileResponse:
     """ Endpoint for downloading a completed recording that the active user owns """
 
@@ -312,7 +235,7 @@ async def download_completed(
 
     file_path = settings.destdir / user_digest / recording / OUTPUT_FILENAME
 
-    if not verify_download_totp(totp, file_path, request.app.state):
+    if not download_totp.verify(totp, file_path):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="TOTP could not be verified"
@@ -343,7 +266,9 @@ def create_app(
         yield
 
     application = FastAPI(lifespan=lifespan)
+    application.state.cached_home_dirs = dict[str, Path]()
     application.state.per_user_running_jobs = defaultdict[Path, set[Path]](set)
+    application.state.download_totp = DownloadTotpAuthority()
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings

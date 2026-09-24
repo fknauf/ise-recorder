@@ -1,65 +1,35 @@
 """
-Recordings whose postprocessing failed, was never scheduled, or was lost to a restart.
+The dependencies that sort a user's recordings into the lists the frontend shows: finished
+recordings with a download OTP each, and recordings whose postprocessing failed, was never
+scheduled, or was lost to a restart.
 
-Nothing records that a job failed, so these are recognized from what is on disk: a main
-stream with chunks, no rendered output, no job in flight -- and no chunk arriving any more,
-because a lecture that is still being streamed looks exactly the same otherwise. The last
-condition is the fragile one and gets most of the tests below.
-
-The first half calls the dependency directly, with chunk ages set through os.utime; the
-second half goes through the listing endpoint for what the frontend actually receives.
+Everything here calls the dependencies directly. What the listing endpoint makes of them --
+the response shape, authentication, the rendering list -- lives in test_server.py.
 """
 
 # pylint: disable=line-too-long
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
-import os
 from pathlib import Path
-import time
-from typing import cast
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 import pytest
 
-from ise_record.server import get_unprocessed_recordings
+from ise_record.download_totp import DownloadTotpAuthority
+from ise_record.recording_lists import (
+    _get_downloadable_recording_paths, # pyright: ignore[reportPrivateUsage]
+    get_downloadable_recordings,
+    get_unprocessed_recordings,
+)
 from ise_record.settings import OidcSettings, Settings
 
 from .harness import (
-    DEFAULT_SUBJECT_DIGEST,
-    digest_of,
+    abandon_recording,
+    age,
     finish_recording,
-    list_recordings,
-    Provider,
+    MINUTE,
+    write_chunks,
 )
-
-MINUTE = 60
-
-
-def age(path: Path, seconds: float) -> None:
-    """ Backdate a file's modification time, which is what the staleness check reads. """
-    then = time.time() - seconds
-    os.utime(path, (then, then))
-
-
-def write_chunks(recording_dir: Path, ages: list[float], track: str = "stream") -> None:
-    """ One chunk per entry, chunk.0000 first, each last written `age` seconds ago. """
-    track_dir = recording_dir / track
-    track_dir.mkdir(parents=True, exist_ok=True)
-
-    for index, seconds in enumerate(ages):
-        chunk = track_dir / f"chunk.{index:04d}"
-        chunk.write_bytes(b"chunk")
-        age(chunk, seconds)
-
-
-def abandoned(home: Path, name: str, minutes: float = 30) -> Path:
-    """ A recording whose last chunk arrived long enough ago that nobody is streaming it. """
-    recording_dir = home / name
-    write_chunks(recording_dir, [ (minutes + 2) * MINUTE, (minutes + 1) * MINUTE, minutes * MINUTE ])
-    return recording_dir
-
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
@@ -74,14 +44,14 @@ def home(tmp_path: Path) -> Path:
     return user_home
 
 
-def unprocessed(settings: Settings, home: Path, running_jobs: set[Path] | None = None) -> list[str]:
-    return [ p.name for p in get_unprocessed_recordings(settings, home, running_jobs or set()) ]
+def unprocessed(settings: Settings, home: Path, running_jobs: frozenset[Path] | None = None) -> list[str]:
+    return [ p.name for p in get_unprocessed_recordings(settings, home, running_jobs or frozenset[Path]()) ]
 
 
-# --- what counts as unprocessed --------------------------------------------
+# --- unprocessed: what counts --------------------------------------------
 
 def test_an_abandoned_recording_is_unprocessed(settings: Settings, home: Path):
-    abandoned(home, "GVS_2025")
+    abandon_recording(home, "GVS_2025")
 
     assert unprocessed(settings, home) == [ "GVS_2025" ]
 
@@ -128,7 +98,7 @@ def test_a_recording_is_given_up_on_five_minutes_after_its_last_chunk(
 def test_a_failed_render_left_behind_is_unprocessed(settings: Settings, home: Path):
     # the case the feature is mostly for: ffmpeg ran and failed, and its partial output is
     # kept for inspection -- which must not be mistaken for the finished file
-    recording_dir = abandoned(home, "GVS_2025")
+    recording_dir = abandon_recording(home, "GVS_2025")
     (recording_dir / "presentation.part.webm").write_bytes(b"half")
 
     assert unprocessed(settings, home) == [ "GVS_2025" ]
@@ -139,7 +109,7 @@ def test_a_concatenation_left_behind_does_not_count_as_a_fresh_chunk(settings: S
     # middle of it leaves the file there. It sorts after chunk.*, and it is newer than any
     # chunk, so reading it as the newest chunk would hide the recording for five minutes
     # after every attempt.
-    recording_dir = abandoned(home, "GVS_2025")
+    recording_dir = abandon_recording(home, "GVS_2025")
     (recording_dir / "stream" / "full.webm").write_bytes(b"concatenated")
 
     assert unprocessed(settings, home) == [ "GVS_2025" ]
@@ -147,15 +117,15 @@ def test_a_concatenation_left_behind_does_not_count_as_a_fresh_chunk(settings: S
 
 def test_the_listing_is_sorted_by_name(settings: Settings, home: Path):
     for name in [ "PSU_2026", "ABC_2026", "GVS_2025" ]:
-        abandoned(home, name)
+        abandon_recording(home, name)
 
     assert unprocessed(settings, home) == [ "ABC_2026", "GVS_2025", "PSU_2026" ]
 
 
-# --- what is left out ------------------------------------------------------
+# --- unprocessed: what is left out -----------------------------------------
 
 def test_a_rendered_recording_is_not_unprocessed(settings: Settings, home: Path):
-    recording_dir = abandoned(home, "GVS_2025")
+    recording_dir = abandon_recording(home, "GVS_2025")
     finish_recording(home, "GVS_2025")
 
     assert (recording_dir / "presentation.webm").exists()
@@ -165,10 +135,10 @@ def test_a_rendered_recording_is_not_unprocessed(settings: Settings, home: Path)
 def test_a_recording_that_is_rendering_is_not_unprocessed(settings: Settings, home: Path):
     # its chunks are as old as an abandoned recording's, since the job starts once the
     # lecture ends; only the running job tells them apart
-    recording_dir = abandoned(home, "GVS_2025")
-    abandoned(home, "PSU_2026")
+    recording_dir = abandon_recording(home, "GVS_2025")
+    abandon_recording(home, "PSU_2026")
 
-    assert unprocessed(settings, home, { recording_dir }) == [ "PSU_2026" ]
+    assert unprocessed(settings, home, frozenset({ recording_dir })) == [ "PSU_2026" ]
 
 
 def test_a_recording_without_a_main_stream_is_not_unprocessed(settings: Settings, home: Path):
@@ -196,7 +166,7 @@ def test_a_main_stream_with_only_a_leftover_concatenation_is_not_unprocessed(set
 
 
 def test_stray_files_in_the_home_directory_are_ignored(settings: Settings, home: Path):
-    abandoned(home, "GVS_2025")
+    abandon_recording(home, "GVS_2025")
     (home / "notes.txt").write_text("not a recording")
 
     assert unprocessed(settings, home) == [ "GVS_2025" ]
@@ -205,65 +175,87 @@ def test_stray_files_in_the_home_directory_are_ignored(settings: Settings, home:
 def test_nothing_is_scanned_without_authentication(tmp_path: Path):
     # without authentication the "home" is the shared destination directory; the listing is
     # refused there anyway, and walking every lecture on the server for it would be waste
-    abandoned(tmp_path, "GVS_2025")
+    abandon_recording(tmp_path, "GVS_2025")
 
     assert unprocessed(Settings(destdir=tmp_path), tmp_path) == []
 
 
-# --- through the listing endpoint ------------------------------------------
+# --- downloadable ----------------------------------------------------------
 
-def running_jobs_of(auth_client: TestClient, home: Path) -> set[Path]:
-    app = cast(FastAPI, auth_client.app)
-    return app.state.per_user_running_jobs[home]
+# The listing is built in two steps: a scan of the home directory that runs in the thread
+# pool, and the OTPs minted on the event loop afterwards, because the authority's generators
+# are shared state. The first step is private, but it is where every rule about which
+# recordings are offered lives.
 
-
-def test_the_listing_reports_unprocessed_recordings_by_name(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "DONE_2025")
-    abandoned(home, "GVS_2025")
-
-    data = list_recordings(auth_client, provider.mint()).json()
-
-    # only the name: there is nothing to download, and the Rerender button needs no more
-    assert data["unprocessed"] == [ { "name": "GVS_2025" } ]
-    assert [ r["name"] for r in data["completed"] ] == [ "DONE_2025" ]
-    assert data["rendering"] == []
+def downloadable(settings: Settings, home: Path) -> list[tuple[str, int]]:
+    return [ (p.name, size) for p, size in _get_downloadable_recording_paths(settings, home) ]
 
 
-def test_the_listing_reports_no_unprocessed_recordings_when_there_are_none(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "DONE_2025")
+def test_a_rendered_recording_is_downloadable_with_the_size_of_its_video(settings: Settings, home: Path):
+    # the size of the video, which is what the download button shows -- not of the
+    # recording directory that holds it
+    finish_recording(home, "GVS_2025", b"x" * 12345)
 
-    # present and empty rather than absent, because the frontend schema requires the field
-    assert list_recordings(auth_client, provider.mint()).json()["unprocessed"] == []
-
-
-def test_the_listing_only_shows_the_callers_own_unprocessed_recordings(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    abandoned(tmp_path / digest_of("user-a"), "mine")
-    abandoned(tmp_path / digest_of("user-b"), "theirs")
-
-    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["unprocessed"] == [ { "name": "mine" } ]
-    assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["unprocessed"] == [ { "name": "theirs" } ]
+    assert downloadable(settings, home) == [ ("GVS_2025", 12345) ]
 
 
-def test_a_rerendered_recording_moves_from_unprocessed_to_rendering(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    # what the lecturer sees after pressing Rerender on a failed card: the card turns into
-    # a spinner rather than showing up twice
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    recording_dir = abandoned(home, "GVS_2025")
-    token = provider.mint()
+def test_recordings_that_are_not_rendered_are_not_downloadable(settings: Settings, home: Path):
+    finish_recording(home, "rendered")
+    # uploaded but never postprocessed
+    write_chunks(home / "raw", [ 30 * MINUTE ])
+    # postprocessing that failed partway, which is left on disk deliberately
+    (home / "failed").mkdir()
+    (home / "failed" / "presentation.part.webm").write_bytes(b"half")
 
-    assert list_recordings(auth_client, token).json()["unprocessed"] == [ { "name": "GVS_2025" } ]
+    assert [ name for name, _ in downloadable(settings, home) ] == [ "rendered" ]
 
-    running_jobs_of(auth_client, home).add(recording_dir)
-    data = list_recordings(auth_client, token).json()
 
-    assert data["unprocessed"] == []
-    assert data["rendering"] == [ { "name": "GVS_2025" } ]
+def test_the_downloadable_recordings_are_sorted_by_name(settings: Settings, home: Path):
+    for name in [ "PSU_2026", "ABC_2026", "GVS_2025" ]:
+        finish_recording(home, name)
+
+    assert [ name for name, _ in downloadable(settings, home) ] == [ "ABC_2026", "GVS_2025", "PSU_2026" ]
+
+
+def test_stray_files_are_not_downloadable(settings: Settings, home: Path):
+    finish_recording(home, "GVS_2025")
+    (home / "notes.txt").write_text("not a recording")
+
+    assert [ name for name, _ in downloadable(settings, home) ] == [ "GVS_2025" ]
+
+
+@pytest.mark.asyncio
+async def test_every_downloadable_recording_gets_an_otp_for_its_own_video(settings: Settings, home: Path):
+    finish_recording(home, "GVS_2025")
+    finish_recording(home, "PSU_2026", b"the other lecture")
+    authority = DownloadTotpAuthority()
+
+    listed = await get_downloadable_recordings(_get_downloadable_recording_paths(settings, home), authority)
+
+    assert [ (r.name, r.size) for r in listed ] == [ ("GVS_2025", 5), ("PSU_2026", 17) ]
+    # the OTP is for the file the download route will serve, which it assembles from the
+    # recording name plus presentation.webm -- a key for the directory would never verify
+    assert authority.verify(listed[0].totp, home / "GVS_2025" / "presentation.webm")
+    assert authority.verify(listed[1].totp, home / "PSU_2026" / "presentation.webm")
+    assert not authority.verify(listed[0].totp, home / "PSU_2026" / "presentation.webm")
+
+
+def test_nothing_is_offered_for_download_without_authentication(tmp_path: Path):
+    # without authentication the "home" is the shared destination directory, which holds
+    # every lecture on the server; the listing is refused there, and the dependency runs
+    # before that refusal
+    finish_recording(tmp_path, "GVS_2025")
+
+    assert downloadable(Settings(destdir=tmp_path), tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_an_unauthenticated_deployment_mints_nothing(tmp_path: Path):
+    # moved here from test_download_totp.py: an OTP generator for every lecture on the
+    # server, for a response that hands none of them out, would be pure waste
+    finish_recording(tmp_path, "GVS_2025")
+    authority = DownloadTotpAuthority()
+
+    await get_downloadable_recordings(_get_downloadable_recording_paths(Settings(destdir=tmp_path), tmp_path), authority)
+
+    assert not authority.factories

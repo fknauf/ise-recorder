@@ -85,12 +85,9 @@ async def get_current_user_home(
             detail="Could not identify user"
         )
 
-    cached_home_dirs: dict[str, Path] | None = getattr(request.app.state, "cached_home_dirs", None)
+    cached_home_dirs: dict[str, Path] = request.app.state.cached_home_dirs
 
-    if cached_home_dirs is None:
-        cached_home_dirs = dict[str, Path]()
-        request.app.state.cached_home_dirs = cached_home_dirs
-    elif user_info.sub in cached_home_dirs:
+    if user_info.sub in cached_home_dirs:
         # If we already know the home dir, no preparation needed.
         return cached_home_dirs[user_info.sub]
 
