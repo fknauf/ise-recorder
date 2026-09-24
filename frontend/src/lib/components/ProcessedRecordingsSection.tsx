@@ -102,7 +102,7 @@ function UnprocessedRecordingCard(
   const [ busy, rerender ] = useRerender(recording.name);
 
   return (
-    <RecordingCard title={recording.name} testid="rendering-card">
+    <RecordingCard title={recording.name} testid="unprocessed-card">
       <Text>Postprocessing failed.</Text>
       <ActionButton
         width="100%"

@@ -46,7 +46,7 @@ const LISTING = {
     { name: "PSU_2026", size: 3.5 * MiB, totp: "9876543210" }
   ],
   rendering: [] as { name: string }[],
-  unprocessed: []
+  unprocessed: [] as { name: string }[]
 };
 
 function renderSection(
@@ -329,6 +329,94 @@ test("a refresh that blows up unexpectedly still gives the button back", async (
   expect(warn).toHaveBeenCalled();
 
   warn.mockRestore();
+});
+
+// --- recordings whose postprocessing never produced anything ---------------
+
+const unprocessedCards = () => screen.queryAllByTestId("unprocessed-card");
+
+const UNPROCESSED_LISTING = {
+  ...LISTING,
+  rendering: [ { name: "ABC_2026" } ],
+  unprocessed: [ { name: "OLD_2024" }, { name: "XYZ_2025" } ]
+};
+
+test("a recording whose postprocessing failed gets a card that says so", () => {
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [], unprocessed: [ { name: "OLD_2024" } ] } });
+
+  expect(unprocessedCards()).toHaveLength(1);
+  expect(within(unprocessedCards()[0]).getByText("OLD_2024")).toBeInTheDocument();
+  expect(within(unprocessedCards()[0]).getByText("Postprocessing failed.")).toBeInTheDocument();
+  // counted as neither of the other two kinds
+  expect(cards()).toHaveLength(0);
+  expect(renderingCards()).toHaveLength(0);
+});
+
+test("a recording whose postprocessing failed offers a rerender but no download", () => {
+  // there is no file to download; rendering it again is the only thing to offer
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [], unprocessed: [ { name: "OLD_2024" } ] } });
+
+  expect(within(unprocessedCards()[0]).queryByRole("link")).toBeNull();
+  expect(rerenderButton(unprocessedCards()[0])).toBeEnabled();
+});
+
+test("a rerender of a failed recording schedules a job for it and refreshes the listing", async () => {
+  renderSection({ data: UNPROCESSED_LISTING });
+
+  await userEvent.click(rerenderButton(unprocessedCards()[1]));
+
+  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(
+    { apiUrl: API_URL, streamingImpeded: false, getAccessToken },
+    "XYZ_2025",
+    LECTURER_EMAIL,
+    expect.objectContaining({ retries: 0 })
+  );
+  // the refresh is what turns the failed card into a rendering one
+  await waitFor(() => expect(refreshProcessedRecordings).toHaveBeenCalledOnce());
+});
+
+test("a failed recording's rerender button is disabled while the job request is in flight", async () => {
+  let answer: (scheduled: boolean) => void = () => {};
+
+  renderSection({ data: UNPROCESSED_LISTING });
+
+  vi.mocked(schedulePostprocessing).mockReturnValue(new Promise(resolve => {
+    answer = resolve;
+  }));
+
+  await userEvent.click(rerenderButton(unprocessedCards()[0]));
+
+  expect(rerenderButton(unprocessedCards()[0])).toBeDisabled();
+  // the busy state is per card, not shared with the finished ones
+  expect(rerenderButton(unprocessedCards()[1])).toBeEnabled();
+  expect(rerenderButton(cards()[0])).toBeEnabled();
+
+  answer(false);
+
+  await waitFor(() => expect(rerenderButton(unprocessedCards()[0])).toBeEnabled());
+  expect(refreshProcessedRecordings).not.toHaveBeenCalled();
+});
+
+test("the failed cards come after the finished and the rendering ones", () => {
+  renderSection({ data: UNPROCESSED_LISTING });
+
+  expect(unprocessedCards()).toHaveLength(2);
+  expect(within(unprocessedCards()[0]).getByText("OLD_2024")).toBeInTheDocument();
+  expect(within(unprocessedCards()[1]).getByText("XYZ_2025")).toBeInTheDocument();
+
+  const follows = (a: HTMLElement, b: HTMLElement) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  expect(follows(cards()[1], renderingCards()[0])).toBe(true);
+  expect(follows(renderingCards()[0], unprocessedCards()[0])).toBe(true);
+});
+
+test("a stale listing's failed cards are withdrawn with the rest while the error is showing", () => {
+  // the Rerender button would post against a listing the section can no longer vouch for
+  renderSection({ data: UNPROCESSED_LISTING, error: new Error("server responded 500, ") });
+
+  expect(unprocessedCards()).toHaveLength(0);
+  expect(screen.getByRole("alert")).toBeInTheDocument();
 });
 
 test("nothing is rendered before the first listing arrives", () => {

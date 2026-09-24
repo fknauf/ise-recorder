@@ -44,7 +44,7 @@ const LISTING = {
     { name: "PSU_2026", size: 2048, totp: "9876543210" }
   ],
   rendering: [ { name: "ABC_2026" } ],
-  unprocessed: []
+  unprocessed: [ { name: "XYZ_2024" } ]
 };
 
 /**
@@ -240,7 +240,7 @@ test("a JSON body with no string detail is left out rather than stringified", as
 test("a malformed listing is a failure rather than something to render", async () => {
   // size as a string is what a backend change would most plausibly produce, and it would
   // otherwise reach the MiB formatter as NaN
-  respondWith(() => jsonResponse({ user: "u", completed: [ { name: "x", size: "1024", totp: "1" } ], rendering: [] }));
+  respondWith(() => jsonResponse({ user: "u", completed: [ { name: "x", size: "1024", totp: "1" } ], rendering: [], unprocessed: [] }));
 
   const { result } = renderPreprocessedRecordings();
 
@@ -324,7 +324,29 @@ test("a listing in the old shape of /api/completed is refused rather than half-r
 });
 
 test("a listing without the rendering entries is refused", async () => {
-  respondWith(() => jsonResponse({ user: "u", completed: [] }));
+  respondWith(() => jsonResponse({ user: "u", completed: [], unprocessed: [] }));
+
+  const { result } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(result.current.error).toBeInstanceOf(z.ZodError);
+});
+
+test("a listing without the unprocessed entries is refused", async () => {
+  // what a backend from before failed renders were listed answers
+  respondWith(() => jsonResponse({ user: "u", completed: [], rendering: [] }));
+
+  const { result } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(result.current.error).toBeInstanceOf(z.ZodError);
+});
+
+test("an unprocessed entry without a name is refused", async () => {
+  // the name is what the Rerender button posts back as the job's recording
+  respondWith(() => jsonResponse({ user: "u", completed: [], rendering: [], unprocessed: [ {} ] }));
 
   const { result } = renderPreprocessedRecordings();
 
@@ -334,7 +356,7 @@ test("a listing without the rendering entries is refused", async () => {
 });
 
 test("a rendering entry without a name is refused", async () => {
-  respondWith(() => jsonResponse({ user: "u", completed: [], rendering: [ {} ] }));
+  respondWith(() => jsonResponse({ user: "u", completed: [], rendering: [ {} ], unprocessed: [] }));
 
   const { result } = renderPreprocessedRecordings();
 

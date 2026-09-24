@@ -214,6 +214,7 @@ def _downloads_disabled():
     )
 
 def get_unprocessed_recordings(
+    settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
     running_jobs: Annotated[set[Path], Depends(get_running_jobs)]
 ) -> list[Path]:
@@ -225,6 +226,8 @@ def get_unprocessed_recordings(
     the post-processing job. They should only show up in the event that something went wrong, e.g.
     a streaming lecturer lost connectivity before the postprocessing could be scheduled.
     """
+    if not settings.auth_required:
+        return []
 
     running_job_names = { job.name for job in running_jobs }
 
@@ -232,6 +235,9 @@ def get_unprocessed_recordings(
         output_path = recording_dir / OUTPUT_FILENAME
         main_track_dir = recording_dir / MAIN_TRACK_NAME
 
+        # - name in running_job_names -> is currently rendering
+        # - presentation.webm exists -> preprocessing finished
+        # - main track doesn't exist -> not renderable.
         if (
             recording_dir.name in running_job_names
             or output_path.exists()
@@ -239,16 +245,17 @@ def get_unprocessed_recordings(
         ):
             return False
 
-        chunks = sorted(main_track_dir.iterdir(), reverse=True)
+        chunks = sorted(main_track_dir.glob("chunk.*"), reverse=True)
 
+        # no chunks in main track -> not renderable
         if len(chunks) == 0:
             return False
 
         # if the newest chunk is older than 5 minutes, the recording isn't still being streamed.
         cutoff = datetime.now() - timedelta(minutes=5)
-        latest = chunks[-1]
+        latest = chunks[0]
 
-        return latest.stat().st_ctime < cutoff.timestamp()
+        return latest.stat().st_mtime < cutoff.timestamp()
 
     return sorted(dir for dir in user_home.iterdir() if is_unprocessed(dir))
 
