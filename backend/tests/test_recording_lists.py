@@ -19,6 +19,7 @@ from ise_record.download_totp import DownloadTotpAuthority
 from ise_record.recording_lists import (
     _get_downloadable_recording_paths, # pyright: ignore[reportPrivateUsage]
     get_downloadable_recordings,
+    get_purgeable_recordings,
     get_unprocessed_recordings,
 )
 from ise_record.settings import OidcSettings, Settings
@@ -259,3 +260,64 @@ async def test_an_unauthenticated_deployment_mints_nothing(tmp_path: Path):
     await get_downloadable_recordings(_get_downloadable_recording_paths(Settings(destdir=tmp_path), tmp_path), authority)
 
     assert not authority.factories
+
+
+# --- purgeable -------------------------------------------------------------
+
+# What the purge endpoint may delete right now: a finished recording or a failed one, but
+# nothing a job is working on or a lecturer is still streaming into. This composes the two
+# lists above; the scans run for real so the composition is tested against actual rules.
+
+async def purgeable(settings: Settings, home: Path, running_jobs: frozenset[Path] = frozenset()) -> list[str]:
+    return await get_purgeable_recordings(
+        _get_downloadable_recording_paths(settings, home),
+        get_unprocessed_recordings(settings, home, running_jobs),
+        running_jobs
+    )
+
+
+@pytest.mark.asyncio
+async def test_finished_and_failed_recordings_are_purgeable(settings: Settings, home: Path):
+    finish_recording(home, "DONE_2025")
+    abandon_recording(home, "FAILED_2025")
+
+    assert sorted(await purgeable(settings, home)) == [ "DONE_2025", "FAILED_2025" ]
+
+
+@pytest.mark.asyncio
+async def test_a_recording_that_is_rendering_for_the_first_time_is_not_purgeable(settings: Settings, home: Path):
+    recording_dir = abandon_recording(home, "GVS_2025")
+
+    assert await purgeable(settings, home, frozenset({ recording_dir })) == []
+
+
+@pytest.mark.asyncio
+async def test_a_recording_that_is_being_rerendered_is_not_purgeable(settings: Settings, home: Path):
+    # the previous output is still on disk, so by the download list alone it is finished
+    recording_dir = abandon_recording(home, "GVS_2025")
+    finish_recording(home, "GVS_2025")
+
+    assert await purgeable(settings, home, frozenset({ recording_dir })) == []
+
+
+@pytest.mark.asyncio
+async def test_a_recording_that_is_still_being_streamed_is_not_purgeable(settings: Settings, home: Path):
+    write_chunks(home / "LIVE_2026", [ 30 * MINUTE, 5 ])
+
+    assert await purgeable(settings, home) == []
+
+
+@pytest.mark.asyncio
+async def test_a_job_elsewhere_does_not_block_a_purge(settings: Settings, home: Path):
+    finish_recording(home, "DONE_2025")
+    abandon_recording(home, "BUSY_2025")
+
+    assert await purgeable(settings, home, frozenset({ home / "BUSY_2025" })) == [ "DONE_2025" ]
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_purgeable_without_authentication(tmp_path: Path):
+    finish_recording(tmp_path, "DONE_2025")
+    abandon_recording(tmp_path, "FAILED_2025")
+
+    assert await purgeable(Settings(destdir=tmp_path), tmp_path) == []

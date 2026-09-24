@@ -109,6 +109,40 @@ def test_an_otp_from_an_earlier_interval_no_longer_verifies(tmp_path: Path):
     assert not download_totp.verify(stale, path)
 
 
+def test_a_forgotten_file_no_longer_verifies_its_otp(tmp_path: Path):
+    # a purged recording's links must die with it, including for a lecture that is later
+    # recorded under the same name
+    download_totp = DownloadTotpAuthority()
+    path = tmp_path / "GVS_2025" / "presentation.webm"
+    totp = download_totp.generate(path)
+
+    download_totp.forget(path)
+
+    assert not download_totp.verify(totp, path)
+    assert not download_totp.factories
+
+
+def test_forgetting_a_file_leaves_the_others_alone(tmp_path: Path):
+    download_totp = DownloadTotpAuthority()
+    kept = tmp_path / "PSU_2026" / "presentation.webm"
+    totp = download_totp.generate(kept)
+    download_totp.generate(tmp_path / "GVS_2025" / "presentation.webm")
+
+    download_totp.forget(tmp_path / "GVS_2025" / "presentation.webm")
+
+    assert download_totp.verify(totp, kept)
+
+
+def test_forgetting_a_file_that_never_had_an_otp_is_harmless(tmp_path: Path):
+    # an unprocessed recording has no output and so never had a generator; purging it
+    # must not fail on the way out
+    download_totp = DownloadTotpAuthority()
+
+    download_totp.forget(tmp_path / "never_listed" / "presentation.webm")
+
+    assert not download_totp.factories
+
+
 # --- through the endpoints -------------------------------------------------
 
 # The properties above, restated over a real request, because what the download route

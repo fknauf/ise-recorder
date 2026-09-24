@@ -138,3 +138,51 @@ export async function schedulePostprocessing(
     return false;
   }
 }
+
+export const downloadUrl = (
+  apiUrl: string,
+  user: string,
+  recordingName: string,
+  totp: string
+) =>
+  `${apiUrl}/api/recordings/${user}/${encodeURIComponent(recordingName)}?totp=${totp}`;
+
+export async function purgeRecording(
+  apiUrl: string,
+  recordingName: string,
+  getAccessToken: () => Promise<string | undefined>,
+  refreshList: () => void) {
+  const token = await getAccessToken();
+
+  if(token === undefined) {
+    showError(`Failed to purge ${recordingName}: Not authenticated`);
+    return;
+  }
+
+  const endpoint = `${apiUrl}/api/recordings/${encodeURIComponent(recordingName)}`;
+
+  const request: RequestInit = {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    }
+  };
+
+  try {
+    const response = await fetch(endpoint, request);
+    refreshList();
+
+    if(response.ok) {
+      showSuccess(`Purged ${recordingName}`);
+    } else {
+      const body = await response.json().catch(() => null);
+      const detail = typeof body?.detail === "string" ? body.detail : "Unknown error";
+      showError(`Failed to purge ${recordingName}: ${detail}`);
+    }
+  } catch(e) {
+    console.error(`Failed to purge ${recordingName}`, e);
+    const errMsg = e instanceof Error ? e.message : "Unknown error";
+    showError(`Failed to purge ${recordingName}: ${errMsg}`);
+  }
+}

@@ -4,13 +4,19 @@ import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { PreprocessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
 import { useProcessedRecordings, useRefreshProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
-import { schedulePostprocessing } from "@/lib/utils/serverStorage";
+import { purgeRecording, schedulePostprocessing } from "@/lib/utils/serverStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
 
 vi.mock("@/lib/hooks/useProcessedRecordings");
-vi.mock("@/lib/utils/serverStorage");
+// the requests are mocked, but the URL builder is kept: which href the link carries is
+// exactly what the download tests below are about
+vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/utils/serverStorage")>(),
+  schedulePostprocessing: vi.fn(),
+  purgeRecording: vi.fn()
+}));
 
 // the rerender button reads the recipient from the lecture form, which lives in the app
 // store; a factory keeps the store out of these tests
@@ -88,6 +94,8 @@ function renderSection(
   vi.mocked(useRefreshProcessedRecordings).mockReturnValue(refreshProcessedRecordings);
   vi.mocked(schedulePostprocessing).mockReset();
   vi.mocked(schedulePostprocessing).mockResolvedValue(true);
+  vi.mocked(purgeRecording).mockReset();
+  vi.mocked(purgeRecording).mockResolvedValue(undefined);
 
   vi.mocked(useProcessedRecordings).mockReturnValue(
     { data, error } as ReturnType<typeof useProcessedRecordings>
@@ -131,10 +139,9 @@ test("the download link carries the user, the recording and its TOTP", () => {
 
 test("a non-ASCII recording name reaches the backend percent-encoded", () => {
   // SafeRecording accepts any Unicode letter, so this is what a German or Chinese lecture
-  // title actually produces. The href is built by interpolation rather than through
-  // encodeURIComponent, so what makes this work is the browser encoding the path on its
-  // way out -- and the backend decoding it and running SafeRecording over it again, which
-  // the round-trip test on the Python side pins from the other end.
+  // title actually produces. The name is percent-encoded into the path, and the backend
+  // decodes it and runs SafeRecording over it again, which the round-trip test on the
+  // Python side pins from the other end.
   renderSection({
     data: { user: USER_DIGEST, completed: [ { name: "Übung_2025", size: MiB, totp: "1111111111" } ], rendering: [], unprocessed: [] }
   });
@@ -417,6 +424,114 @@ test("a stale listing's failed cards are withdrawn with the rest while the error
 
   expect(unprocessedCards()).toHaveLength(0);
   expect(screen.getByRole("alert")).toBeInTheDocument();
+});
+
+// --- purging ----------------------------------------------------------------
+//
+// Deleting a recording cannot be undone, so the button only opens a dialog, and nothing is
+// sent until the lecturer confirms in it. What the request does once it is sent is
+// purgeRecording's business, in serverStorage.test.ts.
+
+const purgeButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Purge/ });
+const dialog = () => screen.getByRole("dialog");
+const confirmButton = () => within(dialog()).getByRole("button", { name: "Purge" });
+const cancelButton = () => within(dialog()).getByRole("button", { name: "Cancel" });
+
+test("finished and failed recordings offer a purge, rendering ones do not", () => {
+  renderSection({ data: UNPROCESSED_LISTING });
+
+  cards().forEach(card => expect(purgeButton(card)).toBeInTheDocument());
+  unprocessedCards().forEach(card => expect(purgeButton(card)).toBeInTheDocument());
+  // deleting it would pull the chunks out from under the render; the backend refuses too
+  expect(within(renderingCards()[0]).queryByRole("button", { name: /Purge/ })).toBeNull();
+});
+
+test("the purge button asks first and sends nothing", async () => {
+  renderSection();
+
+  await userEvent.click(purgeButton(cards()[1]));
+
+  // the dialog names the recording, so the lecturer can tell which one they are about to lose
+  expect(within(dialog()).getByRole("heading", { name: /PSU_2026/ })).toBeInTheDocument();
+  expect(within(dialog()).getByText(/can not be undone/)).toBeInTheDocument();
+  expect(purgeRecording).not.toHaveBeenCalled();
+});
+
+test("the dialog starts on Cancel, so a stray Enter keeps the recording", async () => {
+  renderSection();
+
+  await userEvent.click(purgeButton(cards()[0]));
+
+  await waitFor(() => expect(cancelButton()).toHaveFocus());
+
+  await userEvent.keyboard("{Enter}");
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(purgeRecording).not.toHaveBeenCalled();
+});
+
+test("cancelling closes the dialog and sends nothing", async () => {
+  renderSection();
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.click(cancelButton());
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(purgeRecording).not.toHaveBeenCalled();
+});
+
+test("escape closes the dialog and sends nothing", async () => {
+  renderSection();
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.keyboard("{Escape}");
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(purgeRecording).not.toHaveBeenCalled();
+});
+
+test("confirming purges that one recording and refreshes through the section's cache", async () => {
+  renderSection();
+
+  await userEvent.click(purgeButton(cards()[1]));
+  await userEvent.click(confirmButton());
+
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(API_URL, "PSU_2026", getAccessToken, refreshProcessedRecordings);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("a failed recording can be purged the same way", async () => {
+  renderSection({ data: UNPROCESSED_LISTING });
+
+  await userEvent.click(purgeButton(unprocessedCards()[0]));
+  await userEvent.click(confirmButton());
+
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(API_URL, "OLD_2024", getAccessToken, refreshProcessedRecordings);
+});
+
+test("the dialog stays open and locked while the purge is in flight", async () => {
+  // a second press would send a second DELETE, and Cancel would promise something it can
+  // no longer deliver once the first one is on its way
+  let done: () => void = () => {};
+
+  renderSection();
+
+  vi.mocked(purgeRecording).mockReturnValue(new Promise<void>(resolve => {
+    done = resolve;
+  }));
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.click(confirmButton());
+
+  expect(confirmButton()).toBeDisabled();
+  expect(cancelButton()).toBeDisabled();
+
+  await userEvent.click(confirmButton());
+  expect(purgeRecording).toHaveBeenCalledOnce();
+
+  done();
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
 test("nothing is rendered before the first listing arrives", () => {

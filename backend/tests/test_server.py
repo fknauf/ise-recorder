@@ -4,6 +4,7 @@
 # pylint: disable=missing-module-docstring
 # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
+# pylint: disable=too-many-lines
 # pylint: disable=protected-access
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
@@ -26,6 +27,8 @@ from ise_record.server import create_app
 from ise_record.settings import Settings
 
 from .harness import (
+    purge,
+    write_chunks,
     abandon_recording,
     download_totp_of,
     running_jobs_of,
@@ -498,7 +501,9 @@ def test_downloading_is_refused_without_user(
 
     response = client.get("/api/recordings/GVS_2025")
 
-    assert response.status_code == 404
+    # the path is the purge route's, so this is 405 rather than 404 -- either way, a
+    # recording is not served without the user directory in front of it
+    assert response.status_code in (404, 405)
     assert b"video" not in response.content
 
 def test_two_apps_share_no_state(tmp_path: Path):
@@ -933,3 +938,268 @@ def test_downloading_is_forbidden_without_authentication(
 
     assert response.status_code == 403
     assert b"video" not in response.content
+
+
+# --- purging a recording ---------------------------------------------------
+
+# The one endpoint that destroys data, and irreversibly. Every refusal below checks the disk
+# rather than only the status code: a 4xx that had already deleted something would pass a
+# status check just fine. Which recordings count as purgeable is get_purgeable_recordings'
+# business, in test_recording_lists.py; these pin what the endpoint does with the answer.
+
+def snapshot(root: Path) -> dict[str, bytes]:
+    """ Every file under root with its content, following no symlinks. """
+    return {
+        str(p.relative_to(root)): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file() and not p.is_symlink()
+    }
+
+
+def rendered_recording(home: Path, name: str) -> Path:
+    """ A recording as it looks after a successful render: chunks, output, leftovers. """
+    recording_dir = home / name
+    write_chunks(recording_dir, [ 30 * 60, 29 * 60 ])
+    write_chunks(recording_dir, [ 30 * 60 ], track="overlay")
+    (recording_dir / "presentation.webm").write_bytes(b"the rendered lecture")
+    return recording_dir
+
+
+def test_a_purge_deletes_the_whole_recording(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    recording_dir = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+
+    response = purge(auth_client, provider.mint(), "GVS_2025")
+
+    assert response.status_code == 200
+    assert response.json()["recording"] == "GVS_2025"
+    assert not recording_dir.exists()
+
+
+def test_a_purge_leaves_everything_else_alone(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(home, "PSU_2026")
+    # the same name under another user, and a decoy at the destination root: a purge that
+    # resolved the name anywhere but under the caller's own home would find one of these
+    rendered_recording(tmp_path / digest_of("someone-else"), "GVS_2025")
+    rendered_recording(tmp_path, "GVS_2025")
+
+    before = snapshot(tmp_path)
+    assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 200
+
+    expected = { k: v for k, v in before.items() if not k.startswith(f"{DEFAULT_SUBJECT_DIGEST}/GVS_2025/") }
+    assert snapshot(tmp_path) == expected
+
+
+def test_a_purged_recording_leaves_the_listing(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    token = provider.mint()
+
+    assert [ r["name"] for r in list_recordings(auth_client, token).json()["completed"] ] == [ "GVS_2025" ]
+    assert purge(auth_client, token, "GVS_2025").status_code == 200
+
+    data = list_recordings(auth_client, token).json()
+    assert data["completed"] == [] and data["rendering"] == [] and data["unprocessed"] == []
+
+
+def test_a_purged_recording_takes_its_download_otp_with_it(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    token = provider.mint()
+    server_list = list_recordings(auth_client, token).json()
+
+    assert purge(auth_client, token, "GVS_2025").status_code == 200
+
+    # a lecture recorded again under the same name must not be downloadable with a link
+    # that was handed out for the one that was purged
+    rendered_recording(home, "GVS_2025")
+    response = download_completed(auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"])
+
+    assert response.status_code == 401
+    assert str((home / "GVS_2025" / "presentation.webm").absolute()) not in download_totp_of(auth_client).factories
+
+
+def test_an_unprocessed_recording_can_be_purged(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the other card that offers Purge: a render that failed, with no output to show for it
+    recording_dir = abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    (recording_dir / "presentation.part.webm").write_bytes(b"half")
+
+    assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 200
+    assert not recording_dir.exists()
+
+
+def test_a_decomposed_name_purges_the_composed_recording(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the same normalization as on upload and download, so the purge hits the recording the
+    # lecturer saw rather than 404ing on a macOS client
+    recording_dir = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "\u00dcbung_2025")
+
+    assert purge(auth_client, provider.mint(), "U\u0308bung_2025").status_code == 200
+    assert not recording_dir.exists()
+
+
+def test_a_purge_is_logged_with_the_user_who_asked(
+    auth_client: TestClient, provider: Provider, tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    # nothing else is left afterwards to say where the recording went
+    rendered_recording(tmp_path / digest_of("user-a"), "GVS_2025")
+
+    with caplog.at_level("INFO", logger="ise_record"):
+        assert purge(auth_client, provider.mint(sub="user-a"), "GVS_2025").status_code == 200
+
+    assert any("user-a" in r.getMessage() and "GVS_2025" in r.getMessage() for r in caplog.records)
+
+
+# refusals ------------------------------------------------------------------
+
+def test_purging_without_a_token_is_rejected(auth_client: TestClient, tmp_path: Path):
+    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    before = snapshot(tmp_path)
+
+    assert purge(auth_client, None, "GVS_2025").status_code == 401
+    assert snapshot(tmp_path) == before
+
+
+def test_purging_is_forbidden_without_authentication(client: TestClient, settings: Settings):
+    # an unauthenticated deployment has one shared destination directory and nobody to own
+    # a recording, so nobody may delete one either
+    rendered_recording(settings.destdir, "GVS_2025")
+    before = snapshot(settings.destdir)
+
+    assert purge(client, None, "GVS_2025").status_code == 403
+    assert snapshot(settings.destdir) == before
+
+
+def test_purging_a_recording_that_does_not_exist_is_a_404(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    before = snapshot(tmp_path)
+
+    assert purge(auth_client, provider.mint(), "PSU_2026").status_code == 404
+    assert snapshot(tmp_path) == before
+
+
+def test_another_users_recording_cannot_be_purged(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    rendered_recording(tmp_path / digest_of("user-a"), "GVS_2025")
+    before = snapshot(tmp_path)
+
+    # user-b has no recording of that name, so from where they stand it does not exist
+    assert purge(auth_client, provider.mint(sub="user-b"), "GVS_2025").status_code == 404
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("recording", [
+    "..",
+    "%2e%2e",
+    "..%2fvictim",
+    "%2e%2e%2fvictim",
+    ".hidden",
+    "%2e%2e%2f%2e%2e%2fvictim",
+    "foo%00bar",
+])
+def test_a_recording_name_cannot_reach_outside_the_home_directory(
+    recording: str, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(tmp_path, "victim")
+    (home / ".hidden").mkdir()
+    before = snapshot(tmp_path)
+
+    # sent as-is rather than through purge(), which would quote the tricks away
+    response = auth_client.delete(f"/api/recordings/{recording}", headers={"Authorization": f"Bearer {provider.mint()}"})
+
+    assert response.status_code in (404, 405, 422)
+    assert snapshot(tmp_path) == before
+    assert home.is_dir()
+
+
+def test_a_symlink_in_the_home_directory_is_not_followed(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # nothing in the app creates one, but a purge must not become a way to delete whatever
+    # a link happens to point at
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(tmp_path, "victim")
+    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+    before = snapshot(tmp_path)
+
+    assert purge(auth_client, provider.mint(), "link").status_code == 404
+    assert snapshot(tmp_path) == before
+    assert (home / "link").is_symlink()
+
+
+def test_a_recording_that_is_rendering_cannot_be_purged(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # a rerender: the old output is still there, so this is a finished recording by every
+    # other measure. Deleting it would pull the chunks out from under ffmpeg.
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    recording_dir = rendered_recording(home, "GVS_2025")
+    running_jobs_of(auth_client, home).add(recording_dir)
+    before = snapshot(tmp_path)
+
+    assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 409
+    assert snapshot(tmp_path) == before
+
+
+def test_a_recording_that_is_still_being_streamed_cannot_be_purged(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the next chunk would recreate the directory and bring back half a recording
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    write_chunks(home / "LIVE_2026", [ 30 * 60, 5 ])
+    before = snapshot(tmp_path)
+
+    assert purge(auth_client, provider.mint(), "LIVE_2026").status_code == 409
+    assert snapshot(tmp_path) == before
+
+
+def test_a_failing_filesystem_is_reported_without_details(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    # the details go to the log for the admin; the response only says that it failed
+    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    mocker.patch("shutil.rmtree", side_effect=PermissionError(13, "Permission denied", "/secret/path"))
+
+    with caplog.at_level("ERROR", logger="ise_record"):
+        response = purge(auth_client, provider.mint(), "GVS_2025")
+
+    assert response.status_code == 500
+    assert "/secret/path" not in response.text
+    assert any(r.exc_info is not None and r.exc_info[0] is PermissionError for r in caplog.records)
+
+
+def test_cors_preflight_allows_purging(tmp_path: Path):
+    # without DELETE here the browser refuses the request before it is sent, whenever the
+    # frontend is served from another origin than the backend
+    cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
+
+    with TestClient(create_app(cors_settings)) as cors_client:
+        response = cors_client.options(
+            "/api/recordings/GVS_2025",
+            headers={
+                "Origin": "http://allowed.example.com",
+                "Access-Control-Request-Method": "DELETE",
+                "Access-Control-Request-Headers": "Authorization",
+            }
+        )
+
+    assert response.status_code == 200
+    assert "DELETE" in response.headers["Access-Control-Allow-Methods"]
+    assert "authorization" in response.headers["Access-Control-Allow-Headers"].lower()

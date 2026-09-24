@@ -249,6 +249,12 @@ def download_totp_of(client: TestClient) -> DownloadTotpAuthority:
     return app_of(client).state.download_totp
 
 
+def purge(client: TestClient, token: str | None, recording: str):
+    """ Ask for a recording to be deleted, as the Purge dialog does once it is confirmed. """
+    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
+    return client.delete(f"/api/recordings/{quote(recording)}", headers=headers)
+
+
 def download_completed(client: TestClient, user_digest: str, recording: str, totp: str | None):
     """ Follow a download link, as the browser would when the lecturer clicks one. """
     params = {"totp": totp} if totp is not None else None

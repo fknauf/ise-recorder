@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
+import { downloadUrl, purgeRecording, sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
 import { showError, showSuccess } from "@/lib/utils/notifications";
 
 interface FetchRequest {
@@ -58,6 +58,8 @@ async function settleRetries<T>(pending: Promise<T>): Promise<T> {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.mocked(showError).mockClear();
+  vi.mocked(showSuccess).mockClear();
 });
 
 test("sending chunk to server is nop if api url is undefined", async () => {
@@ -626,4 +628,112 @@ test("a permanent failure still reports the server's explanation", async () => {
   expect(vi.mocked(showError)).toHaveBeenCalledWith(
     expect.stringContaining("recording name is not acceptable")
   );
+});
+
+// --- purging ---------------------------------------------------------------
+//
+// The request that deletes a recording for good. What the lecturer has to confirm first is
+// the dialog's business, in ProcessedRecordingsSection.test.tsx; this is what happens once
+// they have.
+
+const API = "http://record.example.com";
+
+test("a purge sends one authenticated DELETE for the recording", async () => {
+  window.fetch = vi.fn().mockResolvedValue(Response.json({ recording: "GVS_2025" }));
+  const refresh = vi.fn();
+
+  await purgeRecording(API, "GVS_2025", accessToken, refresh);
+
+  expect(window.fetch).toHaveBeenCalledExactlyOnceWith(
+    `${API}/api/recordings/GVS_2025`,
+    expect.objectContaining({ method: "DELETE" })
+  );
+  const request = vi.mocked(window.fetch).mock.calls[0][1] as RequestInit;
+  expect((request.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
+});
+
+test("a purged recording name is percent-encoded into the path", async () => {
+  // a name is a path segment here, so anything the browser would not encode on its own
+  // has to be encoded before it gets there
+  window.fetch = vi.fn().mockResolvedValue(Response.json({}));
+
+  await purgeRecording(API, "Übung_2025", accessToken, vi.fn());
+
+  expect(vi.mocked(window.fetch).mock.calls[0][0]).toBe(`${API}/api/recordings/${encodeURIComponent("Übung_2025")}`);
+});
+
+test("a successful purge is confirmed and refreshes the listing", async () => {
+  window.fetch = vi.fn().mockResolvedValue(Response.json({ recording: "GVS_2025" }));
+  const refresh = vi.fn();
+
+  await purgeRecording(API, "GVS_2025", accessToken, refresh);
+
+  expect(refresh).toHaveBeenCalledOnce();
+  expect(showSuccess).toHaveBeenCalledWith(expect.stringContaining("GVS_2025"));
+  expect(showError).not.toHaveBeenCalled();
+});
+
+test("nothing is sent without an access token", async () => {
+  // the endpoint would refuse it anyway; asking without a token only produces a 401 that
+  // says less than this
+  window.fetch = vi.fn();
+  const refresh = vi.fn();
+
+  await purgeRecording(API, "GVS_2025", noAccessToken, refresh);
+
+  expect(window.fetch).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("Not authenticated"));
+});
+
+test("a refused purge shows the server's explanation and still refreshes", async () => {
+  // a 409 means the listing was stale -- the recording started rendering in the meantime --
+  // so fetching it again is what brings the page up to date
+  window.fetch = vi.fn().mockResolvedValue(
+    Response.json({ detail: "Recording GVS_2025 is in use and currently not purgeable" }, { status: 409 })
+  );
+  const refresh = vi.fn();
+
+  await purgeRecording(API, "GVS_2025", accessToken, refresh);
+
+  expect(refresh).toHaveBeenCalledOnce();
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("in use and currently not purgeable"));
+  expect(showSuccess).not.toHaveBeenCalled();
+});
+
+test("a refusal whose detail is not a string is not stringified", async () => {
+  // FastAPI answers a validation failure with an array of issue objects
+  window.fetch = vi.fn().mockResolvedValue(
+    Response.json({ detail: [ { loc: [ "path", "recording" ], msg: "String should match pattern" } ] }, { status: 422 })
+  );
+
+  await purgeRecording(API, "GVS_2025", accessToken, vi.fn());
+
+  const message = vi.mocked(showError).mock.calls[0][0] as string;
+  expect(message).toContain("Unknown error");
+  expect(message).not.toContain("[object Object]");
+});
+
+test("a refusal that is not JSON still says something", async () => {
+  window.fetch = vi.fn().mockResolvedValue(new Response("<html>502</html>", { status: 502 }));
+
+  await purgeRecording(API, "GVS_2025", accessToken, vi.fn());
+
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("Unknown error"));
+});
+
+test("a backend that cannot be reached is reported rather than thrown", async () => {
+  // the dialog awaits this and then closes; a rejection would leave it stuck half-busy
+  window.fetch = vi.fn().mockRejectedValue(new TypeError("NetworkError when attempting to fetch resource."));
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  await expect(purgeRecording(API, "GVS_2025", accessToken, vi.fn())).resolves.toBeUndefined();
+
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("NetworkError"));
+  error.mockRestore();
+});
+
+test("the download URL carries the user, the encoded recording name and the OTP", () => {
+  expect(downloadUrl(API, "8f14e45f", "Übung_2025", "0123456789"))
+    .toBe(`${API}/api/recordings/8f14e45f/${encodeURIComponent("Übung_2025")}?totp=0123456789`);
 });

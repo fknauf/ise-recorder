@@ -108,3 +108,18 @@ async def get_downloadable_recordings(
         )
 
     return collected
+
+async def get_purgeable_recordings(
+    downloadable: Annotated[list[tuple[Path, int]], Depends(_get_downloadable_recording_paths)],
+    unprocessed: Annotated[list[Path], Depends(get_unprocessed_recordings)],
+    running_jobs: Annotated[frozenset[Path], Depends(get_running_jobs_snapshot)]
+) -> list[str]:
+    """
+    List of recordings that can be purged right now, i.e. that are not being rendered or streamed
+    """
+    running_job_names = { job.name for job in running_jobs }
+
+    return (
+        [ path.name for path, _ in downloadable if not path.name in running_job_names ]
+        + [ u.name for u in unprocessed ]
+    )

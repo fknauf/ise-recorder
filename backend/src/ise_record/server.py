@@ -9,7 +9,8 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, AsyncGenerator
+import shutil
+from typing import Annotated, Any, AsyncGenerator, Callable, NoReturn
 import unicodedata
 
 import aiofiles
@@ -28,7 +29,7 @@ from fastapi.responses import FileResponse
 from pathvalidate import sanitize_filename
 from pydantic import BaseModel, BeforeValidator, Field
 
-from .auth import load_oidc_config
+from .auth import UserInfo, get_user_info, load_oidc_config
 from .download_totp import DownloadTotpAuthority, get_download_totp
 from .jobs import postprocessing_task, get_running_jobs
 from .logconfig import setup_logging
@@ -36,6 +37,7 @@ from .postprocess import OUTPUT_FILENAME
 from .recording_lists import (
     DownloadableRecording,
     get_downloadable_recordings,
+    get_purgeable_recordings,
     get_unprocessed_recordings
 )
 from .settings import get_settings, Settings
@@ -43,6 +45,15 @@ from .user_home import get_current_user_home
 
 def _normalize_for_filesystem(value: str) -> str:
     return sanitize_filename(unicodedata.normalize("NFC", value), platform="universal")
+
+def _require_authentication(
+        settings: Annotated[Settings, Depends(get_settings)]
+) -> None:
+    if not settings.auth_required:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Server is configured without authentication"
+        )
 
 SafeRecording = Annotated[
     str,
@@ -176,24 +187,14 @@ def health_check():
     logger.debug("health check requested")
     return { "status": "healthy" }
 
-def _downloads_disabled():
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Server is configured without authentication, downloads are disabled."
-    )
-
-@router.get('/recordings')
+@router.get('/recordings', dependencies=[ Depends(_require_authentication) ])
 async def get_recordings_list(
-    settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
     completed: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)],
     running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
     unprocessed: Annotated[list[Path], Depends(get_unprocessed_recordings)]
 ) -> dict[str, Any]:
     """ Endpoint to obtain a list of completed and rendering recordings for the active user """
-    if not settings.auth_required:
-        raise _downloads_disabled()
-
     running_job_names = sorted([ job.name for job in running_jobs ])
 
     return {
@@ -220,7 +221,10 @@ async def get_recordings_list(
         ]
     }
 
-@router.get('/recordings/{user_digest}/{recording}')
+@router.get(
+    '/recordings/{user_digest}/{recording}',
+    dependencies=[ Depends(_require_authentication) ]
+)
 async def download_completed(
     recording: SafeRecording,
     user_digest: Annotated[str, Field(pattern=r"\A[0-9a-f]+\z")],
@@ -229,9 +233,6 @@ async def download_completed(
     download_totp: Annotated[DownloadTotpAuthority, Depends(get_download_totp)]
 ) -> FileResponse:
     """ Endpoint for downloading a completed recording that the active user owns """
-
-    if not settings.auth_required:
-        raise _downloads_disabled()
 
     file_path = settings.destdir / user_digest / recording / OUTPUT_FILENAME
 
@@ -247,6 +248,66 @@ async def download_completed(
         )
 
     return FileResponse(file_path, filename = f"{recording}.webm")
+
+@router.delete('/recordings/{recording}', dependencies=[ Depends(_require_authentication) ])
+def purge_recording(
+    recording: SafeRecording,
+    user_info: Annotated[UserInfo | None, Depends(get_user_info)],
+    user_home: Annotated[Path, Depends(get_current_user_home)],
+    purgeable_recordings: Annotated[list[str], Depends(get_purgeable_recordings)],
+    download_totp: Annotated[DownloadTotpAuthority, Depends(get_download_totp)]
+):
+    """ Endpoint to purge a recording directory """
+
+    def fail_purge(
+            log: Callable[[str], None],
+            status_code: int,
+            detail: str
+    ) -> NoReturn:
+        log(detail)
+        raise HTTPException(status_code=status_code, detail=detail)
+
+    if user_info is None:
+        fail_purge(
+            logger.error,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User is not authenticated"
+        )
+
+    logger.info("User %s (sub = %s) is purging recording %s",
+                user_info.preferred_username, user_info.sub, recording)
+
+    recording_path = user_home / recording
+
+    if not recording_path.is_dir(follow_symlinks=False):
+        fail_purge(
+            logger.warning,
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Recording {recording} does not exist for this user"
+        )
+
+    if not recording in purgeable_recordings:
+        fail_purge(
+            logger.warning,
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Recording {recording} is in use and currently not purgeable"
+        )
+
+    try:
+        shutil.rmtree(recording_path)
+    except Exception: # pylint: disable=broad-exception-caught
+        fail_purge(
+            logger.exception,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Filesystem error"
+        )
+
+    download_totp.forget(recording_path / OUTPUT_FILENAME)
+
+    return {
+        "recording": recording,
+        "detail": "deleted successfully"
+    }
 
 def create_app(
         settings: Settings | None = None
@@ -278,7 +339,7 @@ def create_app(
             CORSMiddleware,
             allow_origins=settings.cors_origins,
             allow_credentials=False,
-            allow_methods=["GET", "POST"],
+            allow_methods=["GET", "POST", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
     application.include_router(router, prefix=settings.route_prefix)
