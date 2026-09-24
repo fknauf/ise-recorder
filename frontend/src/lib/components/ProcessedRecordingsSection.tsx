@@ -6,7 +6,7 @@ import { ActionButton, Content, Flex, Heading, InlineAlert, Link, ProgressCircle
 import Download from "@spectrum-icons/workflow/Download";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { DownloadableRecording, RenderingRecording, useProcessedRecordings, useRefreshProcessedRecordings } from "../hooks/useProcessedRecordings";
+import { DownloadableRecording, RenderingRecording, UnprocessedRecording, useProcessedRecordings, useRefreshProcessedRecordings } from "../hooks/useProcessedRecordings";
 import * as z from "zod";
 import { schedulePostprocessing } from "../utils/serverStorage";
 import { useLecture } from "../hooks/useLecture";
@@ -21,12 +21,12 @@ const mibFormatter = new Intl.NumberFormat(
   }
 );
 
-function ProcessedRecordingCard(
-  { apiUrl, user, recording }: Readonly<{ apiUrl: string; user: string; recording: DownloadableRecording }>
-) {
+const useRerender = (recordingName: string) => {
+  const { apiUrl } = useServerEnv();
   const { getAccessToken } = useAppSession();
   const { lecturerEmail } = useLecture();
   const refreshProcessedRecordings = useRefreshProcessedRecordings();
+
   const [ busy, setBusy ] = useState(false);
 
   const rerender = async () => {
@@ -35,7 +35,7 @@ function ProcessedRecordingCard(
     try {
       const scheduled = await schedulePostprocessing(
         { apiUrl, streamingImpeded: false, getAccessToken },
-        recording.name,
+        recordingName,
         lecturerEmail,
         { retries: 0, intervalMillis: 5000 }
       );
@@ -44,11 +44,20 @@ function ProcessedRecordingCard(
         await refreshProcessedRecordings();
       }
     } catch(e) {
-      console.warn(`Failed to schedule re-render for ${recording.name}`, e);
+      console.warn(`Failed to schedule re-render for ${recordingName}`, e);
     }
 
     setBusy(false);
   };
+
+  return [ busy, rerender ] as const;
+};
+
+function ProcessedRecordingCard(
+  { user, recording }: Readonly<{ user: string; recording: DownloadableRecording }>
+) {
+  const { apiUrl } = useServerEnv();
+  const [ busy, rerender ] = useRerender(recording.name);
 
   return (
     <RecordingCard title={recording.name} testid="prec-card">
@@ -87,6 +96,26 @@ const RenderingRecordingCard = (
     </Flex>
   </RecordingCard>;
 
+function UnprocessedRecordingCard(
+  { recording }: Readonly<{ recording: UnprocessedRecording }>
+) {
+  const [ busy, rerender ] = useRerender(recording.name);
+
+  return (
+    <RecordingCard title={recording.name} testid="rendering-card">
+      <Text>Postprocessing failed.</Text>
+      <ActionButton
+        width="100%"
+        onPress={rerender}
+        isDisabled={busy}
+      >
+        <Refresh/>
+        <Text>Rerender</Text>
+      </ActionButton>
+    </RecordingCard>
+  );
+}
+
 function prettifyError(error: unknown) {
   if(error instanceof z.ZodError) {
     return z.prettifyError(error);
@@ -99,7 +128,7 @@ function prettifyError(error: unknown) {
   return "Unknown error";
 }
 
-function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string }>) {
+function PreprocessedRecordingsSectionImpl() {
   const { data, error } = useProcessedRecordings();
   const sectionTitle = "Server-Side Processed Recordings";
 
@@ -128,7 +157,6 @@ function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string
         data.completed.map(rec =>
           <ProcessedRecordingCard
             key={rec.name}
-            apiUrl={apiUrl}
             user={data.user}
             recording={rec}
           />
@@ -137,6 +165,11 @@ function PreprocessedRecordingsSectionImpl({ apiUrl }: Readonly<{ apiUrl: string
       {
         data.rendering.map(rec =>
           <RenderingRecordingCard key={rec.name} recording={rec}/>
+        )
+      }
+      {
+        data.unprocessed.map(rec =>
+          <UnprocessedRecordingCard key={rec.name} recording={rec}/>
         )
       }
     </RecordingCardSection>
@@ -151,5 +184,5 @@ export function PreprocessedRecordingsSection() {
     return null;
   }
 
-  return <PreprocessedRecordingsSectionImpl apiUrl={apiUrl}/>;
+  return <PreprocessedRecordingsSectionImpl/>;
 }

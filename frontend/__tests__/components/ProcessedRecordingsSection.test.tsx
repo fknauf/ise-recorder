@@ -45,7 +45,8 @@ const LISTING = {
     { name: "GVS_2025", size: 1.25 * MiB, totp: "0123456789" },
     { name: "PSU_2026", size: 3.5 * MiB, totp: "9876543210" }
   ],
-  rendering: [] as { name: string }[]
+  rendering: [] as { name: string }[],
+  unprocessed: []
 };
 
 function renderSection(
@@ -135,7 +136,7 @@ test("a non-ASCII recording name reaches the backend percent-encoded", () => {
   // way out -- and the backend decoding it and running SafeRecording over it again, which
   // the round-trip test on the Python side pins from the other end.
   renderSection({
-    data: { user: USER_DIGEST, completed: [ { name: "Übung_2025", size: MiB, totp: "1111111111" } ], rendering: [] }
+    data: { user: USER_DIGEST, completed: [ { name: "Übung_2025", size: MiB, totp: "1111111111" } ], rendering: [], unprocessed: [] }
   });
 
   const link = within(cards()[0]).getByRole("link") as HTMLAnchorElement;
@@ -146,7 +147,7 @@ test("a non-ASCII recording name reaches the backend percent-encoded", () => {
 });
 
 test("an empty backend renders the section without any cards", () => {
-  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [] } });
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [], unprocessed: [] } });
 
   expect(screen.getByText("Server-Side Processed Recordings")).toBeInTheDocument();
   expect(cards()).toHaveLength(0);
@@ -162,7 +163,7 @@ const RENDERING_LISTING = {
 };
 
 test("a recording that is still rendering gets a card that says so", () => {
-  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [ { name: "ABC_2026" } ] } });
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [ { name: "ABC_2026" } ], unprocessed: [] } });
 
   expect(renderingCards()).toHaveLength(1);
   expect(within(renderingCards()[0]).getByText("ABC_2026")).toBeInTheDocument();
@@ -174,7 +175,7 @@ test("a recording that is still rendering gets a card that says so", () => {
 
 test("a recording that is still rendering offers no download", () => {
   // there is no file yet and no TOTP to put in the link, so anything clickable would 404
-  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [ { name: "ABC_2026" } ] } });
+  renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [ { name: "ABC_2026" } ], unprocessed: [] } });
 
   expect(within(renderingCards()[0]).queryByRole("link")).toBeNull();
   expect(within(renderingCards()[0]).queryByRole("button")).toBeNull();

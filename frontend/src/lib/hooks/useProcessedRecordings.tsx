@@ -15,10 +15,15 @@ export interface RenderingRecording {
   name: string
 }
 
+export interface UnprocessedRecording {
+  name: string
+}
+
 export interface DownloadableRecordings {
   user: string
   completed: DownloadableRecording[]
   rendering: RenderingRecording[]
+  unprocessed: UnprocessedRecording[]
 }
 
 const DownloadableRecordingsSchema = z.object({
@@ -29,6 +34,9 @@ const DownloadableRecordingsSchema = z.object({
     totp: z.string()
   })),
   rendering: z.array(z.object({
+    name: z.string()
+  })),
+  unprocessed: z.array(z.object({
     name: z.string()
   }))
 });

@@ -6,6 +6,7 @@
 
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 import logging
 import os
 from pathlib import Path
@@ -32,7 +33,7 @@ from pydantic import BaseModel, BeforeValidator, Field
 from .auth import load_oidc_config
 from .download_totp import DownloadableRecording, get_downloadable_recordings, verify_download_totp
 from .logconfig import setup_logging
-from .postprocess import postprocess_recording, OUTPUT_FILENAME
+from .postprocess import postprocess_recording, OUTPUT_FILENAME, MAIN_TRACK_NAME
 from .reporting import normalize_recipient, send_report
 from .settings import get_settings, Settings, SmtpSettings
 from .user_home import get_current_user_home
@@ -212,18 +213,58 @@ def _downloads_disabled():
         detail="Server is configured without authentication, downloads are disabled."
     )
 
+def get_unprocessed_recordings(
+    user_home: Annotated[Path, Depends(get_current_user_home)],
+    running_jobs: Annotated[set[Path], Depends(get_running_jobs)]
+) -> list[Path]:
+    """
+    Identify recordings that haven't been processed, aren't being processed, aren't still being
+    streamed and are processable (i.e., have a main stream).
+
+    These will be shown in the UI as failed postprocessings with a button that allows rescheduling
+    the post-processing job. They should only show up in the event that something went wrong, e.g.
+    a streaming lecturer lost connectivity before the postprocessing could be scheduled.
+    """
+
+    running_job_names = { job.name for job in running_jobs }
+
+    def is_unprocessed(recording_dir: Path) -> bool:
+        output_path = recording_dir / OUTPUT_FILENAME
+        main_track_dir = recording_dir / MAIN_TRACK_NAME
+
+        if (
+            recording_dir.name in running_job_names
+            or output_path.exists()
+            or not main_track_dir.is_dir()
+        ):
+            return False
+
+        chunks = sorted(main_track_dir.iterdir(), reverse=True)
+
+        if len(chunks) == 0:
+            return False
+
+        # if the newest chunk is older than 5 minutes, the recording isn't still being streamed.
+        cutoff = datetime.now() - timedelta(minutes=5)
+        latest = chunks[-1]
+
+        return latest.stat().st_ctime < cutoff.timestamp()
+
+    return sorted(dir for dir in user_home.iterdir() if is_unprocessed(dir))
+
 @router.get('/recordings')
 async def get_recordings_list(
     settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
     recordings: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)],
-    running_jobs: Annotated[set[Path], Depends(get_running_jobs)]
+    running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
+    unprocessed: Annotated[list[Path], Depends(get_unprocessed_recordings)]
 ) -> dict[str, Any]:
     """ Endpoint to obtain a list of completed and rendering recordings for the active user """
     if not settings.auth_required:
         raise _downloads_disabled()
 
-    running_job_names = [ job.name for job in sorted(running_jobs) ]
+    running_job_names = sorted([ job.name for job in running_jobs ])
 
     return {
         "user": user_home.name,
@@ -240,6 +281,12 @@ async def get_recordings_list(
                 "name": name
             }
             for name in running_job_names
+        ],
+        "unprocessed": [
+            {
+                "name": dir.name
+            }
+            for dir in unprocessed
         ]
     }
 

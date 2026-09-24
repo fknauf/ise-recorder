@@ -399,7 +399,10 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
     mock_concat_chunks.assert_called_once_with(Path("foo/stream"))
     mock_rename.assert_called_once_with(Path("foo/presentation.part.webm"), Path("foo/presentation.webm"))
 
-    mock_unlink.assert_called_once_with(Path("foo/stream/full.webm"), missing_ok=True)
+    mock_unlink.assert_has_calls([
+        call(Path("foo/presentation.part.webm"), missing_ok=True),
+        call(Path("foo/stream/full.webm"), missing_ok=True)
+    ])
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):

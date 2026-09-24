@@ -365,6 +365,10 @@ async def postprocess_tracks(
         logger.info("Rendering %s...", intermediate_path)
         logger.debug("Render command = %s", render_command)
 
+        # in case the server crashed and there's another ffmpeg running that's writing to
+        # intermediate_path: unlink here, so the other ffmpeg writes to a nameless file descriptor
+        # instead of competing with the ffmpeg we're about to start.
+        intermediate_path.unlink(missing_ok=True)
         await _run_command(render_command)
         intermediate_path.rename(output_path)
 
