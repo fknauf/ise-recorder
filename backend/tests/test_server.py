@@ -9,6 +9,7 @@
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
 
+import datetime
 import os
 from pathlib import Path
 from typing import Iterator
@@ -32,13 +33,17 @@ from .harness import (
     abandon_recording,
     download_totp_of,
     running_jobs_of,
+    alias_of,
+    DEFAULT_SUBJECT,
     DEFAULT_SUBJECT_DIGEST,
     digest_of,
     download_completed,
     finish_recording,
+    home_entries,
     list_recordings,
     Provider,
     upload,
+    upload_chunk_path,
 )
 
 # NAME_MAX on ext4, which is what pathvalidate caps a filename at inside SafeRecording
@@ -564,7 +569,69 @@ def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str
 # shares one destination directory. With authentication on, the home directory is a Path
 # the dependency hands to the endpoint rather than a segment the endpoint joins onto
 # destdir itself -- so these are what show that a caller is confined to their own. How
-# that directory gets its name is in test_user_home.py.
+# that directory gets its name is in core/test_user_home.py.
+#
+# Token validation and the UserInfo lookup are in core/test_auth.py, and how their outcomes
+# become responses in glue/test_auth.py. The first few tests here are the end-to-end check
+# that the pieces are wired together: one of each outcome, over a real request.
+
+def test_a_chunk_lands_in_the_callers_home_directory(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    assert upload(auth_client, provider.mint()).status_code == 201
+
+    # the chunk lives under the subject digest, and is reachable through the readable
+    # alias as well -- a shell user finding "lecturer-..." has to land on the real data
+    assert upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).is_file()
+    assert upload_chunk_path(tmp_path, alias_of("lecturer", DEFAULT_SUBJECT_DIGEST)).is_file()
+    assert len(list(tmp_path.rglob("chunk.*"))) == 1
+
+
+def test_different_subjects_get_different_directories(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    assert upload(auth_client, provider.mint(sub="user-a"), index=0).status_code == 201
+    assert upload(auth_client, provider.mint(sub="user-b"), index=1).status_code == 201
+
+    assert upload_chunk_path(tmp_path, digest_of("user-a"), index=0).is_file()
+    assert upload_chunk_path(tmp_path, digest_of("user-b"), index=1).is_file()
+
+
+def test_a_username_from_userinfo_names_the_alias(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="dozentin")
+
+    assert upload(auth_client, provider.mint(preferred_username=None)).status_code == 201
+
+    assert home_entries(tmp_path) == {
+        DEFAULT_SUBJECT_DIGEST, alias_of("dozentin", DEFAULT_SUBJECT_DIGEST)
+    }
+
+
+def test_uploading_without_a_token_is_rejected(auth_client: TestClient, tmp_path: Path):
+    response = upload(auth_client, None)
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+    assert home_entries(tmp_path) == set()
+
+
+def test_uploading_with_an_invalid_token_is_rejected(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    assert upload(auth_client, provider.mint(aud="some-other-app")).status_code == 401
+    assert home_entries(tmp_path) == set()
+
+
+def test_an_unreachable_provider_is_reported_as_unavailable(
+    auth_client: TestClient, provider: Provider
+):
+    token = provider.mint()
+    provider.jwks_available = False
+
+    assert upload(auth_client, token).status_code == 503
+
 
 def schedule(auth_client: TestClient, token: str | None, recording: str = "foo"):
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
@@ -617,13 +684,13 @@ def test_a_job_cannot_name_another_subjects_recording(
 
 # --- the completed-recording endpoints -------------------------------------
 
-# These are the only endpoints that hand a stored name back to the auth_client and then take it
+# These are the only endpoints that hand a stored name back to the client and then take it
 # again as a path segment, so this is where the recording name has to work as an
-# identifier: through percent-encoding, through a auth_client that normalizes differently, and
+# identifier: through percent-encoding, through a client that normalizes differently, and
 # without becoming a way into somebody else's home directory.
 #
 # What the one-time password in the download link is scoped to and how long it lasts is
-# the download_totp module's own contract, and lives in test_download_totp.py.
+# the download_totp module's own contract, and lives in core/test_download_totp.py.
 
 def test_listing_recordings_without_a_token_is_rejected(auth_client: TestClient):
     assert list_recordings(auth_client, None).status_code == 401
@@ -793,7 +860,7 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
 
 
 # The listing's third list: recordings whose postprocessing never produced anything. Which
-# recordings count is get_unprocessed_recordings' business, in test_recording_lists.py;
+# recordings count is get_unprocessed_recordings' business, in glue/test_recording_lists.py;
 # these pin what the endpoint makes of it.
 
 def test_the_listing_reports_unprocessed_recordings_by_name(
@@ -940,12 +1007,90 @@ def test_downloading_is_forbidden_without_authentication(
     assert b"video" not in response.content
 
 
+# --- download OTPs through the endpoints -----------------------------------
+
+# The properties from core/test_download_totp.py, restated over a real request, because
+# what the download route actually verifies against is a path it assembles from two
+# segments the caller supplies.
+
+def test_a_totp_is_scoped_to_the_one_recording_it_was_issued_for(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+    finish_recording(home, "PSU_2026", b"the other lecture")
+
+    server_list = list_recordings(auth_client, provider.mint()).json()
+    by_name = { rec["name"]: rec["totp"] for rec in server_list["completed"] }
+
+    response = download_completed(auth_client, server_list["user"], "PSU_2026", by_name["GVS_2025"])
+
+    assert response.status_code == 401
+    assert b"the other lecture" not in response.content
+
+
+def test_a_totp_does_not_open_another_subjects_recording(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    finish_recording(tmp_path / digest_of("user-a"), "shared_name")
+    finish_recording(tmp_path / digest_of("user-b"), "shared_name", b"not yours")
+
+    server_list = list_recordings(auth_client, provider.mint(sub="user-a")).json()
+
+    # the user directory is a path segment the caller supplies, so the OTP has to be tied
+    # to the full path rather than to the recording name both of them happen to use
+    response = download_completed(
+        auth_client, digest_of("user-b"), "shared_name", server_list["completed"][0]["totp"]
+    )
+
+    assert response.status_code == 401
+    assert b"not yours" not in response.content
+
+
+def test_a_recording_that_was_never_listed_cannot_be_downloaded(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "listed")
+    finish_recording(home, "never_listed", b"secret lecture")
+
+    # only one of them is ever listed, so the other never gets a generator
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    response = download_completed(
+        auth_client, server_list["user"], "never_listed", server_list["completed"][0]["totp"]
+    )
+
+    assert response.status_code == 401
+    assert b"secret lecture" not in response.content
+
+
+def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    key = str((home / "GVS_2025" / "presentation.webm").absolute())
+    generator = download_totp_of(auth_client).factories[key]
+    three_intervals = datetime.timedelta(seconds=3 * generator.interval)
+    three_intervals_ago = datetime.datetime.now() - three_intervals
+    stale = generator.at(three_intervals_ago)
+
+    response = download_completed(auth_client, server_list["user"], "GVS_2025", stale)
+
+    assert response.status_code == 401
+    assert b"video" not in response.content
+
+
 # --- purging a recording ---------------------------------------------------
 
 # The one endpoint that destroys data, and irreversibly. Every refusal below checks the disk
 # rather than only the status code: a 4xx that had already deleted something would pass a
 # status check just fine. Which recordings count as purgeable is get_purgeable_recordings'
-# business, in test_recording_lists.py; these pin what the endpoint does with the answer.
+# business, in glue/test_recording_lists.py; these pin what the endpoint does with the answer.
 
 def snapshot(root: Path) -> dict[str, bytes]:
     """ Every file under root with its content, following no symlinks. """

@@ -32,6 +32,8 @@ from ise_record.core.postprocess import (
     VideoProperties
 )
 
+from ..harness import ASSETS
+
 @pytest.mark.asyncio
 async def test_run_command():
     res = await _run_command([ "/usr/bin/env", "echo", "Hello, world." ])
@@ -65,7 +67,7 @@ def test_determine_crop_area():
 
 @pytest.mark.asyncio
 async def test_video_properties():
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+    sample_path = ASSETS / "sample.webm"
 
     info = await video_properties(sample_path)
 
@@ -92,7 +94,7 @@ async def test_video_properties_reads_a_path_the_filtergraph_would_choke_on(tmp_
     track_path = tmp_path / "GVS,1[2];x='y'" / "stream"
     track_path.mkdir(parents=True)
     shutil.copy(
-        Path(os.path.dirname(__file__)) / "assets" / "sample.webm",
+        ASSETS / "sample.webm",
         track_path / "full.webm"
     )
 

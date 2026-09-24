@@ -21,11 +21,8 @@ from pathlib import Path
 from typing import Iterator
 
 from fastapi.testclient import TestClient
-import jwt
 import pytest
 
-from ise_record.core import auth
-from ise_record.core.auth import OidcClient
 from ise_record.server import create_app
 from ise_record.settings import get_settings, OidcSettings, Settings
 
@@ -81,44 +78,6 @@ def auth_settings(provider: Provider, tmp_path: Path) -> Settings:
 
 
 @pytest.fixture
-def fresh_auth_settings(provider: Provider, tmp_path: Path) -> Settings:
-    """ Settings for a second app, so a test can start one that shares no cached state. """
-    return Settings(
-        destdir=tmp_path / "fresh",
-        oidc=OidcSettings(
-            provider_url=provider.issuer,
-            audience=AUDIENCE
-        )
-    )
-
-
-@pytest.fixture
 def auth_client(auth_settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(auth_settings)) as test_client:
         yield test_client
-
-
-@pytest.fixture
-def oidc(provider: Provider) -> OidcClient:
-    """ What discovery would have produced, for the tests that bypass the app. """
-    return OidcClient(
-        issuer=provider.issuer,
-        audience=AUDIENCE,
-        userinfo_endpoint=f"{provider.issuer}/userinfo",
-        leeway_seconds=30.0,
-        http_timeout_seconds=5.0,
-        jwk_client=jwt.PyJWKClient(f"{provider.issuer}/jwks"),
-    )
-
-
-@pytest.fixture
-def instant_jwks_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Let an unknown kid refetch the key set immediately, instead of after the cooldown.
-
-    Rotation takes milliseconds here and half a minute in production, so without this a
-    rotation test would only be measuring PyJWKClient's rate limit. The cooldown is read
-    when the client is constructed, which is when the app starts up -- request this
-    fixture ahead of `auth_client` so it is patched by then.
-    """
-    monkeypatch.setattr(auth, "JWKS_REFRESH_COOLDOWN_SECONDS", 0.0)

@@ -22,21 +22,15 @@ from ise_record.glue.recording_lists import (
     get_purgeable_recordings,
     get_unprocessed_recordings,
 )
-from ise_record.settings import OidcSettings, Settings
+from ise_record.settings import Settings
 
-from .harness import (
+from ..harness import (
     abandon_recording,
     age,
     finish_recording,
     MINUTE,
     write_chunks,
 )
-
-@pytest.fixture
-def settings(tmp_path: Path) -> Settings:
-    # the dependency only asks whether authentication is on; nothing here talks to a provider
-    return Settings(destdir=tmp_path, oidc=OidcSettings(provider_url="https://idp.example.edu", audience="ise"))
-
 
 @pytest.fixture
 def home(tmp_path: Path) -> Path:

@@ -6,7 +6,8 @@ query string is the whole of the authentication on that request. Everything here
 what that OTP is scoped to and how long it lasts -- the two properties the scheme rests on.
 
 How the endpoints behave around it (status codes, headers, which recordings a listing
-offers) lives in test_server.py; this file is about the mechanism itself.
+offers) lives in test_server.py, including the properties below restated over a real request;
+this file is about the mechanism itself.
 """
 
 # pylint: disable=missing-function-docstring
@@ -15,19 +16,7 @@ offers) lives in test_server.py; this file is about the mechanism itself.
 import datetime
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from ise_record.core.download_totp import DownloadTotpAuthority
-
-from .harness import (
-    download_totp_of,
-    DEFAULT_SUBJECT_DIGEST,
-    digest_of,
-    download_completed,
-    finish_recording,
-    list_recordings,
-    Provider,
-)
 
 
 # --- the module on its own -------------------------------------------------
@@ -141,80 +130,3 @@ def test_forgetting_a_file_that_never_had_an_otp_is_harmless(tmp_path: Path):
     download_totp.forget(tmp_path / "never_listed" / "presentation.webm")
 
     assert not download_totp.factories
-
-
-# --- through the endpoints -------------------------------------------------
-
-# The properties above, restated over a real request, because what the download route
-# actually verifies against is a path it assembles from two segments the caller supplies.
-
-def test_a_totp_is_scoped_to_the_one_recording_it_was_issued_for(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "GVS_2025")
-    finish_recording(home, "PSU_2026", b"the other lecture")
-
-    server_list = list_recordings(auth_client, provider.mint()).json()
-    by_name = { rec["name"]: rec["totp"] for rec in server_list["completed"] }
-
-    response = download_completed(auth_client, server_list["user"], "PSU_2026", by_name["GVS_2025"])
-
-    assert response.status_code == 401
-    assert b"the other lecture" not in response.content
-
-
-def test_a_totp_does_not_open_another_subjects_recording(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    finish_recording(tmp_path / digest_of("user-a"), "shared_name")
-    finish_recording(tmp_path / digest_of("user-b"), "shared_name", b"not yours")
-
-    server_list = list_recordings(auth_client, provider.mint(sub="user-a")).json()
-
-    # the user directory is a path segment the caller supplies, so the OTP has to be tied
-    # to the full path rather than to the recording name both of them happen to use
-    response = download_completed(
-        auth_client, digest_of("user-b"), "shared_name", server_list["completed"][0]["totp"]
-    )
-
-    assert response.status_code == 401
-    assert b"not yours" not in response.content
-
-
-def test_a_recording_that_was_never_listed_cannot_be_downloaded(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "listed")
-    finish_recording(home, "never_listed", b"secret lecture")
-
-    # only one of them is ever listed, so the other never gets a generator
-    server_list = list_recordings(auth_client, provider.mint()).json()
-
-    response = download_completed(
-        auth_client, server_list["user"], "never_listed", server_list["completed"][0]["totp"]
-    )
-
-    assert response.status_code == 401
-    assert b"secret lecture" not in response.content
-
-
-def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "GVS_2025")
-
-    server_list = list_recordings(auth_client, provider.mint()).json()
-
-    key = str((home / "GVS_2025" / "presentation.webm").absolute())
-    generator = download_totp_of(auth_client).factories[key]
-    three_intervals = datetime.timedelta(seconds=3 * generator.interval)
-    three_intervals_ago = datetime.datetime.now() - three_intervals
-    stale = generator.at(three_intervals_ago)
-
-    response = download_completed(auth_client, server_list["user"], "GVS_2025", stale)
-
-    assert response.status_code == 401
-    assert b"video" not in response.content

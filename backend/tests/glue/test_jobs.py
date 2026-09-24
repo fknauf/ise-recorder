@@ -12,14 +12,14 @@ How /jobs schedules these, and how the listing presents them, lives in test_serv
 from pathlib import Path
 from unittest.mock import ANY
 
-from fastapi import Request
 import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.glue.jobs import get_running_jobs, get_running_jobs_snapshot, postprocessing_task
 from ise_record.core.postprocess import Result, ResultReason
-from ise_record.server import create_app
 from ise_record.settings import Settings, SmtpSettings
+
+from .conftest import request_for
 
 
 # --- running a job ---------------------------------------------------------
@@ -196,11 +196,6 @@ async def test_a_running_job_is_registered_while_it_runs(mocker: MockerFixture):
 
 
 # --- the per-user record of running jobs -----------------------------------
-
-def request_for(app_settings: Settings) -> Request:
-    """ A bare request against a fresh app; get_running_jobs only reads app.state from it. """
-    return Request(scope={ "type": "http", "app": create_app(app_settings) })
-
 
 @pytest.mark.asyncio
 async def test_each_user_has_a_running_job_set_of_their_own(tmp_path: Path):

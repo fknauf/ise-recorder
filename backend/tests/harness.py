@@ -6,7 +6,7 @@ name directly -- the Provider type in a signature, and the small functions that 
 what the server does with a token, so an assertion can say what it expects instead of
 recomputing it.
 
-The naming helpers deliberately restate auth.py's scheme rather than importing it: a test
+The naming helpers deliberately restate core/user_home.py's scheme rather than importing it: a test
 that derived the expected directory name from the code under test would agree with any
 change to it, including the ones that would move a lecturer's recordings.
 """
@@ -41,6 +41,7 @@ CLIENT_ID = "ise-recorder"
 # this pair. Only the test that is about a provider collapsing the two sets them equal.
 AUDIENCE = "ise-recorder-api"
 DEFAULT_SUBJECT = "b472c41f9b227e6596e921541f46dc9d7"
+ASSETS = Path(__file__).parent / "assets"
 
 
 def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
@@ -264,18 +265,18 @@ def download_completed(client: TestClient, user_digest: str, recording: str, tot
 # --- the directory scheme, restated ----------------------------------------
 
 def digest_of(subject: str) -> str:
-    """ The stable directory name auth.py derives from a subject. """
+    """ The stable directory name user_home.py derives from a subject. """
     return hashlib.sha3_256(subject.encode("utf-8")).hexdigest()
 
 
 def alias_of(username: str, subject_digest: str) -> str:
-    """ The readable symlink auth.py puts beside the stable directory. """
+    """ The readable symlink user_home.py puts beside the stable directory. """
     return f"{username}-{subject_digest[:12]}"
 
 
 def home_entries(base_dir: Path) -> set[str]:
     """
-    Everything auth.py has put in the destination root.
+    Everything user_home.py has put in the destination root.
 
     The interesting assertion is usually that there is nothing here beyond the digest --
     a name derived from an untrustworthy username is what these tests are about -- so this
