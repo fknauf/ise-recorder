@@ -16,7 +16,7 @@ this file is about the mechanism itself.
 import datetime
 from pathlib import Path
 
-from ise_record.core.download_totp import DownloadTotpAuthority
+from ise_record.core.auth import DownloadTotpAuthority
 
 
 # --- the module on its own -------------------------------------------------

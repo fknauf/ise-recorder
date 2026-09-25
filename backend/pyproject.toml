@@ -14,7 +14,7 @@ dependencies = [
     "PyJWT[crypto]~=2.15",
     "PyOTP~=2.10",
     "python-multipart~=0.0",
-    "uvicorn~=0.53",
+    "uvicorn~=0.54",
 ]
 
 [dependency-groups]
@@ -28,11 +28,15 @@ dev = [
     { include-group = "test" },
     "fastapi[standard]",
     "pylint~=4.0",
+    "ruff~=0.16"
 ]
 
 [build-system]
 requires = ["setuptools >= 84.0.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"ise_record" = [ "**/py.typed", "py.typed" ]
 
 [tool.pytest.ini_options]
 addopts = [

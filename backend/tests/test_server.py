@@ -779,7 +779,9 @@ def test_a_recording_in_postprocessing_is_listed_as_rendering(
 ):
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     finish_recording(home, "GVS_2025")
-    running_jobs_of(auth_client, home).update({ home / "PSU_2026", home / "ABC_2026" })
+    # a job only ever runs for a recording that is on disk -- /jobs refuses anything else --
+    # and the listing classifies what it finds there
+    running_jobs_of(auth_client, home).update({ abandon_recording(home, "PSU_2026"), abandon_recording(home, "ABC_2026") })
 
     data = list_recordings(auth_client, provider.mint()).json()
 
@@ -830,7 +832,7 @@ def test_the_listing_only_shows_the_callers_own_rendering_jobs(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     home_a = tmp_path / digest_of("user-a")
-    running_jobs_of(auth_client, home_a).add(home_a / "mine")
+    running_jobs_of(auth_client, home_a).add(abandon_recording(home_a, "mine"))
 
     assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["rendering"] == [ { "name": "mine" } ]
     assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["rendering"] == []

@@ -10,8 +10,14 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx2
 
-from ise_record.settings import Settings, get_settings
-from ise_record.core.auth import OidcClient, ProviderUnreachable, Unauthenticated, UserInfo
+from ise_record.settings import OidcSettings, Settings, get_settings
+from ise_record.core.auth import (
+    DownloadTotpAuthority,
+    OidcClient,
+    ProviderUnreachable,
+    Unauthenticated,
+    UserInfo
+)
 
 
 logger = logging.getLogger(__name__)
@@ -23,7 +29,7 @@ class OidcServerState:
     """ Oidc-specific state attached to the fastapi server """
 
     client: OidcClient | None = None
-    cached_users: dict[str, UserInfo] = field(default_factory=dict)
+    cached_users: dict[str, UserInfo] = field(default_factory=dict[str, UserInfo])
 
 
 def _unauthenticated():
@@ -43,13 +49,13 @@ def _provider_unreachable():
 
 async def load_oidc_client(
         app_state: Any,
-        settings: Settings,
+        oidc: OidcSettings | None,
 ) -> OidcClient | None:
     """
-    Attempt to load the oidc client into the application state. Done once at applcation start,
+    Attempt to load the oidc client into the application state. Done once at application start,
     and if that fails again at request time until it worked once.
     """
-    if not settings.auth_required:
+    if oidc is None:
         return None
 
     cached: OidcClient | None = app_state.oidc.client
@@ -62,10 +68,10 @@ async def load_oidc_client(
         # is fine because they discover the same configuration, and also we attempt this once at
         # application start, so the race only manifests if the OIDC provider is unreachable then.
         client = await OidcClient.discover(
-            provider_url=settings.oidc.provider_url,
-            audience=settings.oidc.audience,
-            leeway_seconds=settings.oidc.leeway_seconds,
-            http_timeout_seconds=settings.oidc.http_timeout_seconds
+            provider_url=oidc.provider_url,
+            audience=oidc.audience,
+            leeway_seconds=oidc.leeway_seconds,
+            http_timeout_seconds=oidc.http_timeout_seconds
         )
     except (httpx2.HTTPError, KeyError, ValueError):
         logger.exception("OpenID discovery failed; authenticated endpoints will return 503")
@@ -87,7 +93,7 @@ async def get_oidc_client(
     startup. Discovery is retried on demand afterwards, so a provider that is briefly down
     while the service boots does not require a restart.
     """
-    return await load_oidc_client(request.app.state, settings)
+    return await load_oidc_client(request.app.state, settings.oidc)
 
 
 async def get_user_info(
@@ -136,3 +142,8 @@ async def get_user_info(
     cached_users[subject] = user_info
 
     return user_info
+
+
+async def get_download_totp(request: Request) -> DownloadTotpAuthority:
+    """ FastAPI dependable to obtain the TOTP authority """
+    return request.app.state.download_totp

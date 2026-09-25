@@ -239,15 +239,17 @@ def discover(mocker: MockerFixture, oidc: Any) -> AsyncMock:
 async def test_discovery_is_done_once_and_kept(settings: Settings, oidc: Any, discover: AsyncMock):
     state = app_state()
 
-    assert await load_oidc_client(state, settings) is oidc
-    assert await load_oidc_client(state, settings) is oidc
+    assert await load_oidc_client(state, settings.oidc) is oidc
+    assert await load_oidc_client(state, settings.oidc) is oidc
 
     discover.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_discovery_uses_the_configured_provider(settings: Settings, discover: AsyncMock):
-    await load_oidc_client(app_state(), settings)
+    await load_oidc_client(app_state(), settings.oidc)
+
+    assert settings.oidc is not None
 
     discover.assert_awaited_once_with(
         provider_url=settings.oidc.provider_url,
@@ -270,12 +272,12 @@ async def test_a_failed_discovery_is_retried_on_the_next_request(
     discover.side_effect = [ failure, oidc ]
     state = app_state()
 
-    assert await load_oidc_client(state, settings) is None
-    assert await load_oidc_client(state, settings) is oidc
+    assert await load_oidc_client(state, settings.oidc) is None
+    assert await load_oidc_client(state, settings.oidc) is oidc
 
 
 @pytest.mark.asyncio
 async def test_an_open_deployment_discovers_nothing(open_settings: Settings, discover: AsyncMock):
-    assert await load_oidc_client(app_state(), open_settings) is None
+    assert await load_oidc_client(app_state(), open_settings.oidc) is None
 
     discover.assert_not_awaited()

@@ -69,3 +69,22 @@ class PostProcessingJob(BaseModel):
             examples=["mustermann@vss.uni-hannover.de", None]
         )
     ]
+
+
+class DisplayableRecording(BaseModel):
+    """ Information needed to display a recording in the UI """
+    name: str
+
+
+class DownloadableRecording(DisplayableRecording):
+    """ Per-downloadable-file information for the frontend """
+    size: int
+    totp: str
+
+
+class RecordingsList(BaseModel):
+    """ List of recordings as returned by the recordings-list endpoint  """
+    user: str
+    completed: list[DownloadableRecording]
+    rendering: list[DisplayableRecording]
+    unprocessed: list[DisplayableRecording]

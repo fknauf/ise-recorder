@@ -4,13 +4,14 @@
    This module defines the HTTP API endpoints and validates inputs.
 """
 
+import asyncio
 from collections import defaultdict
 from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
 import shutil
-from typing import Annotated, Any, AsyncGenerator, Callable, NoReturn
+from typing import Annotated, AsyncGenerator
 
 import aiofiles
 from fastapi import (
@@ -26,22 +27,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import Field
 
-from ise_record.core.auth import UserInfo
-from ise_record.core.download_totp import DownloadTotpAuthority
+from ise_record.core.auth import DownloadTotpAuthority
 from ise_record.core.logconfig import setup_logging
 from ise_record.core.postprocess import OUTPUT_FILENAME
-from ise_record.glue.auth import get_user_info, load_oidc_client, OidcServerState
-from ise_record.glue.download_totp import get_download_totp
+from ise_record.glue.auth import load_oidc_client, OidcServerState
+from ise_record.glue.auth import get_download_totp
 from ise_record.glue.jobs import postprocessing_task, get_running_jobs
-from ise_record.glue.models import ChunkUpload, PostProcessingJob, SafeRecording
-from ise_record.glue.recording_lists import (
-    DownloadableRecording,
-    get_downloadable_recordings,
-    get_purgeable_recordings,
-    get_unprocessed_recordings
+from ise_record.glue.models import ChunkUpload, PostProcessingJob, RecordingsList, SafeRecording
+from ise_record.glue.recordings import (
+    get_recording_path_for_purge,
+    get_recordings_list
 )
 from ise_record.glue.user_home import get_current_user_home
 from ise_record.settings import get_settings, Settings
+
 
 def _require_authentication(
         settings: Annotated[Settings, Depends(get_settings)]
@@ -55,6 +54,7 @@ def _require_authentication(
 setup_logging()
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
+
 
 @router.post('/chunks', status_code=status.HTTP_201_CREATED)
 async def upload_chunk(
@@ -124,49 +124,25 @@ def schedule_job(
 
     return job
 
+
 @router.get('/health')
 def health_check():
     """ Endpoint for container health checks """
     logger.debug("health check requested")
     return { "status": "healthy" }
 
-@router.get('/recordings', dependencies=[ Depends(_require_authentication) ])
-async def get_recordings_list(
-    user_home: Annotated[Path, Depends(get_current_user_home)],
-    completed: Annotated[list[DownloadableRecording], Depends(get_downloadable_recordings)],
-    running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
-    unprocessed: Annotated[list[Path], Depends(get_unprocessed_recordings)]
-) -> dict[str, Any]:
-    """ Endpoint to obtain a list of completed and rendering recordings for the active user """
-    running_job_names = sorted([ job.name for job in running_jobs ])
 
-    return {
-        "user": user_home.name,
-        "completed": [
-            {
-                "name": rec.name,
-                "size": rec.size,
-                "totp": rec.totp
-            }
-            for rec in completed if rec.name not in running_job_names
-        ],
-        "rendering": [
-            {
-                "name": name
-            }
-            for name in running_job_names
-        ],
-        "unprocessed": [
-            {
-                "name": dir.name
-            }
-            for dir in unprocessed
-        ]
-    }
+@router.get('/recordings', dependencies=[ Depends(_require_authentication) ])
+async def recordings_list(
+    recordings: Annotated[RecordingsList, Depends(get_recordings_list)]
+) -> RecordingsList:
+    """ Endpoint to obtain a list of completed and rendering recordings for the active user """
+    return recordings
+
 
 @router.get(
-    '/recordings/{user_digest}/{recording}',
-    dependencies=[ Depends(_require_authentication) ]
+        '/recordings/{user_digest}/{recording}',
+        dependencies=[ Depends(_require_authentication) ]
 )
 async def download_completed(
     recording: SafeRecording,
@@ -192,68 +168,32 @@ async def download_completed(
 
     return FileResponse(file_path, filename = f"{recording}.webm")
 
+
 @router.delete('/recordings/{recording}', dependencies=[ Depends(_require_authentication) ])
-def purge_recording(
-    recording: SafeRecording,
-    user_info: Annotated[UserInfo | None, Depends(get_user_info)],
-    user_home: Annotated[Path, Depends(get_current_user_home)],
-    purgeable_recordings: Annotated[list[str], Depends(get_purgeable_recordings)],
+async def purge_recording(
+    recording_path: Annotated[Path, Depends(get_recording_path_for_purge)],
     download_totp: Annotated[DownloadTotpAuthority, Depends(get_download_totp)]
 ):
     """ Endpoint to purge a recording directory """
-
-    def fail_purge(
-            log: Callable[[str], None],
-            status_code: int,
-            detail: str
-    ) -> NoReturn:
-        log(detail)
-        raise HTTPException(status_code=status_code, detail=detail)
-
-    if user_info is None:
-        fail_purge(
-            logger.error,
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User is not authenticated"
-        )
-
-    logger.info("User %s (sub = %s) is purging recording %s",
-                user_info.preferred_username, user_info.sub, recording)
-
-    recording_path = user_home / recording
-
-    if not recording_path.is_dir(follow_symlinks=False):
-        fail_purge(
-            logger.warning,
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Recording {recording} does not exist for this user"
-        )
-
-    if not recording in purgeable_recordings:
-        fail_purge(
-            logger.warning,
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Recording {recording} is in use and currently not purgeable"
-        )
-
     try:
-        shutil.rmtree(recording_path)
-    except Exception: # pylint: disable=broad-exception-caught
-        fail_purge(
-            logger.exception,
+        await asyncio.to_thread(shutil.rmtree, recording_path)
+    except Exception as exc: # pylint: disable=broad-exception-caught
+        logger.exception("Filesystem error")
+        raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Filesystem error"
-        )
+        ) from exc
 
     download_totp.forget(recording_path / OUTPUT_FILENAME)
 
     return {
-        "recording": recording,
+        "recording": recording_path.name,
         "detail": "deleted successfully"
     }
 
+
 def create_app(
-        settings: Settings | None = None
+    settings: Settings | None = None
 ) -> FastAPI:
     """ Application factory. Creates a FastAPI app configured with the given settings. """
     override_settings = settings
@@ -264,7 +204,7 @@ def create_app(
         if settings.auth_required:
             # Attempt to load openid config at application start instead of first request. This
             # isn't strictly necessary but will log an error if the openid provider is unreachable.
-            await load_oidc_client(application.state, settings)
+            await load_oidc_client(application.state, settings.oidc)
         else:
             logger.warning("no OpenID provider configured -- endpoints are unauthenticated")
         yield

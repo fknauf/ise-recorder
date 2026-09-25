@@ -1,14 +1,28 @@
 """
-OpenID Connect authentication client
-"""
+Authentication facilities, OIDC for user authentication and a TOTP mechanism for downloads.
 
+OIDC is pretty standard. There's oidc discovery, token validation, and userinfo query for the case
+where the access token doesn't contain a user name (e.g. kanidm is like that).
+
+For downloads, a special mechanism is needed because it's not possible to attach a bearer token to
+requests that come from browsers when the user clicks a download link, at least not without a whole
+lot of hubbub involving service workers that intercept the request in-flight and modify it, which
+becomes ugly real fast.
+
+So instead, when the frontend asks which recordings are downloadable, we generate a one-time
+password for each file that the frontend can attach as a GET parameter to the link. Frontend
+refreshes the list of recordings regularly, and each time gets new TOTPs.
+"""
 from dataclasses import dataclass
+import hashlib
 import logging
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import httpx2
 import jwt
 from pydantic import BaseModel, ValidationError
+import pyotp
 
 REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub")
 JWKS_CACHE_SECONDS = 1800.0
@@ -36,7 +50,7 @@ class OidcClient:
     jwk_client: jwt.PyJWKClient
     issuer: str
     audience: str
-    userinfo_endpoint: str
+    userinfo_endpoint: str | None
     leeway_seconds: float
     http_timeout_seconds: float
 
@@ -149,3 +163,51 @@ class UserInfo(NamedTuple):
     """ User information used in the ise-recorder backend """
     sub: str
     preferred_username: str | None = None
+
+
+class DownloadTotpAuthority:
+    """
+    Collection of per-file TOTP generators/verifiers. Used to generate and verify tokens for
+    arbitrary processed recordings.
+    """
+
+    def __init__(self):
+        self.factories = dict[str, pyotp.TOTP]()
+
+    @classmethod
+    def _recording_key(cls, file_path: Path) -> str:
+        return f"{str(file_path.absolute())}"
+
+    def generate(self, file_path: Path) -> str:
+        """ Generate a TOTP that authorizes the download of a specific processed recording """
+        key = self._recording_key(file_path)
+
+        # Cache a TOTP factory the first time an OTP is generated for the file
+        if key in self.factories:
+            totp = self.factories[key]
+        else:
+            totp = pyotp.TOTP(
+                pyotp.random_base32(),
+                digits=10,
+                digest=hashlib.sha3_256,
+                interval=120
+            )
+            self.factories[key] = totp
+
+        return totp.now()
+
+    def verify(self, totp: str, file_path: Path) -> bool:
+        """ Verify that a TOTP is valid for the download of the specified file """
+
+        key = self._recording_key(file_path)
+
+        if key not in self.factories:
+            return False
+
+        return self.factories[key].verify(totp)
+
+    def forget(self, file_path: Path):
+        """ Remove a TOTP factory from the authority. Used when a recording is purged. """
+
+        key = self._recording_key(file_path)
+        self.factories.pop(key, None)
