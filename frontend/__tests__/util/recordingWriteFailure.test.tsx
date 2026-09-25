@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
-import { ServerStorageDestination } from "@/lib/utils/serverStorage";
+import { sendChunkToServer, ServerStorageDestination } from "@/lib/utils/serverStorage";
 
 /**
  * What happens when the OPFS refuses a write -- in practice, an exhausted browser
@@ -78,6 +78,9 @@ async function recordOneChunk(onChunkWritten: (name: string, file: string, size:
 }
 
 beforeEach(() => {
+  // the real one always returns a promise, and recordLecture chains on it; the automock's
+  // bare undefined would fail there before the local write this file is about
+  vi.mocked(sendChunkToServer).mockResolvedValue(true);
   audioContext = new AudioContext();
 });
 

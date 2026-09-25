@@ -96,6 +96,7 @@ export interface AppStoreState {
   fileSizeOverrides: Map<string, number>
   savedRecordings: readonly RecordingFileList[]
   adjustedSavedRecordings: readonly RecordingFileList[]
+  manuallyUploading: string[]
   quota: number | undefined
   usage: number | undefined
 
@@ -117,6 +118,8 @@ export interface AppStoreState {
   setActiveRecording: (newActiveRecording: StateUpdate<ActiveRecording>) => void
   overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) => void
   resetFileSizeOverrides: () => void
+  signalManualUploadStarted: (recordingName: string) => void
+  signalManualUploadFinished: (recordingName: string) => void
   updateBrowserStorage: () => Promise<void>
   updateQuotaInformation: () => Promise<void>
 }
@@ -145,6 +148,7 @@ const createRawAppStore = (
   fileSizeOverrides: new Map<string, number>(),
   savedRecordings: [],
   adjustedSavedRecordings: [],
+  manuallyUploading: [],
   quota: undefined,
   usage: undefined,
 
@@ -239,6 +243,14 @@ const createRawAppStore = (
       fileSizeOverrides: new Map(),
       adjustedSavedRecordings: state.savedRecordings
     })),
+
+  signalManualUploadStarted: (recordingName: string) => set(state => ({
+    manuallyUploading: [ ...state.manuallyUploading, recordingName ]
+  })),
+
+  signalManualUploadFinished: (recordingName: string) => set(state => ({
+    manuallyUploading: state.manuallyUploading.filter(name => name !== recordingName)
+  })),
 
   updateQuotaInformation: async () => {
     const { quota, usage } = await navigator.storage.estimate();

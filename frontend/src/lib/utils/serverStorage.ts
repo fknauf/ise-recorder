@@ -77,7 +77,7 @@ export async function sendChunkToServer(
   retryPolicy: RetryPolicy = { retries: 10, intervalMillis: 2000 }
 ) {
   if(!destination.apiUrl || destination.streamingImpeded) {
-    return;
+    return false;
   }
 
   const chunkUrl = `${destination.apiUrl}/api/chunks`;
@@ -97,7 +97,10 @@ export async function sendChunkToServer(
 
   if(result.status !== "ok") {
     showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`);
+    return false;
   }
+
+  return true;
 }
 
 export async function schedulePostprocessing(
@@ -185,4 +188,24 @@ export async function purgeRecording(
     const errMsg = e instanceof Error ? e.message : "Unknown error";
     showError(`Failed to purge ${recordingName}: ${errMsg}`);
   }
+}
+
+export async function uploadFile(
+  destination: ServerStorageDestination,
+  file: Blob,
+  recording: string,
+  track: string,
+  retryPolicy?: RetryPolicy
+): Promise<boolean> {
+  const CHUNK_SIZE = 4 * 2 ** 20;
+
+  for(let index = 0, offset = 0; offset < file.size; ++index, offset += CHUNK_SIZE) {
+    const chunk = file.slice(offset, offset + CHUNK_SIZE);
+
+    if(!await sendChunkToServer(destination, chunk, recording, track, index, retryPolicy)) {
+      return false;
+    }
+  }
+
+  return true;
 }

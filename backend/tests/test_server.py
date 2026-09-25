@@ -682,14 +682,14 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     assert data["completed"][0]["name"] == "GVS_2025"
     assert data["completed"][0]["size"] == 5
     assert download_totp.verify(
-        data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm"
-    )  # type: ignore
+        data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm" # type: ignore
+    )
 
     assert data["completed"][1]["name"] == "PSU_2026"
     assert data["completed"][1]["size"] == 5
     assert download_totp.verify(
-        data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm"
-    )  # type: ignore
+        data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm" # type: ignore
+    )
 
 
 def test_the_listing_leaves_out_recordings_that_are_not_rendered(

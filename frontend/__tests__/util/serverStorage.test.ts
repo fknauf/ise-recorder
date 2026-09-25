@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { downloadUrl, purgeRecording, sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
+import { downloadUrl, purgeRecording, sendChunkToServer, schedulePostprocessing, ServerStorageDestination, uploadFile } from "@/lib/utils/serverStorage";
 import { showError, showSuccess } from "@/lib/utils/notifications";
 
 interface FetchRequest {
@@ -736,4 +736,113 @@ test("a backend that cannot be reached is reported rather than thrown", async ()
 test("the download URL carries the user, the encoded recording name and the OTP", () => {
   expect(downloadUrl(API, "8f14e45f", "Übung_2025", "0123456789"))
     .toBe(`${API}/api/recordings/8f14e45f/${encodeURIComponent("Übung_2025")}?totp=0123456789`);
+});
+
+// --- uploading a whole file in chunks --------------------------------------
+//
+// The manual re-upload sends a locally saved track the same way the live recording does:
+// as numbered chunks, which the backend joins byte for byte. So the split points can fall
+// anywhere, and what matters is that the pieces add up to the file, in order, with no gap.
+
+const MiB = 2 ** 20;
+const CHUNK = 4 * MiB;
+
+const uploadDestination: ServerStorageDestination = {
+  apiUrl: API,
+  streamingImpeded: false,
+  getAccessToken: accessToken
+};
+
+/** Every chunk request fetch() received, with the form fields the backend reads. */
+async function sentChunks() {
+  return Promise.all(vi.mocked(window.fetch).mock.calls.map(async ([ url, request ]) => {
+    const form = (request as RequestInit).body as FormData;
+    const chunk = form.get("chunk") as Blob;
+
+    return {
+      url,
+      recording: form.get("recording"),
+      track: form.get("track"),
+      index: Number(form.get("index")),
+      bytes: new Uint8Array(await chunk.arrayBuffer())
+    };
+  }));
+}
+
+function fileOf(size: number) {
+  // a byte pattern that does not repeat at the chunk size, so a chunk sent twice or out of
+  // order would not add up to the same bytes by accident
+  const bytes = new Uint8Array(size);
+  for(let i = 0; i < size; ++i) {
+    bytes[i] = (i * 7 + (i >> 12)) & 0xff;
+  }
+  return { bytes, blob: new Blob([ bytes ]) };
+}
+
+test("a file larger than a chunk goes up as numbered chunks that add up to it", async () => {
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({}, { status: 201 }));
+  const { bytes, blob } = fileOf(2 * CHUNK + 12345);
+
+  await expect(uploadFile(uploadDestination, blob, "GVS_2025-manual", "stream")).resolves.toBe(true);
+
+  const chunks = await sentChunks();
+
+  expect(chunks.map(c => c.index)).toStrictEqual([ 0, 1, 2 ]);
+  expect(chunks.map(c => c.bytes.length)).toStrictEqual([ CHUNK, CHUNK, 12345 ]);
+  expect(chunks.every(c => c.url === `${API}/api/chunks` && c.recording === "GVS_2025-manual" && c.track === "stream")).toBe(true);
+
+  const joined = new Uint8Array(bytes.length);
+  let offset = 0;
+  for(const c of chunks) {
+    joined.set(c.bytes, offset);
+    offset += c.bytes.length;
+  }
+  // the first byte that differs rather than toStrictEqual, whose element-wise deep
+  // comparison of a 9 MiB array takes longer than the test is allowed to run
+  expect(joined.findIndex((byte, i) => byte !== bytes[i])).toBe(-1);
+});
+
+test("a file of exactly whole chunks gets no empty chunk at the end", async () => {
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({}, { status: 201 }));
+
+  await uploadFile(uploadDestination, fileOf(2 * CHUNK).blob, "GVS_2025-manual", "stream");
+
+  expect((await sentChunks()).map(c => c.bytes.length)).toStrictEqual([ CHUNK, CHUNK ]);
+});
+
+test("a file smaller than a chunk goes up as chunk 0", async () => {
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({}, { status: 201 }));
+
+  await uploadFile(uploadDestination, fileOf(1000).blob, "GVS_2025-manual", "overlay");
+
+  expect((await sentChunks()).map(c => [ c.index, c.bytes.length ])).toStrictEqual([ [ 0, 1000 ] ]);
+});
+
+test("an empty file sends nothing and counts as uploaded", async () => {
+  window.fetch = vi.fn();
+
+  await expect(uploadFile(uploadDestination, new Blob([]), "GVS_2025-manual", "audio-0")).resolves.toBe(true);
+
+  expect(window.fetch).not.toHaveBeenCalled();
+});
+
+test("the upload stops at the first chunk that fails", async () => {
+  // the rest would only land behind a gap, which the backend treats as the end of the track
+  window.fetch = vi.fn()
+    .mockImplementationOnce(async () => Response.json({}, { status: 201 }))
+    .mockImplementation(async () => Response.json({ detail: "disk full" }, { status: 507 }));
+
+  const result = await uploadFile(uploadDestination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", { retries: 0, intervalMillis: 0 });
+
+  expect(result).toBe(false);
+  expect((await sentChunks()).map(c => c.index)).toStrictEqual([ 0, 1 ]);
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("chunk 1"));
+});
+
+test("nothing is uploaded without a backend", async () => {
+  window.fetch = vi.fn();
+
+  await expect(uploadFile({ ...uploadDestination, apiUrl: undefined }, fileOf(1000).blob, "GVS_2025-manual", "stream")).resolves.toBe(false);
+
+  expect(window.fetch).not.toHaveBeenCalled();
 });

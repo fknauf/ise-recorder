@@ -3,10 +3,13 @@
 import { ActionButton, Text } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
+import DataUpload from "@spectrum-icons/workflow/DataUpload";
 import { downloadFile, RecordingFileList } from "../utils/browserStorage";
-import { useBrowserStorage } from "../hooks/useBrowserStorage";
+import { useBrowserStorage, useReuploadSavedRecording } from "../hooks/useBrowserStorage";
 import { useActiveRecording } from "../hooks/useActiveRecording";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
+import { useAppStore } from "../hooks/useAppStore";
+import { useServerEnv } from "../hooks/useServerEnv";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -24,12 +27,16 @@ const mibFormatter = new Intl.NumberFormat(
  * Buttons are disabled for the currently active recording.
  */
 export function SavedRecordingsSection() {
+  const { apiUrl } = useServerEnv();
   const activeRecording = useActiveRecording();
 
   const {
     savedRecordings,
-    removeSavedRecording
+    removeSavedRecording,
   } = useBrowserStorage();
+
+  const reuploadSavedRecording = useReuploadSavedRecording();
+  const manuallyUploading = useAppStore(state => state.manuallyUploading);
 
   const isDisabled = (r: RecordingFileList) => r.name === activeRecording.name;
 
@@ -65,6 +72,16 @@ export function SavedRecordingsSection() {
               <Delete/>
               <Text>Remove</Text>
             </ActionButton>
+            {
+              apiUrl !== undefined &&
+              <ActionButton
+                isDisabled={isDisabled(rec) || manuallyUploading.includes(rec.name)}
+                onPress={() => reuploadSavedRecording(rec.name)}
+              >
+                <DataUpload/>
+                <Text>Re-upload manually</Text>
+              </ActionButton>
+            }
           </RecordingCard>
         )
       }

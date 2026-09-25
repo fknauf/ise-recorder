@@ -36,6 +36,26 @@ async function getRecordingFile(recordingName: string, filename: string, options
   return await recordingDir.getFileHandle(filename, options);
 }
 
+export interface RecordingTrackBlob {
+  trackName: string
+  file: File
+}
+
+export async function getAllRecordingTracks(recordingName: string) {
+  const dir = await getRecordingDirectory(recordingName);
+  const allFilenames = await Array.fromAsync(dir.keys());
+  const filenames = allFilenames.filter(name => name.endsWith(".webm")).sort();
+
+  const openTrack = async (fname: string): Promise<RecordingTrackBlob> => (
+    {
+      trackName: fname.replace(/\.webm$/, ""),
+      file: await dir.getFileHandle(fname).then(h => h.getFile())
+    }
+  );
+
+  return await Array.fromAsync(filenames.map(openTrack));
+}
+
 /**
  * Try to obtain file size, but don't fail if we can't. It's just to
  * show the file size on the download buttons, not critical information.

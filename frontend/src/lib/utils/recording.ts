@@ -227,7 +227,7 @@ export async function recordLecture(
   const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
     // No need to await: we support sending chunks to server out of order and/or concurrently.
     const backgroundPromise =
-      sendChunkToServer(destination, chunk, recordingName, trackTitle, chunkIndex);
+      sendChunkToServer(destination, chunk, recordingName, trackTitle, chunkIndex).then(() => {});
 
     // For local file storage on the other hand, it's important that chunks to the same file
     // are not written concurrently and that filesystem state updates are correctly ordered.

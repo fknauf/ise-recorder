@@ -70,7 +70,7 @@ def test_missing_required_claim_is_rejected(oidc: OidcClient, provider: Provider
     # turn. Parametrized over the constant itself: adding a claim to REQUIRED_CLAIMS without
     # a provider that sends it is how this went wrong before.
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(provider.mint(**{claim: None}))
+        oidc.validate_access_token(provider.mint(**{claim: None})) # type: ignore
 
 
 def test_an_access_token_without_a_scope_claim_is_accepted(oidc: OidcClient, provider: Provider):

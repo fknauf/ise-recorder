@@ -2,7 +2,7 @@
 
 import { useAppSession } from "./SessionProvider";
 import { useServerEnv } from "../hooks/useServerEnv";
-import { ActionButton, Button, ButtonGroup, Content, Dialog, DialogTrigger, Divider, Flex, Heading, InlineAlert, Link, ProgressCircle, Text } from "@adobe/react-spectrum";
+import { ActionButton, Button, ButtonGroup, Content, Dialog, DialogContainer, Divider, Flex, Heading, InlineAlert, Link, ProgressCircle, Text, useDialogContainer } from "@adobe/react-spectrum";
 import Download from "@spectrum-icons/workflow/Download";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import Delete from "@spectrum-icons/workflow/Delete";
@@ -54,53 +54,50 @@ const useRerender = (recordingName: string) => {
   return [ busy, rerender ] as const;
 };
 
-function PurgeButton({ recordingName }: Readonly<{ recordingName: string }>) {
+function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
   const { apiUrl } = useServerEnv();
   const { getAccessToken } = useAppSession();
   const refreshProcessedRecordings = useRefreshProcessedRecordings();
+
+  const { dismiss } = useDialogContainer();
   const [ busy, setBusy ] = useState(false);
 
   if(apiUrl === undefined) {
     return null;
   }
 
-  return (
-    <DialogTrigger>
-      <ActionButton width="100%">
-        <Delete/>
-        <Text>Purge</Text>
-      </ActionButton>
-      {
-        close =>
-          <Dialog>
-            <Heading>
-              Confirm purge of {recordingName}
-            </Heading>
-            <Divider/>
-            <Content>
-              <Text>You are about to permanently delete the recording {recordingName} from the server. This can not be undone. Are you sure?</Text>
-            </Content>
-            <ButtonGroup>
-              <Button isDisabled={busy} variant="secondary" onPress={close} autoFocus>Cancel</Button>
-              <Button
-                isDisabled={busy} variant="negative" onPress={async () => {
-                  setBusy(true);
-                  await purgeRecording(apiUrl, recordingName, getAccessToken, refreshProcessedRecordings);
-                  setBusy(false);
-                  close();
-                }}
-              >Purge
-              </Button>
-            </ButtonGroup>
-          </Dialog>
+  const initiatePurge = async () => {
+    setBusy(true);
+    await purgeRecording(apiUrl, recordingName, getAccessToken, refreshProcessedRecordings);
+    setBusy(false);
+    dismiss();
+  };
 
-      }
-    </DialogTrigger>
+  return (
+    <Dialog>
+      <Heading>
+        Confirm purge of {recordingName}
+      </Heading>
+      <Divider/>
+      <Content>
+        <Text>You are about to permanently delete the recording {recordingName} from the server. This can not be undone. Are you sure?</Text>
+      </Content>
+      <ButtonGroup>
+        <Button isDisabled={busy} variant="secondary" onPress={dismiss} autoFocus>Cancel</Button>
+        <Button
+          isDisabled={busy}
+          variant="negative"
+          onPress={initiatePurge}
+        >
+          Purge
+        </Button>
+      </ButtonGroup>
+    </Dialog>
   );
 }
 
 function ProcessedRecordingCard(
-  { user, recording }: Readonly<{ user: string; recording: DownloadableRecording }>
+  { user, recording, onPurge }: Readonly<{ user: string; recording: DownloadableRecording; onPurge: () => void }>
 ) {
   const { apiUrl } = useServerEnv();
   const [ busy, rerender ] = useRerender(recording.name);
@@ -135,7 +132,10 @@ function ProcessedRecordingCard(
         <Text>Rerender</Text>
       </ActionButton>
 
-      <PurgeButton recordingName={recording.name}/>
+      <ActionButton width="100%" onPress={() => onPurge()}>
+        <Delete/>
+        <Text>Purge</Text>
+      </ActionButton>
     </RecordingCard>
   );
 }
@@ -151,7 +151,7 @@ const RenderingRecordingCard = (
   </RecordingCard>;
 
 function UnprocessedRecordingCard(
-  { recording }: Readonly<{ recording: UnprocessedRecording }>
+  { recording, onPurge }: Readonly<{ recording: UnprocessedRecording; onPurge: () => void }>
 ) {
   const [ busy, rerender ] = useRerender(recording.name);
 
@@ -166,7 +166,10 @@ function UnprocessedRecordingCard(
         <Refresh/>
         <Text>Rerender</Text>
       </ActionButton>
-      <PurgeButton recordingName={recording.name}/>
+      <ActionButton width="100%" onPress={onPurge}>
+        <Delete/>
+        <Text>Purge</Text>
+      </ActionButton>
     </RecordingCard>
   );
 }
@@ -186,6 +189,7 @@ function prettifyError(error: unknown) {
 function PreprocessedRecordingsSectionImpl() {
   const { data, error } = useProcessedRecordings();
   const sectionTitle = "Server-Side Processed Recordings";
+  const [ purgeCandidate, setPurgeCandidate ] = useState<string | null>(null);
 
   if(error !== undefined) {
     return (
@@ -208,12 +212,16 @@ function PreprocessedRecordingsSectionImpl() {
 
   return (
     <RecordingCardSection title={sectionTitle}>
+      <DialogContainer onDismiss={() => setPurgeCandidate(null)}>
+        { purgeCandidate !== null && <PurgeDialog recordingName={purgeCandidate}/> }
+      </DialogContainer>
       {
         data.completed.map(rec =>
           <ProcessedRecordingCard
             key={rec.name}
             user={data.user}
             recording={rec}
+            onPurge={() => setPurgeCandidate(rec.name)}
           />
         )
       }
@@ -224,7 +232,11 @@ function PreprocessedRecordingsSectionImpl() {
       }
       {
         data.unprocessed.map(rec =>
-          <UnprocessedRecordingCard key={rec.name} recording={rec}/>
+          <UnprocessedRecordingCard
+            key={rec.name}
+            recording={rec}
+            onPurge={() => setPurgeCandidate(rec.name)}
+          />
         )
       }
     </RecordingCardSection>

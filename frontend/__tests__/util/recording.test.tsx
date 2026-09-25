@@ -1,10 +1,15 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { render, screen } from "@testing-library/react";
 import { sendChunkToServer, schedulePostprocessing, ServerStorageDestination } from "@/lib/utils/serverStorage";
 
 vi.mock("@/lib/utils/serverStorage");
+
+beforeEach(() => {
+  // the real one always returns a promise, and recordLecture chains on it
+  vi.mocked(sendChunkToServer).mockResolvedValue(true);
+});
 
 const accessToken = async () => "test-token";
 

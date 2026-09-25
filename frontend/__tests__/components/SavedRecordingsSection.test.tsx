@@ -1,16 +1,43 @@
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
 import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { useActiveRecording } from "@/lib/hooks/useActiveRecording";
-import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
+import { useBrowserStorage, useReuploadSavedRecording } from "@/lib/hooks/useBrowserStorage";
 import { downloadFile } from "@/lib/utils/browserStorage";
+import { ServerEnv } from "@/lib/utils/serverEnv";
 
 vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useBrowserStorage");
 vi.mock("@/lib/utils/browserStorage");
+
+// The section reads which recordings are being re-uploaded from the store. Only that one
+// field is faked; the rest of the module stays real for whoever else imports it.
+let manuallyUploading: string[] = [];
+vi.mock("@/lib/hooks/useAppStore", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/hooks/useAppStore")>(),
+  useAppStore: function<T>(selector: (state: { manuallyUploading: string[] }) => T) {
+    return selector({ manuallyUploading });
+  }
+}));
+
+const mockServerEnv = vi.fn<() => ServerEnv>();
+vi.mock("@/lib/hooks/useServerEnv", () => ({
+  useServerEnv: () => mockServerEnv()
+}));
+
+const reupload = vi.fn();
+
+beforeEach(() => {
+  // no backend by default: the tests below that predate the re-upload count buttons, and
+  // a deployment without a server offers nothing to upload to
+  mockServerEnv.mockReturnValue({});
+  manuallyUploading = [];
+  reupload.mockReset();
+  vi.mocked(useReuploadSavedRecording).mockReturnValue(reupload);
+});
 
 test("SavedRecordingsSection displays recordings and reacts to clicks", async () => {
   const MiB = 2 ** 20;
@@ -219,4 +246,86 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
   expect(onDownload).not.toHaveBeenCalled();
   await user.click(barButtons[3]);
   expect(onRemove).not.toHaveBeenCalled();
+});
+
+// --- manual re-upload ------------------------------------------------------
+//
+// For a recording whose live upload did not make it to the server, the local copy can be
+// sent again. What the upload itself does is useReuploadSavedRecording's business, in
+// useBrowserStorage.test.tsx; this is where the button appears and when it can be pressed.
+
+const TWO_RECORDINGS: RecordingFileList[] = [
+  { name: "FOO_2025-12-11T213822.748Z", files: [ { name: "stream.webm", size: 2 ** 20 } ] },
+  { name: "BAR_2025-12-11T214230.418Z", files: [ { name: "stream.webm", size: 2 ** 20 } ] }
+];
+
+function renderWithBackend(activeRecording: ReturnType<typeof useActiveRecording> = { state: "idle" }) {
+  mockServerEnv.mockReturnValue({ apiUrl: "https://record.example.edu" });
+  vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
+  vi.mocked(useBrowserStorage).mockReturnValue({
+    quota: undefined,
+    usage: undefined,
+    savedRecordings: TWO_RECORDINGS,
+    removeSavedRecording: vi.fn()
+  });
+
+  render(
+    <Provider theme={defaultTheme}>
+      <SavedRecordingsSection/>
+    </Provider>
+  );
+
+  return screen.getAllByTestId("sr-card");
+}
+
+const reuploadButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Re-upload manually/ });
+
+test("with a backend, every saved recording can be re-uploaded", async () => {
+  const cards = renderWithBackend();
+
+  await userEvent.click(reuploadButton(cards[1]));
+
+  expect(reupload).toHaveBeenCalledExactlyOnceWith("BAR_2025-12-11T214230.418Z");
+  expect(reuploadButton(cards[0])).toBeEnabled();
+});
+
+test("without a backend, nothing is offered for re-upload", async () => {
+  vi.mocked(useActiveRecording).mockReturnValue({ state: "idle" });
+  vi.mocked(useBrowserStorage).mockReturnValue({
+    quota: undefined,
+    usage: undefined,
+    savedRecordings: TWO_RECORDINGS,
+    removeSavedRecording: vi.fn()
+  });
+
+  render(
+    <Provider theme={defaultTheme}>
+      <SavedRecordingsSection/>
+    </Provider>
+  );
+
+  expect(screen.queryByRole("button", { name: /Re-upload manually/ })).toBeNull();
+});
+
+test("the recording that is being made cannot be re-uploaded", () => {
+  // its files are still being written, so the upload would send half a recording
+  const cards = renderWithBackend({ state: "recording", name: "BAR_2025-12-11T214230.418Z", stop: vi.fn(), streamingImpeded: true });
+
+  expect(reuploadButton(cards[1])).toBeDisabled();
+  expect(reuploadButton(cards[0])).toBeEnabled();
+});
+
+test("a recording cannot be re-uploaded again while its re-upload is running", async () => {
+  // a second press would upload into the same directory the first one is writing to, and
+  // schedule a second job for it
+  manuallyUploading = [ "BAR_2025-12-11T214230.418Z" ];
+
+  const cards = renderWithBackend();
+
+  expect(reuploadButton(cards[1])).toBeDisabled();
+  // only that recording: the others can go up in the meantime
+  expect(reuploadButton(cards[0])).toBeEnabled();
+
+  await userEvent.click(reuploadButton(cards[1]));
+  expect(reupload).not.toHaveBeenCalled();
 });
