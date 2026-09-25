@@ -150,13 +150,13 @@ test("every track goes up under a name of its own, then the job is scheduled", a
   await act(() => result.current.reupload("GVS_2025"));
 
   expect(vi.mocked(uploadFile).mock.calls.map(([ , file, recording, track ]) => [ recording, track, (file as File).name ])).toStrictEqual([
-    [ "GVS_2025-manual", "overlay", "overlay.webm" ],
-    [ "GVS_2025-manual", "stream", "stream.webm" ]
+    [ "GVS_2025-reupload", "overlay", "overlay.webm" ],
+    [ "GVS_2025-reupload", "stream", "stream.webm" ]
   ]);
   expect(uploadFile).toHaveBeenCalledWith(destination, expect.anything(), expect.anything(), expect.anything(), expect.anything());
   // the report goes to whoever is in the lecture form now; the backend keeps no record of
   // the original recipient
-  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-manual", "lecturer@example.edu", expect.anything());
+  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-reupload", "lecturer@example.edu", expect.anything());
   expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
 });
 
@@ -240,7 +240,7 @@ test("an upload that blows up is reported and gives the button back", async () =
 
   await act(() => result.current.reupload("GVS_2025"));
 
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("GVS_2025-manual"));
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("GVS_2025-reupload"));
   expect(result.current.uploading).toStrictEqual([]);
   expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
   error.mockRestore();

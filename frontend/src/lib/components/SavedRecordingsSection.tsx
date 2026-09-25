@@ -32,7 +32,7 @@ export function SavedRecordingsSection() {
 
   const {
     savedRecordings,
-    removeSavedRecording,
+    removeSavedRecording
   } = useBrowserStorage();
 
   const reuploadSavedRecording = useReuploadSavedRecording();

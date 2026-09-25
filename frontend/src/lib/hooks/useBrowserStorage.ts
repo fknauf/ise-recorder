@@ -34,7 +34,7 @@ export function useBrowserStorage() {
     quota,
     usage,
     savedRecordings: adjustedRecordings,
-    removeSavedRecording,
+    removeSavedRecording
   };
 }
 
@@ -50,7 +50,7 @@ export function useReuploadSavedRecording() {
   const reuploadSavedRecording = async (recordingName: string) => {
     signalManualUploadStarted(recordingName);
 
-    const uploadName = `${recordingName}-manual`;
+    const uploadName = `${recordingName}-reupload`;
     const destination = {
       apiUrl,
       getAccessToken,
@@ -86,10 +86,10 @@ export function useReuploadSavedRecording() {
       console.error(`Unexpected error during manual upload of ${uploadName}`, e);
       showError(`Manual upload of ${uploadName} failed`);
     }
-    
+
     signalManualUploadFinished(recordingName);
     refreshProcessedRecordings();
-  }
+  };
 
   return reuploadSavedRecording;
 }
