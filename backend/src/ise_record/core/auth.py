@@ -13,6 +13,7 @@ So instead, when the frontend asks which recordings are downloadable, we generat
 password for each file that the frontend can attach as a GET parameter to the link. Frontend
 refreshes the list of recordings regularly, and each time gets new TOTPs.
 """
+
 from dataclasses import dataclass
 import hashlib
 import logging
@@ -32,20 +33,25 @@ INSECURE_ALGORITHMS = frozenset({"none", "hs256", "hs384", "hs512"})
 
 logger = logging.getLogger(__name__)
 
+
 class ProviderUnreachable(Exception):
-    """ Exception class to signal that the OIDC provider was unreachable """
+    """Exception class to signal that the OIDC provider was unreachable"""
+
 
 class Unauthenticated(Exception):
-    """ Exception class to signal that a token could not be authenticated """
+    """Exception class to signal that a token could not be authenticated"""
+
 
 class UserInfoResponse(BaseModel):
-    """ Part of the response of the OIDC provider's userinfo_endpoint, used for validation """
+    """Part of the response of the OIDC provider's userinfo_endpoint, used for validation"""
+
     sub: str
     preferred_username: str | None = None
 
+
 @dataclass
 class OidcClient:
-    """ Oidc Client. Supports OIDC discovery, token validation, and userinfo queries """
+    """Oidc Client. Supports OIDC discovery, token validation, and userinfo queries"""
 
     jwk_client: jwt.PyJWKClient
     issuer: str
@@ -56,11 +62,7 @@ class OidcClient:
 
     @classmethod
     async def discover(
-        cls,
-        provider_url: str,
-        audience: str,
-        leeway_seconds: float,
-        http_timeout_seconds: float
+        cls, provider_url: str, audience: str, leeway_seconds: float, http_timeout_seconds: float
     ):
         """
         Fetch provider metadata from the well-known discovery endpoint and construct an OIDC client
@@ -92,15 +94,16 @@ class OidcClient:
         )
 
     def validate_access_token(self, token: str) -> dict[str, Any]:
-        """ Validate an access token and extract its claims. """
+        """Validate an access token and extract its claims."""
 
         try:
             signing_key = self.jwk_client.get_signing_key_from_jwt(token)
             algorithm = signing_key.algorithm_name
 
             if algorithm.lower() in INSECURE_ALGORITHMS:
-                logger.error("key %s signs with %s, which we refuse to verify",
-                            signing_key.key_id, algorithm)
+                logger.error(
+                    "key %s signs with %s, which we refuse to verify", signing_key.key_id, algorithm
+                )
                 raise Unauthenticated()
 
             return jwt.decode(
@@ -110,9 +113,7 @@ class OidcClient:
                 issuer=self.issuer,
                 audience=self.audience,
                 leeway=self.leeway_seconds,
-                options={
-                    "require": list(REQUIRED_CLAIMS)
-                },
+                options={"require": list(REQUIRED_CLAIMS)},
             )
         except jwt.PyJWKClientConnectionError as exc:
             logger.error("cannot reach the JWKS endpoint: %s", exc)
@@ -124,12 +125,8 @@ class OidcClient:
             logger.info("rejected access token: %s", exc)
             raise Unauthenticated() from exc
 
-    async def query_username(
-            self,
-            access_token: str,
-            subject: str
-    ) -> str | None:
-        """ Fallback query to oidc provider if preferred_username isn't in the access token. """
+    async def query_username(self, access_token: str, subject: str) -> str | None:
+        """Fallback query to oidc provider if preferred_username isn't in the access token."""
 
         if self.userinfo_endpoint is None:
             return None
@@ -137,8 +134,7 @@ class OidcClient:
         try:
             async with httpx2.AsyncClient(timeout=self.http_timeout_seconds) as client:
                 response = await client.get(
-                    self.userinfo_endpoint,
-                    headers={ "Authorization": f"Bearer {access_token}" }
+                    self.userinfo_endpoint, headers={"Authorization": f"Bearer {access_token}"}
                 )
 
                 if response.status_code != 200:
@@ -150,7 +146,9 @@ class OidcClient:
                 if userinfo.sub != subject:
                     logger.warning(
                         "Discarding userinfo: endpoint returned info for %s when asked about %s",
-                        userinfo.sub, subject)
+                        userinfo.sub,
+                        subject,
+                    )
                     return None
 
                 return userinfo.preferred_username
@@ -160,7 +158,8 @@ class OidcClient:
 
 
 class UserInfo(NamedTuple):
-    """ User information used in the ise-recorder backend """
+    """User information used in the ise-recorder backend"""
+
     sub: str
     preferred_username: str | None = None
 
@@ -176,10 +175,10 @@ class DownloadTotpAuthority:
 
     @classmethod
     def _recording_key(cls, file_path: Path) -> str:
-        return f"{str(file_path.absolute())}"
+        return f"{file_path.absolute()!s}"
 
     def generate(self, file_path: Path) -> str:
-        """ Generate a TOTP that authorizes the download of a specific processed recording """
+        """Generate a TOTP that authorizes the download of a specific processed recording"""
         key = self._recording_key(file_path)
 
         # Cache a TOTP factory the first time an OTP is generated for the file
@@ -187,17 +186,14 @@ class DownloadTotpAuthority:
             totp = self.factories[key]
         else:
             totp = pyotp.TOTP(
-                pyotp.random_base32(),
-                digits=10,
-                digest=hashlib.sha3_256,
-                interval=120
+                pyotp.random_base32(), digits=10, digest=hashlib.sha3_256, interval=120
             )
             self.factories[key] = totp
 
         return totp.now()
 
     def verify(self, totp: str, file_path: Path) -> bool:
-        """ Verify that a TOTP is valid for the download of the specified file """
+        """Verify that a TOTP is valid for the download of the specified file"""
 
         key = self._recording_key(file_path)
 
@@ -207,7 +203,7 @@ class DownloadTotpAuthority:
         return self.factories[key].verify(totp)
 
     def forget(self, file_path: Path):
-        """ Remove a TOTP factory from the authority. Used when a recording is purged. """
+        """Remove a TOTP factory from the authority. Used when a recording is purged."""
 
         key = self._recording_key(file_path)
         self.factories.pop(key, None)

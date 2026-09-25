@@ -33,6 +33,7 @@ jobs:
       working-directory: ${{ github.workspace }}/backend
       run: |
         pylint .
+        ruff check
 
     - name: Test Backend
       working-directory: ${{ github.workspace }}/backend

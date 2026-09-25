@@ -38,6 +38,7 @@
         "healthcheck",
         "HELO",
         "httpx",
+        "isort",
         "janked",
         "kanidm",
         "lavfi",

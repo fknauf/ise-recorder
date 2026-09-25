@@ -9,12 +9,12 @@
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
 
+from collections.abc import Iterator
 import datetime
 import os
 from pathlib import Path
-from typing import Iterator
-from urllib.parse import quote
 from unittest.mock import ANY
+from urllib.parse import quote
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -22,28 +22,28 @@ from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.glue.jobs import postprocessing_task
 from ise_record.core.postprocess import Result, ResultReason
+from ise_record.glue.jobs import postprocessing_task
 from ise_record.server import create_app
 from ise_record.settings import Settings
 
 from .harness import (
-    purge,
-    write_chunks,
     abandon_recording,
-    download_totp_of,
-    running_jobs_of,
     alias_of,
     DEFAULT_SUBJECT,
     DEFAULT_SUBJECT_DIGEST,
     digest_of,
     download_completed,
+    download_totp_of,
     finish_recording,
     home_entries,
     list_recordings,
     Provider,
+    purge,
+    running_jobs_of,
     upload,
     upload_chunk_path,
+    write_chunks,
 )
 
 # NAME_MAX on ext4, which is what pathvalidate caps a filename at inside SafeRecording
@@ -51,30 +51,36 @@ NAME_MAX_BYTES = 255
 # Prefix for the route-prefix tests
 ROUTE_PREFIX = "/foo"
 
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    """ Documented defaults, with a destination directory of this test's own. """
+    """Documented defaults, with a destination directory of this test's own."""
     return Settings(destdir=tmp_path)
+
 
 @pytest.fixture
 def app(settings: Settings) -> FastAPI:
-    """ A fresh application per test. Necessary because app carries mutable state. """
+    """A fresh application per test. Necessary because app carries mutable state."""
     return create_app(settings)
+
 
 @pytest.fixture
 def client(app: FastAPI) -> Iterator[TestClient]:
-    """ A client for the app, inside `with` so the lifespan actually runs. """
+    """A client for the app, inside `with` so the lifespan actually runs."""
     with TestClient(app) as test_client:
         yield test_client
+
 
 @pytest.fixture
 def prefixed_settings(tmp_path: Path) -> Settings:
     return Settings(destdir=tmp_path, route_prefix=ROUTE_PREFIX)
 
+
 @pytest.fixture
 def prefixed_client(prefixed_settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(prefixed_settings)) as test_client:
         yield test_client
+
 
 def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
@@ -82,104 +88,86 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
 
     response = client.post(
         "/api/jobs",
-        headers={ "Content-Type": "application/json" },
-        json={
-            "recording": "foo",
-            "recipient": "foo@bar.de"
-        }
+        headers={"Content-Type": "application/json"},
+        json={"recording": "foo", "recipient": "foo@bar.de"},
     )
 
     assert response.status_code == 202
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
-        postprocessing_task,
-        settings.destdir / "foo",
-        "foo@bar.de",
-        settings.smtp,
-        ANY
+        postprocessing_task, settings.destdir / "foo", "foo@bar.de", settings.smtp, ANY
     )
     # the very set the listing reads, not merely an equal one: every empty set is equal to
     # every other, so only identity shows the job is registered where it will be looked for
     assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
 
-def test_schedule_postprocessing_recipient_omitted(mocker: MockerFixture, client: TestClient, settings: Settings):
+
+def test_schedule_postprocessing_recipient_omitted(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
-        "/api/jobs",
-        headers={ "Content-Type": "application/json" },
-        json={
-            "recording": "foo"
-        }
+        "/api/jobs", headers={"Content-Type": "application/json"}, json={"recording": "foo"}
     )
 
     assert response.status_code == 202
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
-        postprocessing_task,
-        settings.destdir / "foo",
-        None,
-        settings.smtp,
-        ANY
+        postprocessing_task, settings.destdir / "foo", None, settings.smtp, ANY
     )
     # the very set the listing reads, not merely an equal one: every empty set is equal to
     # every other, so only identity shows the job is registered where it will be looked for
     assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
 
-def test_schedule_postprocessing_error(mocker: MockerFixture, client: TestClient, settings: Settings):
+
+def test_schedule_postprocessing_error(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
     mock_isdir = mocker.patch("os.path.isdir", return_value=False)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
-        headers={ "Content-Type": "application/json" },
-        json={
-            "recording": "foo",
-            "recipient": "foo@bar.de"
-        }
+        headers={"Content-Type": "application/json"},
+        json={"recording": "foo", "recipient": "foo@bar.de"},
     )
 
     assert response.status_code == 400
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_not_called()
 
+
 def test_schedule_postprocessing_input_validation(mocker: MockerFixture, client: TestClient):
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
-        headers={ "Content-Type": "application/json" },
-        json = {
-            "recording": "AND 0 == 0; DROP TABLE important_data; --",
-            "recipient": "foo@bar.de"
-        }
+        headers={"Content-Type": "application/json"},
+        json={"recording": "AND 0 == 0; DROP TABLE important_data; --", "recipient": "foo@bar.de"},
     )
 
     assert response.status_code == 422
     mock_add_task.assert_not_called()
 
-def test_schedule_postprocessing_broken_recipient_still_starts_post(mocker: MockerFixture, client: TestClient, settings: Settings):
+
+def test_schedule_postprocessing_broken_recipient_still_starts_post(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
         "/api/jobs",
-        headers={ "Content-Type": "application/json" },
-        json={
-            "recording": "foo",
-            "recipient": "I made a lot of typos"
-        }
+        headers={"Content-Type": "application/json"},
+        json={"recording": "foo", "recipient": "I made a lot of typos"},
     )
 
     assert response.status_code == 202
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
-        postprocessing_task,
-        settings.destdir / "foo",
-        "I made a lot of typos",
-        settings.smtp,
-        ANY
+        postprocessing_task, settings.destdir / "foo", "I made a lot of typos", settings.smtp, ANY
     )
     # the very set the listing reads, not merely an equal one: every empty set is equal to
     # every other, so only identity shows the job is registered where it will be looked for
@@ -190,22 +178,12 @@ def test_chunk_upload(client: TestClient, settings: Settings):
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
     sample_size = os.stat(sample_path).st_size
 
-    for ix, fname in [
-        (   0, "chunk.0000"),
-        (  42, "chunk.0042"),
-        (9999, "chunk.9999")
-    ]:
+    for ix, fname in [(0, "chunk.0000"), (42, "chunk.0042"), (9999, "chunk.9999")]:
         with open(sample_path, "rb") as sample:
             response = client.post(
                 "/api/chunks",
-                data={
-                    "recording": "foo",
-                    "track": "stream",
-                    "index": str(ix)
-                },
-                files={
-                    "chunk": sample
-                }
+                data={"recording": "foo", "track": "stream", "index": str(ix)},
+                files={"chunk": sample},
             )
 
         target_path = settings.destdir / "foo" / "stream" / fname
@@ -214,13 +192,19 @@ def test_chunk_upload(client: TestClient, settings: Settings):
         assert os.path.isfile(target_path)
         assert os.stat(target_path).st_size == sample_size
 
-@pytest.mark.parametrize("recording", [
-    "GVS_2025-12-21T123456.789Z",
-    "\u673a\u5668\u5b66\u4e60\u7b2c\u4e00\u8bb2_2025-12-21T123456.789Z",              # Chinese
-    "\u0939\u093f\u0928\u094d\u0926\u0940_\u0935\u094d\u092f\u093e\u0915\u0930\u0923_2025-12-21T123456.789Z",  # Devanagari, which \\w rejected
-    "\u00dcbung_3_2025-12-21T123456.789Z",
-])
-def test_chunk_upload_stores_a_non_latin_recording_name(recording: str, client: TestClient, settings: Settings):
+
+@pytest.mark.parametrize(
+    "recording",
+    [
+        "GVS_2025-12-21T123456.789Z",
+        "\u673a\u5668\u5b66\u4e60\u7b2c\u4e00\u8bb2_2025-12-21T123456.789Z",  # Chinese
+        "\u0939\u093f\u0928\u094d\u0926\u0940_\u0935\u094d\u092f\u093e\u0915\u0930\u0923_2025-12-21T123456.789Z",  # Devanagari, which \\w rejected
+        "\u00dcbung_3_2025-12-21T123456.789Z",
+    ],
+)
+def test_chunk_upload_stores_a_non_latin_recording_name(
+    recording: str, client: TestClient, settings: Settings
+):
     # the endpoint has to accept what the frontend derives and then actually create the
     # directory: os.makedirs is where a name that passed validation can still fail
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
@@ -229,25 +213,27 @@ def test_chunk_upload_stores_a_non_latin_recording_name(recording: str, client: 
         response = client.post(
             "/api/chunks",
             data={"recording": recording, "track": "stream", "index": "0"},
-            files={"chunk": sample}
+            files={"chunk": sample},
         )
 
     assert response.status_code == 201
     assert (settings.destdir / recording / "stream" / "chunk.0000").is_file()
 
 
-def test_chunk_upload_stores_a_decomposed_name_under_one_directory(client: TestClient, settings: Settings):
+def test_chunk_upload_stores_a_decomposed_name_under_one_directory(
+    client: TestClient, settings: Settings
+):
     # macOS and several IMEs send NFD, so the same lecture can arrive spelled two ways that
     # are identical on screen. Both have to land in the composed directory, or the chunks of
     # one recording end up split across two and the postprocessing job finds half of them.
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
 
-    for index, recording in enumerate([ "U\u0308bung_2025", "\u00dcbung_2025" ]):
+    for index, recording in enumerate(["U\u0308bung_2025", "\u00dcbung_2025"]):
         with open(sample_path, "rb") as sample:
             response = client.post(
                 "/api/chunks",
                 data={"recording": recording, "track": "stream", "index": str(index)},
-                files={"chunk": sample}
+                files={"chunk": sample},
             )
 
         assert response.status_code == 201
@@ -256,7 +242,7 @@ def test_chunk_upload_stores_a_decomposed_name_under_one_directory(client: TestC
 
     assert (composed / "chunk.0000").is_file()
     assert (composed / "chunk.0001").is_file()
-    assert sorted(p.name for p in settings.destdir.iterdir()) == [ "\u00dcbung_2025" ]
+    assert sorted(p.name for p in settings.destdir.iterdir()) == ["\u00dcbung_2025"]
 
 
 def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, settings: Settings):
@@ -269,7 +255,7 @@ def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, s
         response = client.post(
             "/api/chunks",
             data={"recording": recording, "track": "stream", "index": "0"},
-            files={"chunk": sample}
+            files={"chunk": sample},
         )
 
     assert response.status_code == 201
@@ -291,11 +277,9 @@ def test_chunk_upload_input_validation(client: TestClient):
             data={
                 "recording": "AND 0 == 0; DROP TABLE important_data; --",
                 "track": "stream",
-                "index": "42"
+                "index": "42",
             },
-            files={
-                "chunk": sample
-            }
+            files={"chunk": sample},
         )
 
         assert response.status_code == 422
@@ -305,50 +289,31 @@ def test_chunk_upload_input_validation(client: TestClient):
             data={
                 "recording": "foo",
                 "track": "AND 0 == 0; DROP TABLE important_data; --",
-                "index": "42"
+                "index": "42",
             },
-            files={
-                "chunk": sample
-            }
+            files={"chunk": sample},
         )
 
         assert response.status_code == 422
 
         response = client.post(
             "/api/chunks",
-            data={
-                "recording": "foo",
-                "track": "stream",
-                "index": "-1"
-            },
-            files={
-                "chunk": sample
-            }
+            data={"recording": "foo", "track": "stream", "index": "-1"},
+            files={"chunk": sample},
         )
 
         assert response.status_code == 422
 
         response = client.post(
             "/api/chunks",
-            data={
-                "recording": "foo",
-                "track": "stream",
-                "index": "10000"
-            },
-            files={
-                "chunk": sample
-            }
+            data={"recording": "foo", "track": "stream", "index": "10000"},
+            files={"chunk": sample},
         )
 
         assert response.status_code == 422
 
         response = client.post(
-            "/api/chunks",
-            data={
-                "recording": "foo",
-                "track": "stream",
-                "index": "42"
-            }
+            "/api/chunks", data={"recording": "foo", "track": "stream", "index": "42"}
         )
 
         assert response.status_code == 422
@@ -359,11 +324,9 @@ def test_chunk_upload_input_validation(client: TestClient):
                 "recording": "AND 0 == 0; DROP TABLE important_data; --",
                 "track": "stream",
                 "index": "42",
-                "nonsense": "poppycock"
+                "nonsense": "poppycock",
             },
-            files={
-                "chunk": sample
-            }
+            files={"chunk": sample},
         )
 
         assert response.status_code == 422
@@ -373,26 +336,17 @@ def test_chunk_upload_input_validation(client: TestClient):
             data={
                 "recording": "AND 0 == 0; DROP TABLE important_data; --",
                 "track": "stream",
-                "index": "42"
+                "index": "42",
             },
-            files={
-                "chunk": sample,
-                "nonsense": sample
-            }
+            files={"chunk": sample, "nonsense": sample},
         )
 
         assert response.status_code == 422
 
         response = client.post(
             "/api/chunks",
-            data={
-                "recording": "..",
-                "track": "..",
-                "index": "42"
-            },
-            files={
-                "chunk": sample
-            }
+            data={"recording": "..", "track": "..", "index": "42"},
+            files={"chunk": sample},
         )
 
         assert response.status_code == 422
@@ -406,11 +360,11 @@ def test_chunk_upload_with_more_digits(tmp_path: Path):
     sample_size = os.stat(sample_path).st_size
 
     cases: list[tuple[int, int, str | None]] = [
-        (     0, 201, "chunk.00000"),
-        (    42, 201, "chunk.00042"),
-        ( 12345, 201, "chunk.12345"),
-        ( 99999, 201, "chunk.99999"),
-        (100000, 422, None)
+        (0, 201, "chunk.00000"),
+        (42, 201, "chunk.00042"),
+        (12345, 201, "chunk.12345"),
+        (99999, 201, "chunk.99999"),
+        (100000, 422, None),
     ]
 
     with TestClient(create_app(settings)) as client:
@@ -418,14 +372,8 @@ def test_chunk_upload_with_more_digits(tmp_path: Path):
             with open(sample_path, "rb") as sample:
                 response = client.post(
                     "/api/chunks",
-                    data={
-                        "recording": "foo",
-                        "track": "stream",
-                        "index": str(ix)
-                    },
-                    files={
-                        "chunk": sample
-                    }
+                    data={"recording": "foo", "track": "stream", "index": str(ix)},
+                    files={"chunk": sample},
                 )
 
             assert response.status_code == status_code
@@ -443,12 +391,13 @@ def test_cors_preflight_jobs_unconfigured(client: TestClient):
             "Origin": "http://example.com",
             "Access-Control-Request-Method": "POST",
             "Access-Control-Request-Headers": "Content-Type",
-        }
+        },
     )
     assert response.status_code == 405
     assert "Access-Control-Allow-Origin" not in response.headers
     assert "Access-Control-Allow-Methods" not in response.headers
     assert "Access-Control-Allow-Headers" not in response.headers
+
 
 def test_cors_preflight_jobs(tmp_path: Path):
     cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
@@ -460,13 +409,14 @@ def test_cors_preflight_jobs(tmp_path: Path):
                 "Origin": "http://allowed.example.com",
                 "Access-Control-Request-Method": "POST",
                 "Access-Control-Request-Headers": "Content-Type",
-            }
+            },
         )
 
     assert response.status_code == 200
     assert response.headers["Access-Control-Allow-Origin"] == "http://allowed.example.com"
     assert "POST" in response.headers["Access-Control-Allow-Methods"]
     assert "content-type" in response.headers["Access-Control-Allow-Headers"].lower()
+
 
 def test_cors_preflight_jobs_forbidden(tmp_path: Path):
     cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
@@ -478,15 +428,17 @@ def test_cors_preflight_jobs_forbidden(tmp_path: Path):
                 "Origin": "http://example.com",
                 "Access-Control-Request-Method": "POST",
                 "Access-Control-Request-Headers": "Content-Type",
-            }
+            },
         )
 
     assert response.status_code == 400
     assert "Access-Control-Allow-Origin" not in response.headers
 
+
 # An unauthenticated deployment has one shared destination directory, so there is nobody
 # to own a recording and nobody to withhold one from. Both endpoints refuse to serve rather
 # than hand every lecture to every caller -- these pin which way each of them refuses.
+
 
 def test_the_recordings_listing_is_forbidden_without_authentication(
     client: TestClient, settings: Settings
@@ -498,9 +450,8 @@ def test_the_recordings_listing_is_forbidden_without_authentication(
 
     assert response.status_code == 403
 
-def test_downloading_is_refused_without_user(
-    client: TestClient, settings: Settings
-):
+
+def test_downloading_is_refused_without_user(client: TestClient, settings: Settings):
     (settings.destdir / "GVS_2025").mkdir(parents=True)
     (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
 
@@ -510,6 +461,7 @@ def test_downloading_is_refused_without_user(
     # recording is not served without the user directory in front of it
     assert response.status_code in (404, 405)
     assert b"video" not in response.content
+
 
 def test_two_apps_share_no_state(tmp_path: Path):
     # each app gets instances of its own, rather than one dict living on a class or module
@@ -527,7 +479,7 @@ def test_requests_do_not_replace_the_app_state(client: TestClient, app: FastAPI)
     running_jobs = app.state.per_user_running_jobs
     download_totp = app.state.download_totp
 
-    client.post("/api/jobs", json={ "recording": "missing" })
+    client.post("/api/jobs", json={"recording": "missing"})
     client.get("/api/recordings")
 
     assert app.state.per_user_running_jobs is running_jobs
@@ -540,22 +492,24 @@ def test_health_endpoint(client: TestClient):
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/recordings" ])
+
+@pytest.mark.parametrize("endpoint", ["/api/chunks", "/api/jobs", "/api/health", "/api/recordings"])
 def test_every_endpoint_moves_under_the_prefix(prefixed_client: TestClient, endpoint: str):
     assert prefixed_client.get(f"{ROUTE_PREFIX}{endpoint}").status_code != 404
 
-@pytest.mark.parametrize("endpoint", [ "/api/chunks", "/api/jobs", "/api/health", "/api/recordings" ])
-def test_nothing_is_left_behind_at_the_unprefixed_path(
-    prefixed_client: TestClient, endpoint: str
-):
+
+@pytest.mark.parametrize("endpoint", ["/api/chunks", "/api/jobs", "/api/health", "/api/recordings"])
+def test_nothing_is_left_behind_at_the_unprefixed_path(prefixed_client: TestClient, endpoint: str):
     assert prefixed_client.get(endpoint).status_code == 404
 
-@pytest.mark.parametrize("prefix", [ "foo", "/foo/", "/", " /foo" ])
+
+@pytest.mark.parametrize("prefix", ["foo", "/foo/", "/", " /foo"])
 def test_a_malformed_prefix_is_refused_by_the_settings(tmp_path: Path, prefix: str):
     with pytest.raises(ValidationError):
         Settings(destdir=tmp_path, route_prefix=prefix)
 
-@pytest.mark.parametrize("prefix", [ "", "/foo", "/foo/bar", "/a-b_c" ])
+
+@pytest.mark.parametrize("prefix", ["", "/foo", "/foo/bar", "/a-b_c"])
 def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str):
     settings = Settings(destdir=tmp_path, route_prefix=prefix)
 
@@ -574,6 +528,7 @@ def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str
 # Token validation and the UserInfo lookup are in core/test_auth.py, and how their outcomes
 # become responses in glue/test_auth.py. The first few tests here are the end-to-end check
 # that the pieces are wired together: one of each outcome, over a real request.
+
 
 def test_a_chunk_lands_in_the_callers_home_directory(
     auth_client: TestClient, provider: Provider, tmp_path: Path
@@ -605,7 +560,8 @@ def test_a_username_from_userinfo_names_the_alias(
     assert upload(auth_client, provider.mint(preferred_username=None)).status_code == 201
 
     assert home_entries(tmp_path) == {
-        DEFAULT_SUBJECT_DIGEST, alias_of("dozentin", DEFAULT_SUBJECT_DIGEST)
+        DEFAULT_SUBJECT_DIGEST,
+        alias_of("dozentin", DEFAULT_SUBJECT_DIGEST),
     }
 
 
@@ -651,7 +607,8 @@ def test_a_job_runs_against_the_callers_own_recording(
     mock_postprocess = mocker.patch(
         "ise_record.glue.jobs.postprocess_recording",
         autospec=True,
-        return_value=Result(output_file=None, reason=ResultReason.SUCCESS))
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
+    )
 
     token = provider.mint()
     assert upload(auth_client, token).status_code == 201
@@ -692,6 +649,7 @@ def test_a_job_cannot_name_another_subjects_recording(
 # What the one-time password in the download link is scoped to and how long it lasts is
 # the download_totp module's own contract, and lives in core/test_download_totp.py.
 
+
 def test_listing_recordings_without_a_token_is_rejected(auth_client: TestClient):
     assert list_recordings(auth_client, None).status_code == 401
 
@@ -701,9 +659,7 @@ def test_downloading_without_a_totp_is_rejected(auth_client: TestClient):
 
 
 def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
-    auth_client: TestClient,
-    provider: Provider,
-    tmp_path: Path
+    auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     finish_recording(home, "GVS_2025")
@@ -721,15 +677,19 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     assert "user" in data
     assert "completed" in data
     assert isinstance(data["completed"], list)
-    assert len(data["completed"]) == 2 # type: ignore
+    assert len(data["completed"]) == 2  # type: ignore
 
     assert data["completed"][0]["name"] == "GVS_2025"
     assert data["completed"][0]["size"] == 5
-    assert download_totp.verify(data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm") # type: ignore
+    assert download_totp.verify(
+        data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm"
+    )  # type: ignore
 
     assert data["completed"][1]["name"] == "PSU_2026"
     assert data["completed"][1]["size"] == 5
-    assert download_totp.verify(data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm") # type: ignore
+    assert download_totp.verify(
+        data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm"
+    )  # type: ignore
 
 
 def test_the_listing_leaves_out_recordings_that_are_not_rendered(
@@ -745,7 +705,7 @@ def test_the_listing_leaves_out_recordings_that_are_not_rendered(
 
     response = list_recordings(auth_client, provider.mint())
 
-    assert [ r["name"] for r in response.json()["completed"] ] == [ "rendered" ]
+    assert [r["name"] for r in response.json()["completed"]] == ["rendered"]
 
 
 def test_the_listing_only_shows_the_callers_own_recordings(
@@ -754,14 +714,21 @@ def test_the_listing_only_shows_the_callers_own_recordings(
     finish_recording(tmp_path / digest_of("user-a"), "mine")
     finish_recording(tmp_path / digest_of("user-b"), "theirs")
 
-    assert [ r["name"] for r in list_recordings(auth_client, provider.mint(sub="user-a")).json()["completed"] ] == [ "mine" ]
-    assert [ r["name"] for r in list_recordings(auth_client, provider.mint(sub="user-b")).json()["completed"] ] == [ "theirs" ]
+    assert [
+        r["name"]
+        for r in list_recordings(auth_client, provider.mint(sub="user-a")).json()["completed"]
+    ] == ["mine"]
+    assert [
+        r["name"]
+        for r in list_recordings(auth_client, provider.mint(sub="user-b")).json()["completed"]
+    ] == ["theirs"]
 
 
 # The listing also names the recordings that are still being postprocessed, so the frontend
 # can show that a lecture is on its way rather than missing. What it reads is the per-user
 # set of running jobs that _postprocessing_task maintains; a TestClient runs background tasks
 # to completion before it returns, so the set is seeded by hand to catch a job mid-flight.
+
 
 def test_the_listing_reports_nothing_rendering_when_no_job_is_running(
     auth_client: TestClient, provider: Provider, tmp_path: Path
@@ -781,15 +748,17 @@ def test_a_recording_in_postprocessing_is_listed_as_rendering(
     finish_recording(home, "GVS_2025")
     # a job only ever runs for a recording that is on disk -- /jobs refuses anything else --
     # and the listing classifies what it finds there
-    running_jobs_of(auth_client, home).update({ abandon_recording(home, "PSU_2026"), abandon_recording(home, "ABC_2026") })
+    running_jobs_of(auth_client, home).update(
+        {abandon_recording(home, "PSU_2026"), abandon_recording(home, "ABC_2026")}
+    )
 
     data = list_recordings(auth_client, provider.mint()).json()
 
     # a set has no order of its own, and the frontend renders the list as it comes, so the
     # cards would shuffle between polls without the sort
-    assert data["rendering"] == [ { "name": "ABC_2026" }, { "name": "PSU_2026" } ]
+    assert data["rendering"] == [{"name": "ABC_2026"}, {"name": "PSU_2026"}]
     # only the name: there is no file to size and nothing to download yet
-    assert [ r["name"] for r in data["completed"] ] == [ "GVS_2025" ]
+    assert [r["name"] for r in data["completed"]] == ["GVS_2025"]
 
 
 def test_a_recording_being_rerendered_is_only_listed_as_rendering(
@@ -804,8 +773,8 @@ def test_a_recording_being_rerendered_is_only_listed_as_rendering(
 
     data = list_recordings(auth_client, provider.mint()).json()
 
-    assert [ r["name"] for r in data["completed"] ] == [ "GVS_2025" ]
-    assert data["rendering"] == [ { "name": "PSU_2026" } ]
+    assert [r["name"] for r in data["completed"]] == ["GVS_2025"]
+    assert data["rendering"] == [{"name": "PSU_2026"}]
 
 
 def test_a_rerendered_recording_is_offered_for_download_again_once_the_job_is_done(
@@ -824,7 +793,7 @@ def test_a_rerendered_recording_is_offered_for_download_again_once_the_job_is_do
 
     data = list_recordings(auth_client, token).json()
 
-    assert [ r["name"] for r in data["completed"] ] == [ "GVS_2025" ]
+    assert [r["name"] for r in data["completed"]] == ["GVS_2025"]
     assert data["rendering"] == []
 
 
@@ -834,7 +803,9 @@ def test_the_listing_only_shows_the_callers_own_rendering_jobs(
     home_a = tmp_path / digest_of("user-a")
     running_jobs_of(auth_client, home_a).add(abandon_recording(home_a, "mine"))
 
-    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["rendering"] == [ { "name": "mine" } ]
+    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["rendering"] == [
+        {"name": "mine"}
+    ]
     assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["rendering"] == []
 
 
@@ -850,13 +821,15 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
         seen_while_running.append(set(running_jobs_of(auth_client, home)))
         return Result(output_file=None, reason=ResultReason.SUCCESS)
 
-    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess)
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess
+    )
 
     token = provider.mint()
     assert upload(auth_client, token).status_code == 201
     assert schedule(auth_client, token).status_code == 202
 
-    assert seen_while_running == [ { home / "foo" } ]
+    assert seen_while_running == [{home / "foo"}]
     # and gone again once it finished, or the card would spin forever
     assert list_recordings(auth_client, token).json()["rendering"] == []
 
@@ -864,6 +837,7 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
 # The listing's third list: recordings whose postprocessing never produced anything. Which
 # recordings count is get_unprocessed_recordings' business, in glue/test_recording_lists.py;
 # these pin what the endpoint makes of it.
+
 
 def test_the_listing_reports_unprocessed_recordings_by_name(
     auth_client: TestClient, provider: Provider, tmp_path: Path
@@ -875,8 +849,8 @@ def test_the_listing_reports_unprocessed_recordings_by_name(
     data = list_recordings(auth_client, provider.mint()).json()
 
     # only the name: there is nothing to download, and the Rerender button needs no more
-    assert data["unprocessed"] == [ { "name": "GVS_2025" } ]
-    assert [ r["name"] for r in data["completed"] ] == [ "DONE_2025" ]
+    assert data["unprocessed"] == [{"name": "GVS_2025"}]
+    assert [r["name"] for r in data["completed"]] == ["DONE_2025"]
     assert data["rendering"] == []
 
 
@@ -895,8 +869,12 @@ def test_the_listing_only_shows_the_callers_own_unprocessed_recordings(
     abandon_recording(tmp_path / digest_of("user-a"), "mine")
     abandon_recording(tmp_path / digest_of("user-b"), "theirs")
 
-    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["unprocessed"] == [ { "name": "mine" } ]
-    assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["unprocessed"] == [ { "name": "theirs" } ]
+    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["unprocessed"] == [
+        {"name": "mine"}
+    ]
+    assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["unprocessed"] == [
+        {"name": "theirs"}
+    ]
 
 
 def test_a_rerendered_recording_moves_from_unprocessed_to_rendering(
@@ -908,13 +886,13 @@ def test_a_rerendered_recording_moves_from_unprocessed_to_rendering(
     recording_dir = abandon_recording(home, "GVS_2025")
     token = provider.mint()
 
-    assert list_recordings(auth_client, token).json()["unprocessed"] == [ { "name": "GVS_2025" } ]
+    assert list_recordings(auth_client, token).json()["unprocessed"] == [{"name": "GVS_2025"}]
 
     running_jobs_of(auth_client, home).add(recording_dir)
     data = list_recordings(auth_client, token).json()
 
     assert data["unprocessed"] == []
-    assert data["rendering"] == [ { "name": "GVS_2025" } ]
+    assert data["rendering"] == [{"name": "GVS_2025"}]
 
 
 def test_a_completed_recording_can_be_downloaded(
@@ -924,7 +902,9 @@ def test_a_completed_recording_can_be_downloaded(
 
     server_list = list_recordings(auth_client, provider.mint()).json()
 
-    response = download_completed(auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"])
+    response = download_completed(
+        auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"]
+    )
 
     assert response.status_code == 200
     assert response.content == b"the rendered lecture"
@@ -934,11 +914,14 @@ def test_a_completed_recording_can_be_downloaded(
     assert response.headers["content-disposition"] == 'attachment; filename="GVS_2025.webm"'
 
 
-@pytest.mark.parametrize("recording", [
-    "Übung_3_2025",                                          # Latin with a diacritic
-    "机器学习_2025",                              # Chinese
-    "हिन्दी_2025",                  # Devanagari, combining marks
-])
+@pytest.mark.parametrize(
+    "recording",
+    [
+        "Übung_3_2025",  # Latin with a diacritic
+        "机器学习_2025",  # Chinese
+        "हिन्दी_2025",  # Devanagari, combining marks
+    ],
+)
 def test_a_recording_name_survives_the_round_trip_through_the_url(
     recording: str, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -952,13 +935,16 @@ def test_a_recording_name_survives_the_round_trip_through_the_url(
 
     assert server_list["completed"][0]["name"] == recording
 
-    response = download_completed(auth_client, server_list["user"], recording, server_list["completed"][0]["totp"])
+    response = download_completed(
+        auth_client, server_list["user"], recording, server_list["completed"][0]["totp"]
+    )
 
     assert response.status_code == 200
     assert response.content == b"video"
     # RFC 5987, because the name does not fit in a quoted ASCII filename
     assert response.headers["content-disposition"] == (
-        f"attachment; filename*=utf-8''{quote(recording)}.webm")
+        f"attachment; filename*=utf-8''{quote(recording)}.webm"
+    )
 
 
 def test_a_decomposed_name_downloads_the_composed_recording(
@@ -970,13 +956,15 @@ def test_a_decomposed_name_downloads_the_composed_recording(
 
     server_list = list_recordings(auth_client, provider.mint()).json()
 
-    response = download_completed(auth_client, server_list["user"], "U\u0308bung_2025", server_list["completed"][0]["totp"])
+    response = download_completed(
+        auth_client, server_list["user"], "U\u0308bung_2025", server_list["completed"][0]["totp"]
+    )
 
     assert response.status_code == 200
     assert response.content == b"video"
 
 
-@pytest.mark.parametrize("user_digest", [ "..", "not-hex", "AAAA", "" ])
+@pytest.mark.parametrize("user_digest", ["..", "not-hex", "AAAA", ""])
 def test_a_user_directory_that_is_not_a_digest_is_refused(
     user_digest: str, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -995,9 +983,7 @@ def test_a_user_directory_that_is_not_a_digest_is_refused(
     assert b"video" not in response.content
 
 
-def test_downloading_is_forbidden_without_authentication(
-    client: TestClient, settings: Settings
-):
+def test_downloading_is_forbidden_without_authentication(client: TestClient, settings: Settings):
     # the counterpart of the listing test above, on the route that actually serves bytes:
     # an unauthenticated deployment has one shared destdir and nobody to own a recording
     (settings.destdir / "GVS_2025").mkdir(parents=True)
@@ -1015,6 +1001,7 @@ def test_downloading_is_forbidden_without_authentication(
 # what the download route actually verifies against is a path it assembles from two
 # segments the caller supplies.
 
+
 def test_a_totp_is_scoped_to_the_one_recording_it_was_issued_for(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1023,7 +1010,7 @@ def test_a_totp_is_scoped_to_the_one_recording_it_was_issued_for(
     finish_recording(home, "PSU_2026", b"the other lecture")
 
     server_list = list_recordings(auth_client, provider.mint()).json()
-    by_name = { rec["name"]: rec["totp"] for rec in server_list["completed"] }
+    by_name = {rec["name"]: rec["totp"] for rec in server_list["completed"]}
 
     response = download_completed(auth_client, server_list["user"], "PSU_2026", by_name["GVS_2025"])
 
@@ -1078,7 +1065,7 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
     key = str((home / "GVS_2025" / "presentation.webm").absolute())
     generator = download_totp_of(auth_client).factories[key]
     three_intervals = datetime.timedelta(seconds=3 * generator.interval)
-    three_intervals_ago = datetime.datetime.now() - three_intervals
+    three_intervals_ago = datetime.datetime.now(datetime.UTC) - three_intervals
     stale = generator.at(three_intervals_ago)
 
     response = download_completed(auth_client, server_list["user"], "GVS_2025", stale)
@@ -1094,8 +1081,9 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
 # status check just fine. Which recordings count as purgeable is get_purgeable_recordings'
 # business, in glue/test_recording_lists.py; these pin what the endpoint does with the answer.
 
+
 def snapshot(root: Path) -> dict[str, bytes]:
-    """ Every file under root with its content, following no symlinks. """
+    """Every file under root with its content, following no symlinks."""
     return {
         str(p.relative_to(root)): p.read_bytes()
         for p in sorted(root.rglob("*"))
@@ -1104,10 +1092,10 @@ def snapshot(root: Path) -> dict[str, bytes]:
 
 
 def rendered_recording(home: Path, name: str) -> Path:
-    """ A recording as it looks after a successful render: chunks, output, leftovers. """
+    """A recording as it looks after a successful render: chunks, output, leftovers."""
     recording_dir = home / name
-    write_chunks(recording_dir, [ 30 * 60, 29 * 60 ])
-    write_chunks(recording_dir, [ 30 * 60 ], track="overlay")
+    write_chunks(recording_dir, [30 * 60, 29 * 60])
+    write_chunks(recording_dir, [30 * 60], track="overlay")
     (recording_dir / "presentation.webm").write_bytes(b"the rendered lecture")
     return recording_dir
 
@@ -1138,7 +1126,9 @@ def test_a_purge_leaves_everything_else_alone(
     before = snapshot(tmp_path)
     assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 200
 
-    expected = { k: v for k, v in before.items() if not k.startswith(f"{DEFAULT_SUBJECT_DIGEST}/GVS_2025/") }
+    expected = {
+        k: v for k, v in before.items() if not k.startswith(f"{DEFAULT_SUBJECT_DIGEST}/GVS_2025/")
+    }
     assert snapshot(tmp_path) == expected
 
 
@@ -1148,7 +1138,9 @@ def test_a_purged_recording_leaves_the_listing(
     rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
     token = provider.mint()
 
-    assert [ r["name"] for r in list_recordings(auth_client, token).json()["completed"] ] == [ "GVS_2025" ]
+    assert [r["name"] for r in list_recordings(auth_client, token).json()["completed"]] == [
+        "GVS_2025"
+    ]
     assert purge(auth_client, token, "GVS_2025").status_code == 200
 
     data = list_recordings(auth_client, token).json()
@@ -1168,10 +1160,15 @@ def test_a_purged_recording_takes_its_download_otp_with_it(
     # a lecture recorded again under the same name must not be downloadable with a link
     # that was handed out for the one that was purged
     rendered_recording(home, "GVS_2025")
-    response = download_completed(auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"])
+    response = download_completed(
+        auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"]
+    )
 
     assert response.status_code == 401
-    assert str((home / "GVS_2025" / "presentation.webm").absolute()) not in download_totp_of(auth_client).factories
+    assert (
+        str((home / "GVS_2025" / "presentation.webm").absolute())
+        not in download_totp_of(auth_client).factories
+    )
 
 
 def test_an_unprocessed_recording_can_be_purged(
@@ -1209,6 +1206,7 @@ def test_a_purge_is_logged_with_the_user_who_asked(
 
 
 # refusals ------------------------------------------------------------------
+
 
 def test_purging_without_a_token_is_rejected(auth_client: TestClient, tmp_path: Path):
     rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
@@ -1249,15 +1247,18 @@ def test_another_users_recording_cannot_be_purged(
     assert snapshot(tmp_path) == before
 
 
-@pytest.mark.parametrize("recording", [
-    "..",
-    "%2e%2e",
-    "..%2fvictim",
-    "%2e%2e%2fvictim",
-    ".hidden",
-    "%2e%2e%2f%2e%2e%2fvictim",
-    "foo%00bar",
-])
+@pytest.mark.parametrize(
+    "recording",
+    [
+        "..",
+        "%2e%2e",
+        "..%2fvictim",
+        "%2e%2e%2fvictim",
+        ".hidden",
+        "%2e%2e%2f%2e%2e%2fvictim",
+        "foo%00bar",
+    ],
+)
 def test_a_recording_name_cannot_reach_outside_the_home_directory(
     recording: str, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1268,7 +1269,9 @@ def test_a_recording_name_cannot_reach_outside_the_home_directory(
     before = snapshot(tmp_path)
 
     # sent as-is rather than through purge(), which would quote the tricks away
-    response = auth_client.delete(f"/api/recordings/{recording}", headers={"Authorization": f"Bearer {provider.mint()}"})
+    response = auth_client.delete(
+        f"/api/recordings/{recording}", headers={"Authorization": f"Bearer {provider.mint()}"}
+    )
 
     assert response.status_code in (404, 405, 422)
     assert snapshot(tmp_path) == before
@@ -1310,7 +1313,7 @@ def test_a_recording_that_is_still_being_streamed_cannot_be_purged(
 ):
     # the next chunk would recreate the directory and bring back half a recording
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    write_chunks(home / "LIVE_2026", [ 30 * 60, 5 ])
+    write_chunks(home / "LIVE_2026", [30 * 60, 5])
     before = snapshot(tmp_path)
 
     assert purge(auth_client, provider.mint(), "LIVE_2026").status_code == 409
@@ -1318,11 +1321,17 @@ def test_a_recording_that_is_still_being_streamed_cannot_be_purged(
 
 
 def test_a_failing_filesystem_is_reported_without_details(
-    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    mocker: MockerFixture,
+    auth_client: TestClient,
+    provider: Provider,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ):
     # the details go to the log for the admin; the response only says that it failed
     rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
-    mocker.patch("shutil.rmtree", side_effect=PermissionError(13, "Permission denied", "/secret/path"))
+    mocker.patch(
+        "shutil.rmtree", side_effect=PermissionError(13, "Permission denied", "/secret/path")
+    )
 
     with caplog.at_level("ERROR", logger="ise_record"):
         response = purge(auth_client, provider.mint(), "GVS_2025")
@@ -1344,7 +1353,7 @@ def test_cors_preflight_allows_purging(tmp_path: Path):
                 "Origin": "http://allowed.example.com",
                 "Access-Control-Request-Method": "DELETE",
                 "Access-Control-Request-Headers": "Authorization",
-            }
+            },
         )
 
     assert response.status_code == 200

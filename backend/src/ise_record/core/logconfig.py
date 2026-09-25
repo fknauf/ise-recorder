@@ -1,9 +1,10 @@
-""" Logging setup for ise-recorder  """
+"""Logging setup for ise-recorder"""
 
 import logging
 
+
 def health_check_filter(record: logging.LogRecord):
-    """ Filter out successful health checks done by the container itself """
+    """Filter out successful health checks done by the container itself"""
     return (
         not isinstance(record.args, tuple)
         or len(record.args) < 5
@@ -16,12 +17,13 @@ def health_check_filter(record: logging.LogRecord):
         or not 200 <= record.args[4] < 300
     )
 
+
 def setup_logging():
     """
     Set up logging to match uvicorn options and filter out the container's
     health check
     """
-    logging.getLogger('uvicorn.access').addFilter(health_check_filter)
+    logging.getLogger("uvicorn.access").addFilter(health_check_filter)
 
-    uvicorn_logger = logging.getLogger('uvicorn.error')
+    uvicorn_logger = logging.getLogger("uvicorn.error")
     logging.basicConfig(level=uvicorn_logger.getEffectiveLevel())

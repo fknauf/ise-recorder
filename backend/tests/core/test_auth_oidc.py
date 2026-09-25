@@ -10,7 +10,7 @@ glue/test_auth.py. The stand-in provider is in harness.py.
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 import jwt
@@ -18,10 +18,11 @@ import pytest
 
 from ise_record.core.auth import OidcClient, ProviderUnreachable, REQUIRED_CLAIMS, Unauthenticated
 
-from ..harness import AUDIENCE, CLIENT_ID, DEFAULT_SUBJECT, Provider, make_key
+from ..harness import AUDIENCE, CLIENT_ID, DEFAULT_SUBJECT, make_key, Provider
 from .conftest import discover
 
 # --- what counts as a valid token ------------------------------------------
+
 
 def test_valid_token_is_accepted(oidc: OidcClient, provider: Provider):
     claims = oidc.validate_access_token(provider.mint())
@@ -36,7 +37,7 @@ def test_garbage_token_is_rejected(oidc: OidcClient):
 
 
 def test_expired_token_is_rejected(oidc: OidcClient, provider: Provider):
-    stale = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale = datetime.now(UTC) - timedelta(hours=1)
     token = provider.mint(iat=stale, exp=stale + timedelta(minutes=5))
 
     with pytest.raises(Unauthenticated):
@@ -53,7 +54,9 @@ def test_wrong_audience_is_rejected(oidc: OidcClient, provider: Provider):
         oidc.validate_access_token(provider.mint(aud="some-other-app"))
 
 
-def test_a_token_for_the_client_rather_than_the_api_is_rejected(oidc: OidcClient, provider: Provider):
+def test_a_token_for_the_client_rather_than_the_api_is_rejected(
+    oidc: OidcClient, provider: Provider
+):
     # `aud` of the client id is what an OIDC ID token carries, so on a normal deployment
     # this is the audience check refusing an ID token -- no inspection of the token's kind
     # needed, and nothing else in this module has to care.
@@ -79,7 +82,7 @@ def test_an_access_token_without_a_scope_claim_is_accepted(oidc: OidcClient, pro
 
 @pytest.mark.asyncio
 async def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_identifiers(
-    provider: Provider
+    provider: Provider,
 ):
     """
     A DECISION, recorded so the next reader does not take it for an oversight.
@@ -102,10 +105,7 @@ async def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_ident
     collapsed = await discover(provider, audience=CLIENT_ID)
 
     id_token_shaped = provider.mint(
-        aud=CLIENT_ID,
-        scope=None,
-        at_hash="PQhwSWwbKnhNqMPtUXQAhg",
-        nonce="nonce-abcdef0123456789"
+        aud=CLIENT_ID, scope=None, at_hash="PQhwSWwbKnhNqMPtUXQAhg", nonce="nonce-abcdef0123456789"
     )
 
     assert collapsed.validate_access_token(id_token_shaped)["sub"] == DEFAULT_SUBJECT
@@ -113,8 +113,12 @@ async def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_ident
 
 def forge(provider: Provider, key: Any, algorithm: str) -> str:
     claims: dict[str, Any] = {
-        "iss": provider.issuer, "sub": "nobody", "aud": AUDIENCE, "scope": "openid",
-        "iat": datetime.now(timezone.utc), "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "iss": provider.issuer,
+        "sub": "nobody",
+        "aud": AUDIENCE,
+        "scope": "openid",
+        "iat": datetime.now(UTC),
+        "exp": datetime.now(UTC) + timedelta(minutes=5),
     }
     return jwt.encode(claims, key, algorithm=algorithm, headers={"kid": "key-1"})
 
@@ -141,6 +145,7 @@ def test_unknown_kid_is_rejected(oidc: OidcClient, provider: Provider):
 
 
 # --- operational behavior -------------------------------------------------
+
 
 def test_rotated_signing_key_is_picked_up_without_restart(
     instant_jwks_refresh: None,  # pylint: disable=unused-argument
@@ -175,12 +180,16 @@ def test_jwks_is_cached_between_validations(oidc: OidcClient, provider: Provider
 
 # --- the signing algorithm comes from the key set --------------------------
 
-@pytest.mark.parametrize("advertised", [
-    ["none"],
-    ["HS256"],
-    [],
-    None,
-])
+
+@pytest.mark.parametrize(
+    "advertised",
+    [
+        ["none"],
+        ["HS256"],
+        [],
+        None,
+    ],
+)
 @pytest.mark.asyncio
 async def test_metadata_algorithm_list_is_not_consulted(provider: Provider, advertised: Any):
     # Whatever the discovery document claims, the key set decides. A provider advertising
@@ -216,7 +225,7 @@ async def test_key_claiming_an_insecure_algorithm_is_refused(oidc: OidcClient, p
             "alg": "HS256",
             "k": "bEM2SVVab2FrdGVwNnFQY2JKTE5oUTFqaU9WbEFxS1k",
             "kid": "key-1",
-            "use": "sig"
+            "use": "sig",
         }
     )
     forged = forge(provider, "lC6IUZoaktep6qPcbJLNhQ1jiOVlAqKY", "HS256")
@@ -233,12 +242,15 @@ async def test_key_claiming_an_insecure_algorithm_is_refused(oidc: OidcClient, p
 # OIDC Discovery 1.0 lists userinfo_endpoint as RECOMMENDED, not REQUIRED, so its absence
 # is not an error and must not take the service down with it.
 
+
 def test_discovery_records_the_userinfo_endpoint(oidc: OidcClient, provider: Provider):
     assert oidc.userinfo_endpoint == f"{provider.issuer}/userinfo"
 
 
 @pytest.mark.asyncio
-async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoint(provider: Provider):
+async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoint(
+    provider: Provider,
+):
     provider.advertise_userinfo = False
 
     assert (await discover(provider)).userinfo_endpoint is None
@@ -253,6 +265,7 @@ async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoin
 # is not worth failing an upload over, and one that could not be made sense of is not worth
 # guessing at either.
 
+
 @pytest.mark.asyncio
 async def test_the_username_comes_from_userinfo(oidc: OidcClient, provider: Provider):
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
@@ -262,7 +275,9 @@ async def test_the_username_comes_from_userinfo(oidc: OidcClient, provider: Prov
 
 
 @pytest.mark.asyncio
-async def test_userinfo_is_asked_with_the_callers_access_token(oidc: OidcClient, provider: Provider):
+async def test_userinfo_is_asked_with_the_callers_access_token(
+    oidc: OidcClient, provider: Provider
+):
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
     token = provider.mint(preferred_username=None)
 
@@ -273,7 +288,9 @@ async def test_userinfo_is_asked_with_the_callers_access_token(oidc: OidcClient,
 
 
 @pytest.mark.asyncio
-async def test_userinfo_about_a_different_subject_is_discarded(oidc: OidcClient, provider: Provider):
+async def test_userinfo_about_a_different_subject_is_discarded(
+    oidc: OidcClient, provider: Provider
+):
     # OIDC Core 5.3.2 requires this check: an answer about somebody else would otherwise
     # put this caller's recordings in a directory named after them
     provider.serve_userinfo(sub="somebody-else", preferred_username="mallory")
@@ -281,16 +298,23 @@ async def test_userinfo_about_a_different_subject_is_discarded(oidc: OidcClient,
     assert await oidc.query_username(provider.mint(), DEFAULT_SUBJECT) is None
 
 
-@pytest.mark.parametrize("response", [
-    (404, "text/plain", b""),                                          # nothing known about the caller
-    (502, "text/html", b"<html><body>502 Bad Gateway</body></html>"),  # a proxy, not the OP
-    (403, "application/json", b'{"error":"insufficient_scope"}'),      # profile not granted
-    (200, "application/jwt", b"eyJhbGciOiJSUzI1NiJ9.e30.sig"),         # signed UserInfo
-    (200, "application/json", b""),                                    # nothing at all
-    (200, "application/json", b'["not", "an", "object"]'),             # json, wrong shape
-    (200, "application/json", b'{"preferred_username":"lecturer"}'),   # no sub to check
-    (200, "application/json", f'{{"sub":"{DEFAULT_SUBJECT}","preferred_username":42}}'.encode()),
-])
+@pytest.mark.parametrize(
+    "response",
+    [
+        (404, "text/plain", b""),  # nothing known about the caller
+        (502, "text/html", b"<html><body>502 Bad Gateway</body></html>"),  # a proxy, not the OP
+        (403, "application/json", b'{"error":"insufficient_scope"}'),  # profile not granted
+        (200, "application/jwt", b"eyJhbGciOiJSUzI1NiJ9.e30.sig"),  # signed UserInfo
+        (200, "application/json", b""),  # nothing at all
+        (200, "application/json", b'["not", "an", "object"]'),  # json, wrong shape
+        (200, "application/json", b'{"preferred_username":"lecturer"}'),  # no sub to check
+        (
+            200,
+            "application/json",
+            f'{{"sub":"{DEFAULT_SUBJECT}","preferred_username":42}}'.encode(),
+        ),
+    ],
+)
 @pytest.mark.asyncio
 async def test_unusable_userinfo_yields_no_username(
     oidc: OidcClient, provider: Provider, response: tuple[int, str, bytes]

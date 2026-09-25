@@ -1,2 +1,9 @@
 [MAIN]
 ignore=.venv,build,data
+
+[MESSAGES CONTROL]
+disable=
+    wrong-import-order,      # ruff I001
+    ungrouped-imports,       # ruff I001
+    wrong-import-position,   # ruff E402
+    multiple-imports,        # ruff E401

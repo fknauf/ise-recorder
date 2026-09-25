@@ -18,8 +18,8 @@ from pathlib import Path
 
 from ise_record.core.auth import DownloadTotpAuthority
 
-
 # --- the module on its own -------------------------------------------------
+
 
 def test_an_otp_verifies_for_the_file_it_was_issued_for(tmp_path: Path):
     download_totp = DownloadTotpAuthority()
@@ -92,7 +92,7 @@ def test_an_otp_from_an_earlier_interval_no_longer_verifies(tmp_path: Path):
     # dating an OTP back rather than moving the clock keeps this independent of how the
     # app measures time
     three_intervals = datetime.timedelta(seconds=3 * generator.interval)
-    three_intervals_ago = datetime.datetime.now() - three_intervals
+    three_intervals_ago = datetime.datetime.now(datetime.UTC) - three_intervals
     stale = generator.at(three_intervals_ago)
 
     assert not download_totp.verify(stale, path)

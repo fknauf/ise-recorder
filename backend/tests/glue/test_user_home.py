@@ -28,7 +28,7 @@ async def test_the_home_directory_is_prepared_under_destdir(
     home = await get_current_user_home(request_, settings, UserInfo("abc", "lecturer"))
 
     assert home == tmp_path / digest_of("abc")
-    assert home_entries(tmp_path) == { digest_of("abc"), alias_of("lecturer", digest_of("abc")) }
+    assert home_entries(tmp_path) == {digest_of("abc"), alias_of("lecturer", digest_of("abc"))}
 
 
 @pytest.mark.asyncio
@@ -63,7 +63,7 @@ async def test_a_known_subject_keeps_its_directory_without_preparing_it_again(
 
     assert first == second
     # no alias appears mid-lecture either: the second call was answered from the cache
-    assert home_entries(tmp_path) == { digest_of("abc") }
+    assert home_entries(tmp_path) == {digest_of("abc")}
 
 
 @pytest.mark.asyncio

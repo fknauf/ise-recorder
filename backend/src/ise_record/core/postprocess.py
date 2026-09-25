@@ -1,7 +1,7 @@
 """
-    ISE-Recorder postprocessing module. Combines camera and slide feeds into a useful
-    whole. Tries to handle partially available data in the most sensible way possible
-    (e.g. missing camera feed -> still produce slides with audio)
+ISE-Recorder postprocessing module. Combines camera and slide feeds into a useful
+whole. Tries to handle partially available data in the most sensible way possible
+(e.g. missing camera feed -> still produce slides with audio)
 """
 
 import asyncio
@@ -21,27 +21,35 @@ OUTPUT_FILENAME = "presentation.webm"
 
 logger = logging.getLogger(__name__)
 
+
 class ResultReason(Enum):
-    """ Reason for a job result, i.e. why a file was produced or not produced. """
+    """Reason for a job result, i.e. why a file was produced or not produced."""
+
     SUCCESS = 1
     FAILURE = 2
     MAIN_STREAM_MISSING = 3
     PARTIAL_SUCCESS = 4
 
+
 class Result(NamedTuple):
-    """ Result of a postprocessing job """
+    """Result of a postprocessing job"""
+
     output_file: Path | None
     reason: ResultReason
 
+
 class Rectangle(NamedTuple):
-    """ rectangular area in a video stream, used for cropping """
+    """rectangular area in a video stream, used for cropping"""
+
     width: int
     height: int
     left: int
     top: int
 
+
 class VideoProperties(NamedTuple):
-    """ Properties of a video stream that we need for postprocessing """
+    """Properties of a video stream that we need for postprocessing"""
+
     width: int
     height: int
     crop: Rectangle
@@ -52,40 +60,38 @@ class VideoProperties(NamedTuple):
         """
         return self.width > self.crop.width or self.height > self.crop.height
 
+
 async def _run_command(command: list[str], cwd: Path | None = None) -> bytes:
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=cwd
+        cwd=cwd,
     )
 
     out, err = await proc.communicate()
 
     if proc.returncode != 0:
         raise CalledProcessError(
-            returncode = proc.returncode if proc.returncode is not None else -65535,
-            cmd = command,
-            output = out,
-            stderr = err
+            returncode=proc.returncode if proc.returncode is not None else -65535,
+            cmd=command,
+            output=out,
+            stderr=err,
         )
 
     return out
 
-def determine_crop_area(
-        stream_width: int,
-        stream_height: int,
-        raw_crop: Rectangle
-) -> Rectangle:
-    """
-        Determine the effective cropping area for a stream. Will select the full
-        stream rectangle if an insignificant area would be cropped.
 
-        :param stream_width width of the input stream
-        :param stream_height height of the input stream
-        :param raw_crop cropping area as detected by ffmpeg
-        :returns the effective cropping area
+def determine_crop_area(stream_width: int, stream_height: int, raw_crop: Rectangle) -> Rectangle:
+    """
+    Determine the effective cropping area for a stream. Will select the full
+    stream rectangle if an insignificant area would be cropped.
+
+    :param stream_width width of the input stream
+    :param stream_height height of the input stream
+    :param raw_crop cropping area as detected by ffmpeg
+    :returns the effective cropping area
     """
 
     slack_width = stream_width - raw_crop.width
@@ -97,28 +103,35 @@ def determine_crop_area(
 
     return raw_crop
 
+
 async def video_properties(path: Path) -> VideoProperties:
     """
-        Extract the information required for postprocess_picture_in_picture from a video file
+    Extract the information required for postprocess_picture_in_picture from a video file
 
-        The most involved bit here is the crop detection that figures out what the slide stream
-        can be sensibly cropped to. We use ffmpeg's avfilter plugin for that, which gives us a
-        list of sensible crop dimensions for successive time slices in the video file. We just
-        use the most expansive of these to be on the safe side. We really expect them all to be
-        the same anyway.
+    The most involved bit here is the crop detection that figures out what the slide stream
+    can be sensibly cropped to. We use ffmpeg's avfilter plugin for that, which gives us a
+    list of sensible crop dimensions for successive time slices in the video file. We just
+    use the most expansive of these to be on the safe side. We really expect them all to be
+    the same anyway.
 
-        :params path input video file
-        :returns properties of the input file
+    :params path input video file
+    :returns properties of the input file
     """
 
     probe_command = [
-        'ffprobe',
-        '-print_format', 'json',
-        '-f', 'lavfi',
-        '-i', f'movie={str(path.name)},cropdetect',
-        '-show_streams',
-        '-show_entries', 'packet_tags=lavfi.cropdetect.x1,lavfi.cropdetect.y1,'
-                                     'lavfi.cropdetect.x2,lavfi.cropdetect.y2'
+        "ffprobe",
+        "-print_format",
+        "json",
+        "-f",
+        "lavfi",
+        "-i",
+        f"movie={path.name!s},cropdetect",
+        "-show_streams",
+        "-show_entries",
+        (
+            "packet_tags=lavfi.cropdetect.x1,lavfi.cropdetect.y1,"
+            "lavfi.cropdetect.x2,lavfi.cropdetect.y2"
+        ),
     ]
 
     logger.info("Analyzing %s...", path)
@@ -129,64 +142,71 @@ async def video_properties(path: Path) -> VideoProperties:
     info = json.loads(probe_stdout)
 
     # frontend can only generate files with one video stream
-    video_stream = next(s for s in info['streams'] if s['codec_type'] == 'video')
+    video_stream = next(s for s in info["streams"] if s["codec_type"] == "video")
 
-    width = int(video_stream['width'])
-    height = int(video_stream['height'])
+    width = int(video_stream["width"])
+    height = int(video_stream["height"])
 
-    packets = [ p for p in info['packets'] if 'tags' in p ]
+    packets = [p for p in info["packets"] if "tags" in p]
 
-    crop_left   = min((int(p['tags']['lavfi.cropdetect.x1']) for p in packets), default=0)
-    crop_top    = min((int(p['tags']['lavfi.cropdetect.y1']) for p in packets), default=0)
-    crop_right  = max((int(p['tags']['lavfi.cropdetect.x2']) for p in packets), default=width - 1)
-    crop_bottom = max((int(p['tags']['lavfi.cropdetect.y2']) for p in packets), default=height - 1)
+    crop_left = min((int(p["tags"]["lavfi.cropdetect.x1"]) for p in packets), default=0)
+    crop_top = min((int(p["tags"]["lavfi.cropdetect.y1"]) for p in packets), default=0)
+    crop_right = max((int(p["tags"]["lavfi.cropdetect.x2"]) for p in packets), default=width - 1)
+    crop_bottom = max((int(p["tags"]["lavfi.cropdetect.y2"]) for p in packets), default=height - 1)
 
-    logger.debug('%s: size=%dx%d, crop=%d,%d-%d,%d',
-                 path, width, height, crop_left, crop_top, crop_right, crop_bottom)
+    logger.debug(
+        "%s: size=%dx%d, crop=%d,%d-%d,%d",
+        path,
+        width,
+        height,
+        crop_left,
+        crop_top,
+        crop_right,
+        crop_bottom,
+    )
 
     crop = determine_crop_area(
-        stream_width = width,
-        stream_height = height,
-        raw_crop = Rectangle(
-            width = crop_right - crop_left + 1,
-            height = crop_bottom - crop_top + 1,
-            left = crop_left,
-            top = crop_top
-        )
+        stream_width=width,
+        stream_height=height,
+        raw_crop=Rectangle(
+            width=crop_right - crop_left + 1,
+            height=crop_bottom - crop_top + 1,
+            left=crop_left,
+            top=crop_top,
+        ),
     )
 
-    return VideoProperties(
-        width = width,
-        height = height,
-        crop = crop
-    )
+    return VideoProperties(width=width, height=height, crop=crop)
+
 
 class ConcatenatedFile(NamedTuple):
     """
-        A concatenated file, plus information on whether only part of the files in the track
-        directory could be used because of a gap (e.g. chunk.0000, chunk.0001, chunk.0003 exist but
-        no chunk.0002)
+    A concatenated file, plus information on whether only part of the files in the track
+    directory could be used because of a gap (e.g. chunk.0000, chunk.0001, chunk.0003 exist but
+    no chunk.0002)
     """
+
     path: Path
     incomplete: bool
 
+
 async def concat_chunks(track_path: Path) -> ConcatenatedFile:
     """
-        Concatenates the chunk files supplied by the frontend to get the full stream file that
-        we can feed to ffmpeg.
+    Concatenates the chunk files supplied by the frontend to get the full stream file that
+    we can feed to ffmpeg.
 
-        :params track_path directory that contains the input fragments
-        :returns path of the assembled stream file
+    :params track_path directory that contains the input fragments
+    :returns path of the assembled stream file
     """
     target_path = track_path / "full.webm"
     incomplete = False
 
     try:
-        async with aiofiles.open(target_path, 'wb') as dest:
+        async with aiofiles.open(target_path, "wb") as dest:
             last_extension = None
             expected_ext_value = 0
 
-            for src_path in sorted(track_path.glob('chunk.*')):
+            for src_path in sorted(track_path.glob("chunk.*")):
                 src_ext = src_path.suffix[1:]
 
                 if (
@@ -200,7 +220,7 @@ async def concat_chunks(track_path: Path) -> ConcatenatedFile:
                 last_extension = src_ext
                 expected_ext_value = expected_ext_value + 1
 
-                async with aiofiles.open(src_path, 'rb') as src:
+                async with aiofiles.open(src_path, "rb") as src:
                     while content := await src.read(512 * 1024):
                         await dest.write(content)
     except:
@@ -209,17 +229,18 @@ async def concat_chunks(track_path: Path) -> ConcatenatedFile:
 
     return ConcatenatedFile(path=target_path, incomplete=incomplete)
 
+
 def pick_target_geometry(content: Rectangle) -> tuple[int, int]:
     """
-        Picks the most appropriate out of a list of standardized output geometries.
+    Picks the most appropriate out of a list of standardized output geometries.
 
-        :param content area of the main stream that's going to be used
-        :returns target width and height
+    :param content area of the main stream that's going to be used
+    :returns target width and height
     """
     candidates = [
         (1280, 720),  # 16:9
         (1280, 800),  # 16:10
-        (1920, 1080)  # 16:9
+        (1920, 1080),  # 16:9
     ]
 
     for w, h in candidates:
@@ -228,18 +249,19 @@ def pick_target_geometry(content: Rectangle) -> tuple[int, int]:
 
     return candidates[-1]
 
+
 def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int) -> str:
     """
-        Generate a scaling filter appropriate for the overlay stream.
+    Generate a scaling filter appropriate for the overlay stream.
 
-        This is meant to make good use of inserted black bars around the main stream, if there are
-        any, and otherwise to keep the overlay usefully visible while not hiding important parts
-        of the slides.
+    This is meant to make good use of inserted black bars around the main stream, if there are
+    any, and otherwise to keep the overlay usefully visible while not hiding important parts
+    of the slides.
 
-        :param crop rectangle to which the main stream will be cropped
-        :param outer_width target width of the combined output stream
-        :param outer_height target height of the combined output stream
-        :returns ffmpeg filter that scales the overlay stream appropriately
+    :param crop rectangle to which the main stream will be cropped
+    :param outer_width target width of the combined output stream
+    :param outer_height target height of the combined output stream
+    :returns ffmpeg filter that scales the overlay stream appropriately
     """
 
     # note: if the input stream is not cropped, scaling_x == scaling_y == 1
@@ -260,31 +282,34 @@ def generate_overlay_scale(crop: Rectangle, outer_width: int, outer_height: int)
         # practice; most likely it won't make a difference.
         slack_height = outer_height - round(scaling_x * crop.height)
         overlay_height = max(slack_height // 2, outer_height // 10)
-        scale_filter = f'scale=-1:{overlay_height},crop=w=min(in_w\\,{outer_width})'
+        scale_filter = f"scale=-1:{overlay_height},crop=w=min(in_w\\,{outer_width})"
     else:
         # pillarboxed. Slides will appear on the left, so we can use the full horizontal slack.
         # Again, we'll use at least 10% of the screen width, and height is cropped to at most main
         # stream height.
         slack_width = outer_width - round(scaling_y * crop.width)
         overlay_width = max(slack_width, outer_width // 10)
-        scale_filter = f'scale={overlay_width}:-1,crop=h=min(in_h\\,{outer_height})'
+        scale_filter = f"scale={overlay_width}:-1,crop=h=min(in_h\\,{outer_height})"
 
     return scale_filter
 
+
 def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
     """
-        Assembles the picture-in-picture rendering filter for ffmpeg
+    Assembles the picture-in-picture rendering filter for ffmpeg
 
-        :param stream properties of the main video stream
-        :param has_overlay whether there is an overlay stream
-        :return ffmpeg filter for use with -filter_complex
+    :param stream properties of the main video stream
+    :param has_overlay whether there is an overlay stream
+    :return ffmpeg filter for use with -filter_complex
     """
     outer_width, outer_height = pick_target_geometry(stream.crop)
 
     # crop if the main stream is something like 4:3 slides captured on a 16:9 screen (or vice versa)
-    crop_filter = \
-        f'crop={stream.crop.width}:{stream.crop.height}:{stream.crop.left}:{stream.crop.top},' \
-        if stream.needs_cropping() else ''
+    crop_filter = (
+        f"crop={stream.crop.width}:{stream.crop.height}:{stream.crop.left}:{stream.crop.top},"
+        if stream.needs_cropping()
+        else ""
+    )
 
     # scale to desired dimensions, but keep original aspect ratio by decreasing one side length if
     # necessary, then pad to desired dimensions by keeping the content left and vertically centered.
@@ -293,42 +318,40 @@ def generate_ffmpeg_filter(stream: VideoProperties, has_overlay: bool) -> str:
     # an 1198x749 input video that with scale=-1:800 yielded 1281x800 instead of 1280x800 and made
     # the padding filter complain.
     scale_filter = (
-        f'scale={outer_width}:{outer_height}:force_original_aspect_ratio=decrease'
-        f',pad={outer_width}:{outer_height}:0:-1'
+        f"scale={outer_width}:{outer_height}:force_original_aspect_ratio=decrease"
+        f",pad={outer_width}:{outer_height}:0:-1"
     )
 
     if not has_overlay:
-        return f'[0:v]{crop_filter}{scale_filter},fps=30'
+        return f"[0:v]{crop_filter}{scale_filter},fps=30"
 
     overlay_scale = generate_overlay_scale(stream.crop, outer_width, outer_height)
 
-    stream_filter = f'[0:v]{crop_filter}{scale_filter},fps=30[main]'
-    overlay_filter = f'[1:v]{overlay_scale}[overlay]'
-    combine_filter = '[main][overlay]overlay=(main_w-overlay_w):0'
+    stream_filter = f"[0:v]{crop_filter}{scale_filter},fps=30[main]"
+    overlay_filter = f"[1:v]{overlay_scale}[overlay]"
+    combine_filter = "[main][overlay]overlay=(main_w-overlay_w):0"
 
-    return f'{stream_filter};{overlay_filter};{combine_filter}'
+    return f"{stream_filter};{overlay_filter};{combine_filter}"
+
 
 async def postprocess_tracks(
-        stream_dir: Path,
-        overlay_dir: Path,
-        audio_dirs: list[Path],
-        output_path: Path
+    stream_dir: Path, overlay_dir: Path, audio_dirs: list[Path], output_path: Path
 ) -> Result:
     """
-        Render the (first) camera stream as an overlay onto the (first) display stream.
-        This is the normal case. Frontend feeds us the (first) captured display with all
-        audio tracks as "stream" and the (first) captured camera stream as "overlay", so
-        we know where to look.
+    Render the (first) camera stream as an overlay onto the (first) display stream.
+    This is the normal case. Frontend feeds us the (first) captured display with all
+    audio tracks as "stream" and the (first) captured camera stream as "overlay", so
+    we know where to look.
 
-        Most of the logic here is to figure out if and how to crop the display stream, how
-        large the overlay should sensibly be, and to construct options that ffmpeg will
-        accept. ffmpeg is a little finnicky at times, so this is a little involved.
+    Most of the logic here is to figure out if and how to crop the display stream, how
+    large the overlay should sensibly be, and to construct options that ffmpeg will
+    accept. ffmpeg is a little finnicky at times, so this is a little involved.
 
-        :param stream_dir path of the main stream (usually slides + voice)
-        :param overlay_dir path of the overlay video stream (usually the speaker)
-        :param audio_dirs paths of additional audio streams, if available
-        :param output_path where to write the result
-        :returns whether the job succeeded, plus info for the e-mail report
+    :param stream_dir path of the main stream (usually slides + voice)
+    :param overlay_dir path of the overlay video stream (usually the speaker)
+    :param audio_dirs paths of additional audio streams, if available
+    :param output_path where to write the result
+    :returns whether the job succeeded, plus info for the e-mail report
     """
 
     inputs: list[ConcatenatedFile] = []
@@ -341,26 +364,27 @@ async def postprocess_tracks(
         stream_props = await video_properties(inputs[0].path)
 
         ffmpeg_maps = [
-            '-filter_complex', generate_ffmpeg_filter(stream_props, has_overlay),
-            '-map', '0:a?'
+            "-filter_complex",
+            generate_ffmpeg_filter(stream_props, has_overlay),
+            "-map",
+            "0:a?",
         ]
 
         if has_overlay:
             inputs.append(await concat_chunks(overlay_dir))
 
         for audio_dir in audio_dirs:
-            ffmpeg_maps.extend([ '-map', f'{len(inputs)}:a' ])
+            ffmpeg_maps.extend(["-map", f"{len(inputs)}:a"])
             inputs.append(await concat_chunks(audio_dir))
 
         intermediate_path = output_path.with_suffix(".part.webm")
 
-        render_command = [
-            'ffmpeg'
-        ] + [
-            arg for input in inputs for arg in [ '-i', str(input.path) ]
-        ] + ffmpeg_maps + [
-            '-y', str(intermediate_path)
-        ]
+        render_command = (
+            ["ffmpeg"]
+            + [arg for input in inputs for arg in ["-i", str(input.path)]]
+            + ffmpeg_maps
+            + ["-y", str(intermediate_path)]
+        )
 
         logger.info("Rendering %s...", intermediate_path)
         logger.debug("Render command = %s", render_command)
@@ -380,11 +404,16 @@ async def postprocess_tracks(
         return Result(output_file=output_path, reason=ResultReason.SUCCESS)
     except CalledProcessError as err:
         logger.error(
-            "While processing %s, a subprocess failed with return code %d.\n" \
-            "command = %s\n\n" \
-            "stdout\n------\n%s\n\n" \
+            "While processing %s, a subprocess failed with return code %d.\n"
+            "command = %s\n\n"
+            "stdout\n------\n%s\n\n"
             "stderr\n------\n%s\n",
-            str(output_path.parent), err.returncode, err.cmd, err.stdout, err.stderr)
+            str(output_path.parent),
+            err.returncode,
+            err.cmd,
+            err.stdout,
+            err.stderr,
+        )
         return Result(output_file=None, reason=ResultReason.FAILURE)
     finally:
         # unlink temporaries to save disk space and limit the number of expected states
@@ -393,12 +422,13 @@ async def postprocess_tracks(
         # intermediate intentionally not unlinked because it's harder to recreate. Admin/user may
         # want to inspect the abortive results. A rerender will overwrite it anyway.
 
+
 async def postprocess_recording(recording_path: Path) -> Result:
     """
-        Postprocess the chunks of a recording. Output will be written to recording_path
+    Postprocess the chunks of a recording. Output will be written to recording_path
 
-        :param recording_path directory that contains the input streams in chunks
-        :returns whether postprocessing succeeded and path of the result file
+    :param recording_path directory that contains the input streams in chunks
+    :returns whether postprocessing succeeded and path of the result file
     """
 
     if not recording_path.is_dir():

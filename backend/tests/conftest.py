@@ -16,9 +16,9 @@ fixture then covers the rest: a cached Settings from an earlier test cannot leak
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
+from collections.abc import Iterator
 import os
 from pathlib import Path
-from typing import Iterator
 
 from fastapi.testclient import TestClient
 import pytest
@@ -32,16 +32,19 @@ from .harness import AUDIENCE, Provider
 # clearing it case-insensitively too avoids a lowercase var slipping through
 ENV_PREFIX = "ise_record_"
 
+
 def scrub_deployment_environment() -> None:
-    """ Remove every setting the deployment might have configured. """
-    for name in [ n for n in os.environ if n.lower().startswith(ENV_PREFIX) ]:
+    """Remove every setting the deployment might have configured."""
+    for name in [n for n in os.environ if n.lower().startswith(ENV_PREFIX)]:
         del os.environ[name]
+
 
 scrub_deployment_environment()
 
+
 @pytest.fixture(autouse=True)
 def isolated_settings():
-    """ Give every test the documented defaults, whatever the machine is configured for. """
+    """Give every test the documented defaults, whatever the machine is configured for."""
     scrub_deployment_environment()
     get_settings.cache_clear()
 
@@ -56,9 +59,10 @@ def isolated_settings():
 # and `client`; these are named apart from those so that a file holding both kinds of test
 # says in each signature which backend it is talking to.
 
+
 @pytest.fixture
 def provider() -> Iterator[Provider]:
-    """ A stand-in OpenID provider, serving discovery and JWKS over a real socket. """
+    """A stand-in OpenID provider, serving discovery and JWKS over a real socket."""
     instance = Provider()
     instance.add_key("key-1")
     instance.start()
@@ -69,11 +73,7 @@ def provider() -> Iterator[Provider]:
 @pytest.fixture
 def auth_settings(provider: Provider, tmp_path: Path) -> Settings:
     return Settings(
-        destdir=tmp_path,
-        oidc=OidcSettings(
-            provider_url=provider.issuer,
-            audience=AUDIENCE
-        )
+        destdir=tmp_path, oidc=OidcSettings(provider_url=provider.issuer, audience=AUDIENCE)
     )
 
 

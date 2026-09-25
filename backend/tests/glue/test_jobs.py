@@ -15,24 +15,26 @@ from unittest.mock import ANY
 import pytest
 from pytest_mock import MockerFixture
 
-from ise_record.glue.jobs import get_running_jobs, get_running_jobs_snapshot, postprocessing_task
 from ise_record.core.postprocess import Result, ResultReason
+from ise_record.glue.jobs import get_running_jobs, get_running_jobs_snapshot, postprocessing_task
 from ise_record.settings import Settings, SmtpSettings
 
 from .conftest import request_for
 
-
 # --- running a job ---------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_postprocessing_task_with_report(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
+    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_postprocess = mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result
+    )
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     settings = Settings(
-        smtp = SmtpSettings(
+        smtp=SmtpSettings(
             server="localhost",
             port=587,
             local_hostname="smtp.example.de",
@@ -40,16 +42,11 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
             password="supersecure",
             sender="render@example.de",
             starttls=True,
-            allowed_domains=("example.de",)
+            allowed_domains=("example.de",),
         )
     )
 
-    await postprocessing_task(
-        settings.destdir / "foo",
-        "lecturer@example.de",
-        settings.smtp,
-        set()
-    )
+    await postprocessing_task(settings.destdir / "foo", "lecturer@example.de", settings.smtp, set())
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
     mock_send.assert_called_once_with(
@@ -60,7 +57,7 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
         start_tls=True,
         use_tls=False,
         username="server@example.de",
-        password="supersecure"
+        password="supersecure",
     )
 
     sent_report = mock_send.call_args[0][0]
@@ -70,15 +67,18 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
     assert "lecturer@example.de" == sent_report["To"]
     assert "foo/presentation.webm" in sent_report.get_payload()
 
+
 @pytest.mark.asyncio
 async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
+    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_postprocess = mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result
+    )
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     settings = Settings(
-        smtp = SmtpSettings(
+        smtp=SmtpSettings(
             server="localhost",
             port=587,
             local_hostname="smtp.example.de",
@@ -86,36 +86,30 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
             password="supersecure",
             sender="render@example.de",
             starttls=True,
-            allowed_domains=("example.de",)
+            allowed_domains=("example.de",),
         )
     )
 
-    await postprocessing_task(
-        settings.destdir / "foo",
-        None,
-        settings.smtp,
-        set()
-    )
+    await postprocessing_task(settings.destdir / "foo", None, settings.smtp, set())
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
     mock_send.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
+    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result)
+    mock_postprocess = mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result
+    )
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
-    await postprocessing_task(
-        Settings().destdir / "foo",
-        "lecturer@example.de",
-        None,
-        set()
-    )
+    await postprocessing_task(Settings().destdir / "foo", "lecturer@example.de", None, set())
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
     mock_send.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_a_second_job_for_a_running_recording_is_dropped(mocker: MockerFixture):
@@ -123,56 +117,51 @@ async def test_a_second_job_for_a_running_recording_is_dropped(mocker: MockerFix
     # rather than by malice. Two renders would write over each other's assembled tracks.
     mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
 
-    await postprocessing_task(
-        Settings().destdir / "foo",
-        None,
-        None,
-        { Path("data/foo") }
-    )
+    await postprocessing_task(Settings().destdir / "foo", None, None, {Path("data/foo")})
 
     mock_postprocess.assert_not_called()
 
+
 @pytest.mark.asyncio
 async def test_a_job_for_a_different_recording_is_not_dropped(mocker: MockerFixture):
-    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=Result(reason=ResultReason.SUCCESS, output_file=None))
-
-    await postprocessing_task(
-        Settings().destdir / "bar",
-        None,
-        None,
-        { Path("data/foo") }
+    mock_postprocess = mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
     )
+
+    await postprocessing_task(Settings().destdir / "bar", None, None, {Path("data/foo")})
 
     mock_postprocess.assert_called_once_with(Path("data/bar"))
 
+
 @pytest.mark.asyncio
 async def test_a_finished_job_releases_the_recording(mocker: MockerFixture):
-    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=Result(reason=ResultReason.SUCCESS, output_file=None))
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
+    )
     running_jobs: set[Path] = set()
 
-    await postprocessing_task(
-        Settings().destdir / "foo",
-        None,
-        None,
-        running_jobs
-    )
+    await postprocessing_task(Settings().destdir / "foo", None, None, running_jobs)
 
     assert running_jobs == set()
+
 
 @pytest.mark.asyncio
 async def test_a_job_that_blows_up_still_releases_the_recording(mocker: MockerFixture):
     # otherwise one unexpected failure locks that recording out of postprocessing until
     # the server is restarted, and rerender.py is the only way back
-    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=RuntimeError("boom"))
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        side_effect=RuntimeError("boom"),
+    )
     running_jobs: set[Path] = set()
 
     with pytest.raises(RuntimeError):
-        await postprocessing_task(
-            Settings().destdir / "foo",
-            None,
-            None,
-            running_jobs
-        )
+        await postprocessing_task(Settings().destdir / "foo", None, None, running_jobs)
 
     assert running_jobs == set()
 
@@ -187,15 +176,18 @@ async def test_a_running_job_is_registered_while_it_runs(mocker: MockerFixture):
         seen_while_running.append(set(running_jobs))
         return Result(reason=ResultReason.SUCCESS, output_file=None)
 
-    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess)
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess
+    )
 
     await postprocessing_task(Path("data/foo"), None, None, running_jobs)
 
-    assert seen_while_running == [ { Path("data/foo") } ]
+    assert seen_while_running == [{Path("data/foo")}]
     assert running_jobs == set()
 
 
 # --- the per-user record of running jobs -----------------------------------
+
 
 @pytest.mark.asyncio
 async def test_each_user_has_a_running_job_set_of_their_own(tmp_path: Path):
@@ -212,14 +204,20 @@ async def test_each_user_has_a_running_job_set_of_their_own(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_another_users_job_does_not_block_a_recording_of_the_same_name(mocker: MockerFixture, tmp_path: Path):
+async def test_another_users_job_does_not_block_a_recording_of_the_same_name(
+    mocker: MockerFixture, tmp_path: Path
+):
     # two lecturers naming a lecture alike is ordinary; only the same recording of the same
     # user counts as a duplicate
     request = request_for(Settings(destdir=tmp_path))
     home_a, home_b = tmp_path / "a", tmp_path / "b"
     (await get_running_jobs(request, home_a)).add(home_a / "foo")
 
-    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=Result(reason=ResultReason.SUCCESS, output_file=None))
+    mock_postprocess = mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
+    )
 
     await postprocessing_task(home_b / "foo", None, None, await get_running_jobs(request, home_b))
 
@@ -238,5 +236,5 @@ async def test_the_snapshot_does_not_follow_later_changes(tmp_path: Path):
     running_jobs.add(tmp_path / "bar")
     running_jobs.discard(tmp_path / "foo")
 
-    assert snapshot == frozenset({ tmp_path / "foo" })
+    assert snapshot == frozenset({tmp_path / "foo"})
     assert isinstance(snapshot, frozenset)

@@ -16,7 +16,7 @@ change to it, including the ones that would move a lecturer's recordings.
 # pylint: disable=missing-function-docstring
 # pylint: disable=too-many-instance-attributes
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
@@ -45,15 +45,15 @@ ASSETS = Path(__file__).parent / "assets"
 
 
 def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
-    """ Generate an RSA key pair and the JWK describing its public half """
+    """Generate an RSA key pair and the JWK describing its public half"""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True) # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
-    jwk.update({"kid": kid, "use": "sig", "alg": "RS256"}) # pyright: ignore[reportUnknownMemberType]
-    return private_key, jwk # pyright: ignore[reportUnknownVariableType]
+    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
+    jwk.update({"kid": kid, "use": "sig", "alg": "RS256"})  # pyright: ignore[reportUnknownMemberType]
+    return private_key, jwk  # pyright: ignore[reportUnknownVariableType]
 
 
 class Provider:
-    """ A stand-in OpenID provider serving discovery and JWKS documents over HTTP """
+    """A stand-in OpenID provider serving discovery and JWKS documents over HTTP"""
 
     def __init__(self) -> None:
         self.keys: dict[str, tuple[rsa.RSAPrivateKey, dict[str, Any]]] = {}
@@ -101,9 +101,9 @@ class Provider:
                         self.send_response(503)
                         self.end_headers()
                         return None
-                    return provider.respond(self, {
-                        "keys": [jwk for _, jwk in provider.keys.values()]
-                    })
+                    return provider.respond(
+                        self, {"keys": [jwk for _, jwk in provider.keys.values()]}
+                    )
 
                 if self.path.endswith("/userinfo"):
                     provider.userinfo_fetch_count += 1
@@ -122,7 +122,8 @@ class Provider:
         # serve_forever polls for the shutdown flag, and defaults to doing so twice a
         # second -- which every test would then wait out in teardown
         self._thread = threading.Thread(
-            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         self._thread.start()
 
     @staticmethod
@@ -140,11 +141,11 @@ class Provider:
         handler.wfile.write(body)
 
     def serve_userinfo(self, **claims: Any) -> None:
-        """ Answer UserInfo with these claims, the way a provider holding them would """
+        """Answer UserInfo with these claims, the way a provider holding them would"""
         self.userinfo_response = (200, "application/json", json.dumps(claims).encode())
 
     def serve_userinfo_raw(self, status: int, content_type: str, body: bytes) -> None:
-        """ Answer UserInfo with a body of our choosing, for the shapes providers get wrong """
+        """Answer UserInfo with a body of our choosing, for the shapes providers get wrong"""
         self.userinfo_response = (status, content_type, body)
 
     def stop(self) -> None:
@@ -153,8 +154,8 @@ class Provider:
             self._server.server_close()
 
     def mint(self, kid: str = "key-1", **overrides: Any) -> str:
-        """ Issue a signed access token, with claim overrides applied last """
-        now = datetime.now(timezone.utc)
+        """Issue a signed access token, with claim overrides applied last"""
+        now = datetime.now(UTC)
         claims: dict[str, Any] = {
             "iss": self.issuer,
             "sub": DEFAULT_SUBJECT,
@@ -175,8 +176,9 @@ class Provider:
 
 # --- driving the endpoints -------------------------------------------------
 
+
 def upload(client: TestClient, token: str | None, index: int = 0):
-    """ Upload one chunk of the recording "foo", with or without a token. """
+    """Upload one chunk of the recording "foo", with or without a token."""
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return client.post(
         "/api/chunks",
@@ -187,12 +189,12 @@ def upload(client: TestClient, token: str | None, index: int = 0):
 
 
 def upload_chunk_path(base_dir: Path, user_segment: str, index: int = 0) -> Path:
-    """ Where `upload` puts its chunk, given the directory it is filed under. """
+    """Where `upload` puts its chunk, given the directory it is filed under."""
     return base_dir / user_segment / "foo" / "stream" / f"chunk.{index:04d}"
 
 
 def finish_recording(user_home: Path, recording: str, content: bytes = b"video") -> None:
-    """ A recording whose postprocessing ran to completion. """
+    """A recording whose postprocessing ran to completion."""
     (user_home / recording).mkdir(parents=True, exist_ok=True)
     (user_home / recording / "presentation.webm").write_bytes(content)
 
@@ -201,13 +203,13 @@ MINUTE = 60
 
 
 def age(path: Path, seconds: float) -> None:
-    """ Backdate a file's modification time, which is what the staleness check reads. """
+    """Backdate a file's modification time, which is what the staleness check reads."""
     then = time.time() - seconds
     os.utime(path, (then, then))
 
 
 def write_chunks(recording_dir: Path, ages: list[float], track: str = "stream") -> None:
-    """ One chunk per entry, chunk.0000 first, each last written `age` seconds ago. """
+    """One chunk per entry, chunk.0000 first, each last written `age` seconds ago."""
     track_dir = recording_dir / track
     track_dir.mkdir(parents=True, exist_ok=True)
 
@@ -218,20 +220,20 @@ def write_chunks(recording_dir: Path, ages: list[float], track: str = "stream") 
 
 
 def abandon_recording(user_home: Path, recording: str, minutes: float = 30) -> Path:
-    """ A recording whose last chunk arrived long enough ago that nobody is streaming it. """
+    """A recording whose last chunk arrived long enough ago that nobody is streaming it."""
     recording_dir = user_home / recording
-    write_chunks(recording_dir, [ (minutes + 2) * MINUTE, (minutes + 1) * MINUTE, minutes * MINUTE ])
+    write_chunks(recording_dir, [(minutes + 2) * MINUTE, (minutes + 1) * MINUTE, minutes * MINUTE])
     return recording_dir
 
 
 def list_recordings(client: TestClient, token: str | None):
-    """ Ask for the caller's completed and rendering recordings, with or without a token. """
+    """Ask for the caller's completed and rendering recordings, with or without a token."""
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return client.get("/api/recordings", headers=headers)
 
 
 def app_of(client: TestClient) -> FastAPI:
-    """ The application behind a client, typed -- TestClient only promises an ASGI app. """
+    """The application behind a client, typed -- TestClient only promises an ASGI app."""
     return client.app  # type: ignore[return-value]
 
 
@@ -246,31 +248,32 @@ def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
 
 
 def download_totp_of(client: TestClient) -> DownloadTotpAuthority:
-    """ The authority that issued the OTPs in this client's listings. """
+    """The authority that issued the OTPs in this client's listings."""
     return app_of(client).state.download_totp
 
 
 def purge(client: TestClient, token: str | None, recording: str):
-    """ Ask for a recording to be deleted, as the Purge dialog does once it is confirmed. """
+    """Ask for a recording to be deleted, as the Purge dialog does once it is confirmed."""
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return client.delete(f"/api/recordings/{quote(recording)}", headers=headers)
 
 
 def download_completed(client: TestClient, user_digest: str, recording: str, totp: str | None):
-    """ Follow a download link, as the browser would when the lecturer clicks one. """
+    """Follow a download link, as the browser would when the lecturer clicks one."""
     params = {"totp": totp} if totp is not None else None
     return client.get(f"/api/recordings/{user_digest}/{quote(recording)}", params=params)
 
 
 # --- the directory scheme, restated ----------------------------------------
 
+
 def digest_of(subject: str) -> str:
-    """ The stable directory name user_home.py derives from a subject. """
+    """The stable directory name user_home.py derives from a subject."""
     return hashlib.sha3_256(subject.encode("utf-8")).hexdigest()
 
 
 def alias_of(username: str, subject_digest: str) -> str:
-    """ The readable symlink user_home.py puts beside the stable directory. """
+    """The readable symlink user_home.py puts beside the stable directory."""
     return f"{username}-{subject_digest[:12]}"
 
 

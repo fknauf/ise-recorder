@@ -48,3 +48,11 @@ useLibraryCodeForTypes = true
 
 [tool.fastapi]
 entrypoint = "ise_record.server:app"
+
+[tool.ruff]
+line-length = 100                        # pylint's default; ruff's is 88
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true        # sort by module name, whether `import x` or `from x import`
+order-by-type = false                    # members alphabetically, not CONSTANTS, Classes, functions
+known-first-party = ["ise_record"]

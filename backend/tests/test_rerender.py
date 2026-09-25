@@ -9,16 +9,19 @@ from pathlib import Path
 
 import pytest
 from pytest_mock import MockerFixture
-import rerender # pyright: ignore[reportMissingTypeStubs]
 
 from ise_record.core.postprocess import Result, ResultReason
+import rerender  # pyright: ignore[reportMissingTypeStubs]
+
 
 @pytest.mark.asyncio
 async def test_rerender(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
+    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("sys.argv", [ "./rerender.py", "foo" ])
-    mock_postprocess = mocker.patch("rerender.postprocess_recording", autospec=True, return_value=expected_result)
+    mocker.patch("sys.argv", ["./rerender.py", "foo"])
+    mock_postprocess = mocker.patch(
+        "rerender.postprocess_recording", autospec=True, return_value=expected_result
+    )
     mock_basic_config = mocker.patch("logging.basicConfig")
 
     await rerender.main()
@@ -26,12 +29,15 @@ async def test_rerender(mocker: MockerFixture):
     mock_basic_config.assert_called_once_with(level="INFO")
     mock_postprocess.assert_called_once_with(Path("foo"))
 
+
 @pytest.mark.asyncio
 async def test_rerender_loglevel(mocker: MockerFixture):
-    expected_result = Result(reason = ResultReason.SUCCESS, output_file = Path("foo/presentation.webm"))
+    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    mocker.patch("sys.argv", [ "./rerender.py", "--log-level", "DEBUG", "foo" ])
-    mock_postprocess = mocker.patch("rerender.postprocess_recording", autospec=True, return_value=expected_result)
+    mocker.patch("sys.argv", ["./rerender.py", "--log-level", "DEBUG", "foo"])
+    mock_postprocess = mocker.patch(
+        "rerender.postprocess_recording", autospec=True, return_value=expected_result
+    )
     mock_basic_config = mocker.patch("logging.basicConfig")
 
     await rerender.main()

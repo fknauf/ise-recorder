@@ -15,7 +15,7 @@ from ..harness import AUDIENCE, Provider
 
 
 async def discover(provider: Provider, audience: str = AUDIENCE) -> OidcClient:
-    """ An OidcClient built the way the app builds one at startup. """
+    """An OidcClient built the way the app builds one at startup."""
     return await OidcClient.discover(
         provider_url=provider.issuer,
         audience=audience,

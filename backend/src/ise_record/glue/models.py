@@ -22,12 +22,12 @@ SafeRecording = Annotated[
         min_length=1,
         description="Name of the recording. Usually consists of Lecture Title and Timestamp",
         examples=["PSU_2026-02-13T164309.313Z"],
-    )
+    ),
 ]
 
 
 class ChunkUpload(BaseModel):
-    """ An uploaded chunk with metadata """
+    """An uploaded chunk with metadata"""
 
     recording: SafeRecording
     track: Annotated[
@@ -35,27 +35,20 @@ class ChunkUpload(BaseModel):
         Field(
             pattern=r"\A[a-z][a-z0-9-]*\z",
             description="Name of the track, e.g. stream, overlay, audio-0",
-            examples=["stream", "overlay", "audio-0"]
-        )
+            examples=["stream", "overlay", "audio-0"],
+        ),
     ]
     index: Annotated[
         int,
         Field(
-            ge=0,
-            description="Running number of the chunk in the track. Start at 0.",
-            examples=[0]
-        )
+            ge=0, description="Running number of the chunk in the track. Start at 0.", examples=[0]
+        ),
     ]
-    chunk: Annotated[
-        UploadFile,
-        Field(
-            description="video/audio blob to store, as file"
-        )
-    ]
+    chunk: Annotated[UploadFile, Field(description="video/audio blob to store, as file")]
 
 
 class PostProcessingJob(BaseModel):
-    """ DTO for a postprocessing job the client wants to schedule """
+    """DTO for a postprocessing job the client wants to schedule"""
 
     recording: SafeRecording
     # backend will validate before sending email. We want the postprocessing to work even if
@@ -66,24 +59,27 @@ class PostProcessingJob(BaseModel):
         Field(
             default=None,
             description="Recipient of the completion notification",
-            examples=["mustermann@vss.uni-hannover.de", None]
-        )
+            examples=["mustermann@vss.uni-hannover.de", None],
+        ),
     ]
 
 
 class DisplayableRecording(BaseModel):
-    """ Information needed to display a recording in the UI """
+    """Information needed to display a recording in the UI"""
+
     name: str
 
 
 class DownloadableRecording(DisplayableRecording):
-    """ Per-downloadable-file information for the frontend """
+    """Per-downloadable-file information for the frontend"""
+
     size: int
     totp: str
 
 
 class RecordingsList(BaseModel):
-    """ List of recordings as returned by the recordings-list endpoint  """
+    """List of recordings as returned by the recordings-list endpoint"""
+
     user: str
     completed: list[DownloadableRecording]
     rendering: list[DisplayableRecording]

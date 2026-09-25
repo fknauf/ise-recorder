@@ -7,6 +7,7 @@ subject, and a human-readable symlink to it that's a filesystem-safe mangling of
 preferred_username claim suffixed with the first few characters of the hash so it's unique even
 if preferred usernames overlap.
 """
+
 import hashlib
 from pathlib import Path
 import re
@@ -16,9 +17,8 @@ from pathvalidate import sanitize_filename
 
 from ise_record.core.auth import UserInfo
 
-async def fs_safe_user_name(
-        preferred_username: str | None
-) -> str | None:
+
+async def fs_safe_user_name(preferred_username: str | None) -> str | None:
     """
     Tries to create a file-system-safe, human-readable identifier for the user for use in a symlink
     to the cryptic digest dir so someone with shell access can identify user homes.
@@ -33,15 +33,13 @@ async def fs_safe_user_name(
     # filter out hacky user names, i.e. hidden, empty, or looks like a cmdline argument
     # Bail out rather than try to fix because just removing these breaks file name sanitation, at
     # least on Windows: -COM -> COM hits a reserved file name.
-    if candidate[:1] in [ ".", "-", "" ]:
+    if candidate[:1] in [".", "-", ""]:
         return None
 
     return candidate
 
-async def prepare_user_home_dir(
-        user_info: UserInfo,
-        base_dir: Path
-) -> Path:
+
+async def prepare_user_home_dir(user_info: UserInfo, base_dir: Path) -> Path:
     """
     Prepare a stable (even when user info in the OIDC changes), user-specific home directory, and
     also create a human-readable symlink to it that a shell user can use to identify which stable

@@ -10,15 +10,15 @@ from fastapi import Depends, HTTPException, Request, status
 from ise_record.core.auth import UserInfo
 from ise_record.core.user_home import prepare_user_home_dir
 from ise_record.glue.auth import get_user_info
-from ise_record.settings import Settings, get_settings
+from ise_record.settings import get_settings, Settings
 
 
 async def get_current_user_home(
-        request: Request,
-        settings: Annotated[Settings, Depends(get_settings)],
-        user_info: Annotated[UserInfo | None, Depends(get_user_info)]
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    user_info: Annotated[UserInfo | None, Depends(get_user_info)],
 ) -> Path:
-    """ Resolve the caller's home directory name, rejecting unauthenticated requests. """
+    """Resolve the caller's home directory name, rejecting unauthenticated requests."""
     if not settings.auth_required:
         return settings.destdir
 
@@ -26,8 +26,7 @@ async def get_current_user_home(
     # throws, and we never come here.
     if user_info is None:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not identify user"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not identify user"
         )
 
     cached_home_dirs: dict[str, Path] = request.app.state.cached_home_dirs

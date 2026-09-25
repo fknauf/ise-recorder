@@ -3,15 +3,16 @@ Lists of recordings for display in the UI as server-side recordings, binned into
 rendering, and unprocessed/failed-postprocessing recordings.
 """
 
-from datetime import datetime, timedelta
-from enum import Enum, auto
+from datetime import datetime, timedelta, UTC
+from enum import auto, Enum
 from pathlib import Path
 from typing import NamedTuple
 
 from ise_record.core.postprocess import MAIN_TRACK_NAME, OUTPUT_FILENAME
 
+
 class RecordingState(Enum):
-    """ Current state of a recording """
+    """Current state of a recording"""
 
     NONEXISTENT = auto()
     STREAMING = auto()
@@ -20,15 +21,16 @@ class RecordingState(Enum):
     UNPROCESSED = auto()
     NOT_RENDERABLE = auto()
 
+
 class RecordingInfo(NamedTuple):
-    """ Information about a recording """
+    """Information about a recording"""
+
     path: Path
     state: RecordingState
     size: int | None = None
 
-def _unfinished_state(
-        main_track_dir: Path
-) -> RecordingState:
+
+def _unfinished_state(main_track_dir: Path) -> RecordingState:
     chunks = sorted(main_track_dir.glob("chunk.*"), reverse=True)
 
     # no chunks in main track -> not renderable
@@ -40,7 +42,7 @@ def _unfinished_state(
         return RecordingState.NOT_RENDERABLE
 
     # if the newest chunk is older than 5 minutes, the recording isn't still being streamed.
-    cutoff = datetime.now() - timedelta(minutes=5)
+    cutoff = datetime.now(UTC) - timedelta(minutes=5)
     latest = chunks[0]
 
     if latest.stat().st_mtime < cutoff.timestamp():
@@ -48,10 +50,8 @@ def _unfinished_state(
 
     return RecordingState.STREAMING
 
-def _recording_state(
-        recording_dir: Path,
-        running_jobs: frozenset[Path]
-) -> RecordingState:
+
+def _recording_state(recording_dir: Path, running_jobs: frozenset[Path]) -> RecordingState:
     output_path = recording_dir / OUTPUT_FILENAME
     main_track_dir = recording_dir / MAIN_TRACK_NAME
 
@@ -69,10 +69,8 @@ def _recording_state(
 
     return _unfinished_state(main_track_dir)
 
-def classify_recording(
-        recording_dir: Path,
-        running_jobs: frozenset[Path]
-) -> RecordingInfo:
+
+def classify_recording(recording_dir: Path, running_jobs: frozenset[Path]) -> RecordingInfo:
     """
     Classifies a recording according to its state of processing, and attaches the size of the
     output for finished recordings.
@@ -86,9 +84,7 @@ def classify_recording(
 
     return RecordingInfo(path=recording_dir, state=state)
 
-def classify_all_recordings(
-        user_home: Path,
-        running_jobs: frozenset[Path]
-) -> list[RecordingInfo]:
-    """ Classifies all recordings a user has """
-    return [ classify_recording(path, running_jobs) for path in sorted(user_home.iterdir()) ]
+
+def classify_all_recordings(user_home: Path, running_jobs: frozenset[Path]) -> list[RecordingInfo]:
+    """Classifies all recordings a user has"""
+    return [classify_recording(path, running_jobs) for path in sorted(user_home.iterdir())]

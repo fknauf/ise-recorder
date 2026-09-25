@@ -33,9 +33,9 @@ BEARER = HTTPAuthorizationCredentials(scheme="Bearer", credentials=TOKEN)
 
 @pytest.fixture
 def oidc(mocker: MockerFixture) -> Any:
-    """ An OidcClient that accepts any token as the lecturer, and has no UserInfo to give. """
+    """An OidcClient that accepts any token as the lecturer, and has no UserInfo to give."""
     client = mocker.create_autospec(OidcClient, instance=True)
-    client.validate_access_token.return_value = { "sub": "abc", "preferred_username": "lecturer" }
+    client.validate_access_token.return_value = {"sub": "abc", "preferred_username": "lecturer"}
     client.query_username.return_value = None
     return client
 
@@ -44,7 +44,9 @@ async def user_info(request: Request, settings: Settings, oidc: Any) -> UserInfo
     return await get_user_info(request, settings, oidc, BEARER)
 
 
-async def rejection(request: Request, settings: Settings, oidc: Any, credentials: Any = BEARER) -> HTTPException:
+async def rejection(
+    request: Request, settings: Settings, oidc: Any, credentials: Any = BEARER
+) -> HTTPException:
     with pytest.raises(HTTPException) as excinfo:
         await get_user_info(request, settings, oidc, credentials)
     return excinfo.value
@@ -52,17 +54,18 @@ async def rejection(request: Request, settings: Settings, oidc: Any, credentials
 
 # --- who the caller is -----------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_the_caller_is_who_the_token_says(request_: Request, settings: Settings, oidc: Any):
-    assert await user_info(request_, settings, oidc) == UserInfo(sub="abc", preferred_username="lecturer")
+    assert await user_info(request_, settings, oidc) == UserInfo(
+        sub="abc", preferred_username="lecturer"
+    )
 
     oidc.validate_access_token.assert_called_once_with(TOKEN)
 
 
 @pytest.mark.asyncio
-async def test_an_open_deployment_has_no_user_and_asks_nobody(
-    open_settings: Settings, oidc: Any
-):
+async def test_an_open_deployment_has_no_user_and_asks_nobody(open_settings: Settings, oidc: Any):
     # not even a missing token is an error: there is nobody to authenticate against
     assert await get_user_info(request_for(open_settings), open_settings, oidc, None) is None
 
@@ -71,6 +74,7 @@ async def test_an_open_deployment_has_no_user_and_asks_nobody(
 
 # --- what becomes which response -------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_a_missing_token_is_a_401_with_a_bearer_challenge(
     request_: Request, settings: Settings, oidc: Any
@@ -78,17 +82,19 @@ async def test_a_missing_token_is_a_401_with_a_bearer_challenge(
     error = await rejection(request_, settings, oidc, credentials=None)
 
     assert error.status_code == 401
-    assert error.headers == { "WWW-Authenticate": "Bearer" }
+    assert error.headers == {"WWW-Authenticate": "Bearer"}
 
 
 @pytest.mark.asyncio
-async def test_a_token_the_client_rejects_is_a_401(request_: Request, settings: Settings, oidc: Any):
+async def test_a_token_the_client_rejects_is_a_401(
+    request_: Request, settings: Settings, oidc: Any
+):
     oidc.validate_access_token.side_effect = Unauthenticated()
 
     error = await rejection(request_, settings, oidc)
 
     assert error.status_code == 401
-    assert error.headers == { "WWW-Authenticate": "Bearer" }
+    assert error.headers == {"WWW-Authenticate": "Bearer"}
 
 
 @pytest.mark.asyncio
@@ -107,19 +113,20 @@ async def test_a_provider_that_was_never_discovered_is_a_503(request_: Request, 
     assert (await rejection(request_, settings, None)).status_code == 503
 
 
-@pytest.mark.parametrize("subject", [ 42, None, [ "abc" ] ])
+@pytest.mark.parametrize("subject", [42, None, ["abc"]])
 @pytest.mark.asyncio
 async def test_a_subject_that_is_not_a_string_is_a_401(
     request_: Request, settings: Settings, oidc: Any, subject: Any
 ):
     # the subject names the home directory; a token that validates but does not carry a
     # usable one identifies nobody
-    oidc.validate_access_token.return_value = { "sub": subject }
+    oidc.validate_access_token.return_value = {"sub": subject}
 
     assert (await rejection(request_, settings, oidc)).status_code == 401
 
 
 # --- the UserInfo fallback -------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_userinfo_is_not_consulted_when_the_token_carries_the_username(
@@ -131,11 +138,14 @@ async def test_userinfo_is_not_consulted_when_the_token_carries_the_username(
     oidc.query_username.assert_not_called()
 
 
-@pytest.mark.parametrize("claims", [
-    { "sub": "abc" },
-    { "sub": "abc", "preferred_username": 42 },
-    { "sub": "abc", "preferred_username": None },
-])
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"sub": "abc"},
+        {"sub": "abc", "preferred_username": 42},
+        {"sub": "abc", "preferred_username": None},
+    ],
+)
 @pytest.mark.asyncio
 async def test_the_username_comes_from_userinfo_when_the_token_has_none(
     request_: Request, settings: Settings, oidc: Any, claims: dict[str, Any]
@@ -143,7 +153,9 @@ async def test_the_username_comes_from_userinfo_when_the_token_has_none(
     oidc.validate_access_token.return_value = claims
     oidc.query_username.return_value = "dozentin"
 
-    assert await user_info(request_, settings, oidc) == UserInfo(sub="abc", preferred_username="dozentin")
+    assert await user_info(request_, settings, oidc) == UserInfo(
+        sub="abc", preferred_username="dozentin"
+    )
 
     # asked about this caller, with this caller's token as the credential
     oidc.query_username.assert_awaited_once_with(TOKEN, "abc")
@@ -154,16 +166,19 @@ async def test_no_answer_from_userinfo_is_a_user_without_a_name(
     request_: Request, settings: Settings, oidc: Any
 ):
     # not an error: the name is only cosmetic, and the subject is what the home is named after
-    oidc.validate_access_token.return_value = { "sub": "abc" }
+    oidc.validate_access_token.return_value = {"sub": "abc"}
 
     assert await user_info(request_, settings, oidc) == UserInfo(sub="abc", preferred_username=None)
 
 
 # --- what is cached --------------------------------------------------------
 
+
 @pytest.mark.asyncio
-async def test_userinfo_is_consulted_once_per_subject(request_: Request, settings: Settings, oidc: Any):
-    oidc.validate_access_token.return_value = { "sub": "abc" }
+async def test_userinfo_is_consulted_once_per_subject(
+    request_: Request, settings: Settings, oidc: Any
+):
+    oidc.validate_access_token.return_value = {"sub": "abc"}
     oidc.query_username.return_value = "dozentin"
 
     for _ in range(3):
@@ -192,7 +207,7 @@ async def test_a_recovering_provider_does_not_rename_a_known_subject(
     # UserInfo unavailable for the first chunk, so this lecture starts without a name. The
     # rest of it has to be filed the same way, or get_current_user_home could be asked about
     # a different user halfway through a recording.
-    oidc.validate_access_token.return_value = { "sub": "abc" }
+    oidc.validate_access_token.return_value = {"sub": "abc"}
     first = await user_info(request_, settings, oidc)
 
     oidc.query_username.return_value = "dozentin"
@@ -204,19 +219,21 @@ async def test_a_recovering_provider_does_not_rename_a_known_subject(
 
 @pytest.mark.asyncio
 async def test_subjects_are_cached_apart(request_: Request, settings: Settings, oidc: Any):
-    oidc.validate_access_token.return_value = { "sub": "user-a", "preferred_username": "anna" }
+    oidc.validate_access_token.return_value = {"sub": "user-a", "preferred_username": "anna"}
     await user_info(request_, settings, oidc)
 
-    oidc.validate_access_token.return_value = { "sub": "user-b", "preferred_username": "bernd" }
+    oidc.validate_access_token.return_value = {"sub": "user-b", "preferred_username": "bernd"}
 
-    assert await user_info(request_, settings, oidc) == UserInfo(sub="user-b", preferred_username="bernd")
+    assert await user_info(request_, settings, oidc) == UserInfo(
+        sub="user-b", preferred_username="bernd"
+    )
 
 
 @pytest.mark.asyncio
 async def test_two_apps_share_no_user_cache(settings: Settings, oidc: Any):
     # the cache once lived on the class rather than on the instance, so every app in the
     # process -- and every test -- read the users an earlier one had cached
-    oidc.validate_access_token.return_value = { "sub": "abc" }
+    oidc.validate_access_token.return_value = {"sub": "abc"}
 
     await user_info(request_for(settings), settings, oidc)
     await user_info(request_for(settings), settings, oidc)
@@ -226,13 +243,16 @@ async def test_two_apps_share_no_user_cache(settings: Settings, oidc: Any):
 
 # --- discovery -------------------------------------------------------------
 
+
 def app_state() -> Any:
     return SimpleNamespace(oidc=OidcServerState())
 
 
 @pytest.fixture
 def discover(mocker: MockerFixture, oidc: Any) -> AsyncMock:
-    return mocker.patch("ise_record.glue.auth.OidcClient.discover", autospec=True, return_value=oidc)
+    return mocker.patch(
+        "ise_record.glue.auth.OidcClient.discover", autospec=True, return_value=oidc
+    )
 
 
 @pytest.mark.asyncio
@@ -259,17 +279,20 @@ async def test_discovery_uses_the_configured_provider(settings: Settings, discov
     )
 
 
-@pytest.mark.parametrize("failure", [
-    httpx2.ConnectError("connection refused"),
-    KeyError("jwks_uri"),
-    ValueError("not json"),
-])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx2.ConnectError("connection refused"),
+        KeyError("jwks_uri"),
+        ValueError("not json"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_a_failed_discovery_is_retried_on_the_next_request(
     settings: Settings, oidc: Any, discover: AsyncMock, failure: Exception
 ):
     # a provider that is briefly down while the service boots must not need a restart
-    discover.side_effect = [ failure, oidc ]
+    discover.side_effect = [failure, oidc]
     state = app_state()
 
     assert await load_oidc_client(state, settings.oidc) is None

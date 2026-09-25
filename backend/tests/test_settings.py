@@ -3,8 +3,8 @@
 
 from typing import Any
 
-import pytest
 from pydantic import ValidationError
+import pytest
 
 from ise_record.settings import Settings, SmtpSettings
 
@@ -13,17 +13,21 @@ from ise_record.settings import Settings, SmtpSettings
 # was introduced -- and only for deployments that send mail at all. The validator moves that
 # to startup, where it is the operator who just edited the variables who sees it.
 
+
 def smtp(**overrides: Any) -> SmtpSettings:
     return SmtpSettings(server="mail.example.edu", sender="ise-record@example.edu", **overrides)
 
 
-@pytest.mark.parametrize("starttls,use_tls", [
-    (None, False),    # opportunistic: STARTTLS if the relay advertises it
-    (True, False),    # STARTTLS required, usually port 587
-    (False, False),   # plaintext, never upgraded
-    (False, True),    # implicit TLS, usually port 465, with STARTTLS explicitly off
-    (None, True),     # implicit TLS; aiosmtplib skips STARTTLS when use_tls is set
-])
+@pytest.mark.parametrize(
+    "starttls,use_tls",
+    [
+        (None, False),  # opportunistic: STARTTLS if the relay advertises it
+        (True, False),  # STARTTLS required, usually port 587
+        (False, False),  # plaintext, never upgraded
+        (False, True),  # implicit TLS, usually port 465, with STARTTLS explicitly off
+        (None, True),  # implicit TLS; aiosmtplib skips STARTTLS when use_tls is set
+    ],
+)
 def test_a_workable_transport_security_combination_is_accepted(
     starttls: bool | None, use_tls: bool
 ):
@@ -57,9 +61,7 @@ def test_the_rejection_does_not_echo_the_smtp_password():
     assert "hunter2" not in str(caught.value)
 
 
-def test_the_conflict_is_caught_when_it_comes_from_the_environment(
-    monkeypatch: pytest.MonkeyPatch
-):
+def test_the_conflict_is_caught_when_it_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ISE_RECORD_SMTP_SERVER", "mail.example.edu")
     monkeypatch.setenv("ISE_RECORD_SMTP_SENDER", "ise-record@example.edu")
     monkeypatch.setenv("ISE_RECORD_SMTP_STARTTLS", "true")
@@ -71,9 +73,7 @@ def test_the_conflict_is_caught_when_it_comes_from_the_environment(
     assert caught.value.errors()[0]["loc"] == ("smtp", "use_tls")
 
 
-def test_starttls_is_left_opportunistic_unless_it_is_configured(
-    monkeypatch: pytest.MonkeyPatch
-):
+def test_starttls_is_left_opportunistic_unless_it_is_configured(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ISE_RECORD_SMTP_SERVER", "mail.example.edu")
     monkeypatch.setenv("ISE_RECORD_SMTP_SENDER", "ise-record@example.edu")
 

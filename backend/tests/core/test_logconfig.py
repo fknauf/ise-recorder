@@ -2,8 +2,9 @@
 # pylint: disable=missing-module-docstring
 # pylint: disable=redefined-outer-name
 
+from collections.abc import Iterator
 import logging
-from typing import Any, Iterator
+from typing import Any
 
 import pytest
 
@@ -25,7 +26,7 @@ CONTAINER_CLIENT = "127.0.0.1:54321"
 
 
 def access_record(*args: Any) -> logging.LogRecord:
-    """ A uvicorn.access record carrying the given positional arguments. """
+    """A uvicorn.access record carrying the given positional arguments."""
     return logging.LogRecord(
         name="uvicorn.access",
         level=logging.INFO,
@@ -33,7 +34,7 @@ def access_record(*args: Any) -> logging.LogRecord:
         lineno=1,
         msg=ACCESS_FORMAT,
         args=args,
-        exc_info=None
+        exc_info=None,
     )
 
 
@@ -41,7 +42,7 @@ def health_check(
     client: str | None = CONTAINER_CLIENT,
     method: str = "GET",
     path: str = "/api/health",
-    status: Any = 200
+    status: Any = 200,
 ) -> logging.LogRecord:
     return access_record(client, method, path, "1.1", status)
 
@@ -52,12 +53,12 @@ def test_the_containers_own_successful_health_check_is_dropped():
     assert health_check_filter(health_check()) is False
 
 
-@pytest.mark.parametrize("status", [ 200, 204, 299 ])
+@pytest.mark.parametrize("status", [200, 204, 299])
 def test_every_success_status_is_dropped(status: int):
     assert health_check_filter(health_check(status=status)) is False
 
 
-@pytest.mark.parametrize("status", [ 199, 300, 404, 500, 503 ])
+@pytest.mark.parametrize("status", [199, 300, 404, 500, 503])
 def test_a_health_check_that_did_not_succeed_is_kept(status: int):
     # A failing health check is the one occasion where this line is the most interesting
     # thing in the log, so the filter must not swallow it along with the quiet ones.
@@ -101,7 +102,7 @@ def test_a_record_that_is_not_an_access_log_line_is_kept():
         lineno=1,
         msg="something happened",
         args=None,
-        exc_info=None
+        exc_info=None,
     )
 
     assert health_check_filter(record) is True
@@ -120,15 +121,15 @@ def test_a_record_whose_arguments_are_a_mapping_is_kept():
         pathname=__file__,
         lineno=1,
         msg="%(client)s",
-        args=({ "client": CONTAINER_CLIENT },),
-        exc_info=None
+        args=({"client": CONTAINER_CLIENT},),
+        exc_info=None,
     )
 
     assert not isinstance(record.args, tuple)
     assert health_check_filter(record) is True
 
 
-@pytest.mark.parametrize("status", [ "200", 200.0, None ])
+@pytest.mark.parametrize("status", ["200", 200.0, None])
 def test_a_status_that_is_not_an_integer_is_kept(status: Any):
     # bool is deliberately not in this list: it is an int subclass, and True would compare
     # as 1, which falls outside the success range anyway.
@@ -139,7 +140,7 @@ def test_a_non_string_client_address_is_kept():
     assert health_check_filter(health_check(client=None)) is True
 
 
-@pytest.mark.parametrize("path", [ "/foo/api/health", "/foo/bar/api/health" ])
+@pytest.mark.parametrize("path", ["/foo/api/health", "/foo/bar/api/health"])
 def test_a_prefixed_deployments_health_check_is_dropped_too(path: str):
     # ISE_RECORD_ROUTE_PREFIX moves the endpoint, and the container's health check follows
     # it, so matching the path exactly used to leave prefixed deployments logging a line
@@ -157,7 +158,7 @@ def test_any_path_ending_in_the_health_endpoint_is_dropped():
 
 @pytest.fixture
 def restored_access_logger() -> Iterator[logging.Logger]:
-    """ Let a test touch the global uvicorn.access logger without leaking the change. """
+    """Let a test touch the global uvicorn.access logger without leaking the change."""
     access_logger = logging.getLogger("uvicorn.access")
     saved = list(access_logger.filters)
 
@@ -167,7 +168,7 @@ def restored_access_logger() -> Iterator[logging.Logger]:
 
 
 def test_setup_logging_attaches_the_filter_to_the_access_logger(
-    restored_access_logger: logging.Logger
+    restored_access_logger: logging.Logger,
 ):
     # The filter only does anything if it is wired to the logger uvicorn actually uses,
     # and that wiring is a string ("uvicorn.access") on both sides.

@@ -4,21 +4,20 @@ FastAPI dependables to do with authentication
 
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx2
 
-from ise_record.settings import OidcSettings, Settings, get_settings
 from ise_record.core.auth import (
     DownloadTotpAuthority,
     OidcClient,
     ProviderUnreachable,
     Unauthenticated,
-    UserInfo
+    UserInfo,
 )
-
+from ise_record.settings import get_settings, OidcSettings, Settings
 
 logger = logging.getLogger(__name__)
 security_scheme = HTTPBearer(auto_error=False)
@@ -26,7 +25,7 @@ security_scheme = HTTPBearer(auto_error=False)
 
 @dataclass
 class OidcServerState:
-    """ Oidc-specific state attached to the fastapi server """
+    """Oidc-specific state attached to the fastapi server"""
 
     client: OidcClient | None = None
     cached_users: dict[str, UserInfo] = field(default_factory=dict[str, UserInfo])
@@ -48,8 +47,8 @@ def _provider_unreachable():
 
 
 async def load_oidc_client(
-        app_state: Any,
-        oidc: OidcSettings | None,
+    app_state: Any,
+    oidc: OidcSettings | None,
 ) -> OidcClient | None:
     """
     Attempt to load the oidc client into the application state. Done once at application start,
@@ -71,9 +70,9 @@ async def load_oidc_client(
             provider_url=oidc.provider_url,
             audience=oidc.audience,
             leeway_seconds=oidc.leeway_seconds,
-            http_timeout_seconds=oidc.http_timeout_seconds
+            http_timeout_seconds=oidc.http_timeout_seconds,
         )
-    except (httpx2.HTTPError, KeyError, ValueError):
+    except httpx2.HTTPError, KeyError, ValueError:
         logger.exception("OpenID discovery failed; authenticated endpoints will return 503")
         return None
 
@@ -83,8 +82,7 @@ async def load_oidc_client(
 
 
 async def get_oidc_client(
-        request: Request,
-        settings: Annotated[Settings, Depends(get_settings)]
+    request: Request, settings: Annotated[Settings, Depends(get_settings)]
 ) -> OidcClient | None:
     """
     Return the cached provider configuration, discovering it if necessary.
@@ -97,10 +95,10 @@ async def get_oidc_client(
 
 
 async def get_user_info(
-        request: Request,
-        settings: Annotated[Settings, Depends(get_settings)],
-        oidc_client: Annotated[OidcClient | None, Depends(get_oidc_client)],
-        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)]
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    oidc_client: Annotated[OidcClient | None, Depends(get_oidc_client)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
 ) -> UserInfo | None:
     """
     Get information about the logged-in user, or None if no auth is required. Throws 401 if auth is
@@ -145,5 +143,5 @@ async def get_user_info(
 
 
 async def get_download_totp(request: Request) -> DownloadTotpAuthority:
-    """ FastAPI dependable to obtain the TOTP authority """
+    """FastAPI dependable to obtain the TOTP authority"""
     return request.app.state.download_totp
