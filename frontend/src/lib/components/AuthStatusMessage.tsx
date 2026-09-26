@@ -30,7 +30,10 @@ export function AuthStatusMessage() {
       <InlineAlert variant="info">
         <Heading>Authentication Loading</Heading>
         <Content>
-          <ProgressCircle aria-label="Authenticating" size="M" isIndeterminate/> <Text>Authenticating...</Text>
+          <Flex direction="row" gap="size-100" justifyContent="center" alignItems="center">
+            <ProgressCircle aria-label="Authenticating" size="M" isIndeterminate/>
+            <Text>Authenticating...</Text>
+          </Flex>
         </Content>
       </InlineAlert>
     );
