@@ -105,7 +105,7 @@ function AuthenticatedSessionContextBridge(
   };
 
   const interactiveSignin = async () => {
-    await signinPopup().catch(() => null);
+    await signinPopup({ popupAbortOnClose: true }).catch(() => null);
   };
 
   const reauthenticate = async () => {
@@ -147,7 +147,7 @@ function AuthenticatedSessionContextBridge(
 
     if(await recheckStaleness()) {
       return refreshSession(
-        signinPopup,
+        () => signinPopup({ popupAbortOnClose: true }),
         "renewed",
         "still-stale",
         "Failed to reauthenticate stale oidc session, continuing with existing session"
@@ -252,8 +252,8 @@ function AuthenticatedSessionProvider({ providerUrl, clientId, maxAge, autoSigni
     };
   }, [maxAge, setStale, userMgr]);
 
-  const onSigninCallback = () => {
-    if(window.self === window.top) {
+  const onSigninCallback = (user: User | undefined) => {
+    if(user !== undefined) {
       router.replace("/");
     }
   };

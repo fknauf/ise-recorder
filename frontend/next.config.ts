@@ -28,10 +28,6 @@ const nextConfig: NextConfig = {
             value: "same-origin"
           },
           {
-            key: "Cross-Origin-Opener-Policy",
-            value: "same-origin-allow-popups"
-          },
-          {
             key: "Cross-Origin-Resource-Policy",
             value: "same-origin"
           }

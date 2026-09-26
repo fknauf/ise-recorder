@@ -52,6 +52,15 @@ export function proxy(request: NextRequest) {
     }
   });
   response.headers.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
+
+  // Every page except the OIDC callback. The sign-in popup arrives there from the provider's
+  // pages, which send no COOP; a COOP here would count as a mismatch, cut the popup off from
+  // the app (window.opener null in the popup, popup.closed true in the app), and make
+  // popupAbortOnClose throw away sign-ins that just succeeded.
+  if(request.nextUrl.pathname !== "/auth/callback") {
+    response.headers.set("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  }
+
   if(process.env.ISE_RECORD_OIDC_PROVIDER_URL === undefined) {
     // No need to embed the OIDC provider -> might as well be strict.
     response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");

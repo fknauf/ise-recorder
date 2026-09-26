@@ -77,6 +77,12 @@ const oidc = vi.hoisted(() => {
     signinSilentResult: FakeUser | Error | null = null;
     /** Test-only: hold signinSilent open until this settles, so callers can pile up behind it. */
     signinSilentGate: Promise<void> | null = null;
+    /**
+     * Test-only: the user closes the sign-in popup. Mirrors the library, which only notices
+     * with popupAbortOnClose -- then it rejects with "Popup closed by user"; without it, the
+     * sign-in never settles, which is what left the UI stuck in its loading state.
+     */
+    popupClosedByUser = false;
     /** Test-only: make removeUser reject, as a blocked or corrupt user store does. */
     removeUserError: Error | null = null;
 
@@ -137,6 +143,14 @@ const oidc = vi.hoisted(() => {
       this.signinPopupCalls += 1;
       this.signinPopupArgs.push(args);
 
+      if(this.popupClosedByUser) {
+        if((args as { popupAbortOnClose?: boolean } | undefined)?.popupAbortOnClose) {
+          throw new Error("Popup closed by user");
+        }
+
+        return new Promise<never>(() => {});
+      }
+
       if(this.signinPopupResult instanceof Error) {
         throw this.signinPopupResult;
       }
@@ -147,6 +161,13 @@ const oidc = vi.hoisted(() => {
 
       return this.signinPopupResult;
     };
+
+    /**
+     * What AuthProvider calls on mount when the page URL carries a sign-in response. The real
+     * one returns the user only for a redirect sign-in; a popup or silent callback hands the
+     * response to the window that started it and returns nothing.
+     */
+    signinCallback = async (): Promise<FakeUser | undefined> => callback.user;
 
     removeUser = async (): Promise<void> => {
       this.removeUserCalls += 1;
@@ -195,14 +216,18 @@ const oidc = vi.hoisted(() => {
   }
 
   const instances: FakeUserManager[] = [];
-  return { FakeUserManager, instances, applyClaimFilter };
+  // set before mounting: the UserManager is built during the provider's render
+  const callback: { user: FakeUser | undefined } = { user: undefined };
+  return { FakeUserManager, instances, applyClaimFilter, callback };
 });
 
 vi.mock("oidc-client-ts", () => ({ UserManager: oidc.FakeUserManager }));
 
-// useRouter needs an app-router context that renderHook does not provide.
+// useRouter needs an app-router context that renderHook does not provide. One shared
+// replace, so a test can see where the provider navigated.
+const router = vi.hoisted(() => ({ replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn() })
+  useRouter: () => router
 }));
 
 const MAX_AGE_SECONDS = 25200;
@@ -274,6 +299,7 @@ const userManager = () => {
 
 beforeEach(() => {
   oidc.instances.length = 0;
+  oidc.callback.user = undefined;
   localStorage.clear();
 });
 
@@ -685,6 +711,28 @@ test("a silent refresh that fails on a dead token is reported as expired", async
   }
 });
 
+test("a stale session's popup the user closes does not hold up the recording", async () => {
+  // startRecording waits on this before it gets past "preparing"; a popup that never
+  // settled left the record button disabled until the page was reloaded
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    const { result } = await renderAppSession(authenticatedEnv);
+    const mgr = userManager();
+
+    await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
+    mgr.popupClosedByUser = true;
+
+    await act(async () => {
+      expect(await settledWithin(result.current.expandSession())).toBe("still-stale");
+    });
+
+    expect(mgr.signinPopupCalls).toBe(1);
+  } finally {
+    consoleWarn.mockRestore();
+  }
+});
+
 // react-oidc-context wraps every navigator method: it catches, dispatches an ERROR into
 // its own state, and *resolves with null* rather than throwing. So the null return is the
 // only signal that a sign-in failed, and these pin that expandSession reads it. Getting
@@ -799,6 +847,28 @@ test("a declined sign-in leaves the user signed out rather than rejecting", asyn
   expect(result.current.isAuthenticated).toBe(false);
 });
 
+/** Resolves with "still pending" if `promise` has not settled by then, rather than hanging the test. */
+function settledWithin<T>(promise: Promise<T>, millis = 1000) {
+  return Promise.race([ promise, new Promise<"still pending">(resolve => setTimeout(() => resolve("still pending"), millis)) ]);
+}
+
+test("a sign-in popup the user closes ends the sign-in rather than leaving it pending", async () => {
+  // without popupAbortOnClose the library never notices, and the session stays in its
+  // loading state for good: AuthStatusMessage spins, and nothing offers to sign in again
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  mgr.popupClosedByUser = true;
+
+  await act(async () => {
+    expect(await settledWithin(result.current.interactiveSignin())).toBeUndefined();
+  });
+
+  expect(result.current.isLoading).toBe(false);
+  expect(result.current.isAuthenticated).toBe(false);
+  expect(result.current.error?.message).toBe("Popup closed by user");
+});
+
 // --- reauthenticate --------------------------------------------------------
 
 test("reauthenticate forces a fresh authentication rather than reusing the SSO session", async () => {
@@ -829,6 +899,20 @@ test("an aborted reauthentication puts the previous user back", async () => {
   await act(() => result.current.reauthenticate());
 
   expect(result.current.isAuthenticated).toBe(true);
+  expect(await result.current.getAccessToken()).toBe("still-good");
+});
+
+test("a reauthentication popup the user closes puts the previous user back", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { access_token: "still-good" })));
+  mgr.popupClosedByUser = true;
+
+  await act(async () => {
+    expect(await settledWithin(result.current.reauthenticate())).toBeUndefined();
+  });
+
   expect(await result.current.getAccessToken()).toBe("still-good");
 });
 
@@ -1055,4 +1139,55 @@ test("a sign-out whose user store refuses still stops signing back in", async ()
   } finally {
     consoleError.mockRestore();
   }
+});
+
+// --- the callback page -----------------------------------------------------
+//
+// Every sign-in flow ends on /auth/callback. After a redirect sign-in that window is the
+// app's, and has to go back to it. After a popup sign-in it is the popup, which only reports
+// back and is closed by the window that opened it -- left to navigate, it would load the whole
+// app inside the popup, and with auto sign-in configured start a sign-in of its own there.
+
+/**
+ * Mount with a sign-in response in the URL, the way the callback page is loaded -- and in a
+ * top-level window, which is where both a redirect and a popup sign-in end up. The suite runs
+ * inside an iframe, where a window-based check would never navigate and a popup could not be
+ * told from anything else. window.top cannot be replaced, but window.self can.
+ */
+async function renderOnCallbackPage() {
+  const original = window.location.href;
+  window.history.replaceState(null, "", `${window.location.pathname}?code=abc&state=xyz`);
+  Object.defineProperty(window, "self", { value: window.top, configurable: true, writable: true });
+
+  try {
+    return await renderAppSession(authenticatedEnv);
+  } finally {
+    Object.defineProperty(window, "self", { value: window, configurable: true, writable: true });
+    window.history.replaceState(null, "", original);
+  }
+}
+
+test("a redirect sign-in leaves the callback page for the app", async () => {
+  oidc.callback.user = userAged(0);
+
+  await renderOnCallbackPage();
+
+  expect(router.replace).toHaveBeenCalledExactlyOnceWith("/");
+});
+
+test("a popup or silent sign-in leaves the callback page where it is", async () => {
+  oidc.callback.user = undefined;
+
+  await renderOnCallbackPage();
+
+  expect(router.replace).not.toHaveBeenCalled();
+});
+
+test("a page without a sign-in response navigates nowhere", async () => {
+  // the provider sits in the root layout, so this is every other page of the app
+  oidc.callback.user = userAged(0);
+
+  await renderAppSession(authenticatedEnv);
+
+  expect(router.replace).not.toHaveBeenCalled();
 });
