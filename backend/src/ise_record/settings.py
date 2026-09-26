@@ -1,11 +1,20 @@
 """Admin-configurable server settings"""
 
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, EmailStr, Field, field_validator, ValidationInfo
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator, ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_PREFIX="ise_record_"
+
+
+class AuthBackend(StrEnum):
+    """ Types of authentication backends """
+    DISABLED = "disabled"
+    OIDC = "oidc"
 
 
 class SmtpSettings(BaseModel):
@@ -54,22 +63,44 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="ise_record_", env_nested_delimiter="_", env_nested_max_split=1, frozen=True
+        env_ignore_empty=True,
+        env_nested_delimiter="_",
+        env_nested_max_split=1,
+        env_prefix=_ENV_PREFIX,
+        frozen=True
     )
 
     route_prefix: Annotated[str, Field(pattern=r"\A(/.*[^/])?\z")] = ""
     destdir: Path = Path("./data")
     chunk_file_digits: Annotated[int, Field(ge=3, lt=10)] = 4
     cors_origins: tuple[str, ...] = ()
+    auth: AuthBackend = AuthBackend.OIDC
 
     oidc: OidcSettings | None = None
     smtp: SmtpSettings | None = None
 
+    @model_validator(mode="after")
+    def auth_backend_matches_settings(self) -> Settings:
+        pfx = _ENV_PREFIX.upper()
+
+        if self.auth == AuthBackend.OIDC and self.oidc is None:
+            raise ValueError(
+                "OpenID auth is enabled, but provider and audience are not set.\n"
+                f"Configure {pfx}OIDC_PROVIDER_URL and {pfx}OIDC_AUDIENCE, or set "
+                f"{pfx}AUTH=disabled to run without authentication."
+            )
+        if self.auth == AuthBackend.DISABLED and self.oidc is not None:
+            raise ValueError(
+                f"Authentication is disabled, but {pfx}OIDC_PROVIDER_URL and "
+                f"{pfx}OIDC_AUDIENCE are set."
+            )
+
+        return self
+
     @property
     def auth_required(self) -> bool:
         """Whether clients must present an access token"""
-        return self.oidc is not None
-
+        return self.auth != AuthBackend.DISABLED
 
 @lru_cache
 def get_settings() -> Settings:

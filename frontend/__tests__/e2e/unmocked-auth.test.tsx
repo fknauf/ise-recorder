@@ -15,14 +15,14 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
  * at all, so any hook from that library reachable on this path takes the whole page
  * down -- and the stubbed suites cannot see it.
  *
- * No OpenID provider is contacted: with no oidcProviderUrl configured the anonymous
- * branch is taken and no UserManager is ever built.
+ * No OpenID provider is contacted: with authentication turned off the anonymous branch
+ * is taken and no UserManager is ever built.
  */
 
 afterEach(cleanup);
 
 test("an unauthenticated deployment renders with the real react-oidc-context", async () => {
-  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" };
+  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000", authBackend: "disabled" };
 
   render(
     <Provider theme={defaultTheme}>
@@ -40,7 +40,7 @@ test("an unauthenticated deployment renders with the real react-oidc-context", a
 });
 
 test("an unauthenticated deployment shows no authentication UI", async () => {
-  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" };
+  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000", authBackend: "disabled" };
 
   render(
     <Provider theme={defaultTheme}>

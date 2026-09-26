@@ -24,8 +24,8 @@ def settings(tmp_path: Path) -> Settings:
 
 @pytest.fixture
 def open_settings(tmp_path: Path) -> Settings:
-    """A deployment with no provider configured, where every caller shares destdir."""
-    return Settings(destdir=tmp_path)
+    """A deployment with authentication turned off, where every caller shares destdir."""
+    return Settings(destdir=tmp_path, auth="disabled")
 
 
 def request_for(app_settings: Settings) -> Request:

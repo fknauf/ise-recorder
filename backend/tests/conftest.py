@@ -23,11 +23,6 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 import pytest
 
-from ise_record.server import create_app
-from ise_record.settings import get_settings, OidcSettings, Settings
-
-from .harness import AUDIENCE, Provider
-
 # matches SettingsConfigDict(env_prefix=...); pydantic matches it case-insensitively, so
 # clearing it case-insensitively too avoids a lowercase var slipping through
 ENV_PREFIX = "ise_record_"
@@ -40,6 +35,19 @@ def scrub_deployment_environment() -> None:
 
 
 scrub_deployment_environment()
+
+# Importing the server builds its module-level app, and a deployment that says nothing about
+# authentication refuses to start -- by design, so an open backend is never an accident. Say
+# something for the duration of the import only: every test then states for itself which
+# kind of deployment it is, and the defaults apply to any test that does not.
+os.environ["ISE_RECORD_AUTH"] = "disabled"
+from ise_record.server import create_app
+
+del os.environ["ISE_RECORD_AUTH"]
+
+from ise_record.settings import get_settings, OidcSettings, Settings
+
+from .harness import AUDIENCE, Provider
 
 
 @pytest.fixture(autouse=True)

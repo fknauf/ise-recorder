@@ -42,7 +42,7 @@ configs:
           "requiredActions": [],
           "credentials": [{ "type": "password", "value": "hunter2", "temporary": false }]
         }]
-      }    
+      }
 
 services:
   frontend:
@@ -57,6 +57,7 @@ services:
       - TZ=Europe/Berlin
       - ISE_RECORD_API_URL=http://localhost:8000
       - ISE_RECORD_SHOW_VERSION=true
+      - ISE_RECORD_AUTH=oidc
       - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
       - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
       - ISE_RECORD_OIDC_MAX_AGE=25200 # 7 hours
@@ -83,6 +84,7 @@ services:
     environment:
       - TZ=Europe/Berlin
       - ISE_RECORD_CORS_ORIGINS=[ "http://localhost:3000" ]
+      - ISE_RECORD_AUTH=oidc
       - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
       - ISE_RECORD_OIDC_AUDIENCE=ise-recorder-api
 

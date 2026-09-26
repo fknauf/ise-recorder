@@ -43,6 +43,7 @@ function validateMaxAge(envMaxAge: string | undefined): number | undefined {
 export interface ServerEnv {
   version?: string
   apiUrl?: string
+  authBackend?: string
   oidcProviderUrl?: string
   oidcClientId?: string
   oidcMaxAge?: number
@@ -60,6 +61,7 @@ export async function getServerEnv(): Promise<ServerEnv> {
     runtimeEnvironment = {
       version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? pkg.version : undefined,
       apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
+      authBackend: process.env.ISE_RECORD_AUTH,
       oidcProviderUrl: process.env.ISE_RECORD_OIDC_PROVIDER_URL,
       oidcClientId: process.env.ISE_RECORD_OIDC_CLIENT_ID,
       oidcMaxAge: validateMaxAge(process.env.ISE_RECORD_OIDC_MAX_AGE),

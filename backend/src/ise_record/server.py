@@ -187,7 +187,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # isn't strictly necessary but will log an error if the openid provider is unreachable.
             await load_oidc_client(application.state, settings.oidc)
         else:
-            logger.warning("no OpenID provider configured -- endpoints are unauthenticated")
+            logger.warning("AUTH is disabled -- endpoints are unauthenticated")
         yield
 
     application = FastAPI(lifespan=lifespan)

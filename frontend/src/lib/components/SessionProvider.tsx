@@ -312,9 +312,17 @@ interface ServerProviderProps {
 export function SessionProvider({ serverEnv, children }: Readonly<ServerProviderProps>) {
   // Support openid authentication and legacy yolo-who-needs-authentication mode. Split into two
   // impl components to conform to React hook rules.
-  if(serverEnv.oidcProviderUrl !== undefined) {
+
+  // default to disabled in frontend-only deployments, oidc otherwise
+  const authBackend = serverEnv.authBackend || (serverEnv.apiUrl ? "oidc" : "disabled");
+
+  if(authBackend === "oidc") {
+    if(serverEnv.oidcProviderUrl === undefined) {
+      throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_PROVIDER_URL is not set.");
+    }
+
     if(serverEnv.oidcClientId === undefined) {
-      throw Error("OpenID provider configured but no client ID supplied");
+      throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_CLIENT_ID is not set.");
     }
 
     return (
@@ -327,13 +335,15 @@ export function SessionProvider({ serverEnv, children }: Readonly<ServerProvider
         {children}
       </AuthenticatedSessionProvider>
     );
-  } else {
+  } else if(authBackend === "disabled") {
     return (
       <AnonymousSessionProvider>
         {children}
       </AnonymousSessionProvider>
     );
   }
+
+  throw new Error(`Invalid authentication backend "${serverEnv.authBackend}" configured, must be "oidc" or "disabled"`);
 }
 
 export function useAppSession() {

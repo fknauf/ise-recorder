@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
@@ -324,43 +324,96 @@ test("useAppSession refuses to work outside a provider", () => {
   }
 });
 
-// --- unauthenticated deployments -------------------------------------------
+// --- which kind of deployment ---------------------------------------------
+//
+// Authentication is on by default wherever there is a backend to protect, so that running
+// an open one takes ISE_RECORD_AUTH=disabled, written down on purpose. A deployment without
+// a backend has nothing to authenticate against and defaults to anonymous.
 
-test("an unconfigured deployment yields an anonymous session", async () => {
-  const { result } = await renderAppSession({ apiUrl: "http://localhost:5000" });
+/** Rendering fails outright: a deployment configured like this must not come up at all. */
+function expectRenderToFail(serverEnv: ServerEnv) {
+  // React logs the render failure; the throw itself is what we are asserting on
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    expect(() => renderHook(() => useAppSession(), { wrapper: providerWrapper(serverEnv) })).toThrow();
+  } finally {
+    consoleError.mockRestore();
+  }
+}
+
+const PROVIDER = {
+  oidcProviderUrl: "http://keycloak.localhost:8080/realms/ise",
+  oidcClientId: "ise-recorder"
+};
+
+async function expectAnonymous(serverEnv: ServerEnv) {
+  const { result } = await renderAppSession(serverEnv);
 
   expect(result.current.authRequired).toBe(false);
   expect(result.current.isAuthenticated).toBe(false);
   expect(await result.current.getAccessToken()).toBeUndefined();
   expect(await result.current.expandSession()).toBe("not-signed-in");
-  // no OpenID provider means no UserManager at all
+  // no authentication means no UserManager at all
   expect(oidc.instances.length).toBe(0);
+}
+
+async function expectAuthenticationRequired(serverEnv: ServerEnv) {
+  const { result } = await renderAppSession(serverEnv);
+
+  expect(result.current.authRequired).toBe(true);
+  expect(oidc.instances.length).toBe(1);
+}
+
+test("a deployment without a backend is anonymous by default", async () => {
+  await expectAnonymous({});
+});
+
+test("a deployment with a backend requires authentication by default", async () => {
+  await expectAuthenticationRequired({ apiUrl: "http://localhost:5000", ...PROVIDER });
+});
+
+test("a deployment with a backend but no OpenID configuration does not render", () => {
+  // what used to be an open deployment, by leaving the provider out; now it has to say so
+  expectRenderToFail({ apiUrl: "http://localhost:5000" });
+});
+
+test("authentication can be turned off for a deployment with a backend", async () => {
+  await expectAnonymous({ apiUrl: "http://localhost:5000", authBackend: "disabled" });
+});
+
+test("authentication can be turned on for a deployment without a backend", async () => {
+  await expectAuthenticationRequired({ authBackend: "oidc", ...PROVIDER });
+});
+
+test("an empty auth setting falls back to the default", async () => {
+  // ISE_RECORD_AUTH= with nothing after it, as the backend reads it too
+  await expectAuthenticationRequired({ apiUrl: "http://localhost:5000", authBackend: "", ...PROVIDER });
+  cleanup();
+  oidc.instances.length = 0;
+  await expectAnonymous({ authBackend: "" });
+});
+
+test.each([ "none", "off", "OIDC", "Disabled" ])("an unknown auth setting (%s) does not render", value => {
+  expectRenderToFail({ apiUrl: "http://localhost:5000", authBackend: value, ...PROVIDER });
+});
+
+test("OpenID without a provider URL does not render", () => {
+  expectRenderToFail({ authBackend: "oidc", oidcClientId: "ise-recorder" });
+});
+
+test("OpenID without a client ID does not render", () => {
+  expectRenderToFail({ authBackend: "oidc", oidcProviderUrl: PROVIDER.oidcProviderUrl });
 });
 
 test("an anonymous deployment never reports a stale or failed session", async () => {
-  const { result } = await renderAppSession({ apiUrl: "http://localhost:5000" });
+  const { result } = await renderAppSession({ apiUrl: "http://localhost:5000", authBackend: "disabled" });
 
   // the banners key off these, and there is no session here to go stale or fail
   expect(result.current.isStale).toBe(false);
   expect(result.current.isExpired).toBe(false);
   expect(result.current.error).toBeUndefined();
   expect(result.current.autoSignin).toBe(false);
-});
-
-test("a provider URL without a client ID is a configuration error", () => {
-  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-
-  try {
-    const wrapper = providerWrapper({
-      oidcProviderUrl: "http://keycloak.localhost:8080/realms/ise",
-      oidcClientId: undefined
-    });
-
-    expect(() => renderHook(() => useAppSession(), { wrapper }))
-      .toThrow("OpenID provider configured but no client ID supplied");
-  } finally {
-    consoleError.mockRestore();
-  }
 });
 
 // --- how the UserManager is built ------------------------------------------

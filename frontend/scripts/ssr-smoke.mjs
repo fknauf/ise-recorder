@@ -41,7 +41,7 @@ const USE_DEV = process.argv.includes("--dev");
 const DEPLOYMENTS = [
   {
     name: "unauthenticated",
-    env: { ISE_RECORD_API_URL: "http://localhost:8000" }
+    env: { ISE_RECORD_API_URL: "http://localhost:8000", ISE_RECORD_AUTH: "disabled" }
   },
   {
     name: "openid-connect",
@@ -134,11 +134,11 @@ function startServer(env, port) {
   return { server, output };
 }
 
-async function waitForReady(base) {
+async function waitForReady(base, { anyStatus = false } = {}) {
   for(let attempt = 0; attempt < 120; ++attempt) {
     try {
       const response = await fetch(base, { signal: AbortSignal.timeout(2000) });
-      if(response.status < 500) {
+      if(anyStatus || response.status < 500) {
         return true;
       }
     } catch {
@@ -339,6 +339,55 @@ async function checkOpenerPolicy(name, base) {
   return failures;
 }
 
+/**
+ * A deployment with a backend that says nothing about authentication must not come up.
+ *
+ * Authentication defaults to on wherever there is a backend, so leaving the provider out no
+ * longer yields an open deployment; it yields one that refuses to render, until it either
+ * configures a provider or sets ISE_RECORD_AUTH=disabled on purpose. What this guards against
+ * is the page quietly rendering the recorder anyway.
+ */
+async function checkRefusesToServe({ name, env }, port) {
+  const base = `http://127.0.0.1:${port}`;
+  const failures = [];
+  const { server, output } = startServer(env, port);
+
+  try {
+    if(!await waitForReady(base, { anyStatus: true })) {
+      failures.push(`${name}: server never answered\n${output.join("").slice(-600)}`);
+      return failures;
+    }
+
+    const response = await fetch(base, { signal: AbortSignal.timeout(15000) });
+    const html = await response.text();
+
+    if(response.status < 500) {
+      failures.push(`${name} /: expected the page to fail, got ${response.status}`);
+    }
+
+    if(html.includes("Start Recording")) {
+      failures.push(`${name} /: the recorder rendered on a deployment without authentication configured`);
+    }
+
+    console.log(`  ${failures.length ? "✗" : "✓"} ${name} / refused (${response.status})`);
+  } finally {
+    try {
+      process.kill(-server.pid, "SIGTERM");
+      await sleep(500);
+      process.kill(-server.pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+  }
+
+  return failures;
+}
+
+const MISCONFIGURED = {
+  name: "backend without authentication configured",
+  env: { ISE_RECORD_API_URL: "http://localhost:8000" }
+};
+
 console.log(`SSR smoke test (${USE_DEV ? "next dev" : "next start"}, from port ${BASE_PORT})`);
 
 const failures = [];
@@ -346,6 +395,7 @@ const failures = [];
 for(const [ index, deployment ] of DEPLOYMENTS.entries()) {
   failures.push(...await checkDeployment(deployment, BASE_PORT + index));
 }
+failures.push(...await checkRefusesToServe(MISCONFIGURED, BASE_PORT + DEPLOYMENTS.length));
 
 if(failures.length > 0) {
   console.error("\nSSR smoke test FAILED:");

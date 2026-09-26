@@ -54,8 +54,8 @@ ROUTE_PREFIX = "/foo"
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    """Documented defaults, with a destination directory of this test's own."""
-    return Settings(destdir=tmp_path)
+    """A deployment without authentication, with a destination directory of this test's own."""
+    return Settings(destdir=tmp_path, auth="disabled")
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 
 @pytest.fixture
 def prefixed_settings(tmp_path: Path) -> Settings:
-    return Settings(destdir=tmp_path, route_prefix=ROUTE_PREFIX)
+    return Settings(destdir=tmp_path, auth="disabled", route_prefix=ROUTE_PREFIX)
 
 
 @pytest.fixture
@@ -355,7 +355,7 @@ def test_chunk_upload_input_validation(client: TestClient):
 def test_chunk_upload_with_more_digits(tmp_path: Path):
     # chunk_file_digits is not the default, so this builds its own app rather than taking
     # the shared fixture
-    settings = Settings(destdir=tmp_path, chunk_file_digits=5)
+    settings = Settings(destdir=tmp_path, auth="disabled", chunk_file_digits=5)
     sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
     sample_size = os.stat(sample_path).st_size
 
@@ -427,7 +427,9 @@ def test_cors_preflight_jobs_unconfigured(client: TestClient):
 
 
 def test_cors_preflight_jobs(tmp_path: Path):
-    cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
+    cors_settings = Settings(
+        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
+    )
 
     with TestClient(create_app(cors_settings)) as cors_client:
         response = cors_client.options(
@@ -446,7 +448,9 @@ def test_cors_preflight_jobs(tmp_path: Path):
 
 
 def test_cors_preflight_jobs_forbidden(tmp_path: Path):
-    cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
+    cors_settings = Settings(
+        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
+    )
 
     with TestClient(create_app(cors_settings)) as cors_client:
         response = cors_client.options(
@@ -492,8 +496,8 @@ def test_downloading_is_refused_without_user(client: TestClient, settings: Setti
 
 def test_two_apps_share_no_state(tmp_path: Path):
     # each app gets instances of its own, rather than one dict living on a class or module
-    first = create_app(Settings(destdir=tmp_path))
-    second = create_app(Settings(destdir=tmp_path))
+    first = create_app(Settings(destdir=tmp_path, auth="disabled"))
+    second = create_app(Settings(destdir=tmp_path, auth="disabled"))
 
     assert first.state.cached_home_dirs is not second.state.cached_home_dirs
     assert first.state.per_user_running_jobs is not second.state.per_user_running_jobs
@@ -533,12 +537,12 @@ def test_nothing_is_left_behind_at_the_unprefixed_path(prefixed_client: TestClie
 @pytest.mark.parametrize("prefix", ["foo", "/foo/", "/", " /foo"])
 def test_a_malformed_prefix_is_refused_by_the_settings(tmp_path: Path, prefix: str):
     with pytest.raises(ValidationError):
-        Settings(destdir=tmp_path, route_prefix=prefix)
+        Settings(destdir=tmp_path, auth="disabled", route_prefix=prefix)
 
 
 @pytest.mark.parametrize("prefix", ["", "/foo", "/foo/bar", "/a-b_c"])
 def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str):
-    settings = Settings(destdir=tmp_path, route_prefix=prefix)
+    settings = Settings(destdir=tmp_path, auth="disabled", route_prefix=prefix)
 
     with TestClient(create_app(settings)) as client:
         assert client.get(f"{prefix}/api/health").status_code == 200
@@ -1393,7 +1397,9 @@ def test_a_failing_filesystem_is_reported_without_details(
 def test_cors_preflight_allows_purging(tmp_path: Path):
     # without DELETE here the browser refuses the request before it is sent, whenever the
     # frontend is served from another origin than the backend
-    cors_settings = Settings(destdir=tmp_path, cors_origins=("http://allowed.example.com",))
+    cors_settings = Settings(
+        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
+    )
 
     with TestClient(create_app(cors_settings)) as cors_client:
         response = cors_client.options(
