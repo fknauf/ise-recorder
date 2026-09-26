@@ -14,10 +14,11 @@
  * UserManager fetches provider metadata lazily and AuthProvider does its work in
  * effects, so nothing here talks to Keycloak.
  *
- * It also checks the CSP that proxy.ts sets. proxy.ts cannot be unit tested in the
- * browser-mode suite -- importing NextRequest pulls in Next's server runtime, which
- * needs __dirname -- but it runs on every request, so its output is right here in the
- * response headers, unmocked and in the real runtime.
+ * It also checks the CSP and the opener policy that proxy.ts sets. proxy.ts cannot be
+ * unit tested in the browser-mode suite -- importing NextRequest pulls in Next's server
+ * runtime, which needs __dirname -- but it runs on every request, so its output is right
+ * here in the response headers, unmocked and in the real runtime. That also means these
+ * see headers from next.config.ts, which a test of proxy() alone would miss.
  *
  * Scope: this checks server-side rendering only. A component that renders fine on the
  * server but throws after hydration is not covered -- Next's route-segment error
@@ -198,6 +199,7 @@ async function checkDeployment({ name, env }, port) {
     }
 
     failures.push(...await checkContentSecurityPolicy(name, env, base));
+    failures.push(...await checkOpenerPolicy(name, base));
 
     // A page can render fine and still have logged an SSR error that React recovered from.
     const logged = output.join("");
@@ -289,6 +291,51 @@ async function checkContentSecurityPolicy(name, env, base) {
   }
 
   console.log(`  ${failures.length ? "✗" : "✓"} ${name} csp (${csp.size} directives)`);
+  return failures;
+}
+
+/**
+ * The Cross-Origin-Opener-Policy: on every page but the OIDC callback.
+ *
+ * The sign-in popup reaches the callback from the provider's pages, which send no COOP. A
+ * COOP on the callback counts as a mismatch: the browser cuts the popup off from the app,
+ * window.opener is null in the popup and popup.closed is true in the app, and
+ * popupAbortOnClose then throws away sign-ins that just succeeded -- rarely enough to be
+ * hard to pin down.
+ */
+async function checkOpenerPolicy(name, base) {
+  const failures = [];
+  const note = message => failures.push(`${name} coop: ${message}`);
+
+  const EXPECTED = "same-origin-allow-popups";
+  const expectations = [
+    { path: "/", coop: EXPECTED },
+    // exempting more than the callback itself would quietly weaken every page it matched
+    { path: "/auth/callbacks", coop: EXPECTED },
+    // how the popup actually arrives: with the provider's response in the query
+    { path: "/auth/callback?code=abc&state=xyz", coop: null },
+    { path: "/auth/callback?error=access_denied&state=xyz", coop: null }
+  ];
+
+  for(const { path, coop } of expectations) {
+    let response;
+
+    try {
+      response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(15000) });
+    } catch(e) {
+      note(`${path}: request failed: ${String(e).slice(0, 120)}`);
+      continue;
+    }
+
+    const actual = response.headers.get("cross-origin-opener-policy");
+
+    if(actual !== coop) {
+      note(`${path}: expected ${coop === null ? "no opener policy" : JSON.stringify(coop)}, ` +
+        `got ${actual === null ? "none" : JSON.stringify(actual)}`);
+    }
+  }
+
+  console.log(`  ${failures.length ? "✗" : "✓"} ${name} coop (${expectations.length} paths)`);
   return failures;
 }
 
