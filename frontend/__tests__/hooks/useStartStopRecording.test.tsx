@@ -70,7 +70,7 @@ const makeTokenSource = (
   expandSession: vi.fn(async (): Promise<SessionTransition> => sessionResult)
 });
 
-function renderRecorder(
+async function renderRecorder(
   tokenSource: AccessTokenSource,
   serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" }
 ) {
@@ -81,11 +81,18 @@ function renderRecorder(
       {children}
     </AppStoreProvider>;
 
-  return renderHook(() => ({
+  const rendered = renderHook(() => ({
     ...useStartStopRecording(),
     activeRecording: useActiveRecording(),
     store: useAppStore(state => state)
   }), { wrapper });
+
+  // The provider gathers browser storage when it mounts, and that lands a few ticks later.
+  // Waiting for it here keeps it inside act and ahead of the test: a test that finished
+  // first would have the store change under it unannounced, which React warns about.
+  await waitFor(() => expect(rendered.result.current.store.quota).toBeDefined());
+
+  return rendered;
 }
 
 /**
@@ -140,14 +147,14 @@ afterEach(async () => {
   localStorage.clear();
 });
 
-test("useStartStopRecording starts idle", () => {
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+test("useStartStopRecording starts idle", async () => {
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   expect(result.current.activeRecording.state).toBe("idle");
 });
 
 test("startRecording hands the lecture details and tracks to recordLecture", async () => {
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   const canvas = document.createElement("canvas");
   const displayTracks = canvas.captureStream().getVideoTracks();
@@ -169,7 +176,7 @@ test("startRecording hands the lecture details and tracks to recordLecture", asy
 });
 
 test("startRecording is a no-op while a recording is already active", async () => {
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   act(() => {
     result.current.store.setActiveRecording({
@@ -194,7 +201,7 @@ test("the session headroom is expanded before every recording", async () => {
   // unconditional: even an unauthenticated deployment goes through it, because the
   // anonymous source answers "still-fresh" for free.
   const tokenSource = makeTokenSource(false, undefined);
-  const { result } = renderRecorder(tokenSource);
+  const { result } = await renderRecorder(tokenSource);
 
   await startAndCapture(result.current.startRecording);
 
@@ -203,7 +210,7 @@ test("the session headroom is expanded before every recording", async () => {
 
 test("a renewed session aborts the start so the user can press record again", async () => {
   const tokenSource = makeTokenSource(true, "test-token", "renewed");
-  const { result } = renderRecorder(tokenSource);
+  const { result } = await renderRecorder(tokenSource);
 
   await act(async () => {
     await result.current.startRecording();
@@ -216,7 +223,7 @@ test("a renewed session aborts the start so the user can press record again", as
 
 test("streaming is impeded when the session has expired", async () => {
   const tokenSource = makeTokenSource(true, undefined, "expired");
-  const { result } = renderRecorder(tokenSource);
+  const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
@@ -225,7 +232,7 @@ test("streaming is impeded when the session has expired", async () => {
 
 test("streaming is not impeded when the session is still fresh", async () => {
   const tokenSource = makeTokenSource(true, "test-token", "still-fresh");
-  const { result } = renderRecorder(tokenSource);
+  const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
@@ -234,7 +241,7 @@ test("streaming is not impeded when the session is still fresh", async () => {
 
 test("streaming is not impeded when re-auth failed but the old token still works", async () => {
   const tokenSource = makeTokenSource(true, "test-token", "still-stale");
-  const { result } = renderRecorder(tokenSource);
+  const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
@@ -245,7 +252,7 @@ test("streaming is not impeded when re-auth failed but the old token still works
 
 test("streaming is not impeded without a backend, whatever the session state", async () => {
   const tokenSource = makeTokenSource(true, undefined, "expired");
-  const { result } = renderRecorder(tokenSource, { apiUrl: undefined });
+  const { result } = await renderRecorder(tokenSource, { apiUrl: undefined });
 
   const call = await startAndCapture(result.current.startRecording);
 
@@ -256,7 +263,7 @@ test("streaming is not impeded without a backend, whatever the session state", a
 
 test("the recorder walks idle -> preparing -> starting -> recording -> idle", async () => {
   const tokenSource = makeTokenSource(true, undefined, "expired");
-  const { result } = renderRecorder(tokenSource);
+  const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
   const stop = vi.fn();
@@ -306,7 +313,7 @@ test("a recording that never gets off the ground returns the UI to idle", async 
   // button stays disabled and every track control stays locked by state !== "idle".
   vi.mocked(recordLecture).mockResolvedValue(undefined);
 
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   await act(async () => {
     await result.current.startRecording();
@@ -316,7 +323,7 @@ test("a recording that never gets off the ground returns the UI to idle", async 
 });
 
 test("the unload guard is armed while starting and disarmed when finished", async () => {
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   const addListener = vi.spyOn(window, "addEventListener");
   const removeListener = vi.spyOn(window, "removeEventListener");
@@ -343,7 +350,7 @@ test("the unload guard is armed while starting and disarmed when finished", asyn
 test("arriving chunks accumulate into the file size overrides and refresh the quota", async () => {
   vi.mocked(gatherRecordingsList).mockResolvedValue([{ name: "REC_1", files: [ { name: "stream.webm", size: 0 } ] }]);
 
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
   const call = await startAndCapture(result.current.startRecording);
 
   await act(async () => {
@@ -379,7 +386,7 @@ test("finishing a recording refreshes the server-side listing", async () => {
   // by the time onFinished runs, the postprocessing job has been scheduled, so a fresh
   // listing already names the recording as rendering. The minute poll would leave the
   // lecturer looking at a list without it for up to a minute.
-  const { result } = renderRecorder(makeTokenSource(true, "test-token"));
+  const { result } = await renderRecorder(makeTokenSource(true, "test-token"));
   const call = await startAndCapture(result.current.startRecording);
 
   await act(async () => {
@@ -399,7 +406,7 @@ test("finishing a recording refreshes the server-side listing", async () => {
 // --- stopping --------------------------------------------------------------
 
 test("stopRecording stops the recording and moves to stopping", async () => {
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
   const call = await startAndCapture(result.current.startRecording);
   const stop = vi.fn();
 
@@ -423,7 +430,7 @@ test("a stopRecording captured before the recording began still stops it", async
   // the recording existed -- an async path, a timer, an event handler bound early. A
   // render-time capture would see "idle" there and refuse to stop, stranding the
   // recording with no way to end it.
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   // taken while still idle, and deliberately not re-read afterwards
   const stopTakenWhileIdle = result.current.stopRecording;
@@ -444,13 +451,13 @@ test("a stopRecording captured before the recording began still stops it", async
   expect(result.current.activeRecording.state).toBe("stopping");
 });
 
-test("stopRecording is a no-op when nothing is being recorded", () => {
+test("stopRecording is a no-op when nothing is being recorded", async () => {
   // The hook warns on this path deliberately, so silence it here rather than letting
   // it litter the suite output -- and assert it, since the warning is the behavior.
   const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   try {
-    const { result } = renderRecorder(makeTokenSource(false, undefined));
+    const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
     act(() => {
       result.current.stopRecording();
@@ -470,7 +477,7 @@ test("pressing start twice before the session check resolves records once", asyn
   // "idle" for the whole duration of the expandSessionHeadroom await -- which can be a
   // silent sign-in lasting seconds, while the button stays enabled. Both presses used to
   // get through, producing two recordings writing two sets of files.
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   await act(async () => {
     void result.current.startRecording();
@@ -486,7 +493,7 @@ test("a failing recording is reported to the user", async () => {
   const failure = new Error("no media for you");
   vi.mocked(recordLecture).mockRejectedValue(failure);
 
-  const { result } = renderRecorder(makeTokenSource(false, undefined));
+  const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
   await act(async () => {
     await result.current.startRecording();
