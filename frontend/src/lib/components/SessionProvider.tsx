@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, ReactNode, useContext, useEffect, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { AuthProvider, useAuth } from "react-oidc-context";
 import { User, UserManager } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
@@ -66,10 +66,27 @@ function AuthenticatedSessionContextBridge(
     signinSilent
   } = useAuth();
 
+  const pendingRenewal = useRef<Promise<User | null>>(undefined);
+
   const userName = user?.profile.preferred_username ?? user?.profile.name ?? user?.profile.email ?? "The Nameless One";
 
   const getAccessToken = async () => {
-    const freshUser = await userManager.getUser().catch(() => null);
+    let freshUser = await userManager.getUser().catch(() => null);
+
+    if(freshUser?.expired && freshUser.refresh_token !== undefined) {
+      // User expired while the tab was inactive, probably, but we still have a refresh token. So make a
+      // best effort to force-refresh.
+
+      // If several calls to getAccessToken arrive here at the same time, make the later ones wait for the
+      // renewal attempt the first one kicked off rather than start their own, conflicting ones.
+      if(pendingRenewal.current === undefined) {
+        pendingRenewal.current = signinSilent().finally(() => {
+          pendingRenewal.current = undefined;
+        });
+      }
+
+      freshUser = await pendingRenewal.current;
+    }
 
     if(freshUser === null || freshUser?.expired) {
       return undefined;

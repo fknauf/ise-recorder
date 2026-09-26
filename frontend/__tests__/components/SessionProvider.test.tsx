@@ -51,6 +51,7 @@ const oidc = vi.hoisted(() => {
 
   interface FakeUser {
     access_token: string
+    refresh_token?: string
     expired: boolean
     profile: FakeProfile
   }
@@ -74,6 +75,8 @@ const oidc = vi.hoisted(() => {
     signinPopupResult: FakeUser | Error | null = null;
     /** Test-only: what signinSilent does -- resolve with a user, or throw. */
     signinSilentResult: FakeUser | Error | null = null;
+    /** Test-only: hold signinSilent open until this settles, so callers can pile up behind it. */
+    signinSilentGate: Promise<void> | null = null;
     /** Test-only: make removeUser reject, as a blocked or corrupt user store does. */
     removeUserError: Error | null = null;
 
@@ -114,6 +117,10 @@ const oidc = vi.hoisted(() => {
 
     signinSilent = async (): Promise<FakeUser | null> => {
       this.signinSilentCalls += 1;
+
+      if(this.signinSilentGate !== null) {
+        await this.signinSilentGate;
+      }
 
       if(this.signinSilentResult instanceof Error) {
         throw this.signinSilentResult;
@@ -213,9 +220,10 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 /** A signed-in user whose authentication happened `ageSeconds` ago. */
 const userAged = (
   ageSeconds: number,
-  overrides: Partial<{ access_token: string; expired: boolean; iat: number; preferred_username: string }> = {}
+  overrides: Partial<{ access_token: string; refresh_token: string; expired: boolean; iat: number; preferred_username: string }> = {}
 ) => ({
   access_token: overrides.access_token ?? "current-token",
+  refresh_token: overrides.refresh_token,
   expired: overrides.expired ?? false,
   profile: {
     auth_time: nowSeconds() - ageSeconds,
@@ -406,9 +414,11 @@ test("the user name comes from the profile, with a fallback for a provider that 
 test("getAccessToken returns the token of a signed-in user", async () => {
   const { result } = await renderAppSession(authenticatedEnv);
 
-  await act(() => userManager().events.load(userAged(60, { access_token: "current-token" })));
+  await act(() => userManager().events.load(userAged(60, { access_token: "current-token", refresh_token: "refresh" })));
 
   expect(await result.current.getAccessToken()).toBe("current-token");
+  // a token that is still good is handed out as it is, refresh token or not
+  expect(userManager().signinSilentCalls).toBe(0);
 });
 
 test("getAccessToken returns nothing when nobody is signed in", async () => {
@@ -417,12 +427,108 @@ test("getAccessToken returns nothing when nobody is signed in", async () => {
   expect(await result.current.getAccessToken()).toBeUndefined();
 });
 
-test("getAccessToken returns nothing for an expired user", async () => {
+test("getAccessToken returns nothing for an expired user without a refresh token", async () => {
   const { result } = await renderAppSession(authenticatedEnv);
 
   await act(() => userManager().events.load(userAged(60, { access_token: "stale-token", expired: true })));
 
   expect(await result.current.getAccessToken()).toBeUndefined();
+  // without a refresh token signinSilent would fall back to an iframe flow nobody configured
+  expect(userManager().signinSilentCalls).toBe(0);
+});
+
+// oidc-client-ts renews on a timer, which a background tab throttles and a discarded one
+// never runs, and it does not renew at all when a page loads with a token that has already
+// expired. getAccessToken is on the path of every upload, so it renews on demand when the
+// timer did not get to.
+
+/** getAccessToken inside act: a renewal goes through AuthProvider and updates its state. */
+async function accessTokenFrom(getAccessToken: () => Promise<string | undefined>) {
+  let token: string | undefined;
+  await act(async () => {
+    token = await getAccessToken();
+  });
+  return token;
+}
+
+test("getAccessToken renews an expired token with the refresh token", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
+  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+
+  expect(await accessTokenFrom(result.current.getAccessToken)).toBe("renewed-token");
+  expect(mgr.signinSilentCalls).toBe(1);
+  // and the rest of the app learns about it, so the "not signed in" notice goes away
+  expect(result.current.isAuthenticated).toBe(true);
+});
+
+test("concurrent requests for a token share one renewal", async () => {
+  // every track uploads its own chunks, so several of these arrive at once when the token
+  // runs out; each starting its own refresh would at best waste requests, and at worst
+  // trip refresh token rotation into failing all but one of them
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  // captured the way a recording captures it, and called alongside the current one: the
+  // renewal in flight has to be shared across renders, not only within one
+  const capturedGetAccessToken = result.current.getAccessToken;
+  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
+
+  let releaseRenewal: () => void = () => {};
+  mgr.signinSilentGate = new Promise(resolve => {
+    releaseRenewal = resolve;
+  });
+  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+
+  let tokens: (string | undefined)[] = [];
+  await act(async () => {
+    const pending = Promise.all([
+      capturedGetAccessToken(),
+      result.current.getAccessToken(),
+      result.current.getAccessToken()
+    ]);
+
+    // let all three reach the renewal before it completes
+    await new Promise(resolve => setTimeout(resolve, 0));
+    releaseRenewal();
+    tokens = await pending;
+  });
+
+  expect(tokens).toStrictEqual([ "renewed-token", "renewed-token", "renewed-token" ]);
+  expect(mgr.signinSilentCalls).toBe(1);
+});
+
+test("a failed renewal yields no token and is reported", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
+  mgr.signinSilentResult = new Error("refresh token rejected");
+
+  expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
+  // the expired token is not handed out as a fallback: the backend would only refuse it
+  expect(result.current.error?.message).toBe("refresh token rejected");
+});
+
+test("a failed renewal does not keep later requests from trying again", async () => {
+  // the shared renewal is released once it has settled, however it settled -- otherwise one
+  // failed refresh would stand in for every renewal after it, for the rest of the lecture
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
+
+  mgr.signinSilentResult = new Error("provider unreachable");
+  expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
+
+  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  expect(await accessTokenFrom(result.current.getAccessToken)).toBe("renewed-token");
+
+  expect(mgr.signinSilentCalls).toBe(2);
+  // and the recovery clears the error again
+  expect(result.current.error).toBeUndefined();
 });
 
 test("getAccessToken yields nothing when the user store cannot be read", async () => {
