@@ -1,12 +1,12 @@
 import { expect, test, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RecorderControls } from "@/lib/components/RecorderControls";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { useServerEnv } from "@/lib/hooks/useServerEnv";
 import { useLecture } from "@/lib/hooks/useLecture";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
-import { useMediaDevices } from "@/lib/hooks/useMediaDevices";
+import { RefreshEffect, useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
 import { ActiveRecording } from "@/lib/store/store";
 import { SessionProvider } from "@/lib/components/SessionProvider";
@@ -556,4 +556,98 @@ test.each([
   renderIdleWith(tracks);
 
   expect(await startButton()).toBeEnabled();
+});
+
+// --- the device menus after a permission prompt ----------------------------
+//
+// Opening a device menu refreshes the device list, and on a first visit that is where the
+// browser asks for permission. The user picks devices in that prompt, and the refresh adds
+// them straight away -- so the menu behind it has nothing left to offer, and left open it
+// would swallow the next click. What refreshMediaDevices reports is its own business, in
+// useMediaDevices.test.tsx; these pin what the menu does with it.
+
+const DEVICE_MENUS = [
+  { button: "Add Video Source", device: "Camera 1", kind: "videoinput" },
+  { button: "Add Audio Source", device: "Microphone 1", kind: "audioinput" }
+] as const;
+
+function renderWithDeviceMenus() {
+  const device = (label: string, kind: MediaDeviceKind): MediaDeviceInfo => ({
+    deviceId: label, groupId: label, kind, label, toJSON: () => ({})
+  });
+
+  const callbacks = setupMockHooks(
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [ device("Camera 1", "videoinput") ],
+    [ device("Microphone 1", "audioinput") ],
+    { state: "idle" }
+  );
+
+  // the refresh settles when the test says so, so the menu can be looked at on either side
+  let settleRefresh: (effect: RefreshEffect) => void = () => {};
+  callbacks.refreshMediaDevices.mockImplementation(() => new Promise<RefreshEffect>(resolve => {
+    settleRefresh = resolve;
+  }));
+
+  render(
+    <Provider theme={defaultTheme}>
+      <SessionProvider serverEnv={{}}>
+        <RecorderControls/>
+      </SessionProvider>
+    </Provider>
+  );
+
+  return {
+    callbacks,
+    settle: (effect: RefreshEffect) => act(async () => settleRefresh(effect))
+  };
+}
+
+// Whether a menu is open is read off its trigger: aria-expanded follows the open state at
+// once, while the menu itself lingers in the DOM for as long as its closing animation runs --
+// long enough that a menu on its way out would still pass for an open one.
+const menuTrigger = (button: string) => screen.getByText(button).closest("button") as HTMLElement;
+
+test.each(DEVICE_MENUS)("the menu behind $button closes once the refresh added the devices picked in the prompt", async ({ button, device }) => {
+  const { settle } = renderWithDeviceMenus();
+  const user = userEvent.setup();
+
+  await user.click(screen.getByText(button));
+  expect(await screen.findByRole("menuitem", { name: device })).toBeInTheDocument();
+
+  await settle("added-tracks");
+
+  expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "false");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+});
+
+test.each(DEVICE_MENUS)("the menu behind $button stays open after a refresh that only listed devices", async ({ button, device }) => {
+  // permissions were already there, so the menu is how the user picks a device
+  const { settle } = renderWithDeviceMenus();
+  const user = userEvent.setup();
+
+  await user.click(screen.getByText(button));
+  await settle("just-refreshed");
+
+  expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("menuitem", { name: device })).toBeInTheDocument();
+});
+
+test.each(DEVICE_MENUS)("the menu behind $button stays shut if the user closed it before the refresh settled", async ({ button }) => {
+  // the refresh may wait on a permission prompt for as long as the user takes; the menu
+  // is theirs to close in the meantime, and nothing coming back afterwards reopens it
+  const { settle } = renderWithDeviceMenus();
+  const user = userEvent.setup();
+
+  await user.click(screen.getByText(button));
+  await screen.findByRole("menu");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+  await settle("just-refreshed");
+
+  expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("menu")).toBeNull();
 });

@@ -1,11 +1,19 @@
 import { expect, test, vi } from "vitest";
-import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { ReactNode, useEffect } from "react";
-import { useMediaDevices } from "@/lib/hooks/useMediaDevices";
+import { RefreshEffect, useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import userEvent from "@testing-library/user-event";
 import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
 import _ from "lodash";
+import { showError } from "@/lib/utils/notifications";
+
+// an explicit factory, so a failure path logs nothing and queues no toast outside a Provider
+vi.mock("@/lib/utils/notifications", () => ({
+  showError: vi.fn(),
+  showSuccess: vi.fn(),
+  showMessage: vi.fn()
+}));
 
 const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
   <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
@@ -528,4 +536,89 @@ test("useMediaDevices().openAudioStream works", async () => {
   expect(Object.keys(mockTracks[1]).includes("onended")).toBeTruthy();
   expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
   expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
+});
+
+// --- what a refresh reports ------------------------------------------------
+//
+// The device menus close again when a refresh already added what the user picked in the
+// browser's permission prompt; RecorderControls.test.tsx pins that side. These pin what
+// the refresh reports on each of its paths.
+
+function permissionsAre(state: PermissionState) {
+  navigator.permissions.query = vi.fn().mockImplementation(
+    async (desc: PermissionDescriptor): Promise<PermissionStatus> => ({
+      state,
+      name: desc.name,
+      onchange: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    })
+  );
+}
+
+const aStream = () => ({
+  getTracks: vi.fn().mockReturnValue([ { stop: vi.fn() } ]),
+  getVideoTracks: vi.fn().mockReturnValue([ { label: "camera track" } ]),
+  getAudioTracks: vi.fn().mockReturnValue([ { label: "microphone track" } ])
+});
+
+async function refreshed(refresh: () => Promise<RefreshEffect>) {
+  let effect: RefreshEffect | undefined;
+  await act(async () => {
+    effect = await refresh();
+  });
+  return effect;
+}
+
+test("a refresh that asked for permission reports the devices it added", async () => {
+  permissionsAre("prompt");
+  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(aStream());
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
+
+  const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
+
+  expect(await refreshed(result.current.refreshMediaDevices)).toBe("added-tracks");
+  // and it did add them: the report is about what happened, not a guess
+  expect(result.current.videoTracks.map(t => t.label)).toStrictEqual([ "camera track" ]);
+  expect(result.current.audioTracks.map(t => t.label)).toStrictEqual([ "microphone track" ]);
+});
+
+test("a first refresh with permissions already granted only lists devices", async () => {
+  // it still opens a stream to be allowed to read the labels, but closes it again: the
+  // user picked nothing, so the menu is where they will
+  permissionsAre("granted");
+  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(aStream());
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
+
+  const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
+
+  expect(await refreshed(result.current.refreshMediaDevices)).toBe("just-refreshed");
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+  expect(result.current.videoTracks).toStrictEqual([]);
+});
+
+test("a later refresh that needs no permission only lists devices", async () => {
+  permissionsAre("granted");
+  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(aStream());
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
+
+  const { result } = renderHook(() => useMediaDevices(), { wrapper });
+  await refreshed(result.current.refreshMediaDevices);
+
+  expect(await refreshed(result.current.refreshMediaDevices)).toBe("just-refreshed");
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+});
+
+test("a refused permission prompt adds nothing and says so", async () => {
+  permissionsAre("prompt");
+  navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([]);
+
+  const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
+
+  // nothing was added, so the menu stays: it is the one place the user can still try again
+  expect(await refreshed(result.current.refreshMediaDevices)).toBe("just-refreshed");
+  expect(showError).toHaveBeenCalledWith("Could not obtain device permissions", expect.anything());
+  expect(result.current.videoTracks).toStrictEqual([]);
 });

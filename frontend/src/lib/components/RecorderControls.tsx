@@ -18,6 +18,7 @@ import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording"
 import { useHydrated } from "../hooks/useHydrated";
 import { UserMenu } from "./UserMenu";
 import { useAppSession } from "./SessionProvider";
+import { useState } from "react";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -129,12 +130,26 @@ export function RecorderControls() {
 
   const { authRequired } = useAppSession();
 
+  const [ videoMenuOpen, setVideoMenuOpen ] = useState(false);
+  const [ audioMenuOpen, setAudioMenuOpen ] = useState(false);
+
   const isBackendConfigured = apiUrl !== undefined;
   const hasDisabledTrackControls = activeRecording.state !== "idle";
 
-  const onMenuOpenChange = (isOpen: boolean) => {
+  const onMenuOpenChangeHandler = (setOpen: (isOpen: boolean) => void) => async (isOpen: boolean) => {
+    setOpen(isOpen);
+
     if(isOpen) {
-      refreshMediaDevices();
+      const effect = await refreshMediaDevices();
+
+      // if the refresh handler added video/audio tracks, that means the browser asked for permission
+      // and we took that as the main user action. In that case, the user doesn't need the menu anymore,
+      // may not even recognize that it's still open, and needs to click twice on whatever he does next
+      // to close the menu and only then actually register the desired action. So in that case, close
+      // the menu here so the user is in a more expected state.
+      if(effect === "added-tracks") {
+        setOpen(false);
+      }
     }
   };
 
@@ -177,7 +192,7 @@ export function RecorderControls() {
           <Text>Add Screen/Window</Text>
         </ActionButton>
 
-        <MenuTrigger onOpenChange={onMenuOpenChange}>
+        <MenuTrigger isOpen={videoMenuOpen} onOpenChange={onMenuOpenChangeHandler(setVideoMenuOpen)}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <MovieCamera/>
             <Text>Add Video Source</Text>
@@ -187,7 +202,7 @@ export function RecorderControls() {
           </Menu>
         </MenuTrigger>
 
-        <MenuTrigger onOpenChange={onMenuOpenChange}>
+        <MenuTrigger isOpen={audioMenuOpen} onOpenChange={onMenuOpenChangeHandler(setAudioMenuOpen)}>
           <ActionButton isDisabled={hasDisabledTrackControls}>
             <CallCenter/>
             <Text>Add Audio Source</Text>

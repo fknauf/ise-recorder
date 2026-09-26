@@ -5,6 +5,8 @@ import { showError } from "../utils/notifications";
 import { useAppStore } from "./useAppStore";
 import { createDeviceConstraints } from "../store/store";
 
+export type RefreshEffect = "just-refreshed" | "added-tracks";
+
 const trackIsFromDevice = (track: MediaStreamTrack, uid: MediaDeviceUid) =>
   track.getSettings().groupId === uid.groupId && track.getSettings().deviceId === uid.deviceId;
 
@@ -34,6 +36,7 @@ export function useMediaDevices() {
     const cameraPermissions = await navigator.permissions.query({ name: "camera" }).then(p => p.state);
     const microphonePermissions = await navigator.permissions.query({ name: "microphone" }).then(p => p.state);
     const userInteractionExpected = cameraPermissions === "prompt" || microphonePermissions === "prompt";
+    let effect: RefreshEffect = "just-refreshed";
 
     if(!obtainedDevicePermissions || userInteractionExpected) {
       try {
@@ -56,6 +59,7 @@ export function useMediaDevices() {
           // so in this case we just add the streams he just selected.
           addVideoTracks(stream.getVideoTracks());
           addAudioTracks(stream.getAudioTracks());
+          effect = "added-tracks";
         } else {
           // Here we had the permissions when the site was loaded, so the user didn't select any
           // device for us to get this stream. In this case close the streams and let the user pick
@@ -75,6 +79,8 @@ export function useMediaDevices() {
     } catch(e) {
       showError("Could not enumerate devices", e);
     }
+
+    return effect;
   };
 
   const openDisplayStream = async () => {
