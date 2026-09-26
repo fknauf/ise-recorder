@@ -43,6 +43,7 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
             key={`download-${name}`}
             isDisabled={isRecording}
             onPress={() => downloadFile(recording.name, name)}
+            data-testid="sr-btn-download"
           >
             <Download/>
             <Text>Download {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
@@ -57,6 +58,7 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
               justifyContent="center"
               alignItems="center"
               height="size-900"
+              data-testid="sr-ind-uploading"
             >
               <ProgressCircle size="M" value={reuploadProgress} aria-label="Uploading"/>
               <Text>Uploading...</Text>
@@ -65,6 +67,7 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
               <ActionButton
                 isDisabled={isRecording || isUploading}
                 onPress={() => removeSavedRecording(recording.name)}
+                data-testid="sr-btn-remove"
               >
                 <Delete/>
                 <Text>Remove</Text>
@@ -74,9 +77,10 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
                   <ActionButton
                     isDisabled={isRecording || isUploading}
                     onPress={() => reuploadSavedRecording(recording.name)}
+                    data-testid="sr-btn-reupload"
                   >
                     <DataUpload/>
-                    <Text>Re-upload manually</Text>
+                    <Text>Re-upload</Text>
                   </ActionButton>
               }
             </>

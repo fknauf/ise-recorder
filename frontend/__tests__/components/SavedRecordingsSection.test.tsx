@@ -30,6 +30,14 @@ vi.mock("@/lib/hooks/useServerEnv", () => ({
 
 const reupload = vi.fn();
 
+// Controls are found by test id rather than by label, so rewording a button does not break
+// the tests that are about what it does. The download buttons are still checked for the
+// file name and size they show, since that is content rather than wording.
+const removeButton = (card: HTMLElement) => within(card).getByTestId("sr-btn-remove");
+const reuploadButton = (card: HTMLElement) => within(card).getByTestId("sr-btn-reupload");
+const uploadingIndicator = (card: HTMLElement) => within(card).getByTestId("sr-ind-uploading");
+const downloadButtons = (card: HTMLElement) => within(card).getAllByTestId("sr-btn-download");
+
 beforeEach(() => {
   // no backend by default: the tests below that predate the re-upload count buttons, and
   // a deployment without a server offers nothing to upload to
@@ -100,30 +108,31 @@ test("SavedRecordingsSection displays recordings and reacts to clicks", async ()
   expect(srCards[0]).toHaveTextContent("FOO_2025-12-11T213822.748Z");
   expect(srCards[1]).toHaveTextContent("BAR_2025-12-11T214230.418Z");
 
-  const fooButtons = await within(srCards[0]).findAllByRole("button");
-  expect(fooButtons.length).toBe(2);
-  expect(fooButtons[0]).toHaveTextContent("Download stream.webm (1.23 MiB)");
-  expect(fooButtons[1]).toHaveTextContent("Remove");
+  // one download per file and a remove button, and nothing else: no backend, no re-upload
+  expect(within(srCards[0]).getAllByRole("button")).toHaveLength(2);
+  const fooDownloads = downloadButtons(srCards[0]);
+  expect(fooDownloads).toHaveLength(1);
+  expect(fooDownloads[0]).toHaveTextContent("stream.webm (1.23 MiB)");
 
-  await user.click(fooButtons[0]);
+  await user.click(fooDownloads[0]);
   expect(onDownload).toHaveBeenLastCalledWith("FOO_2025-12-11T213822.748Z", "stream.webm");
-  await user.click(fooButtons[1]);
+  await user.click(removeButton(srCards[0]));
   expect(onRemove).toHaveBeenLastCalledWith("FOO_2025-12-11T213822.748Z");
 
-  const barButtons = await within(srCards[1]).findAllByRole("button");
-  expect(barButtons.length).toBe(4);
-  expect(barButtons[0]).toHaveTextContent("Download stream.webm (2.34 MiB)");
-  expect(barButtons[1]).toHaveTextContent("Download overlay.webm (3.45 MiB)");
-  expect(barButtons[2]).toHaveTextContent("Download audio-0.webm");
-  expect(barButtons[3]).toHaveTextContent("Remove");
+  expect(within(srCards[1]).getAllByRole("button")).toHaveLength(4);
+  const barDownloads = downloadButtons(srCards[1]);
+  expect(barDownloads).toHaveLength(3);
+  expect(barDownloads[0]).toHaveTextContent("stream.webm (2.34 MiB)");
+  expect(barDownloads[1]).toHaveTextContent("overlay.webm (3.45 MiB)");
+  expect(barDownloads[2]).toHaveTextContent("audio-0.webm");
 
-  await user.click(barButtons[0]);
+  await user.click(barDownloads[0]);
   expect(onDownload).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "stream.webm");
-  await user.click(barButtons[1]);
+  await user.click(barDownloads[1]);
   expect(onDownload).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "overlay.webm");
-  await user.click(barButtons[2]);
+  await user.click(barDownloads[2]);
   expect(onDownload).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "audio-0.webm");
-  await user.click(barButtons[3]);
+  await user.click(removeButton(srCards[1]));
   expect(onRemove).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z");
 });
 
@@ -214,37 +223,31 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
   expect(srCards[0]).toHaveTextContent("FOO_2025-12-11T213822.748Z");
   expect(srCards[1]).toHaveTextContent("BAR_2025-12-11T214230.418Z");
 
-  const fooButtons = await within(srCards[0]).findAllByRole("button");
-  expect(fooButtons.length).toBe(2);
-  expect(fooButtons[0]).toHaveTextContent("Download stream.webm (1.23 MiB)");
-  expect(fooButtons[0]).not.toBeDisabled();
-  expect(fooButtons[1]).toHaveTextContent("Remove");
-  expect(fooButtons[1]).not.toBeDisabled();
+  const fooDownloads = downloadButtons(srCards[0]);
+  expect(fooDownloads).toHaveLength(1);
+  expect(fooDownloads[0]).toBeEnabled();
+  expect(removeButton(srCards[0])).toBeEnabled();
 
-  await user.click(fooButtons[0]);
+  await user.click(fooDownloads[0]);
   expect(onDownload).toHaveBeenLastCalledWith("FOO_2025-12-11T213822.748Z", "stream.webm");
-  await user.click(fooButtons[1]);
+  await user.click(removeButton(srCards[0]));
   expect(onRemove).toHaveBeenLastCalledWith("FOO_2025-12-11T213822.748Z");
 
-  const barButtons = await within(srCards[1]).findAllByRole("button");
-  expect(barButtons.length).toBe(4);
-  expect(barButtons[0]).toHaveTextContent("Download stream.webm (2.34 MiB)");
-  expect(barButtons[0]).toBeDisabled();
-  expect(barButtons[1]).toHaveTextContent("Download overlay.webm (3.45 MiB)");
-  expect(barButtons[1]).toBeDisabled();
-  expect(barButtons[2]).toHaveTextContent("Download audio-0.webm");
-  expect(barButtons[2]).toBeDisabled();
-  expect(barButtons[3]).toHaveTextContent("Remove");
-  expect(barButtons[3]).toBeDisabled();
+  const barDownloads = downloadButtons(srCards[1]);
+  expect(barDownloads).toHaveLength(3);
+  for(const download of barDownloads) {
+    expect(download).toBeDisabled();
+  }
+  expect(removeButton(srCards[1])).toBeDisabled();
 
   onDownload.mockClear();
   onRemove.mockClear();
 
-  await user.click(barButtons[0]);
-  await user.click(barButtons[1]);
-  await user.click(barButtons[2]);
+  for(const download of barDownloads) {
+    await user.click(download);
+  }
   expect(onDownload).not.toHaveBeenCalled();
-  await user.click(barButtons[3]);
+  await user.click(removeButton(srCards[1]));
   expect(onRemove).not.toHaveBeenCalled();
 });
 
@@ -282,8 +285,6 @@ function renderWithBackend(
   return screen.getAllByTestId("sr-card");
 }
 
-const reuploadButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Re-upload manually/ });
-
 test("with a backend, every saved recording can be re-uploaded", async () => {
   const cards = renderWithBackend();
 
@@ -308,7 +309,7 @@ test("without a backend, nothing is offered for re-upload", async () => {
     </Provider>
   );
 
-  expect(screen.queryByRole("button", { name: /Re-upload manually/ })).toBeNull();
+  expect(screen.queryByTestId("sr-btn-reupload")).toBeNull();
 });
 
 test("the recording that is being made cannot be re-uploaded", () => {
@@ -322,8 +323,6 @@ test("the recording that is being made cannot be re-uploaded", () => {
 // While its re-upload runs, a card shows the progress in place of the buttons that act on
 // the local copy, so there is nothing to press twice and nothing to remove from under it.
 
-const removeButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Remove/ });
-
 test("a recording cannot be re-uploaded again while its re-upload is running", async () => {
   // a second press would upload into the same directory the first one is writing to, and
   // schedule a second job for it
@@ -331,8 +330,8 @@ test("a recording cannot be re-uploaded again while its re-upload is running", a
 
   const cards = renderWithBackend();
 
-  expect(within(cards[1]).queryByRole("button", { name: /Re-upload manually/ })).toBeNull();
-  expect(cards[1]).toHaveTextContent("Uploading...");
+  expect(within(cards[1]).queryByTestId("sr-btn-reupload")).toBeNull();
+  expect(uploadingIndicator(cards[1])).toBeVisible();
 
   // only that recording: the others can go up in the meantime
   await userEvent.click(reuploadButton(cards[0]));
@@ -344,8 +343,8 @@ test("a running re-upload shows how far it has got", () => {
 
   const cards = renderWithBackend();
 
-  expect(within(cards[1]).getByRole("progressbar", { name: "Uploading" })).toHaveAttribute("aria-valuenow", "42");
-  expect(within(cards[0]).queryByRole("progressbar")).toBeNull();
+  expect(within(uploadingIndicator(cards[1])).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+  expect(within(cards[0]).queryByTestId("sr-ind-uploading")).toBeNull();
 });
 
 test("a recording cannot be removed while its re-upload is running", async () => {
@@ -355,7 +354,7 @@ test("a recording cannot be removed while its re-upload is running", async () =>
 
   const cards = renderWithBackend({ state: "idle" }, onRemove);
 
-  expect(within(cards[1]).queryByRole("button", { name: /Remove/ })).toBeNull();
+  expect(within(cards[1]).queryByTestId("sr-btn-remove")).toBeNull();
 
   // only that recording: the others can be removed in the meantime
   await userEvent.click(removeButton(cards[0]));
@@ -368,7 +367,7 @@ test("the downloads stay available while a re-upload is running", async () => {
 
   const cards = renderWithBackend();
 
-  const download = within(cards[1]).getByRole("button", { name: /Download stream.webm/ });
+  const [ download ] = downloadButtons(cards[1]);
   expect(download).toBeEnabled();
   await userEvent.click(download);
   expect(downloadFile).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "stream.webm");
