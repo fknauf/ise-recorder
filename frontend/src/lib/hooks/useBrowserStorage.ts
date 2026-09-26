@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { deleteRecording, getAllRecordingTracks } from "../utils/browserStorage";
 import { useAppStore } from "./useAppStore";
 import { schedulePostprocessing, uploadFile } from "../utils/serverStorage";
@@ -20,11 +19,6 @@ export function useBrowserStorage() {
 
   const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
 
-  useEffect(() => {
-    // gather browser storage info on first client-side render
-    updateBrowserStorage();
-  }, [ updateBrowserStorage ]);
-
   const removeSavedRecording = async (recordingName: string) => {
     await deleteRecording(recordingName);
     await updateBrowserStorage();
@@ -43,12 +37,12 @@ export function useReuploadSavedRecording() {
   const { getAccessToken } = useAppSession();
   const { lecturerEmail } = useLecture();
 
-  const signalManualUploadStarted = useAppStore(state => state.signalManualUploadStarted);
+  const signalManualUploadProgress = useAppStore(state => state.signalManualUploadProgress);
   const signalManualUploadFinished = useAppStore(state => state.signalManualUploadFinished);
   const refreshProcessedRecordings = useRefreshProcessedRecordings();
 
   const reuploadSavedRecording = async (recordingName: string) => {
-    signalManualUploadStarted(recordingName);
+    signalManualUploadProgress(recordingName, 0);
 
     const uploadName = `${recordingName}-reupload`;
     const destination = {
@@ -56,17 +50,25 @@ export function useReuploadSavedRecording() {
       getAccessToken,
       streamingImpeded: false
     };
+
     const retryPolicy = {
-      retries: 0,
-      intervalMillis: 0
+      retries: 3,
+      intervalMillis: 20000
     };
 
     try {
       const trackBlobs = await getAllRecordingTracks(recordingName);
+      const totalBytes = trackBlobs.reduce((acc, cur) => acc + cur.file.size, 0);
+      let transferred = 0;
+
+      const signalProgress = (sentBytes: number) => {
+        transferred += sentBytes;
+        signalManualUploadProgress(recordingName, transferred / totalBytes * 100);
+      };
 
       const uploadTracks = async () => {
         for(const { trackName, file } of trackBlobs) {
-          const succeeded = await uploadFile(destination, file, uploadName, trackName, retryPolicy);
+          const succeeded = await uploadFile(destination, file, uploadName, trackName, signalProgress, retryPolicy);
 
           if(!succeeded) {
             showError(`Failed manual upload of ${uploadName} track ${trackName}, aborting.`);

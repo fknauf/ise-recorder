@@ -13,13 +13,13 @@ vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useBrowserStorage");
 vi.mock("@/lib/utils/browserStorage");
 
-// The section reads which recordings are being re-uploaded from the store. Only that one
-// field is faked; the rest of the module stays real for whoever else imports it.
-let manuallyUploading: string[] = [];
+// The section reads the progress of running re-uploads from the store. Only that one field
+// is faked; the rest of the module stays real for whoever else imports it.
+let reuploadProgress = new Map<string, number>();
 vi.mock("@/lib/hooks/useAppStore", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/hooks/useAppStore")>(),
-  useAppStore: function<T>(selector: (state: { manuallyUploading: string[] }) => T) {
-    return selector({ manuallyUploading });
+  useAppStore: function<T>(selector: (state: { reuploadProgress: Map<string, number> }) => T) {
+    return selector({ reuploadProgress });
   }
 }));
 
@@ -34,7 +34,7 @@ beforeEach(() => {
   // no backend by default: the tests below that predate the re-upload count buttons, and
   // a deployment without a server offers nothing to upload to
   mockServerEnv.mockReturnValue({});
-  manuallyUploading = [];
+  reuploadProgress = new Map();
   reupload.mockReset();
   vi.mocked(useReuploadSavedRecording).mockReturnValue(reupload);
 });
@@ -259,18 +259,22 @@ const TWO_RECORDINGS: RecordingFileList[] = [
   { name: "BAR_2025-12-11T214230.418Z", files: [ { name: "stream.webm", size: 2 ** 20 } ] }
 ];
 
-function renderWithBackend(activeRecording: ReturnType<typeof useActiveRecording> = { state: "idle" }) {
+function renderWithBackend(
+  activeRecording: ReturnType<typeof useActiveRecording> = { state: "idle" },
+  removeSavedRecording: (name: string) => Promise<void> = vi.fn(),
+  scale: "medium" | "large" = "medium"
+) {
   mockServerEnv.mockReturnValue({ apiUrl: "https://record.example.edu" });
   vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
   vi.mocked(useBrowserStorage).mockReturnValue({
     quota: undefined,
     usage: undefined,
     savedRecordings: TWO_RECORDINGS,
-    removeSavedRecording: vi.fn()
+    removeSavedRecording
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <Provider theme={defaultTheme} scale={scale}>
       <SavedRecordingsSection/>
     </Provider>
   );
@@ -315,17 +319,71 @@ test("the recording that is being made cannot be re-uploaded", () => {
   expect(reuploadButton(cards[0])).toBeEnabled();
 });
 
+// While its re-upload runs, a card shows the progress in place of the buttons that act on
+// the local copy, so there is nothing to press twice and nothing to remove from under it.
+
+const removeButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Remove/ });
+
 test("a recording cannot be re-uploaded again while its re-upload is running", async () => {
   // a second press would upload into the same directory the first one is writing to, and
   // schedule a second job for it
-  manuallyUploading = [ "BAR_2025-12-11T214230.418Z" ];
+  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 0 ] ]);
 
   const cards = renderWithBackend();
 
-  expect(reuploadButton(cards[1])).toBeDisabled();
-  // only that recording: the others can go up in the meantime
-  expect(reuploadButton(cards[0])).toBeEnabled();
+  expect(within(cards[1]).queryByRole("button", { name: /Re-upload manually/ })).toBeNull();
+  expect(cards[1]).toHaveTextContent("Uploading...");
 
-  await userEvent.click(reuploadButton(cards[1]));
-  expect(reupload).not.toHaveBeenCalled();
+  // only that recording: the others can go up in the meantime
+  await userEvent.click(reuploadButton(cards[0]));
+  expect(reupload).toHaveBeenCalledExactlyOnceWith("FOO_2025-12-11T213822.748Z");
+});
+
+test("a running re-upload shows how far it has got", () => {
+  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+
+  const cards = renderWithBackend();
+
+  expect(within(cards[1]).getByRole("progressbar", { name: "Uploading" })).toHaveAttribute("aria-valuenow", "42");
+  expect(within(cards[0]).queryByRole("progressbar")).toBeNull();
+});
+
+test("a recording cannot be removed while its re-upload is running", async () => {
+  // the upload reads the local files as it goes, so they have to outlive it
+  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+  const onRemove = vi.fn();
+
+  const cards = renderWithBackend({ state: "idle" }, onRemove);
+
+  expect(within(cards[1]).queryByRole("button", { name: /Remove/ })).toBeNull();
+
+  // only that recording: the others can be removed in the meantime
+  await userEvent.click(removeButton(cards[0]));
+  expect(onRemove).toHaveBeenCalledExactlyOnceWith("FOO_2025-12-11T213822.748Z");
+});
+
+test("the downloads stay available while a re-upload is running", async () => {
+  // they read the same local files the upload does, which is harmless
+  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+
+  const cards = renderWithBackend();
+
+  const download = within(cards[1]).getByRole("button", { name: /Download stream.webm/ });
+  expect(download).toBeEnabled();
+  await userEvent.click(download);
+  expect(downloadFile).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "stream.webm");
+});
+
+test.each([ "medium", "large" ] as const)("a card keeps its height while its re-upload runs (%s scale)", scale => {
+  // the progress takes the place of two buttons, and a card that shrank and grew around it
+  // would shift every card after it in the row. The two recordings have one file each and
+  // names of the same length, so the only difference between the cards is the upload.
+  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+
+  const [ idle, uploading ] = renderWithBackend({ state: "idle" }, vi.fn(), scale);
+
+  // the card's content rather than the card: the section lays cards out in a row that
+  // stretches each to the tallest, which would make any two cards side by side agree
+  const contentHeight = (card: HTMLElement) => (card.firstElementChild as HTMLElement).getBoundingClientRect().height;
+  expect(contentHeight(uploading)).toBe(contentHeight(idle));
 });

@@ -832,11 +832,44 @@ test("the upload stops at the first chunk that fails", async () => {
     .mockImplementationOnce(async () => Response.json({}, { status: 201 }))
     .mockImplementation(async () => Response.json({ detail: "disk full" }, { status: 507 }));
 
-  const result = await uploadFile(uploadDestination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", { retries: 0, intervalMillis: 0 });
+  const result = await uploadFile(uploadDestination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", undefined, { retries: 0, intervalMillis: 0 });
 
   expect(result).toBe(false);
   expect((await sentChunks()).map(c => c.index)).toStrictEqual([ 0, 1 ]);
   expect(showError).toHaveBeenCalledWith(expect.stringContaining("chunk 1"));
+});
+
+test("progress is signalled with the size of every chunk that arrived", async () => {
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({}, { status: 201 }));
+  const signalProgress = vi.fn();
+
+  await uploadFile(uploadDestination, fileOf(2 * CHUNK + 12345).blob, "GVS_2025-manual", "stream", signalProgress);
+
+  // byte counts rather than a percentage: the caller adds them up across tracks
+  expect(signalProgress.mock.calls).toStrictEqual([ [ CHUNK ], [ CHUNK ], [ 12345 ] ]);
+});
+
+test("a chunk that failed is not counted as progress", async () => {
+  window.fetch = vi.fn()
+    .mockImplementationOnce(async () => Response.json({}, { status: 201 }))
+    .mockImplementation(async () => Response.json({ detail: "disk full" }, { status: 507 }));
+  const signalProgress = vi.fn();
+
+  await uploadFile(uploadDestination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", signalProgress, { retries: 0, intervalMillis: 0 });
+
+  expect(signalProgress.mock.calls).toStrictEqual([ [ CHUNK ] ]);
+});
+
+test("retries of a chunk are not counted twice", async () => {
+  window.fetch = vi.fn()
+    .mockImplementationOnce(async () => Response.json({}, { status: 503 }))
+    .mockImplementation(async () => Response.json({}, { status: 201 }));
+  const signalProgress = vi.fn();
+
+  await expect(uploadFile(uploadDestination, fileOf(1000).blob, "GVS_2025-manual", "stream", signalProgress, { retries: 1, intervalMillis: 0 })).resolves.toBe(true);
+
+  expect(window.fetch).toHaveBeenCalledTimes(2);
+  expect(signalProgress.mock.calls).toStrictEqual([ [ 1000 ] ]);
 });
 
 test("nothing is uploaded without a backend", async () => {

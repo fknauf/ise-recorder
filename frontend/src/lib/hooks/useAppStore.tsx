@@ -1,7 +1,7 @@
 "use client";
 
 import { StoreApi, useStore } from "zustand";
-import { createContext, ReactNode, useContext, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 import { AppStoreState, createAppStore } from "../store/store";
 import { ServerEnv } from "../utils/serverEnv";
 
@@ -17,6 +17,11 @@ interface AppStoreProviderProps {
 
 export function AppStoreProvider({ serverEnv, children }: Readonly<AppStoreProviderProps>) {
   const [ store ] = useState(() => createAppStore(serverEnv));
+
+  useEffect(() => {
+    // gather browser storage info on first client-side render
+    store.getState().updateBrowserStorage();
+  }, [ store ]);
 
   return (
     <AppStoreContext.Provider value={store}>

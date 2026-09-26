@@ -57,7 +57,11 @@ vi.mock("@/lib/hooks/useProcessedRecordings", () => ({
   useRefreshProcessedRecordings: () => refreshProcessedRecordings
 }));
 
-test("useBrowserStorage initializes at first render", async () => {
+// The store gathers browser storage once, when the provider mounts, rather than every hook
+// that reads it doing so on its own -- a hook used once per saved recording would otherwise
+// rescan the whole of it once per card.
+
+test("the provider gathers browser storage at first render", async () => {
   vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
   navigator.storage.estimate = vi.fn().mockImplementation(async () => ({
     quota: 10 * 2 ** 30,
@@ -73,6 +77,19 @@ test("useBrowserStorage initializes at first render", async () => {
     expect(renderResult.result.current.quota).toBe(10 * 2 ** 30);
     expect(renderResult.result.current.usage).toBe(1234);
   });
+});
+
+test("browser storage is gathered once however many components read it", async () => {
+  vi.mocked(gatherRecordingsList).mockClear();
+  vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
+  navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 1234 });
+
+  const renderResult = renderHook(() => [ useBrowserStorage(), useBrowserStorage(), useBrowserStorage() ], { wrapper });
+
+  await waitFor(() => {
+    expect(renderResult.result.current.map(storage => storage.savedRecordings)).toStrictEqual([ mockRecordings, mockRecordings, mockRecordings ]);
+  });
+  expect(gatherRecordingsList).toHaveBeenCalledOnce();
 });
 
 test("useBrowserStorage reacts to file size overrides", async () => {
@@ -133,7 +150,7 @@ function renderReupload() {
   const rendered = renderHook(() => ({
     reupload: useReuploadSavedRecording(),
     lecture: useLecture(),
-    uploading: useAppStore(state => state.manuallyUploading)
+    progress: useAppStore(state => state.reuploadProgress)
   }), { wrapper });
 
   act(() => rendered.result.current.lecture.setLecturerEmail("lecturer@example.edu"));
@@ -153,7 +170,7 @@ test("every track goes up under a name of its own, then the job is scheduled", a
     [ "GVS_2025-reupload", "overlay", "overlay.webm" ],
     [ "GVS_2025-reupload", "stream", "stream.webm" ]
   ]);
-  expect(uploadFile).toHaveBeenCalledWith(destination, expect.anything(), expect.anything(), expect.anything(), expect.anything());
+  expect(uploadFile).toHaveBeenCalledWith(destination, expect.anything(), expect.anything(), expect.anything(), expect.any(Function), expect.anything());
   // the report goes to whoever is in the lecture form now; the backend keeps no record of
   // the original recipient
   expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-reupload", "lecturer@example.edu", expect.anything());
@@ -192,15 +209,16 @@ test("the recording is marked as uploading for exactly as long as the upload run
     running = result.current.reupload("GVS_2025");
   });
 
-  // under the local name, which is what the button is keyed by -- not the upload name
-  await waitFor(() => expect(result.current.uploading).toStrictEqual([ "GVS_2025" ]));
+  // under the local name, which is what the button is keyed by -- not the upload name --
+  // and at zero before the first chunk is through, so the button changes at once
+  await waitFor(() => expect(result.current.progress).toStrictEqual(new Map([ [ "GVS_2025", 0 ] ])));
 
   await act(async () => {
     finishUpload(true);
     await running;
   });
 
-  expect(result.current.uploading).toStrictEqual([]);
+  expect(result.current.progress).toStrictEqual(new Map());
 });
 
 test("a failed track stops the upload before anything is scheduled", async () => {
@@ -216,7 +234,7 @@ test("a failed track stops the upload before anything is scheduled", async () =>
   expect(schedulePostprocessing).not.toHaveBeenCalled();
   expect(showError).toHaveBeenCalledWith(expect.stringContaining("overlay"));
   // released and refreshed all the same, so the button can be pressed again
-  expect(result.current.uploading).toStrictEqual([]);
+  expect(result.current.progress).toStrictEqual(new Map());
   expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
 });
 
@@ -229,7 +247,7 @@ test("a recording without any tracks says so instead of doing nothing", async ()
   expect(uploadFile).not.toHaveBeenCalled();
   expect(schedulePostprocessing).not.toHaveBeenCalled();
   expect(showError).toHaveBeenCalledWith(expect.stringContaining("GVS_2025"));
-  expect(result.current.uploading).toStrictEqual([]);
+  expect(result.current.progress).toStrictEqual(new Map());
 });
 
 test("an upload that blows up is reported and gives the button back", async () => {
@@ -241,7 +259,47 @@ test("an upload that blows up is reported and gives the button back", async () =
   await act(() => result.current.reupload("GVS_2025"));
 
   expect(showError).toHaveBeenCalledWith(expect.stringContaining("GVS_2025-reupload"));
-  expect(result.current.uploading).toStrictEqual([]);
+  expect(result.current.progress).toStrictEqual(new Map());
   expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
   error.mockRestore();
+});
+
+test("progress is the share of all tracks' bytes that has arrived", async () => {
+  // counted across tracks rather than per track, so it does not start over at each one
+  const sized = (trackName: string, size: number) => ({ trackName, file: new File([ new Uint8Array(size) ], `${trackName}.webm`) });
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([ sized("overlay", 100), sized("stream", 300) ]);
+
+  const gates: (() => void)[] = [];
+  const gate = () => new Promise<void>(resolve => gates.push(resolve));
+
+  vi.mocked(uploadFile)
+    .mockImplementationOnce(async (_d, file, _r, _t, signalProgress) => {
+      signalProgress?.(file.size);
+      await gate();
+      return true;
+    })
+    .mockImplementationOnce(async (_d, _f, _r, _t, signalProgress) => {
+      signalProgress?.(150);
+      await gate();
+      signalProgress?.(150);
+      return true;
+    });
+
+  const { result } = renderReupload();
+
+  let running: Promise<void> = Promise.resolve();
+  act(() => {
+    running = result.current.reupload("GVS_2025");
+  });
+
+  await waitFor(() => expect(result.current.progress.get("GVS_2025")).toBe(25));
+  act(() => gates.shift()!());
+
+  await waitFor(() => expect(result.current.progress.get("GVS_2025")).toBe(62.5));
+  await act(async () => {
+    gates.shift()!();
+    await running;
+  });
+
+  expect(result.current.progress).toStrictEqual(new Map());
 });

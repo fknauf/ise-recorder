@@ -96,7 +96,7 @@ export interface AppStoreState {
   fileSizeOverrides: Map<string, number>
   savedRecordings: readonly RecordingFileList[]
   adjustedSavedRecordings: readonly RecordingFileList[]
-  manuallyUploading: string[]
+  reuploadProgress: Map<string, number>
   quota: number | undefined
   usage: number | undefined
 
@@ -118,7 +118,7 @@ export interface AppStoreState {
   setActiveRecording: (newActiveRecording: StateUpdate<ActiveRecording>) => void
   overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) => void
   resetFileSizeOverrides: () => void
-  signalManualUploadStarted: (recordingName: string) => void
+  signalManualUploadProgress: (recordingName: string, percentage: number) => void
   signalManualUploadFinished: (recordingName: string) => void
   updateBrowserStorage: () => Promise<void>
   updateQuotaInformation: () => Promise<void>
@@ -148,7 +148,7 @@ const createRawAppStore = (
   fileSizeOverrides: new Map<string, number>(),
   savedRecordings: [],
   adjustedSavedRecordings: [],
-  manuallyUploading: [],
+  reuploadProgress: new Map<string, number>(),
   quota: undefined,
   usage: undefined,
 
@@ -244,13 +244,17 @@ const createRawAppStore = (
       adjustedSavedRecordings: state.savedRecordings
     })),
 
-  signalManualUploadStarted: (recordingName: string) => set(state => ({
-    manuallyUploading: [ ...state.manuallyUploading, recordingName ]
-  })),
+  signalManualUploadProgress: (recordingName: string, percentage: number) =>
+    set(state => ({
+      reuploadProgress: new Map(state.reuploadProgress).set(recordingName, percentage)
+    })),
 
-  signalManualUploadFinished: (recordingName: string) => set(state => ({
-    manuallyUploading: state.manuallyUploading.filter(name => name !== recordingName)
-  })),
+  signalManualUploadFinished: (recordingName: string) =>
+    set(state => {
+      const newProgress = new Map(state.reuploadProgress);
+      newProgress.delete(recordingName);
+      return { reuploadProgress: newProgress };
+    }),
 
   updateQuotaInformation: async () => {
     const { quota, usage } = await navigator.storage.estimate();

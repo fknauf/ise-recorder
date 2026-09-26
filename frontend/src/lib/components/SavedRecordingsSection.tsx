@@ -1,6 +1,6 @@
 "use client";
 
-import { ActionButton, Text } from "@adobe/react-spectrum";
+import { ActionButton, Flex, ProgressCircle, Text, View } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
 import DataUpload from "@spectrum-icons/workflow/DataUpload";
@@ -20,6 +20,71 @@ const mibFormatter = new Intl.NumberFormat(
   }
 );
 
+function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileList }>) {
+  const { apiUrl } = useServerEnv();
+  const activeRecording = useActiveRecording();
+
+  const { removeSavedRecording } = useBrowserStorage();
+
+  const reuploadSavedRecording = useReuploadSavedRecording();
+  const reuploadProgress = useAppStore(state => state.reuploadProgress.get(recording.name));
+
+  const isRecording = recording.name === activeRecording.name;
+  const isUploading = reuploadProgress !== undefined;
+
+  return (
+    <RecordingCard
+      title={recording.name}
+      testid="sr-card"
+    >
+      {
+        recording.files.map(({ name, size }) =>
+          <ActionButton
+            key={`download-${name}`}
+            isDisabled={isRecording}
+            onPress={() => downloadFile(recording.name, name)}
+          >
+            <Download/>
+            <Text>Download {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
+          </ActionButton>
+        )
+      }
+      {
+        isUploading
+          ? <Flex
+              direction="row"
+              gap="size-100"
+              justifyContent="center"
+              alignItems="center"
+              height="size-900"
+            >
+              <ProgressCircle size="M" value={reuploadProgress} aria-label="Uploading"/>
+              <Text>Uploading...</Text>
+            </Flex>
+          : <>
+              <ActionButton
+                isDisabled={isRecording || isUploading}
+                onPress={() => removeSavedRecording(recording.name)}
+              >
+                <Delete/>
+                <Text>Remove</Text>
+              </ActionButton>
+              {
+                apiUrl !== undefined &&
+                  <ActionButton
+                    isDisabled={isRecording || isUploading}
+                    onPress={() => reuploadSavedRecording(recording.name)}
+                  >
+                    <DataUpload/>
+                    <Text>Re-upload manually</Text>
+                  </ActionButton>
+              }
+            </>
+      }
+    </RecordingCard>
+  );
+}
+
 /**
  * Section on the main page showing all saved recordings.
  *
@@ -27,18 +92,7 @@ const mibFormatter = new Intl.NumberFormat(
  * Buttons are disabled for the currently active recording.
  */
 export function SavedRecordingsSection() {
-  const { apiUrl } = useServerEnv();
-  const activeRecording = useActiveRecording();
-
-  const {
-    savedRecordings,
-    removeSavedRecording
-  } = useBrowserStorage();
-
-  const reuploadSavedRecording = useReuploadSavedRecording();
-  const manuallyUploading = useAppStore(state => state.manuallyUploading);
-
-  const isDisabled = (r: RecordingFileList) => r.name === activeRecording.name;
+  const { savedRecordings } = useBrowserStorage();
 
   if(savedRecordings.length === 0) {
     return null;
@@ -48,41 +102,10 @@ export function SavedRecordingsSection() {
     <RecordingCardSection title="Browser-Local Raw Recordings">
       {
         savedRecordings.map(rec =>
-          <RecordingCard
-            title={rec.name}
+          <SavedRecordingCard
             key={`saved-recording-${rec.name}`}
-            testid="sr-card"
-          >
-            {
-              rec.files.map(({ name: filename, size }) =>
-                <ActionButton
-                  key={`download-${filename}`}
-                  isDisabled={isDisabled(rec)}
-                  onPress={() => downloadFile(rec.name, filename)}
-                >
-                  <Download/>
-                  <Text>Download {filename} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
-                </ActionButton>
-              )
-            }
-            <ActionButton
-              isDisabled={isDisabled(rec)}
-              onPress={() => removeSavedRecording(rec.name)}
-            >
-              <Delete/>
-              <Text>Remove</Text>
-            </ActionButton>
-            {
-              apiUrl !== undefined &&
-              <ActionButton
-                isDisabled={isDisabled(rec) || manuallyUploading.includes(rec.name)}
-                onPress={() => reuploadSavedRecording(rec.name)}
-              >
-                <DataUpload/>
-                <Text>Re-upload manually</Text>
-              </ActionButton>
-            }
-          </RecordingCard>
+            recording={rec}
+          />
         )
       }
     </RecordingCardSection>

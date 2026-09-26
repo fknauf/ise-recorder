@@ -49,6 +49,7 @@ async def upload_chunk(
     upload: Annotated[ChunkUpload, Form()],
     settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
+    running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
 ) -> dict[str, str | int]:
     """
     POST endpoint for the upload of chunk files.
@@ -61,6 +62,12 @@ async def upload_chunk(
                 f"Lecture has been going on too long. "
                 f"Attempted to store {upload.index} chunks (max = {index_limit})"
             ),
+        )
+
+    if user_home / upload.recording in running_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Unable to accept uploads: {upload.recording} is currently being rendered."
         )
 
     filename = f"chunk.{upload.index:0{settings.chunk_file_digits}d}"

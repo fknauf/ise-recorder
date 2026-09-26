@@ -58,7 +58,10 @@ async function sendRequest(
       return { status: "ok" };
     }
 
-    const permanentFailureCodes = [ 400, 404, 422 ];
+    // 409 in here for now because it only occurs when a re-upload is started while it's already rendering, and in
+    // that case it's best to show an immediate error message rather than wait. In principle 409 is transient, though,
+    // so I might reconsider this at some point.
+    const permanentFailureCodes = [ 400, 404, 409, 422 ];
     const status: CallStatus = permanentFailureCodes.includes(response.status) ? "permanent-fail" : "temp-fail";
 
     return { status, errorMessage: `server responded ${response.status}, ${await response.text()}` };
@@ -195,6 +198,7 @@ export async function uploadFile(
   file: Blob,
   recording: string,
   track: string,
+  signalProgress: (bytesSent: number) => void = () => {},
   retryPolicy?: RetryPolicy
 ): Promise<boolean> {
   const CHUNK_SIZE = 4 * 2 ** 20;
@@ -205,6 +209,8 @@ export async function uploadFile(
     if(!await sendChunkToServer(destination, chunk, recording, track, index, retryPolicy)) {
       return false;
     }
+
+    signalProgress(chunk.size);
   }
 
   return true;

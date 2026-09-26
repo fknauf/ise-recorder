@@ -384,6 +384,33 @@ def test_chunk_upload_with_more_digits(tmp_path: Path):
                 assert os.stat(target_path).st_size == sample_size
 
 
+def test_a_chunk_for_a_recording_that_is_rendering_is_refused(
+    client: TestClient, settings: Settings
+):
+    # ffmpeg is reading the track this would be written into, so the chunk would either be
+    # left out of the render or change a file halfway through being read
+    recording_dir = settings.destdir / "foo"
+    write_chunks(recording_dir, [0])
+    running_jobs_of(client, settings.destdir).add(recording_dir)
+    before = snapshot(settings.destdir)
+
+    response = upload(client, None, index=1)
+
+    assert response.status_code == 409
+    assert "foo" in response.json()["detail"]
+    assert snapshot(settings.destdir) == before
+
+
+def test_other_recordings_still_take_chunks_while_one_is_rendering(
+    client: TestClient, settings: Settings
+):
+    # a lecture streamed while an earlier one renders is the ordinary case, not a conflict
+    running_jobs_of(client, settings.destdir).add(settings.destdir / "bar")
+
+    assert upload(client, None).status_code == 201
+    assert (settings.destdir / "foo" / "stream" / "chunk.0000").is_file()
+
+
 def test_cors_preflight_jobs_unconfigured(client: TestClient):
     response = client.options(
         "/api/jobs",
@@ -637,6 +664,28 @@ def test_a_job_cannot_name_another_subjects_recording(
 
     assert response.status_code == 400
     mock_postprocess.assert_not_called()
+
+
+def test_a_chunk_for_the_callers_own_rendering_recording_is_refused(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    running_jobs_of(auth_client, home).add(home / "foo")
+
+    assert upload(auth_client, provider.mint()).status_code == 409
+    assert not upload_chunk_path(tmp_path, DEFAULT_SUBJECT_DIGEST).exists()
+
+
+def test_another_subjects_render_does_not_block_a_recording_of_the_same_name(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the running jobs are kept per user, and the recording name alone says nothing about
+    # whose it is
+    home_a = tmp_path / digest_of("user-a")
+    running_jobs_of(auth_client, home_a).add(home_a / "foo")
+
+    assert upload(auth_client, provider.mint(sub="user-b")).status_code == 201
+    assert upload_chunk_path(tmp_path, digest_of("user-b")).is_file()
 
 
 # --- the completed-recording endpoints -------------------------------------
