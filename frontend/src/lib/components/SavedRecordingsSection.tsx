@@ -1,6 +1,6 @@
 "use client";
 
-import { ActionButton, Flex, ProgressCircle, Text, View } from "@adobe/react-spectrum";
+import { ActionButton, Flex, ProgressCircle, Text } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
 import DataUpload from "@spectrum-icons/workflow/DataUpload";
