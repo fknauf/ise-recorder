@@ -206,7 +206,7 @@ function PreprocessedRecordingsSectionImpl() {
     );
   }
 
-  if(!data) {
+  if(data === null || data.completed.length + data.rendering.length + data.unprocessed.length === 0) {
     return null;
   }
 

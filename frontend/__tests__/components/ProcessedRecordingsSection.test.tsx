@@ -153,11 +153,10 @@ test("a non-ASCII recording name reaches the backend percent-encoded", () => {
   expect(new URL(link.href).searchParams.get("totp")).toBe("1111111111");
 });
 
-test("an empty backend renders the section without any cards", () => {
+test("an empty backend does not render the section", () => {
   renderSection({ data: { user: USER_DIGEST, completed: [], rendering: [], unprocessed: [] } });
 
-  expect(screen.getByText("Server-Side Processed Recordings")).toBeInTheDocument();
-  expect(cards()).toHaveLength(0);
+  expect(screen.queryByText("Server-Side Processed Recordings")).not.toBeInTheDocument();
 });
 
 // --- recordings the backend is still rendering -----------------------------
