@@ -254,6 +254,7 @@ function AuthenticatedSessionProvider({ providerUrl, clientId, maxAge, autoSigni
 
   const onSigninCallback = (user: User | undefined) => {
     if(user !== undefined) {
+      // This corresponds to a redirect sign-in, i.e. not in popup flows or silent renewal
       router.replace("/");
     }
   };

@@ -19,12 +19,16 @@ overlaying the overlay stream (usually the speaker on a webcam) over the main
 stream (usually lecture slides) in the top-right corner such that the slides
 are not obstructed but the speaker remains recognizable. If there are multiple
 audio streams, they will all be attached to the resulting video file. If there
-is no overlay, post-processing just indexes the main video stream.
+is no overlay, post-processing just indexes the main video stream. If there is
+no stream marked as main display, ISE-Recorder will make a best-effort guess.
 
 If there are additional screen or video streams, they will be streamed to the
-backend but not used in post-processing. It's then possible to process them
-manually. If there is no stream marked as main display, post-processing will
-not occur.
+backend but not used in post-processing. It's then possible to process the
+recording manually.
+
+If a backend and authentication are configured, then it's also possible to
+download, delete, and schedule re-rendering of processed recordings, as well
+as to re-upload recordings that are stored in the browser.
 
 ## Take a look
 
@@ -68,21 +72,69 @@ Frontend configuration consists mostly of pointing it at a post-processing
 backend and an openid provider for authentication. It has the following
 variables for settings;
 
-| Variable | Example | Meaning |
-| - | - | - |
-| `ISE_RECORD_API_URL`           | `https://record.example.edu/api`      | Base URL of the post-processing backend API |
-| `ISE_RECORD_OIDC_PROVIDER_URL` | `https://auth.example.edu/realms/ise` | URL of the OpenID Connect provider, same as in the backend. |
-| `ISE_RECORD_OIDC_CLIENT_ID`    | `ise-recorder`                        | Client-ID as configured in the OIDC provider |
-| `ISE_RECORD_OIDC_MAX_AGE`      | `79200`                               | OIDC max_age in seconds |
-| `ISE_RECORD_OIDC_AUTO_SIGNIN`  | `true`                                      | If set to true, the page will attempt auto-signin with the oidc provider on page load. This is more convenient for authenticated users but disables anonymous use (i.e., no backend, browser storage only) |
-| `ISE_RECORD_SHOW_VERSION`      | `true`                                | Show a version indicator on the main page |
+* `ISE_RECORD_API_URL`
 
-Sessions past `ISE_RECORD_OIDC_MAX_AGE` will be considered stale, i.e.
-ise-recorder will not assume that there is enough time left before its expiry
-to record a full lecture. My recommendation is to configure the OpenID client
-with long session lengths and max_age - something like 8-day sessions and
-7-day max_age - but that'll depend on your security needs, paranoia level, and
-how often you want to be forced to enter your password again.
+    Base URL of the post-processing backend API
+
+    | Default | Example |
+    | - | - |
+    | unset | `https://record.example.edu/api` |
+
+
+* `ISE_RECORD_AUTH`
+
+    Whether to enable authentication. Defaults to `oidc` if `ISE_RECORD_API_URL`
+    is set, `disabled` otherwise.
+
+    | Default | Possible values |
+    | - | - |
+    | with backend: `oidc` <br> frontend-only: `disabled`  | `oidc`, `disabled` |
+
+* `ISE_RECORD_OIDC_PROVIDER_URL`
+
+    URL of the OpenID Connect provider, same as in the backend.
+
+    | Default | Example |
+    | - | - |
+    | unset | `https://auth.example.edu/realms/ise` |
+
+* `ISE_RECORD_OIDC_CLIENT_ID`
+
+    Client-ID as configured in the OIDC provider
+
+    | Default | Example |
+    | - | - |
+    | unset | `ise-recorder` |
+
+* `ISE_RECORD_OIDC_MAX_AGE`
+
+    OIDC max_age in seconds. Sessions past `ISE_RECORD_OIDC_MAX_AGE` will be
+    considered stale, i.e. ise-recorder will not assume that there is enough time left
+    before its expiry to record a full lecture. It will then force the user to reauthenticate
+    when a recording is started. Should be set to at least several hours shorter than the OIDC
+    max session age.
+
+    | Default | Example |
+    | - | - |
+    | unlimited | `79200` |
+
+* `ISE_RECORD_OIDC_AUTO_SIGNIN`
+
+    If set to true, the page will attempt auto-signin with the oidc provider on
+    page load. This is more convenient for authenticated users but disables anonymous use
+    (i.e., no backend, browser storage only)
+
+    | Default | Possible values |
+    | - | - |
+    | `false`` | `true`, `false` |
+
+* `ISE_RECORD_SHOW_VERSION`
+
+    Show a version indicator on the main page
+
+    | Default | Possible values |
+    | - | - |
+    | `false` | `true`, `false` |
 
 ### Backend
 
@@ -99,43 +151,232 @@ the frontend configuration.
 
 The backend has the following configuration envvars:
 
-| Variable | Example | Purpose |
-| - | - | - |
-| `ISE_RECORD_ROUTE_PREFIX`               | `/foo`                                      | Route prefix where the API endpoints will be mounted. If set, the prefix must be included in the frontend's `ISE_RECORD_API_URL`. |
-| `ISE_RECORD_DESTDIR`                    | `/app/data`                                 | Base directory where the uploaded chunks and processed video files will be stored |
-| `ISE_RECORD_CHUNK_FILE_DIGITS`          | `4`                                         | Length of the numerical suffix on uploaded chunks. 4 is default and enough for about 14 hours of recording. |
-| `ISE_RECORD_CORS_ORIGINS`               | `[ "https://record-ui.example.edu" ]`       | If the backend is served on a different domain than the frontend, list the frontend's base URL here. |
-| `ISE_RECORD_SMTP_SERVER`                | `mail.example.edu`                          | Hostname or IP address of the SMTP relay|
-| `ISE_RECORD_SMTP_PORT`                  | `25`                                        | Port to use. Defaults to 465 if `ISE_RECORD_SMTP_USE_TLS` is true, 587 if `ISE_RECORD_SMTP_STARTTLS` is true, 25 otherwise. |
-| `ISE_RECORD_SMTP_LOCAL_HOSTNAME`        | `record-api.example.edu`                    | Hostname of the backend server, used for HELO/EHLO |
-| `ISE_RECORD_SMTP_USERNAME`              | `user1`                                     | username for SMTP login, if required |
-| `ISE_RECORD_SMTP_PASSWORD`              | `hunter2`                                   | password for SMTP login, if required |
-| `ISE_RECORD_SMTP_SENDER`                | `ise-record@example.edu`                    | Mail address to put in the "From" header |
-| `ISE_RECORD_SMTP_STARTTLS`              | `false`                                     | Whether to use the STARTTLS command for encryption. If this unset, STARTTLS will be employed opportunistically. If this is set (to either true or false), `ISE_RECORD_SMTP_USE_TLS` must be false or unset.  |
-| `ISE_RECORD_SMTP_USE_TLS`               | `true`                                      | Whether to use implicit TLS for encryption. If this is true, `ISE_RECORD_SMTP_STARTTLS` must be left empty. |
-| `ISE_RECORD_SMTP_ALLOWED_DOMAINS`       | `[ "example.edu", "example.org" ]`          | Domains that the backend will send mail to. Subdomains are implicitly whitelisted. |
-| `ISE_RECORD_OIDC_PROVIDER_URL`          | `http://keycloak.localhost:8080/realms/ise` | URL of the OpenID authentication provider. Same as in the frontend. |
-| `ISE_RECORD_OIDC_AUDIENCE`              | `ise-recorder-api`                          | Audience name that the OpenID provider calls ise-recorder |
-| `ISE_RECORD_OIDC_LEEWAY_SECONDS`        | `30`                                        | Allowable clock skew between frontend and backend, used in the expiration check for access tokens |
-| `ISE_RECORD_OIDC_HTTP_TIMEOUT_SECONDS`  | `5`                                         | Timeout for OpenID discovery |
+* `ISE_RECORD_ROUTE_PREFIX`
+
+    Route prefix where the API endpoints will be mounted. If set,
+    the prefix must be included in the frontend's `ISE_RECORD_API_URL`.
+
+    | Default | Example |
+    | - | - |
+    | unset | `/foo` |
+
+* `ISE_RECORD_DESTDIR`
+
+    Base directory where the uploaded chunks and processed video
+    files will be stored
+
+    | Default | Example |
+    | - | - |
+    | `./data` | `/app/data` |
+
+* `ISE_RECORD_CHUNK_FILE_DIGITS`
+
+    Length of the numerical suffix on uploaded chunks. 4 is
+    default and enough for about 14 hours of recording.
+
+    | Default | Example |
+    | - | - |
+    | `4` | `5` |
+
+* `ISE_RECORD_CORS_ORIGINS`
+
+    If the backend is served on a different domain than the frontend, list the
+    frontend's base URL here. By default, all CORS queries are disallowed.
+
+    | Default | Example |
+    | - | - |
+    | unset | `[ "https://record-ui.example.edu" ]` |
+
+* `ISE_RECORD_AUTH`
+
+    The type of authentication the backend requires. Defaults to `oidc`.
+    If set to `oidc`, `ISE_RECORD_OIDC_PROVIDER_URL` and `ISE_RECORD_OIDC_AUDIENCE`
+    must also be configured. If set to `disabled`, they must be left unset.
+
+    | Default | Possible values |
+    | - | - |
+    | `oidc` | `oidc`, `disabled` |
+
+* `ISE_RECORD_OIDC_PROVIDER_URL`
+
+    URL of the OpenID authentication provider. Same as in the frontend.
+
+    | Default | Example |
+    | - | - |
+    | unset |  `http://keycloak.localhost:8080/realms/ise` |
+
+* `ISE_RECORD_OIDC_AUDIENCE`
+
+    Audience name that the OpenID provider calls ise-recorder
+
+    | Default | Example |
+    | - | - |
+    | unset | `ise-recorder-api` |
+
+* `ISE_RECORD_OIDC_LEEWAY_SECONDS`
+
+    Allowable clock skew in seconds between frontend and backend,
+    used in the expiration check for access tokens
+
+    | Default | Example |
+    | - | - |
+    | `30` | `15` |
+
+* `ISE_RECORD_OIDC_HTTP_TIMEOUT_SECONDS`
+
+    Timeout in seconds for OpenID discovery and userinfo queries
+
+    | Default | Example |
+    | - | - |
+    | `5` | `10` |
+
+* `ISE_RECORD_SMTP_SERVER`
+
+    Hostname or IP address of the SMTP relay
+
+    | Default | Example |
+    | - | - |
+    | unset | `mail.example.edu` |
+
+* `ISE_RECORD_SMTP_PORT`
+
+    SMTP(s) Port to use. Defaults to 465 if `ISE_RECORD_SMTP_USE_TLS` is
+    true, 587 if `ISE_RECORD_SMTP_STARTTLS` is true, 25 otherwise.
+
+    | Default | Example |
+    | - | - |
+    | `465`, `587` or `25`, see description | `25` |
+
+* `ISE_RECORD_SMTP_LOCAL_HOSTNAME`
+
+    Hostname of the backend server, used for HELO/EHLO
+
+    | Default | Example |
+    | - | - |
+    | unset | `record-api.example.edu` |
+
+* `ISE_RECORD_SMTP_USERNAME`
+
+    username for SMTP login, if required
+
+    | Default | Example |
+    | - | - |
+    | unset | `user1` |
+
+* `ISE_RECORD_SMTP_PASSWORD`
+
+    password for SMTP login, if required
+
+    | Default | Example |
+    | - | - |
+    | unset | `hunter2` |
+
+* `ISE_RECORD_SMTP_SENDER`
+
+    Mail address to put in the "From" header
+
+    | Default | Example |
+    | - | - |
+    | unset | `ise-record@example.edu` |
+
+* `ISE_RECORD_SMTP_STARTTLS`
+
+    Whether to use the STARTTLS command for encryption. If this is
+    unset, STARTTLS will be employed opportunistically. If this is set (to
+    either true or false), `ISE_RECORD_SMTP_USE_TLS` must be false or unset.
+
+    | Default | Possible values |
+    | - | - |
+    | unset | `true`, `false` |
+
+* `ISE_RECORD_SMTP_USE_TLS`
+
+    Whether to use implicit TLS for encryption. If this is true,
+    `ISE_RECORD_SMTP_STARTTLS` must be left empty.
+
+    | Default | Possible values |
+    | - | - |
+    | `false` | `true`, `false` |
+
+* `ISE_RECORD_SMTP_ALLOWED_DOMAINS`
+
+    Domains that the backend will send mail to. Subdomains are
+    implicitly whitelisted.
+
+    | Default | Example |
+    | - | - |
+    | unset (no restriction) | `[ "example.edu", "example.org" ]` |
 
 ## Hack it yourself
 
-Clone repo and for the frontend run
+### Frontend-Only
+
+A frontend-only dev instance can be started with
 
     cd frontend
-    npm install
-    npm run dev
-    # or if you want to use the postprocessing backend:
-    ISE_RECORD_API_URL=http://localhost:8000 npm run dev
+    npm ci
 
-For the backend run
+    npm run dev
+
+It will then be reachable under http://localhost:3000.
+
+### Frontend/Backend, no authentication
+
+A development environment with an unauthenticated backend requires some
+configuration with environment variables. A comprehensive example of this can
+be found in the `compose.yml` file next ot this README. Minimally, the
+following environment variables must be supplied:
+
+Frontend:
+
+    cd frontend
+    npm ci
+
+    export ISE_RECORD_API_URL=http://localhost:8000
+    export ISE_RECORD_AUTH=disabled
+    npm run dev
+
+Backend:
 
     cd backend
     python -m venv .venv
     . .venv/bin/activate
     pip install -e . --group dev
+
+    export ISE_RECORD_CORS_ORIGINS='[ "http://localhost:3000" ]'
+    export ISE_RECORD_AUTH=disabled
     fastapi dev
 
-Both of these accept a number of environment variables for configuration. They
-are listed in `compose.yml`.
+### Frontend/backend with authentication
+
+An authenticated dev environment needs an OpenID provider. The easiest way to
+spin one up is to use the provided `compose-with-auth.yml` file, which contains
+a preconfigured keycloak instance as part of a more complete sample deployment.
+The frondend and backend must then be configured to use that keycloak
+authentication provider. Minimally:
+
+Keycloak:
+
+    docker compose -f compose-with-auth.yml up keycloak
+
+Frontend:
+
+    cd frontend
+    npm ci
+
+    export ISE_RECORD_API_URL=http://localhost:8000
+    export ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
+    export ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
+    npm run dev
+
+Backend:
+
+    cd backend
+    python -m venv .venv
+    . .venv/bin/activate
+    pip install -e . --group dev
+
+    export ISE_RECORD_CORS_ORIGINS='[ "http://localhost:3000" ]'
+    export ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
+    export ISE_RECORD_OIDC_AUDIENCE=ise-recorder-api
+    fastapi dev

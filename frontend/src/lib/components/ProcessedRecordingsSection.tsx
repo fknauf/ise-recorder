@@ -186,7 +186,7 @@ function prettifyError(error: unknown) {
   return "Unknown error";
 }
 
-function PreprocessedRecordingsSectionImpl() {
+function ProcessedRecordingsSectionImpl() {
   const { data, error } = useProcessedRecordings();
   const sectionTitle = "Server-Side Processed Recordings";
   const [ purgeCandidate, setPurgeCandidate ] = useState<string | null>(null);
@@ -243,7 +243,7 @@ function PreprocessedRecordingsSectionImpl() {
   );
 }
 
-export function PreprocessedRecordingsSection() {
+export function ProcessedRecordingsSection() {
   const { isAuthenticated, isExpired } = useAppSession();
   const { apiUrl } = useServerEnv();
 
@@ -251,5 +251,5 @@ export function PreprocessedRecordingsSection() {
     return null;
   }
 
-  return <PreprocessedRecordingsSectionImpl/>;
+  return <ProcessedRecordingsSectionImpl/>;
 }

@@ -10,7 +10,7 @@ import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 import { useAutoSignin } from "react-oidc-context";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { useHydrated } from "@/lib/hooks/useHydrated";
-import { PreprocessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
+import { ProcessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
 import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 
 function AutoSignin() {
@@ -39,7 +39,7 @@ export function Home() {
       </Flex>
       <PreviewSection canvasWidth={384} canvasHeight={216}/>
       <SavedRecordingsSection/>
-      <PreprocessedRecordingsSection/>
+      <ProcessedRecordingsSection/>
       <ToastContainer/>
     </Flex>
   );

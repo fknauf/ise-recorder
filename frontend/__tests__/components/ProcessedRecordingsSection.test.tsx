@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
-import { PreprocessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
+import { ProcessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
 import { useProcessedRecordings, useRefreshProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
 import { purgeRecording, schedulePostprocessing } from "@/lib/utils/serverStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
@@ -103,7 +103,7 @@ function renderSection(
 
   render(
     <Provider theme={defaultTheme}>
-      <PreprocessedRecordingsSection/>
+      <ProcessedRecordingsSection/>
     </Provider>
   );
 }

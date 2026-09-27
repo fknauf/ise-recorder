@@ -8,17 +8,32 @@
 
 <!--
 @startuml use-cases
+left to right direction
 
-:User:
 :Admin:
+:User:
 
-User --_> (Record lecture)
-User --_> (Download finished\nraw recording)
-User --_> (Delete raw recording)
-User --_> (Download\nprocessed recording)
-User --_> (Rerender\nprocessed recording)
-User --_> (Delete\nprocessed recording)
-Admin --_> (Configure\npostprocessing)
+rectangle "Browser-Local" {
+    usecase "Delete raw recording" as UC3
+    usecase "Download finished\nraw recording" as UC2
+    usecase "Record lecture" as UC1
+}
+
+rectangle "With Backend" {
+    usecase "Re-upload\nraw recording" as UC7
+    usecase "Delete\nprocessed recording" as UC6
+    usecase "Rerender\nprocessed recording" as UC5
+    usecase "Download\nprocessed recording" as UC4
+}
+
+Admin --_> (Configure\ninstance)
+User --_> UC1
+User --_> UC2
+User --_> UC3
+User --_> UC4
+User --_> UC5
+User --_> UC6
+User --_> UC7
 
 @enduml
 -->
@@ -57,6 +72,10 @@ Admin --_> (Configure\npostprocessing)
     - System cleans up the old recording and removes the deleted recording and quota warning from the UI.
     - User clicks "Stop Recording"
     - System relabels "Stop Recording" to "Start Recording", re-enables controls, enables the Download and Remove buttons on the new recording, and schedules a postprocessing job for the new recording with the backend.
+    - The recording appears in the list of server-side recordings as an indicator that it is currently rendering
+7. System finishes post-processing
+    - After post-processing is finished, system sends a confirmation e-mail
+    - In the frontend, the new recording appears with buttons "download", "re-render" and "purge."
 
 ### UC2: Download raw recording
 
@@ -92,6 +111,28 @@ Admin --_> (Configure\npostprocessing)
 ### UC6: Delete processed recording
 
 - Precondition: System has finished uploading a recording
+- System displays processed recording in the "server-side processed recordings" section with a "purge" button
+- User clicks "Purge" button
+- System opens a dialog asking for confirmation, where the default action (pressing enter, escape, etc.)
+  is to do nothing, warning that the action is permanent.
+- User confirms intent to purge the recording
+- System removes the recording from the server (including raw chunk data)
+- Recording disappears from the displayed list of server-side recordings
+
+### UC7: Re-upload raw recording
+
+- Precondition: Recording exists in the browser's OPFS
+- System displays recording in the "browser-local raw recordings" section with a "re-upload" button
+- User clicks "re-upload" button
+- System uploads the files associated with the recording to the configured backend in chunks of 4 MiB (such
+  that a typical reverse proxy configuration will not choke)
+- While the upload is running, system replaces the "delete" and "re-upload" buttons for this recording with a
+  progress indicator
+- When the uploads are complete, system schedules a post-processing job and announces that it has done so
+- In the "server-side processed recordings", a recording "$name-reupload" appears with an indicator that it
+  is currently rendering
+- after rendering has finished, the new recording appears in the list of server-side recordings like all
+  other completed recordings.
 
 ### UC-ADMIN1: Configure postprocessing backend
 
@@ -137,7 +178,7 @@ The code consists of the following main subsystems:
 | Views | Display and user interaction | `src/app`, `src/lib/components` |
 | Hooks | State access and action logic | `src/lib/hooks` |
 | Utility functions | Application logic not concerned with UI updates | `src/lib/utils` |
-| HTTP response | Content Security Policy | `src/proxy.ts` |
+| HTTP response | Dynamic HTTP response headers: Content Security Policy, COOP, and COEP | `src/proxy.ts` |
 
 ## Application State (Store)
 
@@ -171,13 +212,16 @@ classDiagram
     AppStoreState *--> "*" RecordingFileList: savedRecordings
     AppStoreState *--> "*" RecordingFileList: adjustedSavedRecordings
     AppStoreState *--> "1" Map~string, number~: fileSizeOverrides
+    AppStoreState *--> "1" Map~string, number~: reuploadProgress
 
     class ServerEnv {
         string? version
         string? apiUrl
+        string? authBackend
         string? oidcProviderUrl
         string? oidcClientId
         number? oidcMaxAge
+        boolean? oidcAutoSignin
     }
 
     class ActiveRecording {
@@ -223,6 +267,7 @@ The state broadly covers the following tasks:
 | `savedRecordings` | list of finished recordings as present in the OPFS, i.e. without adjustments from `fileSizeOverrides` |
 | `adjustedSavedRecordings` | `savedRecordings` with adjustments from `fileSizeOverrides`. Displayed in the UI. |
 | `usage`, `quota` | displayed in the quota warning, and determines if that warning is shown |
+| `reuploadProgress` | Progress percentages of currently re-uploading recordings |
 
 The state is modified through a number of supplied mutation functions that guarantee state consistency. In particular:
 
@@ -236,12 +281,12 @@ At present, ISE-Recorder is a single-page application. The UI is split into the 
 
 ```mermaid
 block
-columns 4
-controls["RecorderControls"]:3 ghlink["GithubLink"]
-quota["QuotaWarning"]:2 auth_status["AuthStatusMessage"]:2
-previews["PreviewSection (contains VideoPreview and AudioPreview)"]:4
-recordings["SavedRecordingsSection"]:4
-recordings["ProcessedRecordingsSection"]:4
+columns 3
+controls["RecorderControls"]:2 ghlink["GithubLink"]
+quota["QuotaWarning"]:1 auth_status["AuthStatusMessage"]:1 stream_imp["StreamingImpededWarning"]:1
+previews["PreviewSection (contains VideoPreview and AudioPreview)"]:3
+savedrecordings["SavedRecordingsSection"]:3
+processedrecordings["ProcessedRecordingsSection"]:3
 ```
 
 | View | Function |
@@ -253,8 +298,9 @@ recordings["ProcessedRecordingsSection"]:4
 | `PreviewSection` | Shows configured tracks to the user; user can configure main and overlay tracks or remove unwanted tracks |
 | `VideoPreview` | Preview of a configured video or screen capture stream, with controls to select main and overlay streams |
 | `AudioPreview` | Displays the spectrum of the captured audio stream, so the user can easily identify whether the captured device is actually capturing sound. |
-| `SavedRecordingsSection` | Shows the list of finished recordings; recordings can be downloaded or deleted |
-| `ProcessedRecordingsSection` | Shows the list of server-side, processed recordings for download |
+| `SavedRecordingsSection` | Shows the list of finished, browser-local raw recordings; recordings can be downloaded, deleted, or uploaded to backend |
+| `StreamingImpededWarning` | Shown when a recording is active that cannot be streamed to backend due to expired authentication |
+| `ProcessedRecordingsSection` | Shows the list of server-side, processed recordings for download/rerender/purge, status indicators for currently rendering recordings, and recordings whose postprocessing failed for rerender/purge |
 
 Views are exclusively focused on displaying data and triggering actions. Both the displayed data and the trigger action functions
 are obtained from hooks, so the views themselves are quite thin.
@@ -283,6 +329,8 @@ separated from UI updates, and that's largely the purpose of the hook/utility sp
 | `useMediaDevices` | provides the list of audio and video devices and actions to refresh that list and open media tracks from a device |
 | `useMediaTracks` | provides the list of open tracks, which of those are selected as main and overlay, and actions to select main and overlay track or close a track. These actions will only work when the application is not recording. |
 | `useProcessedRecordings` | Fetches the list of server-side processed recordings along with information needed to download them |
+| `useRefreshProcessedRecordings` | Function to refresh the list of processed recordings, for use in event handlers |
+| `useReuploadSavedRecording` | Function for re-upload of browser-local raw recordings to backend |
 | `useServerEnv` | provides the server-side configuration (no actions) |
 | `useStartStopRecording` | action functions to start and stop recording |
 
@@ -298,6 +346,7 @@ fall into the following subsystems:
 | `recording` | recording logic; determines recording ID and track names, starts recording the configured tracks, stores the recording in the browser and optionally streams it to a backend server, where it also optionally schedules postprocessing when the recording ends. |
 | `serverEnv` | Definition, validation and wiring of the server environment into the nextjs framework |
 | `serverStorage` | functions to stream chunks of media to the backend server (if configured in the server env) |
+| `session` | staleness check for the authentication session |
 | `stringAux` | Grapheme-aware string truncation, used for recording name sanitation |
 
 The `recording` utility is the heart of the application logic and the most complex piece of machinery in the project, so read the comments
@@ -375,7 +424,10 @@ The mechanism for UI updates during recording are four callback functions, passe
 recording utility function and called at state transitions or in response to arriving media chunks.
 
 - At the idle -> preparing transition, large parts of the UI are disabled. The "Start Recording" button is relabeled "Stop Recording"
-  and disabled. If the session is stale, the user is asked to reauthenticate and the state reset to "idle".
+  and disabled. If the session is stale, the user is asked to reauthenticate. If he does, the state reset to "idle". If he refuses,
+  the recording starts but may stop streaming if the session expires. If the session is expired, the system will only create a
+  browser-local recording. The assumption is that the user will typically just reauthenticate when asked, everything else is
+  best-effort fallbacks.
 - At the preparing -> starting transition, the `beforeunload` event is arrested to prevent accidental closing of the application
   during an active recording.
 - At the starting -> recording transition, the "Stop Recording button" is re-enabled and the new recording first shown in the
@@ -389,20 +441,27 @@ recording utility function and called at state transitions or in response to arr
 
 ## Authentication
 
-The implementation is based on `react-oidc-context`, which uses `oidc-client-ts`, so most of the work is done in a library. The main wrinkles
-for ise-recorder are
+The implementation is based on `react-oidc-context`, which uses `oidc-client-ts`, so most of the work is done in a library. The main
+wrinkles for ise-recorder are
 
 - support for not requiring authentication at all
 - the need to ensure that the user will not be asked to reauthenticate mid-recording
+- We have long-running background coroutines that always need access to the current token
 
-The former is the reason that `SessionProvider` exists: this wraps `react-oidc-context`'s `AuthProvider` if authentication is required
-and provides a dummy interface that says "user is authenticated and will be forever" otherwise.
+The first is the reason that `SessionProvider` exists: this wraps `react-oidc-context`'s `AuthProvider` if authentication is required
+and provides a dummy interface otherwise.
 
-The latter requires some extra plumbing in `SessionProvider.tsx`:
+The second requires some extra plumbing in `SessionProvider.tsx`:
 
 - a timer that fires when the authentication session goes past max_age and toggles a staleness indicator
 - event handlers that reset that timer when an event that changes the session length occurs
 - a function to explicitly refresh tokens and force the user to re-authenticate if the session is stale.
+
+The third requires us to build our own `oidc-client-ts` user manager and keep hold of it after passing it on
+to `react-oidc-context`. That's the `getAccessToken` function in `useAppSession`, which retrieves the
+current access token directly from the UserManager because `react-oidc-context` only supplies the current
+access token in the render loop. The `getAccessToken` function will also attempt a silent renewal if the
+active token is expired. That condition should not usually appear, so that's largely a defensive-coding measure.
 
 Auto-Signin is configurable; unfortunately we can't do an optimistic attempt to obtain tokens in a browser that
 already has an SSO session because the OIDC cookies don't get sent in a silent attempt and so the silent attempt
