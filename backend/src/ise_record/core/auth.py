@@ -14,6 +14,7 @@ password for each file that the frontend can attach as a GET parameter to the li
 refreshes the list of recordings regularly, and each time gets new TOTPs.
 """
 
+import asyncio
 from dataclasses import dataclass
 import hashlib
 import logging
@@ -93,11 +94,11 @@ class OidcClient:
             http_timeout_seconds=http_timeout_seconds,
         )
 
-    def validate_access_token(self, token: str) -> dict[str, Any]:
+    async def validate_access_token(self, token: str) -> dict[str, Any]:
         """Validate an access token and extract its claims."""
 
         try:
-            signing_key = self.jwk_client.get_signing_key_from_jwt(token)
+            signing_key = await asyncio.to_thread(self.jwk_client.get_signing_key_from_jwt, token)
             algorithm = signing_key.algorithm_name
 
             if algorithm.lower() in INSECURE_ALGORITHMS:

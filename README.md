@@ -78,7 +78,7 @@ variables for settings;
 
     | Default | Example |
     | - | - |
-    | unset | `https://record.example.edu/api` |
+    | unset | `https://record.example.edu` |
 
 
 * `ISE_RECORD_AUTH`
@@ -126,7 +126,7 @@ variables for settings;
 
     | Default | Possible values |
     | - | - |
-    | `false`` | `true`, `false` |
+    | `false` | `true`, `false` |
 
 * `ISE_RECORD_SHOW_VERSION`
 
@@ -292,7 +292,7 @@ The backend has the following configuration envvars:
 * `ISE_RECORD_SMTP_USE_TLS`
 
     Whether to use implicit TLS for encryption. If this is true,
-    `ISE_RECORD_SMTP_STARTTLS` must be left empty.
+    `ISE_RECORD_SMTP_STARTTLS` must be false or unset.
 
     | Default | Possible values |
     | - | - |
@@ -352,7 +352,7 @@ Backend:
 An authenticated dev environment needs an OpenID provider. The easiest way to
 spin one up is to use the provided `compose-with-auth.yml` file, which contains
 a preconfigured keycloak instance as part of a more complete sample deployment.
-The frondend and backend must then be configured to use that keycloak
+The frontend and backend must then be configured to use that keycloak
 authentication provider. Minimally:
 
 Keycloak:

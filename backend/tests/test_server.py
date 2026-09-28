@@ -735,13 +735,15 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     assert data["completed"][0]["name"] == "GVS_2025"
     assert data["completed"][0]["size"] == 5
     assert download_totp.verify(
-        data["completed"][0]["totp"], home / "GVS_2025" / "presentation.webm" # type: ignore
+        data["completed"][0]["totp"],
+        home / "GVS_2025" / "presentation.webm",  # type: ignore
     )
 
     assert data["completed"][1]["name"] == "PSU_2026"
     assert data["completed"][1]["size"] == 5
     assert download_totp.verify(
-        data["completed"][1]["totp"], home / "PSU_2026" / "presentation.webm" # type: ignore
+        data["completed"][1]["totp"],
+        home / "PSU_2026" / "presentation.webm",  # type: ignore
     )
 
 
@@ -1127,7 +1129,6 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
     assert b"video" not in response.content
 
 
-
 def test_a_totp_from_the_previous_interval_is_accepted_by_the_endpoint(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1147,6 +1148,7 @@ def test_a_totp_from_the_previous_interval_is_accepted_by_the_endpoint(
     response = download_completed(auth_client, server_list["user"], "GVS_2025", previous)
 
     assert response.status_code == 200
+
 
 # --- purging a recording ---------------------------------------------------
 

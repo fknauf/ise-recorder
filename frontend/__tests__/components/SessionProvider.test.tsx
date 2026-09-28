@@ -616,13 +616,19 @@ test("a renewal does not put the page into its loading state", async () => {
   });
   mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
 
+  // Started inside one act and checked outside it, while the renewal is still held open:
+  // React only renders a state change once act is done, so a check inside would see the
+  // state from before the renewal began whatever the renewal did to it.
+  let pending: Promise<unknown> = Promise.resolve();
   await act(async () => {
-    const pending = result.current.getAccessToken();
-
+    pending = result.current.getAccessToken();
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(mgr.signinSilentCalls).toBe(1);
-    expect(result.current.isLoading).toBe(false);
+  });
 
+  expect(mgr.signinSilentCalls).toBe(1);
+  expect(result.current.isLoading).toBe(false);
+
+  await act(async () => {
     releaseRenewal();
     await pending;
   });
@@ -708,6 +714,40 @@ test("a fresh session is refreshed silently rather than through a popup", async 
 
   expect(mgr.signinSilentCalls).toBe(1);
   expect(mgr.signinPopupCalls).toBe(0);
+});
+
+test("the refresh before a recording does not put the page into its loading state", async () => {
+  // it happens at every press of the record button, and an "Authentication Loading" banner
+  // flashing up each time would suggest something is wrong with the session
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
+
+  let releaseRefresh: () => void = () => {};
+  mgr.signinSilentGate = new Promise(resolve => {
+    releaseRefresh = resolve;
+  });
+  mgr.signinSilentResult = userAged(0, { access_token: "fresh-token", refresh_token: "refresh" });
+
+  // Started inside one act and checked outside it, while the refresh is still held open:
+  // React only renders a state change once act is done, so a check inside would see the
+  // state from before the refresh began whatever the refresh did to it.
+  let pending: Promise<unknown> = Promise.resolve();
+  await act(async () => {
+    pending = result.current.expandSession();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  expect(mgr.signinSilentCalls).toBe(1);
+  expect(result.current.isLoading).toBe(false);
+
+  await act(async () => {
+    releaseRefresh();
+    expect(await pending).toBe("can-stream");
+  });
+
+  expect(result.current.isLoading).toBe(false);
 });
 
 test("a session without a refresh token is not refreshed at all", async () => {
@@ -989,7 +1029,7 @@ test("a hiccup refreshing a fresh session does not make it look stale", async ()
     const mgr = userManager();
 
     // The session is well within max_age; only the token refresh failed.
-    await act(() => mgr.events.load(userAged(60)));
+    await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
     mgr.signinSilentResult = new Error("token endpoint hiccup");
 
     // The refresh is advisory -- failing it says nothing about how old the session is,
@@ -997,6 +1037,11 @@ test("a hiccup refreshing a fresh session does not make it look stale", async ()
     await act(async () => {
       expect(await result.current.expandSession()).toBe("can-stream");
     });
+
+    expect(mgr.signinSilentCalls).toBe(1);
+    // nor as an error: the recording streams on the token it already has, and an error
+    // banner would sit on the page for the whole lecture over a refresh nobody needed
+    expect(result.current.error).toBeUndefined();
   } finally {
     consoleWarn.mockRestore();
   }

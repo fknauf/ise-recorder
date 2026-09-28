@@ -8,11 +8,12 @@ from typing import Annotated
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator, ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_ENV_PREFIX="ise_record_"
+_ENV_PREFIX = "ise_record_"
 
 
 class AuthBackend(StrEnum):
-    """ Types of authentication backends """
+    """Types of authentication backends"""
+
     DISABLED = "disabled"
     OIDC = "oidc"
 
@@ -67,7 +68,7 @@ class Settings(BaseSettings):
         env_nested_delimiter="_",
         env_nested_max_split=1,
         env_prefix=_ENV_PREFIX,
-        frozen=True
+        frozen=True,
     )
 
     route_prefix: Annotated[str, Field(pattern=r"\A(/.*[^/])?\z")] = ""
@@ -81,6 +82,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def auth_backend_matches_settings(self) -> Settings:
+        """Check that AUTH backend config and auth-related config vars make sense together"""
+
         pfx = _ENV_PREFIX.upper()
 
         if self.auth == AuthBackend.OIDC and self.oidc is None:
@@ -101,6 +104,7 @@ class Settings(BaseSettings):
     def auth_required(self) -> bool:
         """Whether clients must present an access token"""
         return self.auth != AuthBackend.DISABLED
+
 
 @lru_cache
 def get_settings() -> Settings:

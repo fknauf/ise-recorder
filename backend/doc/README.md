@@ -57,7 +57,7 @@ The API is an HTTP API with the following endpoints:
 | `/api/health` | GET | Monitoring | none |
 | `/api/recordings` | GET | Retrieve list of user's recordings | none, needs auth |
 | `/api/recordings/{recording}` | DELETE | Purge recording from server | none, needs auth |
-| `/api/recordings/{user}/{recording}` | GET | Downnload recording | TOTP for the recording as returned from `/api/recordings` |
+| `/api/recordings/{user}/{recording}` | GET | Download recording | TOTP for the recording as returned from `/api/recordings` |
 
 For convenience of implementation on the frontend side, `/api/chunks` accepts input encoded as `multipart/form-data` with the
 following fields:
@@ -119,14 +119,14 @@ why this is necessary. The shape of the response is thus
     ],
     "rendering": [
         {
-            "name": "GVS_2026-09-25T123456.789Z",
+            "name": "GVS_2026-09-25T123456.789Z"
         }
     ],
-    "unprocessed": {
+    "unprocessed": [
         {
-            "name": "GVS_2026-09-04T123456.789Z",
+            "name": "GVS_2026-09-04T123456.789Z"
         }
-    }
+    ]
 }
 ```
 
@@ -176,9 +176,9 @@ The `glue` submodule is likewise split further into submodules.
 | - | - |
 | `auth` | Connects core.auth to fastapi |
 | `jobs` | a wrapper around `core.postprocessing` and `core.reporting` to be spawned as a background task |
-| `models` | Datatypes for API parameters and return values, for validation and automatic JSON generation |
+| `models` | Data types for API parameters and return values, for validation and automatic JSON generation |
 | `recordings` | Connects core.recordings to fastapi |
-| `user_home` | Connects core.user_home to fastapi |stprocessing for a recording |
+| `user_home` | Connects core.user_home to fastapi |
 
 ## Postprocessing Logic
 
@@ -210,7 +210,7 @@ This backend uses ffmpeg command-line utilities for postprocessing. The process 
 
 ## Recording classification
 
-The classification of recordings is derivd from the application and file system state to avoid the need
+The classification of recordings is derived from the application and file system state to avoid the need
 for a database. The post-processing logic is set up to make this relatively straightforward, in particular
 such that the output file only turns up in the file system after rendering has concluded successfully.
 
@@ -218,7 +218,7 @@ So the logic is basically:
 
 1. If the application knows it has started a rendering process that's still running, recording is rendering.
 2. If the output file exists, the recording is completed.
-3. If thre is no main track, the recording is classified as not renderable.
+3. If there is no main track, the recording is classified as not renderable.
 4. If the newest uploaded chunk in the main stream is younger than five minutes, the stream is considered still streaming
 5. Otherwise, it is unprocessed, which typically means postprocessing failed.
 
@@ -246,7 +246,7 @@ seems to be the standard workaround. So I'm doing that for now.
 The access tokens are used to establish trust, i.e. that a request is allowed to store data and schedule
 jobs. There are no custom scopes, right now it's all-or-nothing when it comes to permissions. The user's
 home directory is derived from `sub`. This is stable but not human-readable, so if `preferred_username`
-is present in the token or can be found out through a query against the OICD provider's `userinfo_endpoint`,
+is present in the token or can be found out through a query against the OIDC provider's `userinfo_endpoint`,
 the backend derives a human-readable alternative name from `sub` and `preferred_username` for a symlink
 to the stable directory. In the future, it may also read the `email` claim for reporting purposes.
 
@@ -256,5 +256,5 @@ Because browsers can't (easily) be made to attach bearer tokens to download requ
 TOTP-based mechanism to authenticate downloads. When the frontend asks for a list of available processed
 recordings, the backend generates a TOTP for each file in the list and sends it along with the list of
 available files. The frontend attaches the TOTP to the download link as a GET parameter, and the backend
-allows downloads only with a matching TOTP. The OTPs are valid for two minutes, and the frontend keeps
+allows downloads only with a matching TOTP. The OTPs are valid for 2-4 minutes, and the frontend keeps
 polling the backend for new OTPs every minute.

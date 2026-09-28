@@ -31,7 +31,7 @@ from ise_record.glue.user_home import get_current_user_home
 from ise_record.settings import get_settings, Settings
 
 
-def _require_authentication(settings: Annotated[Settings, Depends(get_settings)]) -> None:
+def _require_auth_configured(settings: Annotated[Settings, Depends(get_settings)]) -> None:
     if not settings.auth_required:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -67,7 +67,7 @@ async def upload_chunk(
     if user_home / upload.recording in running_jobs:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Unable to accept uploads: {upload.recording} is currently being rendered."
+            detail=f"Unable to accept uploads: {upload.recording} is currently being rendered.",
         )
 
     filename = f"chunk.{upload.index:0{settings.chunk_file_digits}d}"
@@ -123,7 +123,7 @@ def health_check():
     return {"status": "healthy"}
 
 
-@router.get("/recordings", dependencies=[Depends(_require_authentication)])
+@router.get("/recordings", dependencies=[Depends(_require_auth_configured)])
 async def recordings_list(
     recordings: Annotated[RecordingsList, Depends(get_recordings_list)],
 ) -> RecordingsList:
@@ -132,7 +132,7 @@ async def recordings_list(
 
 
 @router.get(
-    "/recordings/{user_digest}/{recording}", dependencies=[Depends(_require_authentication)]
+    "/recordings/{user_digest}/{recording}", dependencies=[Depends(_require_auth_configured)]
 )
 async def download_completed(
     recording: SafeRecording,
@@ -156,7 +156,7 @@ async def download_completed(
     return FileResponse(file_path, filename=f"{recording}.webm")
 
 
-@router.delete("/recordings/{recording}", dependencies=[Depends(_require_authentication)])
+@router.delete("/recordings/{recording}", dependencies=[Depends(_require_auth_configured)])
 async def purge_recording(
     recording_path: Annotated[Path, Depends(get_recording_path_for_purge)],
     download_totp: Annotated[DownloadTotpAuthority, Depends(get_download_totp)],

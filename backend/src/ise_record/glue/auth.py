@@ -84,13 +84,7 @@ async def load_oidc_client(
 async def get_oidc_client(
     request: Request, settings: Annotated[Settings, Depends(get_settings)]
 ) -> OidcClient | None:
-    """
-    Return the cached provider configuration, discovering it if necessary.
-
-    Called once from the application lifespan so the cost and any failure are visible at
-    startup. Discovery is retried on demand afterwards, so a provider that is briefly down
-    while the service boots does not require a restart.
-    """
+    """Return the cached provider configuration, discovering it if necessary."""
     return await load_oidc_client(request.app.state, settings.oidc)
 
 
@@ -117,7 +111,7 @@ async def get_user_info(
     token = credentials.credentials
 
     try:
-        claims = oidc_client.validate_access_token(token)
+        claims = await oidc_client.validate_access_token(token)
     except ProviderUnreachable as exc:
         raise _provider_unreachable() from exc
     except Unauthenticated as exc:

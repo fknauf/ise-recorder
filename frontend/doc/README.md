@@ -85,7 +85,7 @@ User --_> UC7
 
 ### UC3: Delete raw recording
 
-- System displays quota warning a list of recordings under the main UI
+- System displays quota warning and a list of recordings under the main UI
 - User clicks "Remove" button on a recording
 - System cleans up the space and removes the recording and quota warning from the UI
 
@@ -285,8 +285,8 @@ columns 3
 controls["RecorderControls"]:2 ghlink["GithubLink"]
 quota["QuotaWarning"]:1 auth_status["AuthStatusMessage"]:1 stream_imp["StreamingImpededWarning"]:1
 previews["PreviewSection (contains VideoPreview and AudioPreview)"]:3
-savedrecordings["SavedRecordingsSection"]:3
-processedrecordings["ProcessedRecordingsSection"]:3
+saved_recordings["SavedRecordingsSection"]:3
+processed_recordings["ProcessedRecordingsSection"]:3
 ```
 
 | View | Function |
@@ -309,7 +309,7 @@ are obtained from hooks, so the views themselves are quite thin.
 
 The hooks manage access to the store. They organize the application store into views by filtering out the relevant
 parts for their topic, and provide action functions that cause updates to the store and side effects (such as recording).
-The semantics here follow standard React/Zustand hook patterns, their purpose it effectively what a middleware or thunks would
+The semantics here follow standard React/Zustand hook patterns; their purpose is effectively what a middleware or thunks would
 achieve in a pure redux architecture.
 
 The hooks themselves are meant to contain only the UI-specific logic. What precisely this means in a frontend
@@ -321,7 +321,7 @@ separated from UI updates, and that's largely the purpose of the hook/utility sp
 
 | Hook | Purpose |
 | - | - |
-| `useAppSession` | provides functions concerning the authentication state, e.g.. current access token retrieval, sign-out, sign-in, session headroom expansion, along with the information whether authentication is required at all. |
+| `useAppSession` | provides functions concerning the authentication state, e.g. current access token retrieval, sign-out, sign-in, session headroom expansion, along with the information whether authentication is required at all. |
 | `useActiveRecording` | provides info whether a recording is active and details about the active recording |
 | `useBrowserStorage` | provides information about the browser's OPFS, i.e. saved recordings and quota information, and an action to delete a recording |
 | `useHydrated` | determines whether the frontend is hydrating (and needs to match SSR values exactly) or already running normally |
@@ -377,6 +377,13 @@ incorporate additional audio streams, but additional video streams require manua
 will always show up as individual files, largely because at time of writing browsers don't yet support recording multiple audio
 streams in one file.
 
+If there is no main stream, one of the other display/video streams will be picked as a best-effort guess. It will first fall back
+to the first display stream that is not marked overlay, which is a shared monitor and has the highest chance of containing slides.
+If that is not available, it will pick the first video stream that is not marked overlay, and if that is also not available, it
+will pick the overlay. In this last case, the overlay will also no longer be used as overlay, so to get overlay-on-overlay, the
+overlay must be explicitly marked both main display and overlay. If no display and video streams are available, post-processing
+is impossible and therefore not attempted. In that case, the audio streams will simply be sent to the backend for storage.
+
 ### Technical Implementation
 
 On a technical level, the main challenge is to not drop any media chunks and stream them in the correct order to the browser-local
@@ -413,18 +420,18 @@ recording --> stopping
 stopping --> idle
 ```
 
-Of the, "preparing", "starting" and "stopping" are transient and usually only active for a fraction of a second, although a
+Of these states, "preparing", "starting" and "stopping" are transient and usually only active for a fraction of a second, although a
 slow-responding postprocessing backend can keep the UI in the "stopping" state for longer in exceptional cases. The "preparing"
 state covers the refreshing of authentication tokens before the start of the recording, such that their expiry is as far into
 the future as the OIDC provider allows. If at this point the session is past max_age, the user will be asked to reauthenticate,
-and the application drops back to "idle", otherwise it moves on to "starting". The "preparing" and "starting" states exists
+and the application drops back to "idle", otherwise it moves on to "starting". The "preparing" and "starting" states exist
 mostly to prevent double-starts of recordings in response to double-clicks by the user.
 
 The mechanism for UI updates during recording are four callback functions, passed from the `useStartStopRecording` hook into the
 recording utility function and called at state transitions or in response to arriving media chunks.
 
 - At the idle -> preparing transition, large parts of the UI are disabled. The "Start Recording" button is relabeled "Stop Recording"
-  and disabled. If the session is stale, the user is asked to reauthenticate. If he does, the state reset to "idle". If he refuses,
+  and disabled. If the session is stale, the user is asked to reauthenticate. If he does, the state resets to "idle". If he refuses,
   the recording starts but may stop streaming if the session expires. If the session is expired, the system will only create a
   browser-local recording. The assumption is that the user will typically just reauthenticate when asked, everything else is
   best-effort fallbacks.

@@ -163,9 +163,8 @@ async def test_the_directory_name_does_not_depend_on_the_composition_of_the_user
         "\u0308mark",
     ],
 )
-@pytest.mark.asyncio
-async def test_alias_name_is_always_a_safe_single_path_segment(username: Any):
-    name = await fs_safe_user_name(username)
+def test_alias_name_is_always_a_safe_single_path_segment(username: Any):
+    name = fs_safe_user_name(username)
 
     assert name, "an empty directory name would put chunks in the destination root"
     assert not name.startswith((".", "-")), "hidden on unix, an option to anything argv-shaped"
@@ -199,14 +198,13 @@ async def test_alias_name_is_always_a_safe_single_path_segment(username: Any):
         "- - - 81457m4573r 9001 - - -",
     ],
 )
-@pytest.mark.asyncio
-async def test_no_alias_for_broken_usernames(username: Any):
+def test_no_alias_for_broken_usernames(username: Any):
     # a deliberate trade: rather than strip the leading character and keep a readable
     # prefix, the whole alias is dropped. Nothing downstream validates this name -- unlike
     # a recording name, there is no pattern behind it -- so this one check is the entire
     # guarantee, and it is worth keeping obvious. Dropping the alias costs nothing: the
     # home directory does not depend on it.
-    assert await fs_safe_user_name(username) is None
+    assert fs_safe_user_name(username) is None
 
 
 @pytest.mark.asyncio

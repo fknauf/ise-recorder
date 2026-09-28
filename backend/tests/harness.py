@@ -59,6 +59,8 @@ class Provider:
         self.keys: dict[str, tuple[rsa.RSAPrivateKey, dict[str, Any]]] = {}
         self.jwks_available = True
         self.jwks_fetch_count = 0
+        # how long the JWKS endpoint takes to answer, for a provider that is slow or far away
+        self.jwks_delay_seconds = 0.0
         # None means the endpoint 404s: a provider that has nothing to say about the caller
         self.userinfo_response: tuple[int, str, bytes] | None = None
         self.userinfo_fetch_count = 0
@@ -97,6 +99,7 @@ class Provider:
 
                 if self.path.endswith("/jwks"):
                     provider.jwks_fetch_count += 1
+                    time.sleep(provider.jwks_delay_seconds)
                     if not provider.jwks_available:
                         self.send_response(503)
                         self.end_headers()

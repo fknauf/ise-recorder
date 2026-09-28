@@ -10,6 +10,7 @@ glue/test_auth.py. The stand-in provider is in harness.py.
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
+import asyncio
 from datetime import datetime, timedelta, UTC
 from typing import Any
 
@@ -24,60 +25,70 @@ from .conftest import discover
 # --- what counts as a valid token ------------------------------------------
 
 
-def test_valid_token_is_accepted(oidc: OidcClient, provider: Provider):
-    claims = oidc.validate_access_token(provider.mint())
+@pytest.mark.asyncio
+async def test_valid_token_is_accepted(oidc: OidcClient, provider: Provider):
+    claims = await oidc.validate_access_token(provider.mint())
 
     assert claims["sub"] == DEFAULT_SUBJECT
     assert claims["preferred_username"] == "lecturer"
 
 
-def test_garbage_token_is_rejected(oidc: OidcClient):
+@pytest.mark.asyncio
+async def test_garbage_token_is_rejected(oidc: OidcClient):
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token("not-a-jwt")
+        await oidc.validate_access_token("not-a-jwt")
 
 
-def test_expired_token_is_rejected(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_expired_token_is_rejected(oidc: OidcClient, provider: Provider):
     stale = datetime.now(UTC) - timedelta(hours=1)
     token = provider.mint(iat=stale, exp=stale + timedelta(minutes=5))
 
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(token)
+        await oidc.validate_access_token(token)
 
 
-def test_wrong_issuer_is_rejected(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_wrong_issuer_is_rejected(oidc: OidcClient, provider: Provider):
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(provider.mint(iss="https://evil.example.com"))
+        await oidc.validate_access_token(provider.mint(iss="https://evil.example.com"))
 
 
-def test_wrong_audience_is_rejected(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_wrong_audience_is_rejected(oidc: OidcClient, provider: Provider):
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(provider.mint(aud="some-other-app"))
+        await oidc.validate_access_token(provider.mint(aud="some-other-app"))
 
 
-def test_a_token_for_the_client_rather_than_the_api_is_rejected(
+@pytest.mark.asyncio
+async def test_a_token_for_the_client_rather_than_the_api_is_rejected(
     oidc: OidcClient, provider: Provider
 ):
     # `aud` of the client id is what an OIDC ID token carries, so on a normal deployment
     # this is the audience check refusing an ID token -- no inspection of the token's kind
     # needed, and nothing else in this module has to care.
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(provider.mint(aud=CLIENT_ID))
+        await oidc.validate_access_token(provider.mint(aud=CLIENT_ID))
 
 
 @pytest.mark.parametrize("claim", REQUIRED_CLAIMS)
-def test_missing_required_claim_is_rejected(oidc: OidcClient, provider: Provider, claim: str):
+@pytest.mark.asyncio
+async def test_missing_required_claim_is_rejected(oidc: OidcClient, provider: Provider, claim: str):
     # mint() drops a claim whose override is None, so this asks for each required claim in
     # turn. Parametrized over the constant itself: adding a claim to REQUIRED_CLAIMS without
     # a provider that sends it is how this went wrong before.
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(provider.mint(**{claim: None})) # type: ignore
+        await oidc.validate_access_token(provider.mint(**{claim: None}))  # type: ignore
 
 
-def test_an_access_token_without_a_scope_claim_is_accepted(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_an_access_token_without_a_scope_claim_is_accepted(
+    oidc: OidcClient, provider: Provider
+):
     # "scope" was in REQUIRED_CLAIMS once. It is not a claim every provider emits -- Entra
     # ID spells it "scp" -- and a required claim that some conforming provider omits is a
     # deployment that cannot authenticate at all, with a bare 401 to explain it.
-    assert "scope" not in oidc.validate_access_token(provider.mint(scope=None))
+    assert "scope" not in await oidc.validate_access_token(provider.mint(scope=None))
 
 
 @pytest.mark.asyncio
@@ -108,7 +119,7 @@ async def test_an_id_token_is_accepted_when_the_provider_collapses_the_two_ident
         aud=CLIENT_ID, scope=None, at_hash="PQhwSWwbKnhNqMPtUXQAhg", nonce="nonce-abcdef0123456789"
     )
 
-    assert collapsed.validate_access_token(id_token_shaped)["sub"] == DEFAULT_SUBJECT
+    assert (await collapsed.validate_access_token(id_token_shaped))["sub"] == DEFAULT_SUBJECT
 
 
 def forge(provider: Provider, key: Any, algorithm: str) -> str:
@@ -123,59 +134,94 @@ def forge(provider: Provider, key: Any, algorithm: str) -> str:
     return jwt.encode(claims, key, algorithm=algorithm, headers={"kid": "key-1"})
 
 
-def test_unsigned_token_is_rejected(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_unsigned_token_is_rejected(oidc: OidcClient, provider: Provider):
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(forge(provider, "", "none"))
+        await oidc.validate_access_token(forge(provider, "", "none"))
 
 
-def test_token_signed_by_an_unknown_key_is_rejected(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_token_signed_by_an_unknown_key_is_rejected(oidc: OidcClient, provider: Provider):
     stranger, _ = make_key("key-1")
 
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(forge(provider, stranger, "RS256"))
+        await oidc.validate_access_token(forge(provider, stranger, "RS256"))
 
 
-def test_unknown_kid_is_rejected(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_unknown_kid_is_rejected(oidc: OidcClient, provider: Provider):
     provider.add_key("key-2")
     token = provider.mint(kid="key-2")
     del provider.keys["key-2"]
 
     with pytest.raises(Unauthenticated):
-        oidc.validate_access_token(token)
+        await oidc.validate_access_token(token)
 
 
 # --- operational behavior -------------------------------------------------
 
 
-def test_rotated_signing_key_is_picked_up_without_restart(
+@pytest.mark.asyncio
+async def test_rotated_signing_key_is_picked_up_without_restart(
     instant_jwks_refresh: None,  # pylint: disable=unused-argument
     oidc: OidcClient,
     provider: Provider,
 ):
-    oidc.validate_access_token(provider.mint())
+    await oidc.validate_access_token(provider.mint())
 
     # The provider rotates: a new key appears and the old one is withdrawn.
     provider.add_key("key-2")
     del provider.keys["key-1"]
 
-    oidc.validate_access_token(provider.mint(kid="key-2"))
+    await oidc.validate_access_token(provider.mint(kid="key-2"))
 
 
-def test_unreachable_jwks_is_reported_as_such(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_unreachable_jwks_is_reported_as_such(oidc: OidcClient, provider: Provider):
     # distinct from Unauthenticated: the caller's token may be fine, and telling them it is
     # not would send them to log in again for nothing
     token = provider.mint()
     provider.jwks_available = False
 
     with pytest.raises(ProviderUnreachable):
-        oidc.validate_access_token(token)
+        await oidc.validate_access_token(token)
 
 
-def test_jwks_is_cached_between_validations(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_jwks_is_cached_between_validations(oidc: OidcClient, provider: Provider):
     for _ in range(4):
-        oidc.validate_access_token(provider.mint())
+        await oidc.validate_access_token(provider.mint())
 
     assert provider.jwks_fetch_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fetching_the_key_set_does_not_hold_up_other_requests(
+    oidc: OidcClient, provider: Provider
+):
+    # Every request is authenticated, and the key set is fetched over HTTP on first use and
+    # again whenever its cache runs out. Fetched on the event loop, that fetch would stall
+    # every other request the server has in flight -- every chunk upload of every lecture --
+    # for as long as the provider takes to answer, up to the HTTP timeout.
+    provider.jwks_delay_seconds = 0.3
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+
+    try:
+        await oidc.validate_access_token(provider.mint())
+    finally:
+        ticker.cancel()
+
+    assert provider.jwks_fetch_count == 1
+    # a blocked loop would not have ticked at all while the fetch was under way
+    assert ticks >= 10
 
 
 # --- the signing algorithm comes from the key set --------------------------
@@ -197,21 +243,22 @@ async def test_metadata_algorithm_list_is_not_consulted(provider: Provider, adve
     provider.signing_algorithms = advertised
     oidc = await discover(provider)
 
-    oidc.validate_access_token(provider.mint())
+    await oidc.validate_access_token(provider.mint())
 
 
-def test_key_without_an_alg_member_still_verifies(oidc: OidcClient, provider: Provider):
+@pytest.mark.asyncio
+async def test_key_without_an_alg_member_still_verifies(oidc: OidcClient, provider: Provider):
     # RFC 7517 makes "alg" optional; PyJWT infers RS256 from kty=RSA.
     del provider.keys["key-1"][1]["alg"]
 
-    oidc.validate_access_token(provider.mint())
+    await oidc.validate_access_token(provider.mint())
 
 
 @pytest.mark.asyncio
 async def test_key_claiming_an_insecure_algorithm_is_refused(oidc: OidcClient, provider: Provider):
     # Prime the cache with the real key, then have the provider serve a symmetric key under
     # the same kid. PyJWK would bind HS256 to it; the denylist must refuse it.
-    oidc.validate_access_token(provider.mint())
+    await oidc.validate_access_token(provider.mint())
 
     # The served key is the one the token below is signed with, so the only thing standing
     # between the forgery and acceptance is the denylist. A mismatched key would make this
@@ -234,7 +281,7 @@ async def test_key_claiming_an_insecure_algorithm_is_refused(oidc: OidcClient, p
     fresh = await discover(provider)
 
     with pytest.raises(Unauthenticated):
-        fresh.validate_access_token(forged)
+        await fresh.validate_access_token(forged)
 
 
 # --- provider metadata -----------------------------------------------------

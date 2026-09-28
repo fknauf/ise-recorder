@@ -127,7 +127,7 @@ def get_recording_path_for_purge(
             detail=f"Recording {recording} does not exist for this user",
         )
 
-    if not classified_recording.state in {RecordingState.FINISHED, RecordingState.UNPROCESSED}:
+    if classified_recording.state not in {RecordingState.FINISHED, RecordingState.UNPROCESSED}:
         fail_purge(
             logger.warning,
             status_code=status.HTTP_409_CONFLICT,
