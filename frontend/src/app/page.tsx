@@ -32,7 +32,7 @@ export function Home() {
         <GithubLink marginTop="size-450" size="M"/>
       </Flex>
 
-      <Flex direction="row" justifyContent="center" marginTop="size-200">
+      <Flex direction="row" justifyContent="center" marginTop="size-200" gap="size-100">
         <AuthStatusMessage/>
         <StreamingImpededWarning/>
         <QuotaWarning thresholdBytes={2 ** 30}/>
