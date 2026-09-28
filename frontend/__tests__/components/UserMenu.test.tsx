@@ -39,7 +39,7 @@ async function renderMenu(
     signout,
     interactiveSignin,
     reauthenticate,
-    expandSession: async () => "still-fresh"
+    expandSession: async () => "can-stream"
   };
 
   mockUseAppSession.mockReturnValue(tokenSource);

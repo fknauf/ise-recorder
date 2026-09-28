@@ -5,11 +5,12 @@ import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
 import DataUpload from "@spectrum-icons/workflow/DataUpload";
 import { downloadFile, RecordingFileList } from "../utils/browserStorage";
-import { useBrowserStorage, useReuploadSavedRecording } from "../hooks/useBrowserStorage";
+import { useBrowserStorage } from "../hooks/useBrowserStorage";
+import { useReupload } from "../hooks/useReupload";
 import { useActiveRecording } from "../hooks/useActiveRecording";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { useAppStore } from "../hooks/useAppStore";
 import { useServerEnv } from "../hooks/useServerEnv";
+import { useAppSession } from "./SessionProvider";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -23,14 +24,11 @@ const mibFormatter = new Intl.NumberFormat(
 function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileList }>) {
   const { apiUrl } = useServerEnv();
   const activeRecording = useActiveRecording();
-
   const { removeSavedRecording } = useBrowserStorage();
-
-  const reuploadSavedRecording = useReuploadSavedRecording();
-  const reuploadProgress = useAppStore(state => state.reuploadProgress.get(recording.name));
+  const { isUploading, progress, reupload } = useReupload(recording.name);
+  const { authRequired, isAuthenticated } = useAppSession();
 
   const isRecording = recording.name === activeRecording.name;
-  const isUploading = reuploadProgress !== undefined;
 
   return (
     <RecordingCard
@@ -60,7 +58,7 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
               height="size-900"
               data-testid="sr-ind-uploading"
             >
-              <ProgressCircle size="M" value={reuploadProgress} aria-label="Uploading"/>
+              <ProgressCircle size="M" value={progress} aria-label="Uploading"/>
               <Text>Uploading...</Text>
             </Flex>
           : <>
@@ -75,8 +73,8 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
               {
                 apiUrl !== undefined &&
                   <ActionButton
-                    isDisabled={isRecording || isUploading}
-                    onPress={() => reuploadSavedRecording(recording.name)}
+                    isDisabled={isRecording || isUploading || (authRequired && !isAuthenticated)}
+                    onPress={reupload}
                     data-testid="sr-btn-reupload"
                   >
                     <DataUpload/>

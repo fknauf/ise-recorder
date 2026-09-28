@@ -200,7 +200,7 @@ class DownloadTotpAuthority:
         if key not in self.factories:
             return False
 
-        return self.factories[key].verify(totp)
+        return self.factories[key].verify(totp, valid_window=1)
 
     def forget(self, file_path: Path):
         """Remove a TOTP factory from the authority. Used when a recording is purged."""

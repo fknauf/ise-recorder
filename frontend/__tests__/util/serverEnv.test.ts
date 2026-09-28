@@ -17,6 +17,7 @@ vi.mock("next/server", () => ({ connection: async () => {} }));
 
 const ENV_KEYS = [
   "ISE_RECORD_API_URL",
+  "ISE_RECORD_AUTH",
   "ISE_RECORD_OIDC_PROVIDER_URL",
   "ISE_RECORD_OIDC_CLIENT_ID",
   "ISE_RECORD_OIDC_MAX_AGE",
@@ -66,6 +67,15 @@ test("a plain http backend URL is accepted", async () => {
 
 test("https and a path are accepted", async () => {
   expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api" })).apiUrl)
+    .toBe("https://recorder.example.com/api");
+});
+
+test("a trailing slash is dropped, so the API paths joined onto the URL do not double it", async () => {
+  // "http://localhost:8000/" + "/api/chunks" would ask the backend for //api/chunks, which
+  // it does not know, and every upload would be turned away as a permanent failure
+  expect((await envFor({ ISE_RECORD_API_URL: "http://localhost:8000/" })).apiUrl)
+    .toBe("http://localhost:8000");
+  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api/" })).apiUrl)
     .toBe("https://recorder.example.com/api");
 });
 
@@ -136,6 +146,15 @@ test("the OIDC settings are passed through", async () => {
   expect(env.oidcProviderUrl).toBe("http://keycloak.localhost:8080/realms/ise");
   expect(env.oidcClientId).toBe("ise-recorder");
   expect(env.oidcMaxAge).toBe(25200);
+});
+
+test("the auth setting is passed through as given, for the session provider to judge", async () => {
+  // Its default depends on whether there is a backend, and an unknown value has to stop the
+  // page from rendering; both are decided where the session is set up, not here. So neither
+  // an unknown value nor a different case is corrected or dropped on the way.
+  expect((await envFor({ ISE_RECORD_AUTH: "disabled" })).authBackend).toBe("disabled");
+  expect((await envFor({ ISE_RECORD_AUTH: "OIDC" })).authBackend).toBe("OIDC");
+  expect((await envFor({})).authBackend).toBeUndefined();
 });
 
 // --- automatic sign-in ------------------------------------------------------

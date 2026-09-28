@@ -79,7 +79,7 @@ function renderSection(
     signout: async () => {},
     interactiveSignin: async () => {},
     reauthenticate: async () => {},
-    expandSession: async () => "still-fresh"
+    expandSession: async () => "can-stream"
   } satisfies AppSession);
 
   mockUseLecture.mockReturnValue({
@@ -135,6 +135,16 @@ test("the download link carries the user, the recording and its TOTP", () => {
   );
   // without this the browser navigates away from the recorder, which may be mid-recording
   expect(link).toHaveAttribute("download");
+});
+
+test("the download opens in a tab of its own", () => {
+  // The download attribute is ignored for a backend on another origin, and the backend
+  // answers a TOTP that has lapsed -- after a backend restart, say -- with a JSON error
+  // rather than a file. In the recorder's own tab that error would replace the page; in a
+  // tab of its own it leaves the recorder alone, and a successful download closes the tab.
+  renderSection();
+
+  expect(within(cards()[0]).getByRole("link")).toHaveAttribute("target", "_blank");
 });
 
 test("a non-ASCII recording name reaches the backend percent-encoded", () => {

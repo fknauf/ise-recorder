@@ -5,29 +5,32 @@ import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { useActiveRecording } from "@/lib/hooks/useActiveRecording";
-import { useBrowserStorage, useReuploadSavedRecording } from "@/lib/hooks/useBrowserStorage";
+import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
+import { useReupload } from "@/lib/hooks/useReupload";
 import { downloadFile } from "@/lib/utils/browserStorage";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 
 vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useBrowserStorage");
+vi.mock("@/lib/hooks/useReupload");
 vi.mock("@/lib/utils/browserStorage");
-
-// The section reads the progress of running re-uploads from the store. Only that one field
-// is faked; the rest of the module stays real for whoever else imports it.
-let reuploadProgress = new Map<string, number>();
-vi.mock("@/lib/hooks/useAppStore", async importOriginal => ({
-  ...await importOriginal<typeof import("@/lib/hooks/useAppStore")>(),
-  useAppStore: function<T>(selector: (state: { reuploadProgress: Map<string, number> }) => T) {
-    return selector({ reuploadProgress });
-  }
-}));
 
 const mockServerEnv = vi.fn<() => ServerEnv>();
 vi.mock("@/lib/hooks/useServerEnv", () => ({
   useServerEnv: () => mockServerEnv()
 }));
 
+// Only the two fields the card decides on. An anonymous deployment by default, which never
+// needs a sign-in, so the tests that are not about the session are not affected by it.
+const mockSession = vi.fn<() => { authRequired: boolean; isAuthenticated: boolean }>();
+vi.mock("@/lib/components/SessionProvider", () => ({
+  useAppSession: () => mockSession()
+}));
+
+// Progress of running re-uploads by recording name, as the store would hold it. What the
+// upload does is useReupload's business, in useReupload.test.tsx; this fake only answers
+// for one card at a time the way the hook does, and records which recording was sent.
+let reuploadProgress = new Map<string, number>();
 const reupload = vi.fn();
 
 // Controls are found by test id rather than by label, so rewording a button does not break
@@ -42,9 +45,14 @@ beforeEach(() => {
   // no backend by default: the tests below that predate the re-upload count buttons, and
   // a deployment without a server offers nothing to upload to
   mockServerEnv.mockReturnValue({});
+  mockSession.mockReturnValue({ authRequired: false, isAuthenticated: false });
   reuploadProgress = new Map();
   reupload.mockReset();
-  vi.mocked(useReuploadSavedRecording).mockReturnValue(reupload);
+  vi.mocked(useReupload).mockImplementation(recordingName => ({
+    isUploading: reuploadProgress.has(recordingName),
+    progress: reuploadProgress.get(recordingName),
+    reupload: async () => reupload(recordingName)
+  }));
 });
 
 test("SavedRecordingsSection displays recordings and reacts to clicks", async () => {
@@ -254,8 +262,8 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
 // --- manual re-upload ------------------------------------------------------
 //
 // For a recording whose live upload did not make it to the server, the local copy can be
-// sent again. What the upload itself does is useReuploadSavedRecording's business, in
-// useBrowserStorage.test.tsx; this is where the button appears and when it can be pressed.
+// sent again. What the upload itself does is useReupload's business, in useReupload.test.tsx;
+// this is where the button appears and when it can be pressed.
 
 const TWO_RECORDINGS: RecordingFileList[] = [
   { name: "FOO_2025-12-11T213822.748Z", files: [ { name: "stream.webm", size: 2 ** 20 } ] },
@@ -318,6 +326,28 @@ test("the recording that is being made cannot be re-uploaded", () => {
 
   expect(reuploadButton(cards[1])).toBeDisabled();
   expect(reuploadButton(cards[0])).toBeEnabled();
+});
+
+test("nothing can be re-uploaded while signed out of a deployment that requires sign-in", async () => {
+  // the server would turn every chunk away, so the button could only lead to an error
+  mockSession.mockReturnValue({ authRequired: true, isAuthenticated: false });
+
+  const cards = renderWithBackend();
+
+  for(const card of cards) {
+    expect(reuploadButton(card)).toBeDisabled();
+    await userEvent.click(reuploadButton(card));
+  }
+  expect(reupload).not.toHaveBeenCalled();
+});
+
+test("a signed-in user can re-upload in a deployment that requires sign-in", async () => {
+  mockSession.mockReturnValue({ authRequired: true, isAuthenticated: true });
+
+  const cards = renderWithBackend();
+
+  await userEvent.click(reuploadButton(cards[0]));
+  expect(reupload).toHaveBeenCalledExactlyOnceWith("FOO_2025-12-11T213822.748Z");
 });
 
 // While its re-upload runs, a card shows the progress in place of the buttons that act on

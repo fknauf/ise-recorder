@@ -1127,6 +1127,27 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
     assert b"video" not in response.content
 
 
+
+def test_a_totp_from_the_previous_interval_is_accepted_by_the_endpoint(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the link the page shows is up to one poll old, and that poll may have been on the other
+    # side of an interval boundary
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    key = str((home / "GVS_2025" / "presentation.webm").absolute())
+    generator = download_totp_of(auth_client).factories[key]
+    one_interval = datetime.timedelta(seconds=generator.interval)
+    one_interval_ago = datetime.datetime.now(datetime.UTC) - one_interval
+    previous = generator.at(one_interval_ago)
+
+    response = download_completed(auth_client, server_list["user"], "GVS_2025", previous)
+
+    assert response.status_code == 200
+
 # --- purging a recording ---------------------------------------------------
 
 # The one endpoint that destroys data, and irreversibly. Every refusal below checks the disk

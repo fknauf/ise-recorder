@@ -55,8 +55,8 @@ export function useProcessedRecordings() {
     const request: RequestInit = {
       method: "GET",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`
       }
     };
 

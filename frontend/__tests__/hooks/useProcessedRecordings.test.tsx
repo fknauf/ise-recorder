@@ -34,7 +34,7 @@ const session = (getAccessToken: AppSession["getAccessToken"]): AppSession => ({
   signout: async () => {},
   interactiveSignin: async () => {},
   reauthenticate: async () => {},
-  expandSession: async () => "still-fresh"
+  expandSession: async () => "can-stream"
 });
 
 const LISTING = {

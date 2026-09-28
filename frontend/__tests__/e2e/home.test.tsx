@@ -51,7 +51,7 @@ const anonymousTokenSource: AccessTokenSource = {
   signout: async () => {},
   interactiveSignin: async () => {},
   reauthenticate: async () => {},
-  expandSession: async () => "not-signed-in"
+  expandSession: async () => "can-stream"
 };
 
 const authenticatedTokenSource: AccessTokenSource = {
@@ -67,7 +67,7 @@ const authenticatedTokenSource: AccessTokenSource = {
   signout: async () => {},
   interactiveSignin: async () => {},
   reauthenticate: async () => {},
-  expandSession: async () => "still-fresh"
+  expandSession: async () => "can-stream"
 };
 
 const cleanupBetweenTests = async () => {
@@ -301,8 +301,8 @@ test("e2e recording a stream sends the access token to the server", async () => 
     {
       method: "GET",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer test-token"
+        Accept: "application/json",
+        Authorization: "Bearer test-token"
       }
     }
   );

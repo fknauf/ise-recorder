@@ -25,7 +25,7 @@ function renderMessage(
     isStale = false,
     error = undefined as Error | undefined,
     interactiveSignin = vi.fn(async () => {}),
-    expandSession = vi.fn(async (): Promise<SessionTransition> => "not-signed-in")
+    expandSession = vi.fn(async (): Promise<SessionTransition> => "can-stream")
   } = {}
 ) {
   mockUseAppSession.mockReturnValue(

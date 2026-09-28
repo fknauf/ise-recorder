@@ -290,6 +290,24 @@ async function checkContentSecurityPolicy(name, env, base) {
     note(`the same nonce was reused across two requests: ${nonces[0]}`);
   }
 
+  // Over plain http, upgrade-insecure-requests would have the browser rewrite the backend's
+  // http:// URL to https://, which an http-only LAN deployment does not answer, so every
+  // upload would fail. Behind a TLS-terminating proxy the app itself still sees plain http,
+  // so the proxy's X-Forwarded-Proto is what says the page was served over https.
+  if(csp.has("upgrade-insecure-requests")) {
+    note("upgrade-insecure-requests is set on a page served over plain http");
+  }
+
+  const forwarded = await fetch(base, {
+    headers: { "X-Forwarded-Proto": "https" },
+    signal: AbortSignal.timeout(15000)
+  });
+  const forwardedCsp = parseCsp(forwarded.headers.get("content-security-policy") ?? "");
+
+  if(!forwardedCsp.has("upgrade-insecure-requests")) {
+    note("upgrade-insecure-requests is missing on a page served over https behind a proxy");
+  }
+
   console.log(`  ${failures.length ? "✗" : "✓"} ${name} csp (${csp.size} directives)`);
   return failures;
 }

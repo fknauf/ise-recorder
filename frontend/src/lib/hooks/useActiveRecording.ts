@@ -15,7 +15,7 @@ function preventClosing(e: BeforeUnloadEvent) {
 
 // extracted into a function to work around a react compiler limitation where && and || in try blocks cause it to bail.
 function isStreamingImpeded(apiUrl: string | undefined, sessionState: SessionTransition) {
-  return apiUrl !== undefined && sessionState === "expired";
+  return apiUrl !== undefined && sessionState === "cannot-stream";
 }
 
 export const useActiveRecording = () => useAppStore(state => state.activeRecording);
@@ -56,7 +56,7 @@ export function useStartStopRecording() {
     try {
       const sessionState = await expandSession();
 
-      if(sessionState === "renewed") {
+      if(sessionState === "was-renewed") {
         // user just had to re-login. This happens rarely, so user is now slightly confused,
         // which we don't want to record. Let him press the button again so he knows exactly
         // where the recording starts.

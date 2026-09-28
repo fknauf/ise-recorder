@@ -98,6 +98,50 @@ def test_an_otp_from_an_earlier_interval_no_longer_verifies(tmp_path: Path):
     assert not download_totp.verify(stale, path)
 
 
+def test_an_otp_from_one_poll_ago_still_verifies(tmp_path: Path):
+    # The frontend refreshes the listing once a minute, so the link on the page can be a
+    # minute old -- and that minute may straddle an interval boundary. A check against the
+    # current interval alone would turn that click away, for up to half of every interval.
+    download_totp = DownloadTotpAuthority()
+    path = tmp_path / "GVS_2025" / "presentation.webm"
+    download_totp.generate(path)
+
+    generator = download_totp.factories[str(path.absolute())]
+    one_poll_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=60)
+
+    assert download_totp.verify(generator.at(one_poll_ago), path)
+
+
+def test_an_otp_from_the_previous_interval_still_verifies(tmp_path: Path):
+    # the far end of the above: the page polled just before a boundary and the click comes
+    # just before the next one
+    download_totp = DownloadTotpAuthority()
+    path = tmp_path / "GVS_2025" / "presentation.webm"
+    download_totp.generate(path)
+
+    generator = download_totp.factories[str(path.absolute())]
+    one_interval_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+        seconds=generator.interval
+    )
+
+    assert download_totp.verify(generator.at(one_interval_ago), path)
+
+
+def test_an_otp_from_two_intervals_ago_no_longer_verifies(tmp_path: Path):
+    # one interval of grace and no more: a leaked link stays usable for at most two
+    # intervals, i.e. four minutes
+    download_totp = DownloadTotpAuthority()
+    path = tmp_path / "GVS_2025" / "presentation.webm"
+    download_totp.generate(path)
+
+    generator = download_totp.factories[str(path.absolute())]
+    two_intervals_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+        seconds=2 * generator.interval
+    )
+
+    assert not download_totp.verify(generator.at(two_intervals_ago), path)
+
+
 def test_a_forgotten_file_no_longer_verifies_its_otp(tmp_path: Path):
     # a purged recording's links must die with it, including for a lecture that is later
     # recorded under the same name

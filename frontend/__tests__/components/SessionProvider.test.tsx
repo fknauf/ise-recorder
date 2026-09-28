@@ -156,6 +156,9 @@ const oidc = vi.hoisted(() => {
       }
 
       if(this.signinPopupResult !== null) {
+        // the real one never reads the stored user, and stores the new one over whatever was
+        // there -- which repairs a corrupt entry
+        this.getUserError = null;
         await this.events.load(this.signinPopupResult);
       }
 
@@ -185,8 +188,8 @@ const oidc = vi.hoisted(() => {
     };
 
     // The shape react-oidc-context subscribes to, plus load/unload: the real
-    // UserManagerEvents exposes those and SessionProvider.reauthenticate calls load()
-    // to put a user back after an aborted re-authentication.
+    // UserManagerEvents exposes those, and the fake's sign-ins go through load() so that
+    // AuthProvider hears about the new user the way it does from the real library.
     events = {
       addUserLoaded: (l: Listener) => this.listeners.userLoaded.add(l),
       removeUserLoaded: (l: Listener) => this.listeners.userLoaded.delete(l),
@@ -209,6 +212,8 @@ const oidc = vi.hoisted(() => {
 
     /** Test-only: the provider raised userLoaded without us going through a sign-in. */
     emitUserLoaded = () => this.emit("userLoaded", this.user as never);
+    /** Test-only: the library's own timed renewal failed, as it reports to react-oidc-context. */
+    emitSilentRenewError = (error: Error) => this.emit("silentRenewError", error as never);
 
     get listenerCount() {
       return this.listeners.userLoaded.size + this.listeners.userUnloaded.size;
@@ -353,7 +358,8 @@ async function expectAnonymous(serverEnv: ServerEnv) {
   expect(result.current.authRequired).toBe(false);
   expect(result.current.isAuthenticated).toBe(false);
   expect(await result.current.getAccessToken()).toBeUndefined();
-  expect(await result.current.expandSession()).toBe("not-signed-in");
+  // there is no session to expand, and the backend takes uploads without one
+  expect(await result.current.expandSession()).toBe("can-stream");
   // no authentication means no UserManager at all
   expect(oidc.instances.length).toBe(0);
 }
@@ -521,7 +527,7 @@ test("getAccessToken returns nothing for an expired user without a refresh token
 // expired. getAccessToken is on the path of every upload, so it renews on demand when the
 // timer did not get to.
 
-/** getAccessToken inside act: a renewal goes through AuthProvider and updates its state. */
+/** getAccessToken inside act: a successful renewal loads the new user into AuthProvider's state. */
 async function accessTokenFrom(getAccessToken: () => Promise<string | undefined>) {
   let token: string | undefined;
   await act(async () => {
@@ -579,16 +585,62 @@ test("concurrent requests for a token share one renewal", async () => {
   expect(mgr.signinSilentCalls).toBe(1);
 });
 
-test("a failed renewal yields no token and is reported", async () => {
+test("a failed renewal yields no token rather than rejecting", async () => {
+  // UserManager.signinSilent rejects where react-oidc-context's wrapper resolved with null.
+  // The contract stays "a token or undefined": purgeRecording awaits this outside any try,
+  // so a rejection there would leave the purge dialog stuck in its busy state.
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
   await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
   mgr.signinSilentResult = new Error("refresh token rejected");
 
-  expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
   // the expired token is not handed out as a fallback: the backend would only refuse it
-  expect(result.current.error?.message).toBe("refresh token rejected");
+  expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
+});
+
+// The renewal runs in the background, on the path of every upload, so it goes to the
+// UserManager directly rather than through react-oidc-context. The wrapper would flash the
+// "Authentication Loading" banner for every attempt, and during a provider outage alternate
+// it with an "Authentication Error" banner every few seconds for the rest of the lecture.
+
+test("a renewal does not put the page into its loading state", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
+
+  let releaseRenewal: () => void = () => {};
+  mgr.signinSilentGate = new Promise(resolve => {
+    releaseRenewal = resolve;
+  });
+  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+
+  await act(async () => {
+    const pending = result.current.getAccessToken();
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(mgr.signinSilentCalls).toBe(1);
+    expect(result.current.isLoading).toBe(false);
+
+    releaseRenewal();
+    await pending;
+  });
+
+  expect(result.current.isLoading).toBe(false);
+});
+
+test("a failed renewal leaves no authentication error on the page", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
+  mgr.signinSilentResult = new Error("provider unreachable");
+
+  await accessTokenFrom(() => result.current.getAccessToken().catch(() => undefined));
+
+  expect(result.current.error).toBeUndefined();
+  expect(result.current.isLoading).toBe(false);
 });
 
 test("a failed renewal does not keep later requests from trying again", async () => {
@@ -606,8 +658,6 @@ test("a failed renewal does not keep later requests from trying again", async ()
   expect(await accessTokenFrom(result.current.getAccessToken)).toBe("renewed-token");
 
   expect(mgr.signinSilentCalls).toBe(2);
-  // and the recovery clears the error again
-  expect(result.current.error).toBeUndefined();
 });
 
 test("getAccessToken yields nothing when the user store cannot be read", async () => {
@@ -649,15 +699,41 @@ test("a fresh session is refreshed silently rather than through a popup", async 
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
-  await act(() => mgr.events.load(userAged(60)));
-  mgr.signinSilentResult = userAged(0, { access_token: "fresh-token" });
+  await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
+  mgr.signinSilentResult = userAged(0, { access_token: "fresh-token", refresh_token: "refresh" });
 
   await act(async () => {
-    expect(await result.current.expandSession()).toBe("still-fresh");
+    expect(await result.current.expandSession()).toBe("can-stream");
   });
 
   expect(mgr.signinSilentCalls).toBe(1);
   expect(mgr.signinPopupCalls).toBe(0);
+});
+
+test("a session without a refresh token is not refreshed at all", async () => {
+  // UserManager.signinSilent would fall back to an iframe with prompt=none, which does not
+  // work here (see the frontend docs on auto-signin): all it would do is leave an error on
+  // the page and hold up the start of the recording until the iframe gives up
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    const { result } = await renderAppSession(authenticatedEnv);
+    const mgr = userManager();
+
+    await act(() => mgr.events.load(userAged(60)));
+    mgr.signinSilentResult = new Error("login_required");
+
+    await act(async () => {
+      // the token it has is still good, so the recording streams with that
+      expect(await result.current.expandSession()).toBe("can-stream");
+    });
+
+    expect(mgr.signinSilentCalls).toBe(0);
+    expect(mgr.signinPopupCalls).toBe(0);
+    expect(result.current.error).toBeUndefined();
+  } finally {
+    consoleWarn.mockRestore();
+  }
 });
 
 test("a stale session is renewed through a popup rather than silently", async () => {
@@ -668,34 +744,49 @@ test("a stale session is renewed through a popup rather than silently", async ()
   mgr.signinPopupResult = userAged(0);
 
   await act(async () => {
-    expect(await result.current.expandSession()).toBe("renewed");
+    expect(await result.current.expandSession()).toBe("was-renewed");
   });
 
   expect(mgr.signinPopupCalls).toBe(1);
   expect(mgr.signinSilentCalls).toBe(0);
 });
 
-test("no session at all is treated as stale", async () => {
+// Without auto-signin, a deployment lets people record without signing in, into the browser
+// only. Someone doing that has already passed up the "Sign in" banner; a sign-in popup at
+// every press of the record button would only be in their way, and closing it leaves an
+// authentication error on the page for a sign-in they never wanted.
+//
+// Nor is a silent sign-in any use to them. With no user there is no refresh token, so
+// UserManager.signinSilent falls back to an iframe with prompt=none, which fails because the
+// provider's session cookies are not sent there (see the frontend docs on auto-signin). Going
+// through react-oidc-context, that failure lands on the page as an authentication error --
+// the same banner the popup left behind -- after a "loading" flash, and the recording only
+// starts once the iframe has given up.
+test("nobody signed in records locally without being asked to sign in", async () => {
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
   mgr.user = null;
   mgr.signinPopupResult = userAged(0);
+  // what the iframe flow does in practice
+  mgr.signinSilentResult = new Error("login_required");
 
   await act(async () => {
-    await result.current.expandSession();
+    expect(await result.current.expandSession()).toBe("cannot-stream");
   });
 
-  expect(mgr.signinPopupCalls).toBe(1);
+  expect(mgr.signinPopupCalls).toBe(0);
   expect(mgr.signinSilentCalls).toBe(0);
+  expect(result.current.error).toBeUndefined();
 });
 
 test("a deployment without max_age never treats a session as stale", async () => {
   const { result } = await renderAppSession({ ...authenticatedEnv, oidcMaxAge: undefined });
   const mgr = userManager();
 
-  await act(() => mgr.events.load(userAged(10 * MAX_AGE_SECONDS)));
-  mgr.signinSilentResult = userAged(0);
+  // with a refresh token, so the silent branch is visible as a refresh
+  await act(() => mgr.events.load(userAged(10 * MAX_AGE_SECONDS, { refresh_token: "refresh" })));
+  mgr.signinSilentResult = userAged(0, { refresh_token: "refresh" });
 
   await act(async () => {
     await result.current.expandSession();
@@ -709,9 +800,9 @@ test("a provider that omits auth_time never treats a session as stale", async ()
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
-  const aged = userAged(10 * MAX_AGE_SECONDS);
+  const aged = userAged(10 * MAX_AGE_SECONDS, { refresh_token: "refresh" });
   await act(() => mgr.events.load({ ...aged, profile: { iat: aged.profile.iat } }));
-  mgr.signinSilentResult = userAged(0);
+  mgr.signinSilentResult = userAged(0, { refresh_token: "refresh" });
 
   await act(async () => {
     await result.current.expandSession();
@@ -740,7 +831,7 @@ test("the token's own issue time wins when the local clock lags behind the provi
   expect(mgr.signinSilentCalls).toBe(0);
 });
 
-test("a silent refresh that fails on a dead token is reported as expired", async () => {
+test("a silent refresh that fails on a dead token means the recording cannot stream", async () => {
   const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   try {
@@ -751,14 +842,66 @@ test("a silent refresh that fails on a dead token is reported as expired", async
     // the access token died while the laptop was asleep and the refresh cannot revive it.
     // This is the case the whole impeded path exists for, and the silent branch reports it
     // through the only value that differs from its success value.
-    await act(() => mgr.events.load(userAged(60, { expired: true })));
+    await act(() => mgr.events.load(userAged(60, { expired: true, refresh_token: "refresh" })));
     mgr.signinSilentResult = new Error("refresh token rejected");
 
     await act(async () => {
-      expect(await result.current.expandSession()).toBe("expired");
+      expect(await result.current.expandSession()).toBe("cannot-stream");
     });
 
+    // tried, rather than given up on because the token had already run out
+    expect(mgr.signinSilentCalls).toBe(1);
     expect(mgr.signinPopupCalls).toBe(0);
+  } finally {
+    consoleWarn.mockRestore();
+  }
+});
+
+test("a token that ran out before the recording starts is renewed with the refresh token", async () => {
+  // The lecturer opens the laptop, or reloads the page, after the access token has run out.
+  // oidc-client-ts does not renew a token that is already expired when it is loaded, and
+  // react-oidc-context reports such a user as not authenticated -- but the refresh token
+  // still works, and this is the last chance to use it before the recording decides whether
+  // to stream at all. Giving up here would record the whole lecture locally only.
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(60, { expired: true, refresh_token: "refresh" })));
+  expect(result.current.isAuthenticated).toBe(false);
+  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+
+  await act(async () => {
+    expect(await result.current.expandSession()).toBe("can-stream");
+  });
+
+  expect(mgr.signinSilentCalls).toBe(1);
+  expect(result.current.isAuthenticated).toBe(true);
+});
+
+test("an earlier authentication error does not keep a working session from streaming", async () => {
+  // The error on the page stays until the next user is loaded, whatever caused it: a
+  // sign-in popup the user closed, or a background renewal that hit a provider hiccup and
+  // will be retried. The session itself can be perfectly fine meanwhile, and treating the
+  // leftover error as a dead session would record the whole lecture locally only.
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    const { result } = await renderAppSession(authenticatedEnv);
+    const mgr = userManager();
+
+    await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
+
+    // the timed renewal ran into a provider hiccup; the token it had is still good
+    await act(async () => {
+      mgr.emitSilentRenewError(new Error("token endpoint hiccup"));
+    });
+    expect(result.current.error).toBeDefined();
+
+    mgr.signinSilentResult = userAged(0, { refresh_token: "refresh" });
+
+    await act(async () => {
+      expect(await result.current.expandSession()).toBe("can-stream");
+    });
   } finally {
     consoleWarn.mockRestore();
   }
@@ -777,10 +920,14 @@ test("a stale session's popup the user closes does not hold up the recording", a
     mgr.popupClosedByUser = true;
 
     await act(async () => {
-      expect(await settledWithin(result.current.expandSession())).toBe("still-stale");
+      expect(await settledWithin(result.current.expandSession())).toBe("can-stream");
     });
 
     expect(mgr.signinPopupCalls).toBe(1);
+    // the recording goes ahead on the old session, so an error on the page would only
+    // unsettle the lecturer for the length of the lecture
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.isAuthenticated).toBe(true);
   } finally {
     consoleWarn.mockRestore();
   }
@@ -789,11 +936,11 @@ test("a stale session's popup the user closes does not hold up the recording", a
 // react-oidc-context wraps every navigator method: it catches, dispatches an ERROR into
 // its own state, and *resolves with null* rather than throwing. So the null return is the
 // only signal that a sign-in failed, and these pin that expandSession reads it. Getting
-// this wrong is quiet in both directions: a declined popup reported as "renewed" makes
-// startRecording drop the user back to idle without a word, and it leaves "expired"
+// this wrong is quiet in both directions: a declined popup reported as "was-renewed" makes
+// startRecording drop the user back to idle without a word, and it leaves "cannot-stream"
 // unreachable -- which is the one value isStreamingImpeded() looks for, so a recording on
 // a dead session would stream to the backend anyway with no warning.
-test("a declined popup leaves a still-usable token reported as still-stale", async () => {
+test("a declined popup leaves a still-usable token able to stream", async () => {
   const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   try {
@@ -803,15 +950,20 @@ test("a declined popup leaves a still-usable token reported as still-stale", asy
     await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
     mgr.signinPopupResult = new Error("popup closed by user");
 
+    // stale by policy, but the token still works, so the uploads can go ahead
     await act(async () => {
-      expect(await result.current.expandSession()).toBe("still-stale");
+      expect(await result.current.expandSession()).toBe("can-stream");
     });
+
+    // a failed sign-in leaves the stored user alone, and nothing has to put it back
+    expect(await result.current.getAccessToken()).toBe("current-token");
+    expect(result.current.error).toBeUndefined();
   } finally {
     consoleWarn.mockRestore();
   }
 });
 
-test("a declined popup on an expired token is reported as expired", async () => {
+test("a declined popup on an expired token means the recording cannot stream", async () => {
   const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   try {
@@ -822,25 +974,7 @@ test("a declined popup on an expired token is reported as expired", async () => 
     mgr.signinPopupResult = new Error("popup closed by user");
 
     await act(async () => {
-      expect(await result.current.expandSession()).toBe("expired");
-    });
-  } finally {
-    consoleWarn.mockRestore();
-  }
-});
-
-test("a failed popup with nobody signed in is reported as expired", async () => {
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    mgr.user = null;
-    mgr.signinPopupResult = new Error("provider unreachable");
-
-    await act(async () => {
-      expect(await result.current.expandSession()).toBe("expired");
+      expect(await result.current.expandSession()).toBe("cannot-stream");
     });
   } finally {
     consoleWarn.mockRestore();
@@ -861,7 +995,7 @@ test("a hiccup refreshing a fresh session does not make it look stale", async ()
     // The refresh is advisory -- failing it says nothing about how old the session is,
     // so it must not be reported as staleness.
     await act(async () => {
-      expect(await result.current.expandSession()).toBe("still-fresh");
+      expect(await result.current.expandSession()).toBe("can-stream");
     });
   } finally {
     consoleWarn.mockRestore();
@@ -939,7 +1073,7 @@ test("reauthenticate forces a fresh authentication rather than reusing the SSO s
   expect(await result.current.getAccessToken()).toBe("reauthenticated");
 });
 
-test("an aborted reauthentication puts the previous user back", async () => {
+test("an aborted reauthentication keeps the previous user", async () => {
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
@@ -953,9 +1087,12 @@ test("an aborted reauthentication puts the previous user back", async () => {
 
   expect(result.current.isAuthenticated).toBe(true);
   expect(await result.current.getAccessToken()).toBe("still-good");
+  expect(result.current.error).toBeUndefined();
 });
 
-test("a reauthentication popup the user closes puts the previous user back", async () => {
+test("a reauthentication popup the user closes keeps the previous user, without an error", async () => {
+  // the user asked to switch accounts and changed their mind; they are still signed in as
+  // before, which an "Authentication Error" banner would suggest they are not
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
@@ -967,6 +1104,8 @@ test("a reauthentication popup the user closes puts the previous user back", asy
   });
 
   expect(await result.current.getAccessToken()).toBe("still-good");
+  expect(result.current.isAuthenticated).toBe(true);
+  expect(result.current.error).toBeUndefined();
 });
 
 // --- the staleness watcher -------------------------------------------------
@@ -1065,34 +1204,40 @@ test("the silent renewal timer is stopped on unmount", async () => {
 
 // --- an unreadable user store ----------------------------------------------
 
-// getUser rejects when the browser refuses storage access, or when the stored entry is
-// damaged enough that JSON.parse throws. Neither is common, but the consequence used to
-// be out of proportion: expandSession is awaited outside any try in startRecording, so
-// the rejection escaped as an unhandled rejection and left the recorder wedged in
-// "preparing" with no message and no way back but a reload.
+// getUser rejects when the stored user does not parse: a SyntaxError from JSON.parse, or a
+// TypeError if it parses to something that is not an object. oidc-client-ts only ever stores
+// JSON.stringify output, so it takes something else writing to that key -- devtools, an
+// extension. (A browser that blocks storage outright fails earlier, when the UserManager is
+// built, and never gets here.) Rare, but the consequence used to be out of proportion:
+// expandSession is awaited outside any try in startRecording, so a rejection escaped as an
+// unhandled rejection and left the recorder wedged in "preparing" with no way back but a
+// reload.
+//
+// An entry that is there but unreadable means someone signed in, in this tab. Neither a
+// refresh nor a silent sign-in can use it -- both read the same entry first -- but a sign-in
+// popup does not read it and stores the new user over it, so that is what is offered.
 
-test("an unreadable user store is treated as a stale session rather than crashing", async () => {
+test("an unreadable user store is repaired by signing in again", async () => {
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
-  mgr.getUserError = new Error("SecurityError: storage is not available");
-  mgr.signinPopupResult = userAged(0);
+  await act(() => mgr.events.load(userAged(60)));
 
-  // stale rather than fresh: it must prompt for authentication, not skip the check
+  mgr.getUserError = new SyntaxError("Unexpected end of JSON input");
+  mgr.signinPopupResult = userAged(0, { access_token: "signed-in-again" });
+
   await act(async () => {
-    expect(await result.current.expandSession()).toBe("renewed");
+    expect(await result.current.expandSession()).toBe("was-renewed");
   });
 
   expect(mgr.signinPopupCalls).toBe(1);
+  expect(mgr.signinSilentCalls).toBe(0);
+  expect(await result.current.getAccessToken()).toBe("signed-in-again");
 });
 
-// The recovery path reads the store a second time to decide between "expired" and a
-// session that is merely stale. An unguarded read there -- a store blocked by the browser,
-// or damaged enough that JSON.parse throws -- would turn expandSession into a rejection,
-// and startRecording would abandon the lecture with a "Recording failed" toast in exactly
-// the case the impeded path exists for: fall back to recording locally, do not refuse to
-// record at all.
-test("an unreadable user store during popup recovery is reported as expired", async () => {
+test("an unreadable user store with the popup declined records locally rather than crashing", async () => {
+  // the recovery read after the popup hits the same entry, and must not turn expandSession
+  // into a rejection either: fall back to recording locally, do not refuse to record at all
   const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   try {
@@ -1101,27 +1246,31 @@ test("an unreadable user store during popup recovery is reported as expired", as
 
     await act(() => mgr.events.load(userAged(60)));
 
-    // the store fails, so the session reads as stale and the popup is attempted -- and it
-    // fails too. The recovery read then hits the same failure.
-    mgr.getUserError = new Error("SyntaxError: Unexpected end of JSON input");
-    mgr.signinPopupResult = new Error("popup closed by user");
+    mgr.getUserError = new SyntaxError("Unexpected end of JSON input");
+    mgr.popupClosedByUser = true;
 
     await act(async () => {
-      expect(await result.current.expandSession()).toBe("expired");
+      expect(await settledWithin(result.current.expandSession())).toBe("cannot-stream");
     });
+
+    expect(mgr.signinPopupCalls).toBe(1);
+    expect(mgr.signinSilentCalls).toBe(0);
   } finally {
     consoleWarn.mockRestore();
   }
 });
 
-test("the staleness watcher flips to stale when the user store becomes unreadable", async () => {
+// Stale means past max_age and nothing else: the banner it drives offers to reauthenticate,
+// which is no answer to a missing session or an unreadable store. Those have banners of
+// their own, keyed off isAuthenticated and error.
+
+test("the staleness watcher clears staleness when the user store becomes unreadable", async () => {
   const { result } = await renderAppSession(authenticatedEnv);
   const mgr = userManager();
 
-  // establish a genuinely fresh session first, so the assertion below has somewhere to
-  // move from -- nobody-signed-in already reads as stale, which would make it vacuous
-  await act(() => mgr.events.load(userAged(0)));
-  expect(result.current.isStale).toBe(false);
+  // start from a stale session, so the assertion below has somewhere to move from
+  await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
+  await waitFor(() => expect(result.current.isStale).toBe(true));
 
   mgr.getUserError = new Error("storage unavailable");
 
@@ -1131,7 +1280,23 @@ test("the staleness watcher flips to stale when the user store becomes unreadabl
 
   // the watcher re-checks on provider events; a rejection there would leave the last
   // verdict standing and an unhandled rejection behind
+  await waitFor(() => expect(result.current.isStale).toBe(false));
+});
+
+test("nobody signed in is not stale", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  const mgr = userManager();
+
+  await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
   await waitFor(() => expect(result.current.isStale).toBe(true));
+
+  // signing out leaves nothing to reauthenticate
+  await act(async () => {
+    await result.current.signout();
+  });
+
+  await waitFor(() => expect(result.current.isStale).toBe(false));
+  expect(result.current.isAuthenticated).toBe(false);
 });
 
 // --- signing out and the auto sign-in gate ----------------------------------

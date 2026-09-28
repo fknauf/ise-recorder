@@ -116,6 +116,7 @@ function ProcessedRecordingCard(
         href={url}
         download={true}
         width="100%"
+        target="_blank"
       >
         <ActionButton width="100%">
           <Download/>

@@ -49,6 +49,31 @@ async function filesFor(bundle: RecordingTrackBundle): Promise<string[]> {
   return names;
 }
 
+/**
+ * The output files for a given set of tracks, plus the tracks each MediaRecorder was handed,
+ * for the cases where the file names alone cannot tell which track went where. As sets, since
+ * the order a MediaStream lists its tracks in is the browser's business.
+ */
+async function recordersFor(bundle: RecordingTrackBundle) {
+  const tracks: Set<MediaStreamTrack>[] = [];
+  const OriginalMediaRecorder = window.MediaRecorder;
+
+  class SpyingMediaRecorder extends OriginalMediaRecorder {
+    constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+      tracks.push(new Set(stream.getTracks()));
+      super(stream, options);
+    }
+  }
+
+  window.MediaRecorder = SpyingMediaRecorder as unknown as typeof MediaRecorder;
+
+  try {
+    return { files: await filesFor(bundle), tracks };
+  } finally {
+    window.MediaRecorder = OriginalMediaRecorder;
+  }
+}
+
 const emptyBundle: RecordingTrackBundle = {
   displayTracks: [], videoTracks: [], audioTracks: [],
   mainDisplay: undefined, overlay: undefined
@@ -126,18 +151,82 @@ test("with no display at all the first camera becomes the main display", async (
   })).toStrictEqual([ "stream.webm" ]);
 });
 
-test("the overlay is never picked as the fallback main display", async () => {
+test("a lone overlay stands in as the main display rather than leave the lecture without one", async () => {
+  // Adding a first camera makes it the overlay, so a lecture recorded from nothing but a
+  // camera has its only video track marked as overlay. Recorded as such, there would be no
+  // "stream" for the backend to render and the recording would never be postprocessed.
   const camera = videoTrack();
+  const microphone = audioTrack();
 
-  // only track present, but it is the overlay, so there is no main display and the
-  // audio has to go into its own file
-  expect(await filesFor({
+  const recorded = await recordersFor({
     ...emptyBundle,
     videoTracks: [ camera ],
-    audioTracks: [ audioTrack() ],
+    audioTracks: [ microphone ],
     mainDisplay: undefined,
     overlay: camera
-  })).toStrictEqual([ "audio-0.webm", "overlay.webm" ]);
+  });
+
+  expect(recorded.files).toStrictEqual([ "stream.webm" ]);
+  // the camera is recorded once, together with the audio, and not a second time on its own
+  expect(recorded.tracks).toStrictEqual([ new Set([ camera, microphone ]) ]);
+});
+
+test("an overlay that is not among the captured tracks is not promoted either", async () => {
+  // the canary for a selection that outlived its track: recording it as the main stream
+  // would record a track the user has already removed
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    const stale = videoTrack();
+
+    const recorded = await recordersFor({
+      ...emptyBundle,
+      audioTracks: [ audioTrack() ],
+      mainDisplay: undefined,
+      overlay: stale
+    });
+
+    expect(recorded.files).toStrictEqual([ "audio-0.webm" ]);
+    expect(recorded.tracks.some(tracks => tracks.has(stale))).toBe(false);
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("overlay"), stale);
+  } finally {
+    consoleError.mockRestore();
+  }
+});
+
+test("the overlay is not the fallback main display while another camera is there", async () => {
+  const overlay = videoTrack();
+  const other = videoTrack();
+
+  const recorded = await recordersFor({
+    ...emptyBundle,
+    videoTracks: [ overlay, other ],
+    audioTracks: [ audioTrack() ],
+    mainDisplay: undefined,
+    overlay
+  });
+
+  expect(recorded.files).toStrictEqual([ "overlay.webm", "stream.webm" ]);
+  expect(recorded.tracks.find(tracks => tracks.has(other))?.size).toBe(2);
+  expect(recorded.tracks.find(tracks => tracks.has(overlay))).toStrictEqual(new Set([ overlay ]));
+});
+
+test("a track marked as both main display and overlay is recorded as both", async () => {
+  // the user asked for it explicitly, so the postprocessing renders it on top of itself
+  const camera = videoTrack();
+  const microphone = audioTrack();
+
+  const recorded = await recordersFor({
+    ...emptyBundle,
+    videoTracks: [ camera ],
+    audioTracks: [ microphone ],
+    mainDisplay: camera,
+    overlay: camera
+  });
+
+  expect(recorded.files).toStrictEqual([ "overlay.webm", "stream.webm" ]);
+  expect(recorded.tracks).toContainEqual(new Set([ camera, microphone ]));
+  expect(recorded.tracks).toContainEqual(new Set([ camera ]));
 });
 
 test("video and display tracks beyond main and overlay get numbered files", async () => {

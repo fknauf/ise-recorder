@@ -8,7 +8,7 @@ import { ServerEnv } from "../utils/serverEnv";
 import { determineSessionStaleness } from "../utils/session";
 
 export type SessionTransition =
-  "still-fresh" | "still-stale" | "expired" | "renewed" | "not-signed-in";
+  "can-stream" | "cannot-stream" | "was-renewed";
 
 export interface AppSession {
   authRequired: boolean
@@ -60,7 +60,6 @@ function AuthenticatedSessionContextBridge(
     isLoading,
     error,
     user,
-    events,
     removeUser,
     signinPopup,
     signinSilent
@@ -79,10 +78,15 @@ function AuthenticatedSessionContextBridge(
 
       // If several calls to getAccessToken arrive here at the same time, make the later ones wait for the
       // renewal attempt the first one kicked off rather than start their own, conflicting ones.
+      //
+      // Use the userManager here instead of the useAuth hooks to avoid updates of the UI every time this
+      // happens.
       if(pendingRenewal.current === undefined) {
-        pendingRenewal.current = signinSilent().finally(() => {
-          pendingRenewal.current = undefined;
-        });
+        pendingRenewal.current = userManager.signinSilent()
+          .catch(() => null)
+          .finally(() => {
+            pendingRenewal.current = undefined;
+          });
       }
 
       freshUser = await pendingRenewal.current;
@@ -109,12 +113,10 @@ function AuthenticatedSessionContextBridge(
   };
 
   const reauthenticate = async () => {
-    const prevUser = user;
-    const next = await signinPopup({ max_age: 0, popupAbortOnClose: true });
-
-    if(next === null && prevUser) {
-      await events.load(prevUser);
-    }
+    // go through userManager rather than react-oidc-context to avoid updating the error
+    // message in case of failure: we fall back to the existing session here, which is probably
+    // ok, so we don't need to show an unsettling error message if the user closes the popup.
+    await userManager.signinPopup({ max_age: 0, popupAbortOnClose: true }).catch(() => null);
   };
 
   // Expanding the session headroom means making sure the current session isn't stale and refreshing the access token
@@ -128,9 +130,8 @@ function AuthenticatedSessionContextBridge(
     const refreshSession = async (
       fn: () => Promise<User | null>,
       successValue: SessionTransition,
-      defaultValue: SessionTransition,
       errMsg: string
-    ) => {
+    ): Promise<SessionTransition> => {
       if(await fn() !== null) {
         return successValue;
       }
@@ -138,26 +139,39 @@ function AuthenticatedSessionContextBridge(
       console.warn(errMsg);
 
       const freshUser = await userManager.getUser().catch(() => null);
+
       if(freshUser === null || freshUser.expired) {
-        return "expired";
+        return "cannot-stream";
       }
 
-      return defaultValue;
+      return "can-stream";
     };
 
-    if(await recheckStaleness()) {
+    const currentUser = await userManager.getUser().catch(() => undefined);
+
+    // user not logged in
+    if(currentUser === null) {
+      return "cannot-stream";
+    }
+
+    if(currentUser === undefined || await recheckStaleness()) {
       return refreshSession(
-        () => signinPopup({ popupAbortOnClose: true }),
-        "renewed",
-        "still-stale",
+        // go through userManager rather than react-oidc-context to avoid updating the error
+        // message in case of failure: we fall back to the existing session here, which is probably
+        // ok, so we don't need to show an unsettling error message if the user closes the popup.
+        () => userManager.signinPopup({ popupAbortOnClose: true }).catch(() => null),
+        "was-renewed",
         "Failed to reauthenticate stale oidc session, continuing with existing session"
       );
     }
 
+    if(currentUser.refresh_token === undefined) {
+      return currentUser.expired ? "cannot-stream" : "can-stream";
+    }
+
     return refreshSession(
-      signinSilent,
-      "still-fresh",
-      "still-fresh",
+      () => userManager.signinSilent().catch(() => null),
+      "can-stream",
       "Failed to force-refresh access/refresh token, continuing with existing tokens"
     );
   };
@@ -297,7 +311,7 @@ function AnonymousSessionProvider(
         signout: async () => {},
         interactiveSignin: async () => {},
         reauthenticate: async () => {},
-        expandSession: async () => "not-signed-in"
+        expandSession: async () => "can-stream"
       }}
     >
       {children}

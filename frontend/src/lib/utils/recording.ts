@@ -89,7 +89,7 @@ function prepareTrackRecording(
     chunkSignalPromise = new Promise<boolean>(resolve => chunkSignalResolve = resolve);
   };
   newRecorder.onstop = () => chunkSignalResolve(true);
-  newRecorder.onerror = () => chunkSignalResolve(true);
+  newRecorder.onerror = event => showError(`Recording of track ${trackTitle} failed unexpectedly: ${event.message}`);
 
   const processChunks = async () => {
     let finished = false;
@@ -119,7 +119,14 @@ function prepareTrackRecording(
 
   return {
     trackTitle,
-    start: () => newRecorder.start(chunkMillis),
+    start: () => {
+      try {
+        newRecorder.start(chunkMillis);
+      } catch(e) {
+        chunkSignalResolve(true);
+        showError(`Failed to start recording track ${trackTitle}`, e);
+      }
+    },
     stop: () => newRecorder.stop(),
     finished: finishedPromise
   };
@@ -159,11 +166,13 @@ function prepareRecording(
     };
 
     // if no main display is selected, guess a sensible default: first captured display if there
-    // are display streams, first video input otherwise, but don't use the overlay track.
+    // are display streams, first video input otherwise, but don't use the overlay track unless it
+    // really is the only one available.
     const mainDisplayCandidates = [
       mainDisplay !== undefined && isSaneVideoStream(mainDisplay, "main") ? mainDisplay : undefined,
       displayTracks.find(t => t !== overlay),
-      videoTracks.find(t => t !== overlay)
+      videoTracks.find(t => t !== overlay),
+      overlay !== undefined && isSaneVideoStream(overlay, "overlay") ? overlay : undefined
     ];
     const effectiveMainDisplay = mainDisplayCandidates.find(candidate => candidate !== undefined);
 
@@ -178,7 +187,14 @@ function prepareRecording(
       jobs.push(...audioTracks.map((track, index) => prepareAudio([track], `audio-${index}`)));
     }
 
-    if(overlay !== undefined && isSaneVideoStream(overlay, "overlay")) {
+    // If there's an overlay and it wasn't promoted to main display because there was no main display,
+    // add it here. If overlay is explicitly marked both main and overlay, render the overlay on top
+    // of itself.
+    if(
+      overlay !== undefined &&
+      isSaneVideoStream(overlay, "overlay") &&
+      (effectiveMainDisplay !== overlay || mainDisplay === overlay)
+    ) {
       jobs.push(prepareVideo([ overlay ], "overlay"));
     }
 
@@ -274,11 +290,7 @@ export async function recordLecture(
         const outputStream = await openRecordingFileStream(recordingName, filename);
         streams.set(filename, outputStream);
 
-        try {
-          job.start();
-        } catch(e) {
-          console.error(job.trackTitle, e);
-        }
+        job.start();
       }
 
       await onStarted(recordingName, stopJobs);

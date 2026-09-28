@@ -170,8 +170,7 @@ export async function purgeRecording(
   const request: RequestInit = {
     method: "DELETE",
     headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`
+      Authorization: `Bearer ${token}`
     }
   };
 

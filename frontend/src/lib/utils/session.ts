@@ -5,16 +5,19 @@ export interface SessionStaleness {
   recheckMillis?: number
 }
 
+// Narrow question: Is the session stale, and if not and the point in time when it turns stale is known,
+// when does it turn stale?
+//
+// This is used to derive the isStale indicator in useAppSession. When there is no session or there is an
+// error, this will report the session as not stale, so "not stale" does not carry any indication about
+// the health or existence of the session. No one logged in -> not stale. oidc provider not reachable ->
+// not stale. Etc.
 export async function determineSessionStaleness(
   userMgr: UserManager,
   maxAge: number | undefined): Promise<SessionStaleness> {
   const user = await userMgr.getUser().catch(() => null);
 
-  if(user === null) {
-    return { stale: true };
-  }
-
-  if(maxAge === undefined || user.profile.auth_time === undefined) {
+  if(user === null || maxAge === undefined || user.profile.auth_time === undefined) {
     return { stale: false };
   }
 

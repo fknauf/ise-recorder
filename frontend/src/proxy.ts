@@ -12,6 +12,9 @@ export function proxy(request: NextRequest) {
   const apiUrl = process.env.ISE_RECORD_API_URL;
   const apiSrc = apiUrl ? apiUrl + (apiUrl.endsWith("/") ? "" : "/") : "";
 
+  const forwardedProto = requestHeaders.get("x-forwarded-proto");
+  const isHttps = request.nextUrl.protocol === "https:" || forwardedProto === "https";
+
   let oidcSrc = "";
 
   if(process.env.ISE_RECORD_OIDC_PROVIDER_URL !== undefined) {
@@ -37,8 +40,8 @@ export function proxy(request: NextRequest) {
     frame-ancestors 'self';
     frame-src 'self' ${oidcSrc};
     connect-src 'self' ${apiSrc} ${oidcSrc};
-    upgrade-insecure-requests;
-`;
+    ${isHttps ? "upgrade-insecure-requests;" : ""}
+  `;
   // Replace newline characters and spaces
   const contentSecurityPolicyHeaderValue = cspHeader
     .replace(/\s{2,}/g, " ")

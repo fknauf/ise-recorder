@@ -53,7 +53,7 @@ let releaseRecordLecture: (() => void) | undefined;
 const makeTokenSource = (
   authRequired: boolean,
   token: string | undefined,
-  sessionResult: SessionTransition = "not-signed-in"
+  sessionResult: SessionTransition = "can-stream"
 ): AccessTokenSource => ({
   authRequired,
   autoSignin: false,
@@ -199,7 +199,7 @@ test("startRecording is a no-op while a recording is already active", async () =
 
 test("the session headroom is expanded before every recording", async () => {
   // unconditional: even an unauthenticated deployment goes through it, because the
-  // anonymous source answers "still-fresh" for free.
+  // anonymous source answers "can-stream" for free.
   const tokenSource = makeTokenSource(false, undefined);
   const { result } = await renderRecorder(tokenSource);
 
@@ -209,7 +209,7 @@ test("the session headroom is expanded before every recording", async () => {
 });
 
 test("a renewed session aborts the start so the user can press record again", async () => {
-  const tokenSource = makeTokenSource(true, "test-token", "renewed");
+  const tokenSource = makeTokenSource(true, "test-token", "was-renewed");
   const { result } = await renderRecorder(tokenSource);
 
   await act(async () => {
@@ -221,8 +221,10 @@ test("a renewed session aborts the start so the user can press record again", as
   expect(result.current.activeRecording.state).toBe("idle");
 });
 
-test("streaming is impeded when the session has expired", async () => {
-  const tokenSource = makeTokenSource(true, undefined, "expired");
+test("streaming is impeded when the session says it cannot stream", async () => {
+  // an expired session, nobody signed in, or a user store that could not be read: the
+  // session knows which, and all of them mean the chunks would go out without a token
+  const tokenSource = makeTokenSource(true, undefined, "cannot-stream");
   const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
@@ -230,28 +232,17 @@ test("streaming is impeded when the session has expired", async () => {
   expect(call.destination.streamingImpeded).toBe(true);
 });
 
-test("streaming is not impeded when the session is still fresh", async () => {
-  const tokenSource = makeTokenSource(true, "test-token", "still-fresh");
+test("streaming is not impeded when the session can stream", async () => {
+  const tokenSource = makeTokenSource(true, "test-token", "can-stream");
   const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(call.destination.streamingImpeded).toBe(false);
-});
-
-test("streaming is not impeded when re-auth failed but the old token still works", async () => {
-  const tokenSource = makeTokenSource(true, "test-token", "still-stale");
-  const { result } = await renderRecorder(tokenSource);
-
-  const call = await startAndCapture(result.current.startRecording);
-
-  // "still-stale" means the session is older than policy but the token is usable,
-  // so uploads carry on as normal.
   expect(call.destination.streamingImpeded).toBe(false);
 });
 
 test("streaming is not impeded without a backend, whatever the session state", async () => {
-  const tokenSource = makeTokenSource(true, undefined, "expired");
+  const tokenSource = makeTokenSource(true, undefined, "cannot-stream");
   const { result } = await renderRecorder(tokenSource, { apiUrl: undefined });
 
   const call = await startAndCapture(result.current.startRecording);
@@ -262,7 +253,7 @@ test("streaming is not impeded without a backend, whatever the session state", a
 // --- state machine ---------------------------------------------------------
 
 test("the recorder walks idle -> preparing -> starting -> recording -> idle", async () => {
-  const tokenSource = makeTokenSource(true, undefined, "expired");
+  const tokenSource = makeTokenSource(true, undefined, "cannot-stream");
   const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
