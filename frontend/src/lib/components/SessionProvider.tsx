@@ -61,8 +61,7 @@ function AuthenticatedSessionContextBridge(
     error,
     user,
     removeUser,
-    signinPopup,
-    signinSilent
+    signinPopup
   } = useAuth();
 
   const pendingRenewal = useRef<Promise<User | null>>(undefined);
