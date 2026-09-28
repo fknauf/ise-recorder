@@ -1,6 +1,6 @@
 "use client";
 
-import { Content, Heading, InlineAlert } from "@adobe/react-spectrum";
+import { Content, Flex, Heading, InlineAlert, Text } from "@adobe/react-spectrum";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
 
 const mibFormatter = new Intl.NumberFormat(
@@ -40,7 +40,15 @@ export function QuotaWarning({ thresholdBytes }: Readonly<QuotaWarningProps>) {
     <InlineAlert variant="notice">
       <Heading>Quota warning</Heading>
       <Content>
-        Browser storage running low: {formatMib(usage)} of {formatMib(quota)} used. Please consider removing some old recordings.
+        <Flex direction="column">
+          <Text>
+            Browser storage running low: {formatMib(usage)} of {formatMib(quota)} used.
+          </Text>
+          
+          <Text>
+            Please consider removing some old recordings.
+          </Text>
+        </Flex>          
       </Content>
     </InlineAlert>
   );
