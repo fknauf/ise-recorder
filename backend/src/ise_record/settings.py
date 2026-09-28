@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     destdir: Path = Path("./data")
     chunk_file_digits: Annotated[int, Field(ge=3, lt=10)] = 4
     cors_origins: tuple[str, ...] = ()
+    max_parallel_jobs: Annotated[int, Field(ge=1)] = 1
     auth: AuthBackend = AuthBackend.OIDC
 
     oidc: OidcSettings | None = None

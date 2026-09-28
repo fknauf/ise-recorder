@@ -5,7 +5,6 @@ This module defines the HTTP API endpoints and validates inputs.
 """
 
 import asyncio
-from collections import defaultdict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 import logging
@@ -24,7 +23,13 @@ from ise_record.core.auth import DownloadTotpAuthority
 from ise_record.core.logconfig import setup_logging
 from ise_record.core.postprocess import OUTPUT_FILENAME
 from ise_record.glue.auth import get_download_totp, load_oidc_client, OidcServerState
-from ise_record.glue.jobs import get_running_jobs, postprocessing_task
+from ise_record.glue.jobs import (
+    get_job_queue,
+    get_running_jobs,
+    JobQueue,
+    JobsState,
+    postprocessing_task,
+)
 from ise_record.glue.models import ChunkUpload, PostProcessingJob, RecordingsList, SafeRecording
 from ise_record.glue.recordings import get_recording_path_for_purge, get_recordings_list
 from ise_record.glue.user_home import get_current_user_home
@@ -96,7 +101,7 @@ def schedule_job(
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
     user_home: Annotated[Path, Depends(get_current_user_home)],
-    running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
+    job_queue: Annotated[JobQueue, Depends(get_job_queue)],
 ):
     """Endpoint for the scheduling of postprocessing jobs"""
 
@@ -110,7 +115,7 @@ def schedule_job(
         )
 
     background_tasks.add_task(
-        postprocessing_task, recording_path, job.recipient, settings.smtp, running_jobs
+        postprocessing_task, recording_path, job.recipient, settings.smtp, job_queue
     )
 
     return job
@@ -194,8 +199,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.state.oidc = OidcServerState()
     application.state.cached_home_dirs = dict[str, Path]()
-    application.state.per_user_running_jobs = defaultdict[Path, set[Path]](set)
     application.state.download_totp = DownloadTotpAuthority()
+    application.state.jobs = JobsState.create(settings.max_parallel_jobs)
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings

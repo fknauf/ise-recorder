@@ -247,7 +247,7 @@ def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
     A TestClient runs background tasks to completion before it returns, so a test that wants
     to catch a job mid-flight seeds this set by hand.
     """
-    return app_of(client).state.per_user_running_jobs[user_home]
+    return app_of(client).state.jobs.per_user_running_jobs[user_home]
 
 
 def download_totp_of(client: TestClient) -> DownloadTotpAuthority:

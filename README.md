@@ -169,6 +169,16 @@ The backend has the following configuration envvars:
     | - | - |
     | `./data` | `/app/data` |
 
+* `ISE_RECORD_MAX_PARALLEL_JOBS`
+
+    Number of post-processing jobs that can run in parallel. These jobs are
+    fairly heavy-weight in CPU and RAM, so limiting it to only a few is usually
+    sensible.
+
+    | Default | Example |
+    | - | - |
+    | `1` | `4` |
+
 * `ISE_RECORD_CHUNK_FILE_DIGITS`
 
     Length of the numerical suffix on uploaded chunks. 4 is

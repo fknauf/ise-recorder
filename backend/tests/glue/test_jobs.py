@@ -1,14 +1,17 @@
 """
-Postprocessing jobs: running one, reporting on it, and the per-user record of which
-recordings have a job in flight -- which is what keeps a second job for the same recording
-from starting, and what the listing reads to show a recording as rendering.
+Postprocessing jobs: running one, reporting on it, the per-user record of which recordings
+have a job in flight -- which is what keeps a second job for the same recording from starting,
+and what the listing reads to show a recording as rendering -- and the limit on how many jobs
+render at once.
 
 How /jobs schedules these, and how the listing presents them, lives in test_server.py.
 """
 
 # pylint: disable=line-too-long
 # pylint: disable=missing-function-docstring
+# pylint: disable=redefined-outer-name
 
+import asyncio
 from pathlib import Path
 from unittest.mock import ANY
 
@@ -16,10 +19,26 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
-from ise_record.glue.jobs import get_running_jobs, get_running_jobs_snapshot, postprocessing_task
+from ise_record.glue.jobs import (
+    get_job_queue,
+    get_jobs_state,
+    get_running_jobs,
+    get_running_jobs_snapshot,
+    JobQueue,
+    postprocessing_task,
+)
 from ise_record.settings import Settings, SmtpSettings
 
 from .conftest import request_for
+
+
+def queue_for(running_jobs: set[Path] | None = None, slots: int = 1) -> JobQueue:
+    """A job queue of its own, for the tests that are not about the limit."""
+    return JobQueue(
+        semaphore=asyncio.Semaphore(slots),
+        running_jobs=running_jobs if running_jobs is not None else set(),
+    )
+
 
 # --- running a job ---------------------------------------------------------
 
@@ -47,7 +66,9 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
         ),
     )
 
-    await postprocessing_task(settings.destdir / "foo", "lecturer@example.de", settings.smtp, set())
+    await postprocessing_task(
+        settings.destdir / "foo", "lecturer@example.de", settings.smtp, queue_for()
+    )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
     mock_send.assert_called_once_with(
@@ -92,7 +113,7 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
         ),
     )
 
-    await postprocessing_task(settings.destdir / "foo", None, settings.smtp, set())
+    await postprocessing_task(settings.destdir / "foo", None, settings.smtp, queue_for())
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
     mock_send.assert_not_called()
@@ -108,7 +129,7 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     await postprocessing_task(
-        Settings(auth="disabled").destdir / "foo", "lecturer@example.de", None, set()
+        Settings(auth="disabled").destdir / "foo", "lecturer@example.de", None, queue_for()
     )
 
     mock_postprocess.assert_called_once_with(Path("data/foo"))
@@ -122,7 +143,7 @@ async def test_a_second_job_for_a_running_recording_is_dropped(mocker: MockerFix
     mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
 
     await postprocessing_task(
-        Settings(auth="disabled").destdir / "foo", None, None, {Path("data/foo")}
+        Settings(auth="disabled").destdir / "foo", None, None, queue_for({Path("data/foo")})
     )
 
     mock_postprocess.assert_not_called()
@@ -137,7 +158,7 @@ async def test_a_job_for_a_different_recording_is_not_dropped(mocker: MockerFixt
     )
 
     await postprocessing_task(
-        Settings(auth="disabled").destdir / "bar", None, None, {Path("data/foo")}
+        Settings(auth="disabled").destdir / "bar", None, None, queue_for({Path("data/foo")})
     )
 
     mock_postprocess.assert_called_once_with(Path("data/bar"))
@@ -152,7 +173,9 @@ async def test_a_finished_job_releases_the_recording(mocker: MockerFixture):
     )
     running_jobs: set[Path] = set()
 
-    await postprocessing_task(Settings(auth="disabled").destdir / "foo", None, None, running_jobs)
+    await postprocessing_task(
+        Settings(auth="disabled").destdir / "foo", None, None, queue_for(running_jobs)
+    )
 
     assert running_jobs == set()
 
@@ -170,7 +193,7 @@ async def test_a_job_that_blows_up_still_releases_the_recording(mocker: MockerFi
 
     with pytest.raises(RuntimeError):
         await postprocessing_task(
-            Settings(auth="disabled").destdir / "foo", None, None, running_jobs
+            Settings(auth="disabled").destdir / "foo", None, None, queue_for(running_jobs)
         )
 
     assert running_jobs == set()
@@ -190,7 +213,7 @@ async def test_a_running_job_is_registered_while_it_runs(mocker: MockerFixture):
         "ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess
     )
 
-    await postprocessing_task(Path("data/foo"), None, None, running_jobs)
+    await postprocessing_task(Path("data/foo"), None, None, queue_for(running_jobs))
 
     assert seen_while_running == [{Path("data/foo")}]
     assert running_jobs == set()
@@ -201,15 +224,15 @@ async def test_a_running_job_is_registered_while_it_runs(mocker: MockerFixture):
 
 @pytest.mark.asyncio
 async def test_each_user_has_a_running_job_set_of_their_own(tmp_path: Path):
-    request = request_for(Settings(destdir=tmp_path, auth="disabled"))
+    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
     home_a, home_b = tmp_path / "a", tmp_path / "b"
 
-    mine = await get_running_jobs(request, home_a)
-    theirs = await get_running_jobs(request, home_b)
+    mine = await get_running_jobs(jobs_state, home_a)
+    theirs = await get_running_jobs(jobs_state, home_b)
 
     # the same set every time for the same user, or a job would register in one set and the
     # listing would look in another
-    assert await get_running_jobs(request, home_a) is mine
+    assert await get_running_jobs(jobs_state, home_a) is mine
     assert mine is not theirs
 
 
@@ -219,9 +242,9 @@ async def test_another_users_job_does_not_block_a_recording_of_the_same_name(
 ):
     # two lecturers naming a lecture alike is ordinary; only the same recording of the same
     # user counts as a duplicate
-    request = request_for(Settings(destdir=tmp_path, auth="disabled"))
+    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
     home_a, home_b = tmp_path / "a", tmp_path / "b"
-    (await get_running_jobs(request, home_a)).add(home_a / "foo")
+    (await get_running_jobs(jobs_state, home_a)).add(home_a / "foo")
 
     mock_postprocess = mocker.patch(
         "ise_record.glue.jobs.postprocess_recording",
@@ -229,7 +252,8 @@ async def test_another_users_job_does_not_block_a_recording_of_the_same_name(
         return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
     )
 
-    await postprocessing_task(home_b / "foo", None, None, await get_running_jobs(request, home_b))
+    queue_b = await get_job_queue(jobs_state, await get_running_jobs(jobs_state, home_b))
+    await postprocessing_task(home_b / "foo", None, None, queue_b)
 
     mock_postprocess.assert_called_once_with(home_b / "foo")
 
@@ -239,9 +263,8 @@ async def test_the_snapshot_does_not_follow_later_changes(tmp_path: Path):
     # the snapshot is handed to a dependency that scans the filesystem in the thread pool,
     # while jobs on the event loop keep adding and removing entries. A live view would be
     # iterated mid-change; a copy cannot be.
-    running_jobs = await get_running_jobs(
-        request_for(Settings(destdir=tmp_path, auth="disabled")), tmp_path
-    )
+    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
+    running_jobs = await get_running_jobs(jobs_state, tmp_path)
     running_jobs.add(tmp_path / "foo")
 
     snapshot = await get_running_jobs_snapshot(running_jobs)
@@ -250,3 +273,215 @@ async def test_the_snapshot_does_not_follow_later_changes(tmp_path: Path):
 
     assert snapshot == frozenset({tmp_path / "foo"})
     assert isinstance(snapshot, frozenset)
+
+
+# --- the limit on jobs rendering at once -----------------------------------
+#
+# A render decodes the whole lecture twice -- once to detect the crop, once to encode -- so a
+# handful of lectures ending at the same time would otherwise start that many ffmpeg processes
+# at once. The fake render below holds each job open until the test lets it finish, so the
+# tests can look at which jobs are rendering and which are waiting.
+
+
+class GatedRenders:
+    """Stands in for postprocess_recording; each call waits until release() lets it finish."""
+
+    def __init__(self) -> None:
+        self.started: list[Path] = []
+        self.running = 0
+        self.most_at_once = 0
+        self._gates: dict[Path, asyncio.Event] = {}
+
+    async def render(self, recording_path: Path) -> Result:
+        self.started.append(recording_path)
+        self.running += 1
+        self.most_at_once = max(self.most_at_once, self.running)
+        gate = self._gates.setdefault(recording_path, asyncio.Event())
+
+        try:
+            await gate.wait()
+        finally:
+            self.running -= 1
+
+        return Result(reason=ResultReason.SUCCESS, output_file=None)
+
+    def release(self, recording_path: Path) -> None:
+        self._gates.setdefault(recording_path, asyncio.Event()).set()
+
+
+async def settle() -> None:
+    """Let every task that can make progress do so."""
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+@pytest.fixture
+def renders(mocker: MockerFixture) -> GatedRenders:
+    fake = GatedRenders()
+    # a bound async method rather than the object itself: AsyncMock only awaits a side effect
+    # it recognizes as a coroutine function, and an object with an async __call__ is not one
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake.render
+    )
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_with_one_slot_a_second_job_waits_for_the_first(renders: GatedRenders):
+    queue = queue_for(slots=1)
+    first = asyncio.create_task(postprocessing_task(Path("data/foo"), None, None, queue))
+    second = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, queue))
+    await settle()
+
+    assert renders.started == [Path("data/foo")]
+
+    renders.release(Path("data/foo"))
+    await first
+    await settle()
+
+    assert renders.started == [Path("data/foo"), Path("data/bar")]
+
+    renders.release(Path("data/bar"))
+    await second
+    assert renders.most_at_once == 1
+
+
+@pytest.mark.asyncio
+async def test_as_many_jobs_render_at_once_as_there_are_slots(renders: GatedRenders):
+    queue = queue_for(slots=2)
+    recordings = [Path("data/a"), Path("data/b"), Path("data/c")]
+    jobs = [
+        asyncio.create_task(postprocessing_task(path, None, None, queue)) for path in recordings
+    ]
+    await settle()
+
+    # in the order they were scheduled
+    assert renders.started == recordings[:2]
+
+    for path in recordings:
+        renders.release(path)
+    await asyncio.gather(*jobs)
+
+    assert renders.most_at_once == 2
+    assert renders.started == recordings
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_job_already_counts_as_running(renders: GatedRenders):
+    # While it waits for a slot, the listing shows it as rendering, uploads to it are refused
+    # and it cannot be purged -- all of which read the running set. A recording that dropped
+    # out of it while queued could be purged, or have its chunks rewritten, just before its
+    # render starts reading them.
+    running_jobs: set[Path] = set()
+    queue = queue_for(running_jobs, slots=1)
+    first = asyncio.create_task(postprocessing_task(Path("data/foo"), None, None, queue))
+    second = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, queue))
+    await settle()
+
+    assert renders.started == [Path("data/foo")]
+    assert running_jobs == {Path("data/foo"), Path("data/bar")}
+
+    renders.release(Path("data/foo"))
+    renders.release(Path("data/bar"))
+    await asyncio.gather(first, second)
+    assert running_jobs == set()
+
+
+@pytest.mark.asyncio
+async def test_a_second_job_for_a_waiting_recording_is_dropped(renders: GatedRenders):
+    queue = queue_for(slots=1)
+    first = asyncio.create_task(postprocessing_task(Path("data/foo"), None, None, queue))
+    waiting = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, queue))
+    await settle()
+
+    # a retried request for the job that is still waiting
+    await postprocessing_task(Path("data/bar"), None, None, queue)
+
+    renders.release(Path("data/foo"))
+    renders.release(Path("data/bar"))
+    await asyncio.gather(first, waiting)
+
+    assert renders.started == [Path("data/foo"), Path("data/bar")]
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_blows_up_gives_its_slot_back(mocker: MockerFixture):
+    # otherwise one unexpected failure would leave the server one slot short until it is
+    # restarted, and with the default of one slot, render nothing at all
+    started: list[Path] = []
+
+    async def fake_postprocess(recording_path: Path) -> Result:
+        started.append(recording_path)
+        if recording_path == Path("data/foo"):
+            raise RuntimeError("boom")
+        return Result(reason=ResultReason.SUCCESS, output_file=None)
+
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess
+    )
+    queue = queue_for(slots=1)
+
+    with pytest.raises(RuntimeError):
+        await postprocessing_task(Path("data/foo"), None, None, queue)
+
+    await asyncio.wait_for(postprocessing_task(Path("data/bar"), None, None, queue), timeout=1)
+    assert started == [Path("data/foo"), Path("data/bar")]
+
+
+@pytest.mark.asyncio
+async def test_the_report_is_sent_after_the_slot_is_given_back(
+    mocker: MockerFixture, renders: GatedRenders
+):
+    # a slow or unreachable mail relay holds up the one job whose report it is sending, not
+    # the render of the next lecture in line
+    sending = asyncio.Event()
+    relay_answers = asyncio.Event()
+
+    async def slow_send(*_args: object, **_kwargs: object) -> None:
+        sending.set()
+        await relay_answers.wait()
+
+    mocker.patch("ise_record.glue.jobs.send_report", autospec=True, side_effect=slow_send)
+    smtp_settings = SmtpSettings(server="localhost", sender="render@example.de")
+    queue = queue_for(slots=1)
+
+    first = asyncio.create_task(
+        postprocessing_task(Path("data/foo"), "lecturer@example.de", smtp_settings, queue)
+    )
+    second = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, queue))
+    await settle()
+
+    renders.release(Path("data/foo"))
+    await asyncio.wait_for(sending.wait(), timeout=1)
+    await settle()
+
+    # the first job is still waiting for the relay, and the second is already rendering
+    assert not first.done()
+    assert renders.started == [Path("data/foo"), Path("data/bar")]
+
+    relay_answers.set()
+    renders.release(Path("data/bar"))
+    await asyncio.gather(first, second)
+
+
+@pytest.mark.asyncio
+async def test_all_users_share_the_limit(tmp_path: Path, renders: GatedRenders):
+    # the limit protects the machine, so a second lecturer's job waits for the first
+    # lecturer's like any other
+    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
+    home_a, home_b = tmp_path / "a", tmp_path / "b"
+    queue_a = await get_job_queue(jobs_state, await get_running_jobs(jobs_state, home_a))
+    queue_b = await get_job_queue(jobs_state, await get_running_jobs(jobs_state, home_b))
+
+    first = asyncio.create_task(postprocessing_task(home_a / "foo", None, None, queue_a))
+    second = asyncio.create_task(postprocessing_task(home_b / "foo", None, None, queue_b))
+    await settle()
+
+    assert renders.started == [home_a / "foo"]
+
+    renders.release(home_a / "foo")
+    renders.release(home_b / "foo")
+    await asyncio.gather(first, second)
+
+    assert renders.started == [home_a / "foo", home_b / "foo"]
+    assert renders.most_at_once == 1

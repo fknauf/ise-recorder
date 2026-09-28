@@ -164,3 +164,33 @@ def test_an_unknown_auth_setting_is_refused(monkeypatch: pytest.MonkeyPatch, val
 
     # which setting is wrong, not how the message puts it
     assert caught.value.errors()[0]["loc"] == ("auth",)
+
+
+# --- the limit on parallel postprocessing jobs -----------------------------
+
+
+def test_one_job_renders_at_a_time_unless_configured_otherwise(monkeypatch: pytest.MonkeyPatch):
+    # ffmpeg spreads one render over several cores by itself, so one at a time is the default
+    # that cannot overload a machine nobody sized for this
+    configure(monkeypatch, ISE_RECORD_AUTH="disabled")
+
+    assert Settings().max_parallel_jobs == 1
+
+
+def test_the_job_limit_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch):
+    configure(monkeypatch, ISE_RECORD_AUTH="disabled", ISE_RECORD_MAX_PARALLEL_JOBS="4")
+
+    assert Settings().max_parallel_jobs == 4
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_job_limit_that_would_never_render_anything_is_refused(
+    monkeypatch: pytest.MonkeyPatch, value: str
+):
+    # zero slots would accept every job and render none of them, silently
+    configure(monkeypatch, ISE_RECORD_AUTH="disabled", ISE_RECORD_MAX_PARALLEL_JOBS=value)
+
+    with pytest.raises(ValidationError) as caught:
+        Settings()
+
+    assert caught.value.errors()[0]["loc"] == ("max_parallel_jobs",)

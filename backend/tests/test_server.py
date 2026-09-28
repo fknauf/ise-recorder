@@ -30,6 +30,7 @@ from ise_record.settings import Settings
 from .harness import (
     abandon_recording,
     alias_of,
+    app_of,
     DEFAULT_SUBJECT,
     DEFAULT_SUBJECT_DIGEST,
     digest_of,
@@ -99,7 +100,10 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
     )
     # the very set the listing reads, not merely an equal one: every empty set is equal to
     # every other, so only identity shows the job is registered where it will be looked for
-    assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
+    job_queue = mock_add_task.call_args.args[4]
+    assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
+    # and the app's one semaphore, which is what makes the limit apply across all jobs
+    assert job_queue.semaphore is app_of(client).state.jobs.semaphore
 
 
 def test_schedule_postprocessing_recipient_omitted(
@@ -119,7 +123,10 @@ def test_schedule_postprocessing_recipient_omitted(
     )
     # the very set the listing reads, not merely an equal one: every empty set is equal to
     # every other, so only identity shows the job is registered where it will be looked for
-    assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
+    job_queue = mock_add_task.call_args.args[4]
+    assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
+    # and the app's one semaphore, which is what makes the limit apply across all jobs
+    assert job_queue.semaphore is app_of(client).state.jobs.semaphore
 
 
 def test_schedule_postprocessing_error(
@@ -171,7 +178,10 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(
     )
     # the very set the listing reads, not merely an equal one: every empty set is equal to
     # every other, so only identity shows the job is registered where it will be looked for
-    assert mock_add_task.call_args.args[4] is running_jobs_of(client, settings.destdir)
+    job_queue = mock_add_task.call_args.args[4]
+    assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
+    # and the app's one semaphore, which is what makes the limit apply across all jobs
+    assert job_queue.semaphore is app_of(client).state.jobs.semaphore
 
 
 def test_chunk_upload(client: TestClient, settings: Settings):
@@ -500,20 +510,36 @@ def test_two_apps_share_no_state(tmp_path: Path):
     second = create_app(Settings(destdir=tmp_path, auth="disabled"))
 
     assert first.state.cached_home_dirs is not second.state.cached_home_dirs
-    assert first.state.per_user_running_jobs is not second.state.per_user_running_jobs
+    assert first.state.jobs.per_user_running_jobs is not second.state.jobs.per_user_running_jobs
+    # one limit per app: a semaphore shared between apps would let one app's jobs hold up
+    # another's, and bind it to whichever event loop got to it first
+    assert first.state.jobs.semaphore is not second.state.jobs.semaphore
     assert first.state.download_totp.factories is not second.state.download_totp.factories
+
+
+@pytest.mark.asyncio
+async def test_the_app_allows_as_many_jobs_at_once_as_configured(tmp_path: Path):
+    semaphore = create_app(
+        Settings(destdir=tmp_path, auth="disabled", max_parallel_jobs=3)
+    ).state.jobs.semaphore
+
+    for _ in range(3):
+        await semaphore.acquire()
+
+    # three slots taken, so a fourth job would have to wait
+    assert semaphore.locked()
 
 
 def test_requests_do_not_replace_the_app_state(client: TestClient, app: FastAPI):
     # the listing and /jobs both resolve get_running_jobs, and a job registers in the set it
     # was handed; a request that swapped the dict out would strand it there
-    running_jobs = app.state.per_user_running_jobs
+    jobs = app.state.jobs
     download_totp = app.state.download_totp
 
     client.post("/api/jobs", json={"recording": "missing"})
     client.get("/api/recordings")
 
-    assert app.state.per_user_running_jobs is running_jobs
+    assert app.state.jobs is jobs
     assert app.state.download_totp is download_totp
 
 
