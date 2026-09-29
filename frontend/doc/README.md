@@ -346,7 +346,6 @@ fall into the following subsystems:
 | `recording` | recording logic; determines recording ID and track names, starts recording the configured tracks, stores the recording in the browser and optionally streams it to a backend server, where it also optionally schedules postprocessing when the recording ends. |
 | `serverEnv` | Definition, validation and wiring of the server environment into the nextjs framework |
 | `serverStorage` | functions to stream chunks of media to the backend server (if configured in the server env) |
-| `session` | staleness check for the authentication session |
 | `stringAux` | Grapheme-aware string truncation, used for recording name sanitation |
 
 The `recording` utility is the heart of the application logic and the most complex piece of machinery in the project, so read the comments
@@ -458,17 +457,24 @@ wrinkles for ise-recorder are
 The first is the reason that `SessionProvider` exists: this wraps `react-oidc-context`'s `AuthProvider` if authentication is required
 and provides a dummy interface otherwise.
 
-The second requires some extra plumbing in `SessionProvider.tsx`:
+The second requires some extra plumbing in `SessionProvider.tsx`, in particular the `useIsStale` hook sets up
+a timer that fires when the authentication session goes past max_age and forces a UI re-render that'll toggle a
+staleness indicator in the UI. There's also a function `expandSession` in the `useAppSession` hook that'll attempt
+to refresh the current access token immediately instead of waiting for it to expire. This is meant for deployments
+where the admin configures extremely long access token validity intervals (longer than a typical lecture), in which
+case this way a lecture can be recorded without the need to refresh the access token at all. This mode is somewhat
+atypical; arguably an admin that's paranoid about access token renewals should repair his oidc provider, and anyway
+now there's the re-upload logic and a streaming failure is less critical. But I built it and now it's in there.
 
-- a timer that fires when the authentication session goes past max_age and toggles a staleness indicator
-- event handlers that reset that timer when an event that changes the session length occurs
-- a function to explicitly refresh tokens and force the user to re-authenticate if the session is stale.
-
-The third requires us to build our own `oidc-client-ts` user manager and keep hold of it after passing it on
-to `react-oidc-context`. That's the `getAccessToken` function in `useAppSession`, which retrieves the
-current access token directly from the UserManager because `react-oidc-context` only supplies the current
-access token in the render loop. The `getAccessToken` function will also attempt a silent renewal if the
-active token is expired. That condition should not usually appear, so that's largely a defensive-coding measure.
+The third requires a bit of artifice: react-oidc-context is built to be accessed inside the render loop and
+basically just replaces an object in its React context every time auth state changes, and we need functions we can
+pass to our background processes that always know the current state. The solution is a React reference that's updated
+by a React effect whenever the auth state changes. Background procedures (in particular, the `getAccessToken` function 
+that background processes use to retrieve the current access token) capture the ref and through it can always access
+the current react-oidc-context auth state, where the current access token lives. The `getAccessToken` function will
+also attempt a silent renewal if the active token is expired. That condition should not usually appear, in
+`getAccessToken`, so that's largely a defensive-coding measure. It can appear on a page reload, but that's handled
+by an effect.
 
 Auto-Signin is configurable; unfortunately we can't do an optimistic attempt to obtain tokens in a browser that
 already has an SSO session because the OIDC cookies don't get sent in a silent attempt and so the silent attempt

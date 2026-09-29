@@ -1,47 +1,29 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { ReactNode } from "react";
 import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 
 /**
- * The authenticated provider builds a real UserManager, which would talk to an OpenID
- * provider. Fake the class so the tests can hand it users, make signinSilent/signinPopup
- * fail on demand, inspect the settings it was constructed with, and fire the session
- * events the staleness watcher subscribes to.
+ * The session provider is a thin layer over react-oidc-context: it configures AuthProvider,
+ * and builds the app's session from what useAuth() reports. So react-oidc-context is what is
+ * faked here -- an AuthProvider that records the props it is configured with, and a useAuth()
+ * backed by a small store the tests set -- rather than the UserManager beneath it.
  *
- * react-oidc-context is deliberately *not* mocked. AuthProvider is a thin reducer over
- * whatever UserManager it is handed -- it calls getUser() once, subscribes to
- * events.userLoaded/userUnloaded/userSignedOut/silentRenewError, and wraps the navigator
- * methods -- so this one fake drives both halves of the provider. Mocking useAuth as well
- * would mean keeping two fakes consistent by hand, and the interesting bugs live exactly
- * in the seam between them.
+ * The fake keeps to what the provider relies on the library for, and nothing more:
+ *
+ * - State is user, isLoading, isAuthenticated and error. isAuthenticated is "there is a
+ *   user and their token has not expired", as the library computes it when a user loads.
+ * - After mounting, AuthProvider loads the stored user into that state -- without raising a
+ *   userLoaded event, which is what the old staleness watcher missed after a reload.
+ *   renderAppSession() plays that part.
+ * - signinSilent and signinPopup resolve with the new user and load it into the state, or,
+ *   when they fail, resolve with null and put an error saying which method failed into the
+ *   state. They do not reject.
+ * - removeUser drops the user, and does reject when the user store refuses.
  */
 const oidc = vi.hoisted(() => {
-  // Mirrors oidc-client-ts: an array lists the claims to delete, anything falsy filters
-  // nothing, and any other truthy value means the library default. The internally
-  // required claims can never be removed.
-  const DEFAULT_PROTOCOL_CLAIMS = [ "nbf", "jti", "auth_time", "nonce", "acr", "amr", "azp", "at_hash" ];
-  const INTERNAL_REQUIRED_CLAIMS = [ "sub", "iss", "aud", "exp", "iat" ];
-
-  function applyClaimFilter<T extends Record<string, unknown>>(claims: T, filterSetting: unknown): T {
-    if(!filterSetting) {
-      return { ...claims };
-    }
-
-    const toRemove = Array.isArray(filterSetting) ? filterSetting as string[] : DEFAULT_PROTOCOL_CLAIMS;
-    const result: Record<string, unknown> = { ...claims };
-
-    for(const claim of toRemove) {
-      if(!INTERNAL_REQUIRED_CLAIMS.includes(claim)) {
-        delete result[claim];
-      }
-    }
-
-    return result as T;
-  }
-
-  interface FakeProfile extends Record<string, unknown> {
+  interface FakeProfile {
     iat: number
     auth_time?: number
     preferred_username?: string
@@ -56,177 +38,125 @@ const oidc = vi.hoisted(() => {
     profile: FakeProfile
   }
 
-  type Listener = (...args: never[]) => void;
-
-  class FakeUserManager {
-    readonly settings: Record<string, unknown>;
-
-    /**
-     * What the user store holds. Assigning this is what the staleness watcher sees on its
-     * next check; it does *not* reach the AuthProvider reducer, which only learns about
-     * users through getUser() at mount and through the events below. Use signIn() to move
-     * both at once.
-     */
-    user: FakeUser | null = null;
-
-    /** Test-only: make getUser reject, as a blocked or corrupt user store does. */
-    getUserError: Error | null = null;
-    /** Test-only: what signinPopup does -- resolve with a user, or throw. */
-    signinPopupResult: FakeUser | Error | null = null;
-    /** Test-only: what signinSilent does -- resolve with a user, or throw. */
-    signinSilentResult: FakeUser | Error | null = null;
-    /** Test-only: hold signinSilent open until this settles, so callers can pile up behind it. */
-    signinSilentGate: Promise<void> | null = null;
-    /**
-     * Test-only: the user closes the sign-in popup. Mirrors the library, which only notices
-     * with popupAbortOnClose -- then it rejects with "Popup closed by user"; without it, the
-     * sign-in never settles, which is what left the UI stuck in its loading state.
-     */
-    popupClosedByUser = false;
-    /** Test-only: make removeUser reject, as a blocked or corrupt user store does. */
-    removeUserError: Error | null = null;
-
-    signinPopupCalls = 0;
-    signinSilentCalls = 0;
-    removeUserCalls = 0;
-    stopSilentRenewCalls = 0;
-    /** The args of each signinPopup call, so max_age=0 on a reauthenticate is observable. */
-    signinPopupArgs: unknown[] = [];
-
-    private listeners: Record<string, Set<Listener>> = {
-      userLoaded: new Set(),
-      userUnloaded: new Set(),
-      userSignedOut: new Set(),
-      silentRenewError: new Set()
-    };
-
-    constructor(settings: Record<string, unknown>) {
-      this.settings = settings;
-      instances.push(this);
-    }
-
-    private emit = (event: string, ...args: never[]) =>
-      this.listeners[event].forEach(listener => listener(...args));
-
-    // The real UserManager filters protocol claims once at sign-in and stores the
-    // *result*, so getUser never sees the unfiltered set. Model that here: it is the
-    // only thing that makes these tests notice if auth_time gets filtered away again.
-    getUser = async (): Promise<FakeUser | null> => {
-      if(this.getUserError !== null) {
-        throw this.getUserError;
-      }
-
-      return this.user === null
-        ? null
-        : { ...this.user, profile: applyClaimFilter(this.user.profile, this.settings.filterProtocolClaims) };
-    };
-
-    signinSilent = async (): Promise<FakeUser | null> => {
-      this.signinSilentCalls += 1;
-
-      if(this.signinSilentGate !== null) {
-        await this.signinSilentGate;
-      }
-
-      if(this.signinSilentResult instanceof Error) {
-        throw this.signinSilentResult;
-      }
-
-      if(this.signinSilentResult !== null) {
-        await this.events.load(this.signinSilentResult);
-      }
-
-      return this.signinSilentResult;
-    };
-
-    signinPopup = async (args?: unknown): Promise<FakeUser | null> => {
-      this.signinPopupCalls += 1;
-      this.signinPopupArgs.push(args);
-
-      if(this.popupClosedByUser) {
-        if((args as { popupAbortOnClose?: boolean } | undefined)?.popupAbortOnClose) {
-          throw new Error("Popup closed by user");
-        }
-
-        return new Promise<never>(() => {});
-      }
-
-      if(this.signinPopupResult instanceof Error) {
-        throw this.signinPopupResult;
-      }
-
-      if(this.signinPopupResult !== null) {
-        // the real one never reads the stored user, and stores the new one over whatever was
-        // there -- which repairs a corrupt entry
-        this.getUserError = null;
-        await this.events.load(this.signinPopupResult);
-      }
-
-      return this.signinPopupResult;
-    };
-
-    /**
-     * What AuthProvider calls on mount when the page URL carries a sign-in response. The real
-     * one returns the user only for a redirect sign-in; a popup or silent callback hands the
-     * response to the window that started it and returns nothing.
-     */
-    signinCallback = async (): Promise<FakeUser | undefined> => callback.user;
-
-    removeUser = async (): Promise<void> => {
-      this.removeUserCalls += 1;
-
-      if(this.removeUserError !== null) {
-        throw this.removeUserError;
-      }
-
-      this.user = null;
-      await this.events.unload();
-    };
-
-    stopSilentRenew = () => {
-      this.stopSilentRenewCalls += 1;
-    };
-
-    // The shape react-oidc-context subscribes to, plus load/unload: the real
-    // UserManagerEvents exposes those, and the fake's sign-ins go through load() so that
-    // AuthProvider hears about the new user the way it does from the real library.
-    events = {
-      addUserLoaded: (l: Listener) => this.listeners.userLoaded.add(l),
-      removeUserLoaded: (l: Listener) => this.listeners.userLoaded.delete(l),
-      addUserUnloaded: (l: Listener) => this.listeners.userUnloaded.add(l),
-      removeUserUnloaded: (l: Listener) => this.listeners.userUnloaded.delete(l),
-      addUserSignedOut: (l: Listener) => this.listeners.userSignedOut.add(l),
-      removeUserSignedOut: (l: Listener) => this.listeners.userSignedOut.delete(l),
-      addSilentRenewError: (l: Listener) => this.listeners.silentRenewError.add(l),
-      removeSilentRenewError: (l: Listener) => this.listeners.silentRenewError.delete(l),
-
-      load: async (user: FakeUser) => {
-        this.user = user;
-        this.emit("userLoaded", user as never);
-      },
-      unload: async () => {
-        this.user = null;
-        this.emit("userUnloaded");
-      }
-    };
-
-    /** Test-only: the provider raised userLoaded without us going through a sign-in. */
-    emitUserLoaded = () => this.emit("userLoaded", this.user as never);
-    /** Test-only: the library's own timed renewal failed, as it reports to react-oidc-context. */
-    emitSilentRenewError = (error: Error) => this.emit("silentRenewError", error as never);
-
-    get listenerCount() {
-      return this.listeners.userLoaded.size + this.listeners.userUnloaded.size;
-    }
+  interface FakeError extends Error {
+    source: string
   }
 
-  const instances: FakeUserManager[] = [];
-  // set before mounting: the UserManager is built during the provider's render
-  const callback: { user: FakeUser | undefined } = { user: undefined };
-  return { FakeUserManager, instances, applyClaimFilter, callback };
+  interface AuthState {
+    user: FakeUser | null | undefined
+    isLoading: boolean
+    isAuthenticated: boolean
+    error: FakeError | undefined
+  }
+
+  // what AuthProvider starts out with, before it has read the user store
+  const initialState = (): AuthState => ({ user: undefined, isLoading: true, isAuthenticated: false, error: undefined });
+
+  let state = initialState();
+  const listeners = new Set<() => void>();
+
+  const setState = (update: Partial<AuthState>) => {
+    state = { ...state, ...update };
+    listeners.forEach(listener => listener());
+  };
+
+  const loadUser = (user: FakeUser | null) => setState({
+    user,
+    isLoading: false,
+    isAuthenticated: user !== null && !user.expired,
+    error: undefined
+  });
+
+  /** What the next sign-in of each kind does: sign this user in, fail with this error, or neither. */
+  const outcome = {
+    signinSilent: null as FakeUser | Error | null,
+    signinPopup: null as FakeUser | Error | null,
+    /** Hold signinSilent open until this settles, so callers can pile up behind it. */
+    signinSilentGate: null as Promise<void> | null,
+    removeUser: null as Error | null
+  };
+
+  // How the library wraps each sign-in method: loading while it runs, the new user on success,
+  // an error in the state and a null result on failure.
+  const navigator = (source: "signinSilent" | "signinPopup") => async () => {
+    setState({ isLoading: true });
+
+    if(source === "signinSilent" && outcome.signinSilentGate !== null) {
+      await outcome.signinSilentGate;
+    }
+
+    const result = outcome[source];
+
+    if(result instanceof Error) {
+      setState({ isLoading: false, error: Object.assign(result, { source }) });
+      return null;
+    }
+
+    if(result === null) {
+      setState({ isLoading: false });
+      return null;
+    }
+
+    loadUser(result);
+    return result;
+  };
+
+  const methods = {
+    signinSilent: vi.fn(navigator("signinSilent")),
+    signinPopup: vi.fn(navigator("signinPopup")),
+    removeUser: vi.fn(async () => {
+      if(outcome.removeUser !== null) {
+        throw outcome.removeUser;
+      }
+
+      setState({ user: undefined, isAuthenticated: false });
+    })
+  };
+
+  /** Every set of props AuthProvider was rendered with, latest last. */
+  const providerProps: Record<string, unknown>[] = [];
+
+  const reset = () => {
+    state = initialState();
+    listeners.clear();
+    outcome.signinSilent = null;
+    outcome.signinPopup = null;
+    outcome.signinSilentGate = null;
+    outcome.removeUser = null;
+    providerProps.length = 0;
+    Object.values(methods).forEach(method => method.mockClear());
+  };
+
+  return {
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getState: () => state,
+    setState,
+    loadUser,
+    outcome,
+    methods,
+    providerProps,
+    reset
+  };
 });
 
-vi.mock("oidc-client-ts", () => ({ UserManager: oidc.FakeUserManager }));
+vi.mock("react-oidc-context", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    AuthProvider: (props: Record<string, unknown> & { children?: ReactNode }) => {
+      oidc.providerProps.push(props);
+      return props.children;
+    },
+    useAuth: () => {
+      const state = React.useSyncExternalStore(oidc.subscribe, oidc.getState);
+      // one object per state, as the library's context value is
+      return React.useMemo(() => ({ ...state, ...oidc.methods }), [ state ]);
+    }
+  };
+});
 
 // useRouter needs an app-router context that renderHook does not provide. One shared
 // replace, so a test can see where the provider navigated.
@@ -250,7 +180,15 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 /** A signed-in user whose authentication happened `ageSeconds` ago. */
 const userAged = (
   ageSeconds: number,
-  overrides: Partial<{ access_token: string; refresh_token: string; expired: boolean; iat: number; preferred_username: string }> = {}
+  overrides: Partial<{
+    access_token: string
+    refresh_token: string
+    expired: boolean
+    iat: number
+    preferred_username: string
+    name: string
+    email: string
+  }> = {}
 ) => ({
   access_token: overrides.access_token ?? "current-token",
   refresh_token: overrides.refresh_token,
@@ -258,7 +196,9 @@ const userAged = (
   profile: {
     auth_time: nowSeconds() - ageSeconds,
     iat: overrides.iat ?? nowSeconds(),
-    preferred_username: overrides.preferred_username
+    preferred_username: overrides.preferred_username,
+    name: overrides.name,
+    email: overrides.email
   }
 });
 
@@ -272,39 +212,41 @@ function providerWrapper(serverEnv: ServerEnv) {
   return Wrapper;
 }
 
+/** Let the provider's effects and whatever they started run their course. */
+const settle = () => act(async () => {});
+
 /**
- * Mount the provider and wait for it to settle. Two async things run on mount: the
- * staleness watcher's first check, and AuthProvider's own getUser() -- until the latter
- * resolves the session reports isLoading, which is not the state any of these tests are
- * about.
+ * Mount the provider, then load `stored` the way AuthProvider does once it has mounted: by
+ * setting its state, without any event -- what happens on every page load, and after a
+ * reload with a session still in the user store.
  *
- * The UserManager is built inside the provider's render, so there is no way to seed it
- * with a user beforehand. Tests sign a user in afterwards with
- * `userManager().events.load(...)`, which is what the real library does at the end of
- * every sign-in and what both halves of the provider listen to.
+ * Flushed inside act() rather than waited for, because waitFor() runs on timers, and the
+ * staleness tests below install a fake clock before mounting.
  */
-async function renderAppSession(serverEnv: ServerEnv) {
+async function renderAppSession(serverEnv: ServerEnv, stored: ReturnType<typeof userAged> | null = null) {
   const rendered = renderHook(useAppSession, { wrapper: providerWrapper(serverEnv) });
 
-  // Both settle on microtasks, so flushing inside act() is enough -- and it has to be
-  // enough, because waitFor() is driven by timers and two tests below install a fake
-  // clock before mounting. A waitFor() under that clock never resolves, the test times
-  // out before its useRealTimers() runs, and every later test in the file hangs too.
-  await act(async () => {});
-  expect(rendered.result.current.isLoading).toBe(false);
+  await act(async () => {
+    oidc.loadUser(stored);
+  });
+  await settle();
 
   return rendered;
 }
 
-/** The UserManager the authenticated provider just built. */
-const userManager = () => {
-  expect(oidc.instances.length).toBe(1);
-  return oidc.instances[0];
+/** A user signs in or is renewed while the page is open. */
+const signIn = (user: ReturnType<typeof userAged>) => act(async () => {
+  oidc.loadUser(user);
+});
+
+/** The props AuthProvider was last rendered with. */
+const authProviderProps = () => {
+  expect(oidc.providerProps.length).toBeGreaterThan(0);
+  return oidc.providerProps.at(-1)!;
 };
 
 beforeEach(() => {
-  oidc.instances.length = 0;
-  oidc.callback.user = undefined;
+  oidc.reset();
   localStorage.clear();
 });
 
@@ -312,7 +254,6 @@ afterEach(() => {
   // unconditionally, so that a test which times out while the clock is faked cannot take
   // the rest of the file down with it
   vi.useRealTimers();
-  oidc.instances.length = 0;
   localStorage.clear();
   vi.clearAllMocks();
 });
@@ -360,15 +301,15 @@ async function expectAnonymous(serverEnv: ServerEnv) {
   expect(await result.current.getAccessToken()).toBeUndefined();
   // there is no session to expand, and the backend takes uploads without one
   expect(await result.current.expandSession()).toBe("can-stream");
-  // no authentication means no UserManager at all
-  expect(oidc.instances.length).toBe(0);
+  // no authentication means no OIDC library at all
+  expect(oidc.providerProps).toStrictEqual([]);
 }
 
 async function expectAuthenticationRequired(serverEnv: ServerEnv) {
   const { result } = await renderAppSession(serverEnv);
 
   expect(result.current.authRequired).toBe(true);
-  expect(oidc.instances.length).toBe(1);
+  authProviderProps();
 }
 
 test("a deployment without a backend is anonymous by default", async () => {
@@ -396,7 +337,7 @@ test("an empty auth setting falls back to the default", async () => {
   // ISE_RECORD_AUTH= with nothing after it, as the backend reads it too
   await expectAuthenticationRequired({ apiUrl: "http://localhost:5000", authBackend: "", ...PROVIDER });
   cleanup();
-  oidc.instances.length = 0;
+  oidc.reset();
   await expectAnonymous({ authBackend: "" });
 });
 
@@ -422,20 +363,14 @@ test("an anonymous deployment never reports a stale or failed session", async ()
   expect(result.current.autoSignin).toBe(false);
 });
 
-// --- how the UserManager is built ------------------------------------------
+// --- how AuthProvider is configured ----------------------------------------
 
-test("a configured deployment yields an authenticated session", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-
-  expect(result.current.authRequired).toBe(true);
-});
-
-test("the UserManager is configured from the server environment", async () => {
+test("AuthProvider is configured from the server environment", async () => {
   await renderAppSession(authenticatedEnv);
 
   // max_age here does double duty: it enforces freshness on the interactive sign-in,
   // and it is what makes the provider include auth_time in the ID token at all.
-  expect(userManager().settings).toMatchObject({
+  expect(authProviderProps()).toMatchObject({
     authority: "http://keycloak.localhost:8080/realms/ise",
     client_id: "ise-recorder",
     redirect_uri: `${window.location.origin}/auth/callback`,
@@ -448,30 +383,25 @@ test("the UserManager is configured from the server environment", async () => {
 test("max_age is left unset when the deployment does not configure one", async () => {
   await renderAppSession({ ...authenticatedEnv, oidcMaxAge: undefined });
 
-  expect(userManager().settings.max_age).toBeUndefined();
+  expect(authProviderProps().max_age).toBeUndefined();
 });
 
-test("auth_time survives whatever claim filtering the UserManager is configured with", async () => {
+test("auth_time is kept out of the claims the library filters from the profile", async () => {
   await renderAppSession(authenticatedEnv);
 
-  // oidc-client-ts filters auth_time out of user.profile by default, which silently
-  // disables staleness detection entirely: no notice, and expandSession always
-  // takes the silent-refresh branch instead of the popup. This asserts the setting
-  // keeps it, whatever form the setting takes.
-  const filtered = oidc.applyClaimFilter(
-    { auth_time: 1, iat: 2 },
-    userManager().settings.filterProtocolClaims
-  );
+  // oidc-client-ts filters auth_time out of user.profile by default -- which is what it does
+  // for any truthy setting that is not a list -- and that silently switches staleness
+  // detection off: without auth_time a session never turns stale.
+  const filter = authProviderProps().filterProtocolClaims;
 
-  expect(filtered).toHaveProperty("auth_time");
+  expect(Array.isArray(filter)).toBe(true);
+  expect(filter).not.toContain("auth_time");
 });
 
 // --- what the session reports ----------------------------------------------
 
 test("a signed-in user is reported as authenticated", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-
-  await act(() => userManager().events.load(userAged(60)));
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60));
 
   expect(result.current.isAuthenticated).toBe(true);
   expect(result.current.isExpired).toBe(false);
@@ -484,26 +414,39 @@ test("nobody signed in is reported as unauthenticated", async () => {
   expect(result.current.userName).toBe("The Nameless One");
 });
 
-test("the user name comes from the profile, with a fallback for a provider that sends none", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-
-  await act(() => userManager().events.load(userAged(60, { preferred_username: "dozent" })));
+test("the user name comes from the profile, with fallbacks for providers that send less", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { preferred_username: "dozent", name: "Dr. Dozent" }));
   expect(result.current.userName).toBe("dozent");
 
-  await act(() => userManager().events.load(userAged(60)));
+  await signIn(userAged(60, { name: "Dr. Dozent", email: "dozent@example.edu" }));
+  expect(result.current.userName).toBe("Dr. Dozent");
+
+  await signIn(userAged(60, { email: "dozent@example.edu" }));
+  expect(result.current.userName).toBe("dozent@example.edu");
+
+  await signIn(userAged(60));
   expect(result.current.userName).toBe("The Nameless One");
+});
+
+test("the loading state and errors are passed through as the library reports them", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60));
+
+  await act(async () => {
+    oidc.setState({ isLoading: true, error: Object.assign(new Error("provider unreachable"), { source: "renewSilent" }) });
+  });
+
+  expect(result.current.isLoading).toBe(true);
+  expect(result.current.error?.message).toBe("provider unreachable");
 });
 
 // --- getAccessToken --------------------------------------------------------
 
 test("getAccessToken returns the token of a signed-in user", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-
-  await act(() => userManager().events.load(userAged(60, { access_token: "current-token", refresh_token: "refresh" })));
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { access_token: "current-token", refresh_token: "refresh" }));
 
   expect(await result.current.getAccessToken()).toBe("current-token");
   // a token that is still good is handed out as it is, refresh token or not
-  expect(userManager().signinSilentCalls).toBe(0);
+  expect(oidc.methods.signinSilent).not.toHaveBeenCalled();
 });
 
 test("getAccessToken returns nothing when nobody is signed in", async () => {
@@ -513,13 +456,12 @@ test("getAccessToken returns nothing when nobody is signed in", async () => {
 });
 
 test("getAccessToken returns nothing for an expired user without a refresh token", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-
-  await act(() => userManager().events.load(userAged(60, { access_token: "stale-token", expired: true })));
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { expired: true }));
 
   expect(await result.current.getAccessToken()).toBeUndefined();
-  // without a refresh token signinSilent would fall back to an iframe flow nobody configured
-  expect(userManager().signinSilentCalls).toBe(0);
+  // without a refresh token a silent sign-in falls back to an iframe the provider does not
+  // answer usefully
+  expect(oidc.methods.signinSilent).not.toHaveBeenCalled();
 });
 
 // oidc-client-ts renews on a timer, which a background tab throttles and a discarded one
@@ -527,7 +469,7 @@ test("getAccessToken returns nothing for an expired user without a refresh token
 // expired. getAccessToken is on the path of every upload, so it renews on demand when the
 // timer did not get to.
 
-/** getAccessToken inside act: a successful renewal loads the new user into AuthProvider's state. */
+/** getAccessToken inside act: a renewal loads the new user into the session's state. */
 async function accessTokenFrom(getAccessToken: () => Promise<string | undefined>) {
   let token: string | undefined;
   await act(async () => {
@@ -537,14 +479,14 @@ async function accessTokenFrom(getAccessToken: () => Promise<string | undefined>
 }
 
 test("getAccessToken renews an expired token with the refresh token", async () => {
+  // signed in while the page is open, so the renewal on load is not what does it
   const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
-  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
+  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  oidc.methods.signinSilent.mockClear();
 
   expect(await accessTokenFrom(result.current.getAccessToken)).toBe("renewed-token");
-  expect(mgr.signinSilentCalls).toBe(1);
+  expect(oidc.methods.signinSilent).toHaveBeenCalledOnce();
   // and the rest of the app learns about it, so the "not signed in" notice goes away
   expect(result.current.isAuthenticated).toBe(true);
 });
@@ -553,19 +495,18 @@ test("concurrent requests for a token share one renewal", async () => {
   // every track uploads its own chunks, so several of these arrive at once when the token
   // runs out; each starting its own refresh would at best waste requests, and at worst
   // trip refresh token rotation into failing all but one of them
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh" }));
 
   // captured the way a recording captures it, and called alongside the current one: the
   // renewal in flight has to be shared across renders, not only within one
   const capturedGetAccessToken = result.current.getAccessToken;
-  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
 
   let releaseRenewal: () => void = () => {};
-  mgr.signinSilentGate = new Promise(resolve => {
+  oidc.outcome.signinSilentGate = new Promise(resolve => {
     releaseRenewal = resolve;
   });
-  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
 
   let tokens: (string | undefined)[] = [];
   await act(async () => {
@@ -582,103 +523,32 @@ test("concurrent requests for a token share one renewal", async () => {
   });
 
   expect(tokens).toStrictEqual([ "renewed-token", "renewed-token", "renewed-token" ]);
-  expect(mgr.signinSilentCalls).toBe(1);
+  // the renewal the page itself started when the expired user arrived is the same one
+  expect(oidc.methods.signinSilent).toHaveBeenCalledOnce();
 });
 
 test("a failed renewal yields no token rather than rejecting", async () => {
-  // UserManager.signinSilent rejects where react-oidc-context's wrapper resolved with null.
-  // The contract stays "a token or undefined": purgeRecording awaits this outside any try,
-  // so a rejection there would leave the purge dialog stuck in its busy state.
+  // purgeRecording awaits this outside any try, so a rejection would leave the purge dialog
+  // stuck in its busy state
   const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
-  mgr.signinSilentResult = new Error("refresh token rejected");
+  oidc.outcome.signinSilent = new Error("refresh token rejected");
+  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
 
   // the expired token is not handed out as a fallback: the backend would only refuse it
   expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
-});
-
-// The renewal runs in the background, on the path of every upload, so it goes to the
-// UserManager directly rather than through react-oidc-context. The wrapper would flash the
-// "Authentication Loading" banner for every attempt, and during a provider outage alternate
-// it with an "Authentication Error" banner every few seconds for the rest of the lecture.
-
-test("a renewal does not put the page into its loading state", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
-
-  let releaseRenewal: () => void = () => {};
-  mgr.signinSilentGate = new Promise(resolve => {
-    releaseRenewal = resolve;
-  });
-  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
-
-  // Started inside one act and checked outside it, while the renewal is still held open:
-  // React only renders a state change once act is done, so a check inside would see the
-  // state from before the renewal began whatever the renewal did to it.
-  let pending: Promise<unknown> = Promise.resolve();
-  await act(async () => {
-    pending = result.current.getAccessToken();
-    await new Promise(resolve => setTimeout(resolve, 0));
-  });
-
-  expect(mgr.signinSilentCalls).toBe(1);
-  expect(result.current.isLoading).toBe(false);
-
-  await act(async () => {
-    releaseRenewal();
-    await pending;
-  });
-
-  expect(result.current.isLoading).toBe(false);
-});
-
-test("a failed renewal leaves no authentication error on the page", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
-  mgr.signinSilentResult = new Error("provider unreachable");
-
-  await accessTokenFrom(() => result.current.getAccessToken().catch(() => undefined));
-
-  expect(result.current.error).toBeUndefined();
-  expect(result.current.isLoading).toBe(false);
 });
 
 test("a failed renewal does not keep later requests from trying again", async () => {
   // the shared renewal is released once it has settled, however it settled -- otherwise one
   // failed refresh would stand in for every renewal after it, for the rest of the lecture
   const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
+  oidc.outcome.signinSilent = new Error("provider unreachable");
+  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
 
-  await act(() => mgr.events.load(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })));
-
-  mgr.signinSilentResult = new Error("provider unreachable");
   expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
 
-  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
   expect(await accessTokenFrom(result.current.getAccessToken)).toBe("renewed-token");
-
-  expect(mgr.signinSilentCalls).toBe(2);
-});
-
-test("getAccessToken yields nothing when the user store cannot be read", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60)));
-
-  // every chunk upload during a lecture goes through this, and serverStorage treats a
-  // rejection as a failed request rather than as an unauthenticated one -- so a browser
-  // that blocks storage mid-recording would turn into upload errors instead of a
-  // streaming-impeded warning
-  mgr.getUserError = new Error("SecurityError: storage is not available");
-
-  expect(await result.current.getAccessToken()).toBeUndefined();
 });
 
 // A recording holds on to one getAccessToken for its whole length -- useStartStopRecording
@@ -686,662 +556,192 @@ test("getAccessToken yields nothing when the user store cannot be read", async (
 // ninety minutes. Silent renewal replaces the user several times over that span, so the
 // function has to read the *current* user rather than the one that was in scope when the
 // recording started, or uploads start failing with 401 partway through the lecture.
-test("a getAccessToken captured at the start of a recording follows silent renewal", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-
-  await act(() => userManager().events.load(userAged(60, { access_token: "first-token" })));
-
-  // captured the way recordLecture captures it
+test("a getAccessToken captured at the start of a recording follows later renewals", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { access_token: "first-token" }));
   const capturedGetAccessToken = result.current.getAccessToken;
 
-  await act(() => userManager().events.load(userAged(0, { access_token: "renewed-token" })));
+  await signIn(userAged(0, { access_token: "renewed-token" }));
 
   expect(await capturedGetAccessToken()).toBe("renewed-token");
 });
 
-// --- expandSession ---------------------------------------------------------
-
-test("a fresh session is refreshed silently rather than through a popup", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
-  mgr.signinSilentResult = userAged(0, { access_token: "fresh-token", refresh_token: "refresh" });
-
-  await act(async () => {
-    expect(await result.current.expandSession()).toBe("can-stream");
-  });
-
-  expect(mgr.signinSilentCalls).toBe(1);
-  expect(mgr.signinPopupCalls).toBe(0);
-});
-
-test("the refresh before a recording does not put the page into its loading state", async () => {
-  // it happens at every press of the record button, and an "Authentication Loading" banner
-  // flashing up each time would suggest something is wrong with the session
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
-
-  let releaseRefresh: () => void = () => {};
-  mgr.signinSilentGate = new Promise(resolve => {
-    releaseRefresh = resolve;
-  });
-  mgr.signinSilentResult = userAged(0, { access_token: "fresh-token", refresh_token: "refresh" });
-
-  // Started inside one act and checked outside it, while the refresh is still held open:
-  // React only renders a state change once act is done, so a check inside would see the
-  // state from before the refresh began whatever the refresh did to it.
-  let pending: Promise<unknown> = Promise.resolve();
-  await act(async () => {
-    pending = result.current.expandSession();
-    await new Promise(resolve => setTimeout(resolve, 0));
-  });
-
-  expect(mgr.signinSilentCalls).toBe(1);
-  expect(result.current.isLoading).toBe(false);
-
-  await act(async () => {
-    releaseRefresh();
-    expect(await pending).toBe("can-stream");
-  });
-
-  expect(result.current.isLoading).toBe(false);
-});
-
-test("a session without a refresh token is not refreshed at all", async () => {
-  // UserManager.signinSilent would fall back to an iframe with prompt=none, which does not
-  // work here (see the frontend docs on auto-signin): all it would do is leave an error on
-  // the page and hold up the start of the recording until the iframe gives up
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    await act(() => mgr.events.load(userAged(60)));
-    mgr.signinSilentResult = new Error("login_required");
-
-    await act(async () => {
-      // the token it has is still good, so the recording streams with that
-      expect(await result.current.expandSession()).toBe("can-stream");
-    });
-
-    expect(mgr.signinSilentCalls).toBe(0);
-    expect(mgr.signinPopupCalls).toBe(0);
-    expect(result.current.error).toBeUndefined();
-  } finally {
-    consoleWarn.mockRestore();
-  }
-});
-
-test("a stale session is renewed through a popup rather than silently", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
-  mgr.signinPopupResult = userAged(0);
-
-  await act(async () => {
-    expect(await result.current.expandSession()).toBe("was-renewed");
-  });
-
-  expect(mgr.signinPopupCalls).toBe(1);
-  expect(mgr.signinSilentCalls).toBe(0);
-});
-
-// Without auto-signin, a deployment lets people record without signing in, into the browser
-// only. Someone doing that has already passed up the "Sign in" banner; a sign-in popup at
-// every press of the record button would only be in their way, and closing it leaves an
-// authentication error on the page for a sign-in they never wanted.
+// --- renewing on load --------------------------------------------------------
 //
-// Nor is a silent sign-in any use to them. With no user there is no refresh token, so
-// UserManager.signinSilent falls back to an iframe with prompt=none, which fails because the
-// provider's session cookies are not sent there (see the frontend docs on auto-signin). Going
-// through react-oidc-context, that failure lands on the page as an authentication error --
-// the same banner the popup left behind -- after a "loading" flash, and the recording only
-// starts once the iframe has given up.
-test("nobody signed in records locally without being asked to sign in", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
+// The library does not renew a token that was already expired when it was loaded -- after a
+// reload the next morning, say -- and reports such a user as not authenticated. The refresh
+// token may well still work, so the page tries it once by itself.
 
-  mgr.user = null;
-  mgr.signinPopupResult = userAged(0);
-  // what the iframe flow does in practice
-  mgr.signinSilentResult = new Error("login_required");
+test("a user whose token ran out before the page loaded is renewed without anyone asking", async () => {
+  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
 
-  await act(async () => {
-    expect(await result.current.expandSession()).toBe("cannot-stream");
-  });
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })
+  );
 
-  expect(mgr.signinPopupCalls).toBe(0);
-  expect(mgr.signinSilentCalls).toBe(0);
-  expect(result.current.error).toBeUndefined();
-});
-
-test("a deployment without max_age never treats a session as stale", async () => {
-  const { result } = await renderAppSession({ ...authenticatedEnv, oidcMaxAge: undefined });
-  const mgr = userManager();
-
-  // with a refresh token, so the silent branch is visible as a refresh
-  await act(() => mgr.events.load(userAged(10 * MAX_AGE_SECONDS, { refresh_token: "refresh" })));
-  mgr.signinSilentResult = userAged(0, { refresh_token: "refresh" });
-
-  await act(async () => {
-    await result.current.expandSession();
-  });
-
-  expect(mgr.signinSilentCalls).toBe(1);
-  expect(mgr.signinPopupCalls).toBe(0);
-});
-
-test("a provider that omits auth_time never treats a session as stale", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  const aged = userAged(10 * MAX_AGE_SECONDS, { refresh_token: "refresh" });
-  await act(() => mgr.events.load({ ...aged, profile: { iat: aged.profile.iat } }));
-  mgr.signinSilentResult = userAged(0, { refresh_token: "refresh" });
-
-  await act(async () => {
-    await result.current.expandSession();
-  });
-
-  expect(mgr.signinSilentCalls).toBe(1);
-  expect(mgr.signinPopupCalls).toBe(0);
-});
-
-test("the token's own issue time wins when the local clock lags behind the provider", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  // Wall clock says the session is a minute old, but the provider issued the current
-  // token far later than our clock believes. Trusting the wall clock would mean
-  // starting a lecture on a session that is really long past max_age, so the more
-  // pessimistic of the two has to win.
-  await act(() => mgr.events.load(userAged(60, { iat: nowSeconds() + 10 * MAX_AGE_SECONDS })));
-  mgr.signinPopupResult = userAged(0);
-
-  await act(async () => {
-    await result.current.expandSession();
-  });
-
-  expect(mgr.signinPopupCalls).toBe(1);
-  expect(mgr.signinSilentCalls).toBe(0);
-});
-
-test("a silent refresh that fails on a dead token means the recording cannot stream", async () => {
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    // Within max_age, so the session is not stale and the silent branch is taken -- but
-    // the access token died while the laptop was asleep and the refresh cannot revive it.
-    // This is the case the whole impeded path exists for, and the silent branch reports it
-    // through the only value that differs from its success value.
-    await act(() => mgr.events.load(userAged(60, { expired: true, refresh_token: "refresh" })));
-    mgr.signinSilentResult = new Error("refresh token rejected");
-
-    await act(async () => {
-      expect(await result.current.expandSession()).toBe("cannot-stream");
-    });
-
-    // tried, rather than given up on because the token had already run out
-    expect(mgr.signinSilentCalls).toBe(1);
-    expect(mgr.signinPopupCalls).toBe(0);
-  } finally {
-    consoleWarn.mockRestore();
-  }
-});
-
-test("a token that ran out before the recording starts is renewed with the refresh token", async () => {
-  // The lecturer opens the laptop, or reloads the page, after the access token has run out.
-  // oidc-client-ts does not renew a token that is already expired when it is loaded, and
-  // react-oidc-context reports such a user as not authenticated -- but the refresh token
-  // still works, and this is the last chance to use it before the recording decides whether
-  // to stream at all. Giving up here would record the whole lecture locally only.
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { expired: true, refresh_token: "refresh" })));
-  expect(result.current.isAuthenticated).toBe(false);
-  mgr.signinSilentResult = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
-
-  await act(async () => {
-    expect(await result.current.expandSession()).toBe("can-stream");
-  });
-
-  expect(mgr.signinSilentCalls).toBe(1);
+  expect(oidc.methods.signinSilent).toHaveBeenCalledOnce();
   expect(result.current.isAuthenticated).toBe(true);
+  expect(await result.current.getAccessToken()).toBe("renewed-token");
 });
 
-test("an earlier authentication error does not keep a working session from streaming", async () => {
-  // The error on the page stays until the next user is loaded, whatever caused it: a
-  // sign-in popup the user closed, or a background renewal that hit a provider hiccup and
-  // will be retried. The session itself can be perfectly fine meanwhile, and treating the
-  // leftover error as a dead session would record the whole lecture locally only.
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+test("a renewal on load that fails is not tried again on every change of the session", async () => {
+  // A failed attempt leaves the same expired user behind, and the session's state goes on
+  // changing -- the attempt's own loading and error, a failed background renewal, anything
+  // else the library reports. Retrying on each change would hammer the provider's token
+  // endpoint for as long as the refresh token is refused, which may be forever. So a new
+  // attempt takes a new user, not merely a new render.
+  oidc.outcome.signinSilent = new Error("invalid_grant");
 
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { refresh_token: "refresh", expired: true })
+  );
 
-    await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
+  // the session changes again once the failed attempt is well over
+  await act(async () => {
+    oidc.setState({ error: Object.assign(new Error("provider unreachable"), { source: "renewSilent" }) });
+  });
+  await settle();
 
-    // the timed renewal ran into a provider hiccup; the token it had is still good
-    await act(async () => {
-      mgr.emitSilentRenewError(new Error("token endpoint hiccup"));
-    });
-    expect(result.current.error).toBeDefined();
-
-    mgr.signinSilentResult = userAged(0, { refresh_token: "refresh" });
-
-    await act(async () => {
-      expect(await result.current.expandSession()).toBe("can-stream");
-    });
-  } finally {
-    consoleWarn.mockRestore();
-  }
+  expect(oidc.methods.signinSilent).toHaveBeenCalledOnce();
+  expect(result.current.isAuthenticated).toBe(false);
 });
 
-test("a stale session's popup the user closes does not hold up the recording", async () => {
-  // startRecording waits on this before it gets past "preparing"; a popup that never
-  // settled left the record button disabled until the page was reloaded
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+test.each([
+  [ "nobody is signed in", null ],
+  [ "the token is still good", userAged(60, { refresh_token: "refresh" }) ],
+  [ "there is no refresh token to renew with", userAged(60, { expired: true }) ]
+])("nothing is renewed on load when %s", async (_label, stored) => {
+  await renderAppSession(authenticatedEnv, stored);
 
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
-    mgr.popupClosedByUser = true;
-
-    await act(async () => {
-      expect(await settledWithin(result.current.expandSession())).toBe("can-stream");
-    });
-
-    expect(mgr.signinPopupCalls).toBe(1);
-    // the recording goes ahead on the old session, so an error on the page would only
-    // unsettle the lecturer for the length of the lecture
-    expect(result.current.error).toBeUndefined();
-    expect(result.current.isAuthenticated).toBe(true);
-  } finally {
-    consoleWarn.mockRestore();
-  }
+  expect(oidc.methods.signinSilent).not.toHaveBeenCalled();
 });
 
-// react-oidc-context wraps every navigator method: it catches, dispatches an ERROR into
-// its own state, and *resolves with null* rather than throwing. So the null return is the
-// only signal that a sign-in failed, and these pin that expandSession reads it. Getting
-// this wrong is quiet in both directions: a declined popup reported as "was-renewed" makes
-// startRecording drop the user back to idle without a word, and it leaves "cannot-stream"
-// unreachable -- which is the one value isStreamingImpeded() looks for, so a recording on
-// a dead session would stream to the backend anyway with no warning.
-test("a declined popup leaves a still-usable token able to stream", async () => {
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+// --- expandSession ---------------------------------------------------------
+//
+// Called when a recording starts, to decide whether it streams to the backend, and to give the
+// access token as long a life as the provider allows. It asks nothing of the user: a session
+// past max_age has its own banner offering to reauthenticate, and the recording goes ahead on
+// whatever session there is.
 
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
-    mgr.signinPopupResult = new Error("popup closed by user");
-
-    // stale by policy, but the token still works, so the uploads can go ahead
-    await act(async () => {
-      expect(await result.current.expandSession()).toBe("can-stream");
-    });
-
-    // a failed sign-in leaves the stored user alone, and nothing has to put it back
-    expect(await result.current.getAccessToken()).toBe("current-token");
-    expect(result.current.error).toBeUndefined();
-  } finally {
-    consoleWarn.mockRestore();
-  }
-});
-
-test("a declined popup on an expired token means the recording cannot stream", async () => {
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    await act(() => mgr.events.load({ ...userAged(MAX_AGE_SECONDS + 600), expired: true }));
-    mgr.signinPopupResult = new Error("popup closed by user");
-
-    await act(async () => {
-      expect(await result.current.expandSession()).toBe("cannot-stream");
-    });
-  } finally {
-    consoleWarn.mockRestore();
-  }
-});
-
-test("a hiccup refreshing a fresh session does not make it look stale", async () => {
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    // The session is well within max_age; only the token refresh failed.
-    await act(() => mgr.events.load(userAged(60, { refresh_token: "refresh" })));
-    mgr.signinSilentResult = new Error("token endpoint hiccup");
-
-    // The refresh is advisory -- failing it says nothing about how old the session is,
-    // so it must not be reported as staleness.
-    await act(async () => {
-      expect(await result.current.expandSession()).toBe("can-stream");
-    });
-
-    expect(mgr.signinSilentCalls).toBe(1);
-    // nor as an error: the recording streams on the token it already has, and an error
-    // banner would sit on the page for the whole lecture over a refresh nobody needed
-    expect(result.current.error).toBeUndefined();
-  } finally {
-    consoleWarn.mockRestore();
-  }
-});
-
-// --- signing in ------------------------------------------------------------
-
-test("an interactive sign-in establishes a session", async () => {
+test("nobody signed in cannot stream, and is not asked to sign in", async () => {
   const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
 
-  mgr.signinPopupResult = userAged(0, { access_token: "signed-in" });
+  expect(await result.current.expandSession()).toBe("cannot-stream");
+  expect(oidc.methods.signinPopup).not.toHaveBeenCalled();
+  expect(oidc.methods.signinSilent).not.toHaveBeenCalled();
+});
+
+test("a session without a refresh token streams on the token it has, without a refresh", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60));
+
+  expect(await result.current.expandSession()).toBe("can-stream");
+  expect(oidc.methods.signinSilent).not.toHaveBeenCalled();
+});
+
+test("an expired session without a refresh token cannot stream", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { expired: true }));
+
+  expect(await result.current.expandSession()).toBe("cannot-stream");
+  expect(oidc.methods.signinSilent).not.toHaveBeenCalled();
+});
+
+test("a session with a refresh token is refreshed before the recording starts", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh" }));
+  oidc.outcome.signinSilent = userAged(0, { access_token: "fresh-token", refresh_token: "refresh" });
+
+  let transition;
+  await act(async () => {
+    transition = await result.current.expandSession();
+  });
+
+  expect(transition).toBe("can-stream");
+  expect(oidc.methods.signinSilent).toHaveBeenCalledOnce();
+  expect(await result.current.getAccessToken()).toBe("fresh-token");
+});
+
+test("a failed refresh with a token that still works streams on that token", async () => {
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh" }));
+    oidc.outcome.signinSilent = new Error("token endpoint hiccup");
+
+    let transition;
+    await act(async () => {
+      transition = await result.current.expandSession();
+    });
+
+    expect(transition).toBe("can-stream");
+  } finally {
+    consoleWarn.mockRestore();
+  }
+});
+
+test("a failed refresh on a dead token means the recording cannot stream", async () => {
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    oidc.outcome.signinSilent = new Error("refresh token rejected");
+    const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh", expired: true }));
+
+    let transition;
+    await act(async () => {
+      transition = await result.current.expandSession();
+    });
+
+    expect(transition).toBe("cannot-stream");
+  } finally {
+    consoleWarn.mockRestore();
+  }
+});
+
+test("a stale session does not open a sign-in popup when the recording starts", async () => {
+  // by design: the stale banner offers to reauthenticate, and a popup at the press of the
+  // record button would only get between the lecturer and the lecture
+  const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS + 600, { refresh_token: "refresh" }));
+  oidc.outcome.signinSilent = userAged(MAX_AGE_SECONDS + 600, { refresh_token: "refresh" });
+
+  let transition;
+  await act(async () => {
+    transition = await result.current.expandSession();
+  });
+
+  expect(transition).toBe("can-stream");
+  expect(oidc.methods.signinPopup).not.toHaveBeenCalled();
+});
+
+// --- signing in and reauthenticating ------------------------------------------
+
+test("an interactive sign-in is an ordinary popup sign-in", async () => {
+  const { result } = await renderAppSession(authenticatedEnv);
+  oidc.outcome.signinPopup = userAged(0, { access_token: "signed-in" });
 
   await act(() => result.current.interactiveSignin());
 
   expect(result.current.isAuthenticated).toBe(true);
   expect(await result.current.getAccessToken()).toBe("signed-in");
-  // unlike reauthenticate, this is an ordinary sign-in: a user who still has a session
-  // with the provider should come straight back rather than be made to type a password
-  expect(mgr.signinPopupArgs.at(-1)).not.toMatchObject({ max_age: 0 });
+
+  const [ args ] = oidc.methods.signinPopup.mock.calls[0] as unknown as [ Record<string, unknown> ];
+  // without it the library never notices a closed popup, and the session stays in its
+  // loading state for good
+  expect(args).toMatchObject({ popupAbortOnClose: true });
+  // unlike reauthenticate: a user who still has a session with the provider should come
+  // straight back rather than be made to type a password
+  expect(args).not.toHaveProperty("max_age");
 });
-
-test("a declined sign-in leaves the user signed out rather than rejecting", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  mgr.signinPopupResult = null;
-
-  // UserMenu and AuthStatusMessage hand this straight to onPress, so a rejection here
-  // becomes an unhandled one with nothing to catch it
-  await act(async () => {
-    await expect(result.current.interactiveSignin()).resolves.toBeUndefined();
-  });
-
-  expect(result.current.isAuthenticated).toBe(false);
-});
-
-/** Resolves with "still pending" if `promise` has not settled by then, rather than hanging the test. */
-function settledWithin<T>(promise: Promise<T>, millis = 1000) {
-  return Promise.race([ promise, new Promise<"still pending">(resolve => setTimeout(() => resolve("still pending"), millis)) ]);
-}
-
-test("a sign-in popup the user closes ends the sign-in rather than leaving it pending", async () => {
-  // without popupAbortOnClose the library never notices, and the session stays in its
-  // loading state for good: AuthStatusMessage spins, and nothing offers to sign in again
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  mgr.popupClosedByUser = true;
-
-  await act(async () => {
-    expect(await settledWithin(result.current.interactiveSignin())).toBeUndefined();
-  });
-
-  expect(result.current.isLoading).toBe(false);
-  expect(result.current.isAuthenticated).toBe(false);
-  expect(result.current.error?.message).toBe("Popup closed by user");
-});
-
-// --- reauthenticate --------------------------------------------------------
 
 test("reauthenticate forces a fresh authentication rather than reusing the SSO session", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60)));
-  mgr.signinPopupResult = userAged(0, { access_token: "reauthenticated" });
+  const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS + 600));
+  oidc.outcome.signinPopup = userAged(0, { access_token: "reauthenticated" });
 
   await act(() => result.current.reauthenticate());
 
-  // max_age: 0 is what makes the provider re-prompt instead of silently confirming the
+  // max_age: 0 is what makes the provider ask again instead of silently confirming the
   // session that is already there
-  expect(mgr.signinPopupArgs.at(-1)).toMatchObject({ max_age: 0 });
+  expect(oidc.methods.signinPopup).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ max_age: 0, popupAbortOnClose: true }));
   expect(await result.current.getAccessToken()).toBe("reauthenticated");
-});
-
-test("an aborted reauthentication keeps the previous user", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { access_token: "still-good" })));
-
-  // closing the popup resolves with null rather than throwing, and the user must not be
-  // left signed out over it
-  mgr.signinPopupResult = null;
-
-  await act(() => result.current.reauthenticate());
-
-  expect(result.current.isAuthenticated).toBe(true);
-  expect(await result.current.getAccessToken()).toBe("still-good");
-  expect(result.current.error).toBeUndefined();
-});
-
-test("a reauthentication popup the user closes keeps the previous user, without an error", async () => {
-  // the user asked to switch accounts and changed their mind; they are still signed in as
-  // before, which an "Authentication Error" banner would suggest they are not
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60, { access_token: "still-good" })));
-  mgr.popupClosedByUser = true;
-
-  await act(async () => {
-    expect(await settledWithin(result.current.reauthenticate())).toBeUndefined();
-  });
-
-  expect(await result.current.getAccessToken()).toBe("still-good");
-  expect(result.current.isAuthenticated).toBe(true);
-  expect(result.current.error).toBeUndefined();
-});
-
-// --- the staleness watcher -------------------------------------------------
-
-test("the watcher reports a session past max_age as stale", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
-
-  await waitFor(() => expect(result.current.isStale).toBe(true));
-});
-
-test("the watcher clears staleness when the session is renewed elsewhere", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
-  await waitFor(() => expect(result.current.isStale).toBe(true));
-
-  // a re-auth elsewhere establishes a new session; the banner must clear without
-  // waiting out any poll interval
-  await act(() => mgr.events.load(userAged(0)));
-
-  await waitFor(() => expect(result.current.isStale).toBe(false));
-});
-
-test("the watcher flips the session to stale exactly when it ages out", async () => {
-  vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
-
-  try {
-    const remainingSeconds = 120;
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS - remainingSeconds)));
-    await act(async () => {});
-    expect(result.current.isStale).toBe(false);
-
-    // one second short of the deadline, nothing has changed
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync((remainingSeconds - 1) * 1000);
-    });
-    expect(result.current.isStale).toBe(false);
-
-    // and then it flips, without waiting out any polling interval
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
-    });
-    expect(result.current.isStale).toBe(true);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("a session that can never age out arms no timer at all", async () => {
-  vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
-
-  try {
-    // no max_age configured, so only an event can ever change the verdict
-    const { result } = await renderAppSession({ ...authenticatedEnv, oidcMaxAge: undefined });
-    const mgr = userManager();
-
-    await act(() => mgr.events.load(userAged(60)));
-    await act(async () => {});
-
-    expect(vi.getTimerCount()).toBe(0);
-    expect(result.current.isStale).toBe(false);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("the watcher unsubscribes from the provider on unmount", async () => {
-  const { unmount } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await waitFor(() => expect(mgr.listenerCount).toBeGreaterThan(0));
-
-  unmount();
-
-  expect(mgr.listenerCount).toBe(0);
-});
-
-test("the silent renewal timer is stopped on unmount", async () => {
-  const { unmount } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  expect(mgr.stopSilentRenewCalls).toBe(0);
-
-  unmount();
-
-  // automaticSilentRenew starts a timer that nothing else would ever stop
-  expect(mgr.stopSilentRenewCalls).toBe(1);
-});
-
-// --- an unreadable user store ----------------------------------------------
-
-// getUser rejects when the stored user does not parse: a SyntaxError from JSON.parse, or a
-// TypeError if it parses to something that is not an object. oidc-client-ts only ever stores
-// JSON.stringify output, so it takes something else writing to that key -- devtools, an
-// extension. (A browser that blocks storage outright fails earlier, when the UserManager is
-// built, and never gets here.) Rare, but the consequence used to be out of proportion:
-// expandSession is awaited outside any try in startRecording, so a rejection escaped as an
-// unhandled rejection and left the recorder wedged in "preparing" with no way back but a
-// reload.
-//
-// An entry that is there but unreadable means someone signed in, in this tab. Neither a
-// refresh nor a silent sign-in can use it -- both read the same entry first -- but a sign-in
-// popup does not read it and stores the new user over it, so that is what is offered.
-
-test("an unreadable user store is repaired by signing in again", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60)));
-
-  mgr.getUserError = new SyntaxError("Unexpected end of JSON input");
-  mgr.signinPopupResult = userAged(0, { access_token: "signed-in-again" });
-
-  await act(async () => {
-    expect(await result.current.expandSession()).toBe("was-renewed");
-  });
-
-  expect(mgr.signinPopupCalls).toBe(1);
-  expect(mgr.signinSilentCalls).toBe(0);
-  expect(await result.current.getAccessToken()).toBe("signed-in-again");
-});
-
-test("an unreadable user store with the popup declined records locally rather than crashing", async () => {
-  // the recovery read after the popup hits the same entry, and must not turn expandSession
-  // into a rejection either: fall back to recording locally, do not refuse to record at all
-  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-  try {
-    const { result } = await renderAppSession(authenticatedEnv);
-    const mgr = userManager();
-
-    await act(() => mgr.events.load(userAged(60)));
-
-    mgr.getUserError = new SyntaxError("Unexpected end of JSON input");
-    mgr.popupClosedByUser = true;
-
-    await act(async () => {
-      expect(await settledWithin(result.current.expandSession())).toBe("cannot-stream");
-    });
-
-    expect(mgr.signinPopupCalls).toBe(1);
-    expect(mgr.signinSilentCalls).toBe(0);
-  } finally {
-    consoleWarn.mockRestore();
-  }
-});
-
-// Stale means past max_age and nothing else: the banner it drives offers to reauthenticate,
-// which is no answer to a missing session or an unreadable store. Those have banners of
-// their own, keyed off isAuthenticated and error.
-
-test("the staleness watcher clears staleness when the user store becomes unreadable", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  // start from a stale session, so the assertion below has somewhere to move from
-  await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
-  await waitFor(() => expect(result.current.isStale).toBe(true));
-
-  mgr.getUserError = new Error("storage unavailable");
-
-  await act(async () => {
-    mgr.emitUserLoaded();
-  });
-
-  // the watcher re-checks on provider events; a rejection there would leave the last
-  // verdict standing and an unhandled rejection behind
-  await waitFor(() => expect(result.current.isStale).toBe(false));
-});
-
-test("nobody signed in is not stale", async () => {
-  const { result } = await renderAppSession(authenticatedEnv);
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(MAX_AGE_SECONDS + 600)));
-  await waitFor(() => expect(result.current.isStale).toBe(true));
-
-  // signing out leaves nothing to reauthenticate
-  await act(async () => {
-    await result.current.signout();
-  });
-
-  await waitFor(() => expect(result.current.isStale).toBe(false));
-  expect(result.current.isAuthenticated).toBe(false);
+  expect(result.current.isStale).toBe(false);
 });
 
 // --- signing out and the auto sign-in gate ----------------------------------
@@ -1364,14 +764,11 @@ test("auto sign-in is not offered when the deployment does not configure it", as
 });
 
 test("signing out drops the session and stops signing back in", async () => {
-  const { result } = await renderAppSession({ ...authenticatedEnv, oidcAutoSignin: true });
-  const mgr = userManager();
-
-  await act(() => mgr.events.load(userAged(60)));
+  const { result } = await renderAppSession({ ...authenticatedEnv, oidcAutoSignin: true }, userAged(60));
 
   await act(() => result.current.signout());
 
-  expect(mgr.removeUserCalls).toBe(1);
+  expect(oidc.methods.removeUser).toHaveBeenCalledOnce();
   expect(result.current.autoSignin).toBe(false);
   expect(result.current.isAuthenticated).toBe(false);
 });
@@ -1384,17 +781,13 @@ test("a sign-out whose user store refuses still stops signing back in", async ()
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
-    const { result } = await renderAppSession({ ...authenticatedEnv, oidcAutoSignin: true });
-    const mgr = userManager();
-
-    await act(() => mgr.events.load(userAged(60)));
-    mgr.removeUserError = new Error("session storage unavailable");
+    const { result } = await renderAppSession({ ...authenticatedEnv, oidcAutoSignin: true }, userAged(60));
+    oidc.outcome.removeUser = new Error("session storage unavailable");
 
     await act(async () => {
       await expect(result.current.signout()).resolves.toBeUndefined();
     });
 
-    expect(mgr.removeUserCalls).toBe(1);
     expect(result.current.autoSignin).toBe(false);
     // swallowed so it never reaches onPress, but not silently: the session is now in a
     // state the lecturer did not ask for and nothing else would say so
@@ -1404,53 +797,140 @@ test("a sign-out whose user store refuses still stops signing back in", async ()
   }
 });
 
+// --- staleness ---------------------------------------------------------------
+//
+// A session past max_age is not expired -- its tokens still work -- but it is too old to
+// count on for the length of a lecture, so the page says so and offers to reauthenticate.
+
+test("a session within max_age is not stale", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60));
+
+  expect(result.current.isStale).toBe(false);
+});
+
+test("a session past max_age is stale", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS + 600));
+
+  expect(result.current.isStale).toBe(true);
+});
+
+test("a session loaded with the page turns stale exactly when it ages out", async () => {
+  // The case that went unnoticed after a reload: the stored user reaches the page through
+  // the library's state alone, with no userLoaded event, and nothing but the user arriving
+  // there may be needed to arm the deadline.
+  vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
+
+  try {
+    const remainingSeconds = 120;
+    const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS - remainingSeconds));
+    expect(result.current.isStale).toBe(false);
+
+    // one second short of the deadline, nothing has changed
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync((remainingSeconds - 1) * 1000);
+    });
+    expect(result.current.isStale).toBe(false);
+
+    // and then it flips, without waiting out any polling interval
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(result.current.isStale).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("staleness is looked at again when the tab comes back", async () => {
+  // A background tab throttles its timers, or does not run them at all while the laptop
+  // sleeps. The clock moves past the deadline here without the timer firing; coming back
+  // to the tab has to be enough to notice.
+  vi.useFakeTimers({ toFake: [ "Date" ] });
+
+  try {
+    const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS - 60));
+    expect(result.current.isStale).toBe(false);
+
+    vi.setSystemTime(Date.now() + 120 * 1000);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(result.current.isStale).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a fresh sign-in clears staleness", async () => {
+  const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS + 600));
+  expect(result.current.isStale).toBe(true);
+
+  // a reauthentication elsewhere establishes a new session; the banner must clear without
+  // waiting out any timer
+  await signIn(userAged(0));
+
+  expect(result.current.isStale).toBe(false);
+});
+
+test("signing out clears staleness", async () => {
+  // with nobody signed in there is nothing to reauthenticate; the page says "not signed in"
+  const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS + 600));
+  expect(result.current.isStale).toBe(true);
+
+  await act(() => result.current.signout());
+
+  expect(result.current.isStale).toBe(false);
+});
+
+test("the token's own issue time wins when the local clock lags behind the provider", async () => {
+  // Wall clock says the session is a minute old, but the provider issued the current token
+  // far later than our clock believes. Trusting the wall clock would mean starting a lecture
+  // on a session that is really long past max_age, so the more pessimistic of the two wins.
+  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { iat: nowSeconds() + 10 * MAX_AGE_SECONDS }));
+
+  expect(result.current.isStale).toBe(true);
+});
+
+test.each([
+  [ "the deployment configures no max_age", { ...authenticatedEnv, oidcMaxAge: undefined }, userAged(10 * MAX_AGE_SECONDS) ],
+  [ "the provider sends no auth_time", authenticatedEnv, { ...userAged(10 * MAX_AGE_SECONDS), profile: { iat: nowSeconds() } } ]
+])("a session never turns stale when %s", async (_label, serverEnv, stored) => {
+  vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
+
+  try {
+    const { result } = await renderAppSession(serverEnv, stored as ReturnType<typeof userAged>);
+
+    expect(result.current.isStale).toBe(false);
+    // and nothing is waiting to change that
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 // --- the callback page -----------------------------------------------------
 //
 // Every sign-in flow ends on /auth/callback. After a redirect sign-in that window is the
-// app's, and has to go back to it. After a popup sign-in it is the popup, which only reports
-// back and is closed by the window that opened it -- left to navigate, it would load the whole
-// app inside the popup, and with auto sign-in configured start a sign-in of its own there.
-
-/**
- * Mount with a sign-in response in the URL, the way the callback page is loaded -- and in a
- * top-level window, which is where both a redirect and a popup sign-in end up. The suite runs
- * inside an iframe, where a window-based check would never navigate and a popup could not be
- * told from anything else. window.top cannot be replaced, but window.self can.
- */
-async function renderOnCallbackPage() {
-  const original = window.location.href;
-  window.history.replaceState(null, "", `${window.location.pathname}?code=abc&state=xyz`);
-  Object.defineProperty(window, "self", { value: window.top, configurable: true, writable: true });
-
-  try {
-    return await renderAppSession(authenticatedEnv);
-  } finally {
-    Object.defineProperty(window, "self", { value: window, configurable: true, writable: true });
-    window.history.replaceState(null, "", original);
-  }
-}
+// app's, and has to go back to it. After a popup or silent sign-in it is the popup or the
+// iframe, which only reports back -- left to navigate, it would load the whole app in there,
+// and with auto sign-in configured start a sign-in of its own. The library tells the two apart
+// by what it hands onSigninCallback.
 
 test("a redirect sign-in leaves the callback page for the app", async () => {
-  oidc.callback.user = userAged(0);
+  await renderAppSession(authenticatedEnv);
+  const onSigninCallback = authProviderProps().onSigninCallback as (user: unknown) => void;
 
-  await renderOnCallbackPage();
+  onSigninCallback(userAged(0));
 
   expect(router.replace).toHaveBeenCalledExactlyOnceWith("/");
 });
 
 test("a popup or silent sign-in leaves the callback page where it is", async () => {
-  oidc.callback.user = undefined;
-
-  await renderOnCallbackPage();
-
-  expect(router.replace).not.toHaveBeenCalled();
-});
-
-test("a page without a sign-in response navigates nowhere", async () => {
-  // the provider sits in the root layout, so this is every other page of the app
-  oidc.callback.user = userAged(0);
-
   await renderAppSession(authenticatedEnv);
+  const onSigninCallback = authProviderProps().onSigninCallback as (user: unknown) => void;
+
+  onSigninCallback(undefined);
 
   expect(router.replace).not.toHaveBeenCalled();
 });

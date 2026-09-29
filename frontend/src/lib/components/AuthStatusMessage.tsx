@@ -18,7 +18,7 @@ export function AuthStatusMessage() {
     error,
     isStale,
     interactiveSignin,
-    expandSession
+    reauthenticate
   } = useAppSession();
 
   if(apiUrl === undefined || !authRequired) {
@@ -39,7 +39,7 @@ export function AuthStatusMessage() {
     );
   }
 
-  if(error !== undefined) {
+  if(error !== undefined && error.source !== "signinSilent") {
     return (
       <InlineAlert variant="negative">
         <Heading>Authentication Error</Heading>
@@ -80,7 +80,7 @@ export function AuthStatusMessage() {
         <Content>
           <Flex direction="column">
             <Text>The authentication session will expire soon.</Text>
-            <ActionButton onPress={expandSession} marginTop="size-100" alignSelf="center">
+            <ActionButton onPress={reauthenticate} marginTop="size-100" alignSelf="center">
               <Refresh/>
               <Text>Reauthenticate</Text>
             </ActionButton>

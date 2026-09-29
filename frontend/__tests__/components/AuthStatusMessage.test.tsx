@@ -12,6 +12,12 @@ vi.mock("@/lib/components/SessionProvider", () => ({
   useAppSession: () => mockUseAppSession()
 }));
 
+/**
+ * An error the way react-oidc-context reports one: an Error that also says which of its
+ * methods it came from. A failed popup sign-in unless the test says otherwise.
+ */
+const authError = (message: string, source = "signinPopup") => Object.assign(new Error(message), { source });
+
 const DEFAULT_SERVER_ENV: ServerEnv = {
   apiUrl: "https://record.example.edu/api"
 };
@@ -23,8 +29,9 @@ function renderMessage(
     isAuthenticated = false,
     isLoading = false,
     isStale = false,
-    error = undefined as Error | undefined,
+    error = undefined as ReturnType<typeof authError> | undefined,
     interactiveSignin = vi.fn(async () => {}),
+    reauthenticate = vi.fn(async () => {}),
     expandSession = vi.fn(async (): Promise<SessionTransition> => "can-stream")
   } = {}
 ) {
@@ -40,6 +47,7 @@ function renderMessage(
       getAccessToken: async () => "token",
       signout: async () => {},
       interactiveSignin,
+      reauthenticate,
       expandSession
     }
   );
@@ -52,7 +60,7 @@ function renderMessage(
     </Provider>
   );
 
-  return { expandSession, interactiveSignin };
+  return { expandSession, interactiveSignin, reauthenticate };
 }
 
 // --- the anonymous deployment ----------------------------------------------
@@ -63,7 +71,7 @@ test("an anonymous deployment shows nothing and never consults the OIDC library"
     authRequired: false,
     isAuthenticated: false,
     isLoading: false,
-    error: new Error("boom")
+    error: authError("boom")
   });
 
   expect(screen.queryByRole("alert")).toBeNull();
@@ -83,7 +91,7 @@ test("a healthy session shows no banner", () => {
 });
 
 test("a stale session warns and offers reauthentication", async () => {
-  const { expandSession } = renderMessage({
+  const { reauthenticate, expandSession } = renderMessage({
     isAuthenticated: true,
     isLoading: false,
     isStale: true
@@ -93,7 +101,9 @@ test("a stale session warns and offers reauthentication", async () => {
   expect(screen.getByRole("button", { name: /Reauthenticate/i })).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: /Reauthenticate/i }));
-  expect(expandSession).toHaveBeenCalled();
+  // a sign-in that insists on the password, not the refresh a recording starts with
+  expect(reauthenticate).toHaveBeenCalledOnce();
+  expect(expandSession).not.toHaveBeenCalled();
 });
 
 // --- signing in and failing to ---------------------------------------------
@@ -109,7 +119,7 @@ test("a failed sign-in shows the reason", () => {
   renderMessage({
     isAuthenticated: false,
     isLoading: false,
-    error: new Error("invalid_client")
+    error: authError("invalid_client")
   });
 
   expect(screen.getByText(/invalid_client/)).toBeInTheDocument();
@@ -119,7 +129,7 @@ test("a failed sign-in with no message still says something", () => {
   renderMessage({
     isAuthenticated: false,
     isLoading: false,
-    error: new Error("")
+    error: authError("")
   });
 
   expect(screen.getByText(/Unknown Error/)).toBeInTheDocument();
@@ -141,7 +151,7 @@ test("merely not being signed in is offered a way in rather than reported as a f
 test.each([
   [ "signed out", { isAuthenticated: false, isLoading: false, isError: false } ],
   [ "signing in", { isAuthenticated: false, isLoading: true, isError: false } ],
-  [ "failed to sign in", { isAuthenticated: false, isLoading: false, error: new Error("boom") } ],
+  [ "failed to sign in", { isAuthenticated: false, isLoading: false, error: authError("boom") } ],
   [ "signed in", { isAuthenticated: true, isLoading: false, isError: false } ],
   [ "stale", { isAuthenticated: true, isLoading: false, isStale: true, isError: false }]
 ])("a deployment with no backend says nothing at all -- %s", (_label, authState) => {
@@ -153,8 +163,34 @@ test.each([
   expect(screen.queryByText(/Stale/i)).toBeNull();
 });
 
+// A silent refresh is the session looking after itself -- at every start of a recording, and
+// whenever a token has run out -- and its failure leaves the session no worse off than before.
+// The lecturer did not ask for it, and can do nothing about it that the page does not already
+// offer: a dead session shows as not signed in anyway.
+
+test("a failed silent refresh is not reported as an authentication error", () => {
+  renderMessage({ isAuthenticated: true, error: authError("login_required", "signinSilent") });
+
+  expect(screen.queryByText(/Authentication Error/i)).toBeNull();
+  expect(screen.queryByText(/login_required/)).toBeNull();
+});
+
+test("a failed silent refresh on a dead session still offers the way back in", () => {
+  renderMessage({ isAuthenticated: false, error: authError("invalid_grant", "signinSilent") });
+
+  expect(screen.queryByText(/Authentication Error/i)).toBeNull();
+  expect(screen.getByText("You are not authenticated")).toBeInTheDocument();
+});
+
+test("a failed background renewal is still reported", () => {
+  // the library's own timed renewal, as opposed to the refreshes this app asks for
+  renderMessage({ isAuthenticated: true, error: authError("provider unreachable", "renewSilent") });
+
+  expect(screen.getByText(/provider unreachable/)).toBeInTheDocument();
+});
+
 test("a real error outranks the invitation to sign in", () => {
-  renderMessage({ isAuthenticated: false, isLoading: false, error: new Error("invalid_client") });
+  renderMessage({ isAuthenticated: false, isLoading: false, error: authError("invalid_client") });
 
   expect(screen.getByText(/invalid_client/)).toBeInTheDocument();
   expect(screen.queryByText("You are not authenticated")).toBeNull();
@@ -169,7 +205,7 @@ test("a sign-in that has not happened yet outranks a stale flag left in the stor
 
 
 test("a retry in flight is shown as loading rather than as the error being retried", () => {
-  renderMessage({ isAuthenticated: false, isLoading: true, error: new Error("invalid_client") });
+  renderMessage({ isAuthenticated: false, isLoading: true, error: authError("invalid_client") });
 
   expect(screen.getByText(/Authenticating/i)).toBeInTheDocument();
   expect(screen.queryByText(/invalid_client/)).toBeNull();
@@ -182,7 +218,7 @@ test("a failed background renewal is surfaced while the user still counts as sig
   renderMessage({
     isAuthenticated: true,
     isLoading: false,
-    error: new Error("Token is not active")
+    error: authError("Token is not active")
   });
 
   expect(screen.getByText(/Token is not active/)).toBeInTheDocument();
@@ -192,7 +228,7 @@ test("the retry button on the error banner starts an interactive login", async (
   const { interactiveSignin } = renderMessage({
     isAuthenticated: false,
     isLoading: false,
-    error: new Error("invalid_client")
+    error: authError("invalid_client")
   });
 
   await userEvent.click(screen.getByRole("button", { name: /Retry authentication/i }));

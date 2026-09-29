@@ -1,11 +1,10 @@
 "use client";
 
-import { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { AuthProvider, useAuth } from "react-oidc-context";
-import { User, UserManager } from "oidc-client-ts";
+import { createContext, ReactNode, useContext, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
+import { AuthProvider, ErrorContext, useAuth } from "react-oidc-context";
+import { User } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
 import { ServerEnv } from "../utils/serverEnv";
-import { determineSessionStaleness } from "../utils/session";
 
 export type SessionTransition =
   "can-stream" | "cannot-stream" | "was-renewed";
@@ -17,7 +16,7 @@ export interface AppSession {
   isLoading: boolean
   isExpired: boolean | undefined
   isStale: boolean
-  error: Error | undefined
+  error: ErrorContext | undefined
   userName: string | undefined
 
   getAccessToken: () => Promise<string | undefined>
@@ -27,165 +26,202 @@ export interface AppSession {
   expandSession: () => Promise<SessionTransition>
 }
 
-interface SessionProviderProps {
-  providerUrl: string
-  clientId: string
+interface OidcSessionBridgeProps {
   maxAge: number | undefined
   autoSigninConfigured: boolean
   children?: ReactNode
 }
 
-interface SessionContextBridgeProps {
-  userManager: UserManager
-  autoSigninConfigured: boolean
-  isStale: boolean
-  recheckStaleness: () => Promise<boolean>
+interface SessionProviderProps {
+  serverEnv: ServerEnv
   children: ReactNode
 }
 
 const SessionContext = createContext<AppSession | null>(null);
 
-function AuthenticatedSessionContextBridge(
-  {
-    userManager,
-    autoSigninConfigured,
-    isStale,
-    recheckStaleness,
-    children
-  }: Readonly<SessionContextBridgeProps>
+function sessionStaleAtMillis(user: User | null | undefined, maxAge: number | undefined) {
+  if(user === undefined || user === null || maxAge === undefined || user.profile.auth_time === undefined) {
+    return undefined;
+  }
+
+  const staleAt = (user.profile.auth_time + maxAge) * 1000;
+  return staleAt > user.profile.iat * 1000 ? staleAt : 0;
+}
+
+function useIsStale(
+  user: User | null | undefined,
+  maxAge: number | undefined
 ) {
+  const staleAt = sessionStaleAtMillis(user, maxAge);
+
+  const subscribe = (onChange: () => void) => {
+    if(staleAt === undefined) {
+      return () => {};
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const armTimer = () => {
+      clearTimeout(timer);
+      const remainingMillis = staleAt - Date.now();
+      if(remainingMillis > 0) {
+        const timeoutMillis = Math.min(remainingMillis, 2 ** 31 - 1);
+        const timerAction = () => {
+          onChange();
+          armTimer();
+        };
+
+        timer = setTimeout(timerAction, timeoutMillis);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      onChange();
+      armTimer();
+    };
+
+    armTimer();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  };
+
+  return useSyncExternalStore(
+    subscribe,
+    () => staleAt !== undefined && Date.now() >= staleAt,
+    () => false
+  );
+}
+
+/**
+ * The part of the OidcSessionProvider logic that needs to sit inside AuthProvider, see below
+ */
+function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<OidcSessionBridgeProps>) {
   const [ autoSignin, setAutoSignin ] = useState(autoSigninConfigured);
-  const {
-    isAuthenticated,
-    isLoading,
-    error,
-    user,
-    removeUser,
-    signinPopup
-  } = useAuth();
+  const auth = useAuth();
+  const authRef = useRef(auth);
+  const isStale = useIsStale(auth.user, maxAge);
+
+  useEffect(() => {
+    authRef.current = auth;
+  }, [auth]);
+
+  const userName =
+    auth.user?.profile.preferred_username ??
+    auth.user?.profile.name ??
+    auth.user?.profile.email ??
+    "The Nameless One";
 
   const pendingRenewal = useRef<Promise<User | null>>(undefined);
 
-  const userName = user?.profile.preferred_username ?? user?.profile.name ?? user?.profile.email ?? "The Nameless One";
-
-  const getAccessToken = async () => {
-    let freshUser = await userManager.getUser().catch(() => null);
+  const doRenewIfExpired = async () => {
+    const freshUser = authRef.current.user;
 
     if(freshUser?.expired && freshUser.refresh_token !== undefined) {
-      // User expired while the tab was inactive, probably, but we still have a refresh token. So make a
-      // best effort to force-refresh.
-
-      // If several calls to getAccessToken arrive here at the same time, make the later ones wait for the
+      // If several calls arrive here at the same time, make the later ones wait for the
       // renewal attempt the first one kicked off rather than start their own, conflicting ones.
-      //
-      // Use the userManager here instead of the useAuth hooks to avoid updates of the UI every time this
-      // happens.
       if(pendingRenewal.current === undefined) {
-        pendingRenewal.current = userManager.signinSilent()
+        pendingRenewal.current = authRef.current.signinSilent()
           .catch(() => null)
           .finally(() => {
             pendingRenewal.current = undefined;
           });
       }
 
-      freshUser = await pendingRenewal.current;
+      return await pendingRenewal.current;
     }
+
+    return freshUser;
+  };
+
+  const renewIfExpired = useEffectEvent(doRenewIfExpired);
+
+  useEffect(() => {
+    if(auth.user?.expired && auth.user.refresh_token !== undefined) {
+      void renewIfExpired();
+    }
+  }, [auth.user]);
+
+  const getAccessToken = async () => {
+    // Renewal should not usually be necessary here, so this is largely a defensive-coding measure
+    // and should be a nop. If it isn't, the user probably expired while the tab was inactive. In
+    // that case we make a best effort to force-refresh.
+    const freshUser = await doRenewIfExpired();
 
     if(freshUser === null || freshUser?.expired) {
       return undefined;
     }
 
-    return freshUser.access_token;
+    return freshUser?.access_token;
   };
 
   const signout = async () => {
     setAutoSignin(false);
     try {
-      await removeUser();
+      await authRef.current.removeUser();
     } catch(e) {
       console.error("Failed to sign out", e);
     }
   };
 
   const interactiveSignin = async () => {
-    await signinPopup({ popupAbortOnClose: true }).catch(() => null);
+    await authRef.current.signinPopup({ popupAbortOnClose: true });
   };
 
   const reauthenticate = async () => {
-    // go through userManager rather than react-oidc-context to avoid updating the error
-    // message in case of failure: we fall back to the existing session here, which is probably
-    // ok, so we don't need to show an unsettling error message if the user closes the popup.
-    await userManager.signinPopup({ max_age: 0, popupAbortOnClose: true }).catch(() => null);
+    // max_age: 0 to force-reauthenticate even when the session isn't stale.
+    await authRef.current.signinPopup({ max_age: 0, popupAbortOnClose: true });
   };
 
-  // Expanding the session headroom means making sure the current session isn't stale and refreshing the access token
-  // manually, so we have its full length at the beginning of the recording.
+  // Expanding the session headroom means refreshing the access token manually, so we have its full length at the beginning
+  // of the recording.
   //
-  // If the current session is past max_age, this will force the user to reauthenticate and get a fresh session.
   // Refreshing the access token is best-effort and not all that necessary in normal deployments with short-lived access
   // tokens, but this way if a user likes access tokens that live long enough to cover a recording, then the access token
   // present at the beginning of the recording will not need renewal during the lecture.
   const expandSession = async () => {
-    const refreshSession = async (
-      fn: () => Promise<User | null>,
-      successValue: SessionTransition,
-      errMsg: string
-    ): Promise<SessionTransition> => {
-      if(await fn() !== null) {
-        return successValue;
-      }
-
-      console.warn(errMsg);
-
-      const freshUser = await userManager.getUser().catch(() => null);
-
-      if(freshUser === null || freshUser.expired) {
-        return "cannot-stream";
-      }
-
-      return "can-stream";
-    };
-
-    const currentUser = await userManager.getUser().catch(() => undefined);
+    const currentUser = authRef.current.user;
 
     // user not logged in
-    if(currentUser === null) {
+    if(currentUser === null || currentUser === undefined) {
       return "cannot-stream";
     }
 
-    if(currentUser === undefined || await recheckStaleness()) {
-      return refreshSession(
-        // go through userManager rather than react-oidc-context to avoid updating the error
-        // message in case of failure: we fall back to the existing session here, which is probably
-        // ok, so we don't need to show an unsettling error message if the user closes the popup.
-        () => userManager.signinPopup({ popupAbortOnClose: true }).catch(() => null),
-        "was-renewed",
-        "Failed to reauthenticate stale oidc session, continuing with existing session"
-      );
-    }
-
+    // No refresh token, so force-refreshing is pointless. Refer to session expiration state.
     if(currentUser.refresh_token === undefined) {
       return currentUser.expired ? "cannot-stream" : "can-stream";
     }
 
-    return refreshSession(
-      () => userManager.signinSilent().catch(() => null),
-      "can-stream",
-      "Failed to force-refresh access/refresh token, continuing with existing tokens"
-    );
+    // Refresh access token, so it has as long a lifetime as we can manage.
+    if(await authRef.current.signinSilent() !== null) {
+      return "can-stream";
+    }
+
+    // If refreshing failed, log and refer to session expiration state.
+    console.warn("Failed to force-refresh access/refresh token, continuing with existing tokens");
+
+    const freshUser = authRef.current.user;
+    if(freshUser === null || freshUser === undefined || freshUser.expired) {
+      return "cannot-stream";
+    }
+
+    return "can-stream";
   };
 
   return (
     <SessionContext.Provider
       value={{
         authRequired: true,
-        autoSignin,
-        isAuthenticated,
-        isLoading,
-        isExpired: user?.expired,
-        isStale,
-        error,
-        userName,
+        autoSignin: autoSignin,
+        isAuthenticated: auth.isAuthenticated,
+        isLoading: auth.isLoading,
+        isExpired: auth.user?.expired,
+        isStale: isStale,
+        userName: userName,
+        error: auth.error,
         getAccessToken,
         signout,
         interactiveSignin,
@@ -198,72 +234,26 @@ function AuthenticatedSessionContextBridge(
   );
 }
 
-function AuthenticatedSessionProvider({ providerUrl, clientId, maxAge, autoSigninConfigured, children }: Readonly<SessionProviderProps>) {
+/**
+ * OpenID connect session provider. Uses react-oidc-context, puts an OidcSessionBridge inside it, where
+ * most of the actual work happens. This part sets up the AuthProvider and checks the server env for sanity.
+ */
+function OidcSessionProvider(
+  { serverEnv, children }: Readonly<SessionProviderProps>
+) {
   const router = useRouter();
+
+  if(serverEnv.oidcProviderUrl === undefined) {
+    throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_PROVIDER_URL is not set.");
+  }
+
+  if(serverEnv.oidcClientId === undefined) {
+    throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_CLIENT_ID is not set.");
+  }
 
   const callbackUrl = typeof window === "undefined"
     ? ""
     : `${window.location.origin}/auth/callback`;
-
-  // Need to roll our own UserManager instead of relying on react-oidc-context so we have access
-  // to it later. That's required for manual reauthentication and headroom expansion ahead of a recording.
-  const [ userMgr ] = useState(() =>
-    new UserManager({
-      authority: providerUrl,
-      client_id: clientId,
-      redirect_uri: callbackUrl,
-      scope: "openid profile email",
-      automaticSilentRenew: true,
-      accessTokenExpiringNotificationTimeInSeconds: 120,
-      max_age: maxAge,
-      filterProtocolClaims: [ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ] // don't filter auth_time. Otherwise same as default.
-    })
-  );
-
-  const [ stale, setStale ] = useState(false);
-
-  // clean up userMgr when the component is unmounted. Library does not handle it for us.
-  useEffect(() => () => userMgr.stopSilentRenew(), [userMgr]);
-
-  // Staleness detection: set a flag in the store when session goes past max_age, unset it when
-  // the session is renewed. This uses a timer set to the expected expiry time and userMgr events
-  // as triggers, and on each trigger checks the session state and resets the timer if appropriate.
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-
-    const check = async () => {
-      clearTimeout(timer);
-      const { stale, recheckMillis } = await determineSessionStaleness(userMgr, maxAge);
-
-      if(cancelled) {
-        return;
-      }
-
-      setStale(stale);
-
-      if(recheckMillis !== undefined) {
-        // timer's max value is about 25 days. If expiry is further away, do a spurious check in 25 days.
-        const MAX_TIMEOUT_MILLIS = 2 ** 31 - 1;
-        timer = setTimeout(check, Math.min(recheckMillis, MAX_TIMEOUT_MILLIS));
-      }
-    };
-
-    // set event handlers that reset the timer when the session age changes or when we're unsure of our clock
-    check();
-    userMgr.events.addUserLoaded(check);
-    userMgr.events.addUserUnloaded(check);
-    document.addEventListener("visibilitychange", check);
-
-    // make sure all this is cleaned up when the component is unmounted
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", check);
-      userMgr.events.removeUserUnloaded(check);
-      userMgr.events.removeUserLoaded(check);
-      clearTimeout(timer);
-    };
-  }, [maxAge, setStale, userMgr]);
 
   const onSigninCallback = (user: User | undefined) => {
     if(user !== undefined) {
@@ -272,22 +262,24 @@ function AuthenticatedSessionProvider({ providerUrl, clientId, maxAge, autoSigni
     }
   };
 
-  const recheckStaleness = () =>
-    determineSessionStaleness(userMgr, maxAge).then(r => r.stale);
-
   return (
     <AuthProvider
-      userManager={userMgr}
+      authority={serverEnv.oidcProviderUrl}
+      client_id={serverEnv.oidcClientId}
+      redirect_uri={callbackUrl}
+      scope="openid profile email"
+      automaticSilentRenew={true}
+      accessTokenExpiringNotificationTimeInSeconds={120}
+      max_age={serverEnv.oidcMaxAge}
+      filterProtocolClaims={[ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ]} // don't filter auth_time. Otherwise same as default.
       onSigninCallback={onSigninCallback}
     >
-      <AuthenticatedSessionContextBridge
-        userManager={userMgr}
-        autoSigninConfigured={autoSigninConfigured}
-        isStale={stale}
-        recheckStaleness={recheckStaleness}
+      <OidcSessionBridge
+        autoSigninConfigured={serverEnv.oidcAutoSignin || false}
+        maxAge={serverEnv.oidcMaxAge}
       >
         {children}
-      </AuthenticatedSessionContextBridge>
+      </OidcSessionBridge>
     </AuthProvider>
   );
 }
@@ -318,12 +310,7 @@ function AnonymousSessionProvider(
   );
 }
 
-interface ServerProviderProps {
-  serverEnv: ServerEnv
-  children: ReactNode
-}
-
-export function SessionProvider({ serverEnv, children }: Readonly<ServerProviderProps>) {
+export function SessionProvider({ serverEnv, children }: Readonly<SessionProviderProps>) {
   // Support openid authentication and legacy yolo-who-needs-authentication mode. Split into two
   // impl components to conform to React hook rules.
 
@@ -331,23 +318,10 @@ export function SessionProvider({ serverEnv, children }: Readonly<ServerProvider
   const authBackend = serverEnv.authBackend || (serverEnv.apiUrl ? "oidc" : "disabled");
 
   if(authBackend === "oidc") {
-    if(serverEnv.oidcProviderUrl === undefined) {
-      throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_PROVIDER_URL is not set.");
-    }
-
-    if(serverEnv.oidcClientId === undefined) {
-      throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_CLIENT_ID is not set.");
-    }
-
     return (
-      <AuthenticatedSessionProvider
-        autoSigninConfigured={serverEnv.oidcAutoSignin || false}
-        providerUrl={serverEnv.oidcProviderUrl}
-        clientId={serverEnv.oidcClientId}
-        maxAge={serverEnv.oidcMaxAge}
-      >
+      <OidcSessionProvider serverEnv={serverEnv}>
         {children}
-      </AuthenticatedSessionProvider>
+      </OidcSessionProvider>
     );
   } else if(authBackend === "disabled") {
     return (

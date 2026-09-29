@@ -44,11 +44,11 @@ export function QuotaWarning({ thresholdBytes }: Readonly<QuotaWarningProps>) {
           <Text>
             Browser storage running low: {formatMib(usage)} of {formatMib(quota)} used.
           </Text>
-          
+
           <Text>
             Please consider removing some old recordings.
           </Text>
-        </Flex>          
+        </Flex>
       </Content>
     </InlineAlert>
   );
