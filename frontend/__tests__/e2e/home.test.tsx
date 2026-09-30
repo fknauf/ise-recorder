@@ -262,10 +262,21 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
   return recordingName;
 }
 
+/**
+ * How many requests went to one endpoint. Counted per endpoint rather than in total: how many
+ * chunks a recording is sent in depends on how long it ran, which a busy machine stretches.
+ */
+const requestsTo = (url: string) =>
+  vi.mocked(window.fetch).mock.calls.filter(([ calledUrl ]) => calledUrl === url).length;
+
 test("e2e recording a stream works", async () => {
   const recordingName = await recordAStream(anonymousTokenSource, "FOO_101");
 
-  expect(window.fetch).toHaveBeenCalledTimes(3);
+  // one job for one recording; a second would render it twice
+  expect(requestsTo("http://localhost:5000/api/jobs")).toBe(1);
+  expect(requestsTo("http://localhost:5000/api/chunks")).toBeGreaterThan(0);
+  // not signed in, so there is no listing to fetch
+  expect(requestsTo("http://localhost:5000/api/recordings")).toBe(0);
   // chunk and job requests also carry the recording's abort signal, which is not what this is about
   expect(window.fetch).toHaveBeenCalledWith("http://localhost:5000/api/chunks", expect.objectContaining({ method: "POST", body: expect.anything() }));
   expect(window.fetch).toHaveBeenCalledWith(
@@ -286,13 +297,16 @@ test("e2e recording a stream works", async () => {
 test("e2e recording a stream sends the access token to the server", async () => {
   const recordingName = await recordAStream(authenticatedTokenSource, "BAR_202");
 
+  expect(requestsTo("http://localhost:5000/api/jobs")).toBe(1);
+  expect(requestsTo("http://localhost:5000/api/chunks")).toBeGreaterThan(0);
+
   // the listing is fetched once when the section mounts and once more when the recording
-  // finishes, so the new lecture shows up as rendering without waiting for the minute poll
-  expect(window.fetch).toHaveBeenCalledTimes(5);
+  // finishes, so the new lecture shows up as rendering without waiting for the minute poll.
+  // At least twice rather than exactly: SWR also refetches when the window regains focus.
+  expect(requestsTo("http://localhost:5000/api/recordings")).toBeGreaterThanOrEqual(2);
 
   const urls = vi.mocked(window.fetch).mock.calls.map(([ url ]) => url);
 
-  expect(urls.filter(url => url === "http://localhost:5000/api/recordings")).toHaveLength(2);
   // after the job, not merely somewhere: a refresh before it would find nothing rendering
   expect(urls.lastIndexOf("http://localhost:5000/api/recordings"))
     .toBeGreaterThan(urls.indexOf("http://localhost:5000/api/jobs"));
