@@ -40,11 +40,12 @@ interface CapturedRecording {
   trackBundle: RecordingTrackBundle
   lectureTitle: string
   lecturerEmail: string
-  destination: ServerStorageDestination
+  destination: ServerStorageDestination | undefined
   onStarting: (recordingName: string) => Promise<void> | void
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void
   onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void
   onFinished: (recordingName: string) => Promise<void> | void
+  onStreamingFailed: (recordingName: string) => void
 }
 
 let captured: CapturedRecording | undefined;
@@ -119,11 +120,11 @@ beforeEach(() => {
 
   vi.mocked(recordLecture).mockImplementation(async (
     trackBundle, lectureTitle, lecturerEmail, destination,
-    onStarting, onStarted, onChunkWritten, onFinished
+    onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed
   ) => {
     captured = {
       trackBundle, lectureTitle, lecturerEmail, destination,
-      onStarting, onStarted, onChunkWritten, onFinished
+      onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed
     };
 
     await new Promise<void>(resolve => {
@@ -172,7 +173,7 @@ test("startRecording hands the lecture details and tracks to recordLecture", asy
   expect(call.trackBundle.displayTracks).toStrictEqual(displayTracks);
   // first captured display becomes the main display
   expect(call.trackBundle.mainDisplay).toBe(displayTracks[0]);
-  expect(call.destination.apiUrl).toBe("http://localhost:5000");
+  expect(call.destination?.apiUrl).toBe("http://localhost:5000");
 });
 
 test("startRecording is a no-op while a recording is already active", async () => {
@@ -182,8 +183,7 @@ test("startRecording is a no-op while a recording is already active", async () =
     result.current.store.setActiveRecording({
       state: "recording",
       name: "ALREADY_RUNNING",
-      stop: vi.fn(),
-      streamingImpeded: false
+      stop: vi.fn()
     });
   });
 
@@ -195,7 +195,7 @@ test("startRecording is a no-op while a recording is already active", async () =
   expect(result.current.activeRecording.name).toBe("ALREADY_RUNNING");
 });
 
-// --- session headroom and streamingImpeded --------------------------------
+// --- session headroom and where the recording streams to ------------------
 
 test("the session headroom is expanded before every recording", async () => {
   // unconditional: even an unauthenticated deployment goes through it, because the
@@ -208,46 +208,50 @@ test("the session headroom is expanded before every recording", async () => {
   expect(tokenSource.expandSession).toHaveBeenCalledOnce();
 });
 
-test("a renewed session aborts the start so the user can press record again", async () => {
-  const tokenSource = makeTokenSource(true, "test-token", "was-renewed");
-  const { result } = await renderRecorder(tokenSource);
-
-  await act(async () => {
-    await result.current.startRecording();
-  });
-
-  // the re-login popup just interrupted them; starting now would record the confusion
-  expect(vi.mocked(recordLecture)).not.toHaveBeenCalled();
-  expect(result.current.activeRecording.state).toBe("idle");
-});
-
-test("streaming is impeded when the session says it cannot stream", async () => {
+test("a session that cannot stream records without a destination", async () => {
   // an expired session, nobody signed in, or a user store that could not be read: the
-  // session knows which, and all of them mean the chunks would go out without a token
+  // session knows which, and all of them mean the chunks would go out without a token.
+  // No destination is what makes recordLecture mark the recording for re-upload.
   const tokenSource = makeTokenSource(true, undefined, "cannot-stream");
   const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(call.destination.streamingImpeded).toBe(true);
+  expect(call.destination).toBeUndefined();
 });
 
-test("streaming is not impeded when the session can stream", async () => {
+test("a session that can stream records to the backend with the session's tokens", async () => {
   const tokenSource = makeTokenSource(true, "test-token", "can-stream");
   const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(call.destination.streamingImpeded).toBe(false);
+  expect(call.destination?.apiUrl).toBe("http://localhost:5000");
+  // the session's own function, so every chunk asks for the token that is current then
+  expect(call.destination?.getAccessToken).toBe(tokenSource.getAccessToken);
 });
 
-test("streaming is not impeded without a backend, whatever the session state", async () => {
+test("without a backend a recording is not impeded, whatever the session state", async () => {
+  // there is nothing to re-upload to either, so it must not end up marked for re-upload
   const tokenSource = makeTokenSource(true, undefined, "cannot-stream");
   const { result } = await renderRecorder(tokenSource, { apiUrl: undefined });
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(call.destination.streamingImpeded).toBe(false);
+  expect(call.destination).toBeDefined();
+  expect(call.destination?.apiUrl).toBeUndefined();
+});
+
+test("a recording whose streaming failed is listed for re-upload", async () => {
+  const { result } = await renderRecorder(makeTokenSource(true, "test-token"));
+
+  const call = await startAndCapture(result.current.startRecording);
+
+  act(() => {
+    call.onStreamingFailed("REC_1");
+  });
+
+  expect(result.current.store.unstreamedRecordings).toStrictEqual([ "REC_1" ]);
 });
 
 // --- state machine ---------------------------------------------------------
@@ -278,8 +282,6 @@ test("the recorder walks idle -> preparing -> starting -> recording -> idle", as
 
   expect(result.current.activeRecording.state).toBe("recording");
   expect(result.current.activeRecording.name).toBe("REC_1");
-  // the impeded flag determined at start is carried into the active recording
-  expect(result.current.activeRecording).toMatchObject({ streamingImpeded: true });
 
   await act(async () => {
     await call.onFinished("REC_1");

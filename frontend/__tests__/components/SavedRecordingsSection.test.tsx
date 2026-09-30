@@ -205,8 +205,7 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
   vi.mocked(useActiveRecording).mockReturnValue({
     state: "recording",
     name: "BAR_2025-12-11T214230.418Z",
-    stop: vi.fn(),
-    streamingImpeded: false
+    stop: vi.fn()
   });
 
   vi.mocked(useBrowserStorage).mockReturnValue({
@@ -322,7 +321,7 @@ test("without a backend, nothing is offered for re-upload", async () => {
 
 test("the recording that is being made cannot be re-uploaded", () => {
   // its files are still being written, so the upload would send half a recording
-  const cards = renderWithBackend({ state: "recording", name: "BAR_2025-12-11T214230.418Z", stop: vi.fn(), streamingImpeded: true });
+  const cards = renderWithBackend({ state: "recording", name: "BAR_2025-12-11T214230.418Z", stop: vi.fn() });
 
   expect(reuploadButton(cards[1])).toBeDisabled();
   expect(reuploadButton(cards[0])).toBeEnabled();

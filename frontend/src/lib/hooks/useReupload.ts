@@ -1,7 +1,7 @@
 import { useAppSession } from "../components/SessionProvider";
 import { getAllRecordingTracks } from "../utils/browserStorage";
 import { showError } from "../utils/notifications";
-import { uploadFile, schedulePostprocessing } from "../utils/serverStorage";
+import { uploadFile, schedulePostprocessing, RetryPolicy, UploadStatus } from "../utils/serverStorage";
 import { useAppStore } from "./useAppStore";
 import { useLecture } from "./useLecture";
 import { useRefreshProcessedRecordings } from "./useProcessedRecordings";
@@ -23,13 +23,14 @@ export function useReupload(recordingName: string) {
     const uploadName = `${recordingName}-reupload`;
     const destination = {
       apiUrl,
-      getAccessToken,
-      streamingImpeded: false
+      getAccessToken
     };
 
-    const retryPolicy = {
+    let finalStatus: UploadStatus = "failed";
+
+    const retryPolicy: RetryPolicy = {
       retries: 3,
-      intervalMillis: 20000
+      initialWaitMillis: 10000
     };
 
     try {
@@ -45,14 +46,18 @@ export function useReupload(recordingName: string) {
 
       const uploadTracks = async () => {
         for(const { trackName, file } of trackBlobs) {
-          const succeeded = await uploadFile(destination, file, uploadName, trackName, signalProgress, retryPolicy);
+          const fileResult = await uploadFile(destination, file, uploadName, trackName, retryPolicy, signalProgress);
 
-          if(!succeeded) {
-            showError(`Failed manual upload of ${uploadName} track ${trackName}, aborting.`);
+          if(fileResult.status !== "ok") {
+            showError(`Failed manual upload of ${uploadName} track ${trackName}: ${fileResult.errorMessage ?? "unknown error"}`);
+            finalStatus = fileResult.status;
             return false;
           }
         }
 
+        // report ok if all tracks are uploaded even if post-processing can't be scheduled. User doesn't need to
+        // re-upload then, just re-render.
+        finalStatus = "ok";
         return true;
       };
 
@@ -66,7 +71,7 @@ export function useReupload(recordingName: string) {
       showError(`Manual upload of ${uploadName} failed`);
     }
 
-    signalManualUploadFinished(recordingName);
+    signalManualUploadFinished(recordingName, finalStatus);
     refreshProcessedRecordings();
   };
 

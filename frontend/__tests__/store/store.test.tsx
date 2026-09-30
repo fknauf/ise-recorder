@@ -213,12 +213,11 @@ test("setActiveRecording accepts values and reducers", async () => {
     ({
       name: old.name ?? "",
       state: "recording",
-      stop: stopFn,
-      streamingImpeded: false
+      stop: stopFn
     })
   );
   expect(store.getState().activeRecording).toStrictEqual({
-    name: "FOO", state: "recording", stop: stopFn, streamingImpeded: false
+    name: "FOO", state: "recording", stop: stopFn
   });
 });
 
@@ -296,4 +295,81 @@ test("updateBrowserStorage respects file overrides", async () => {
 
   expect(store.getState().savedRecordings).toStrictEqual(makeFileState(2468, 9002));
   expect(store.getState().adjustedSavedRecordings).toStrictEqual(makeFileState(2468, 9002, 23, 42, 1337));
+});
+
+// --- recordings that were not streamed ---------------------------------------
+//
+// What the banner shows and when is StreamingImpededWarning.test.tsx's business; this is the
+// bookkeeping underneath.
+
+const saved = (...names: string[]) =>
+  vi.mocked(gatherRecordingsList).mockResolvedValue(names.map(name => ({ name, files: [] })));
+
+test("a recording marked as not streamed stays listed while it is saved in the browser", async () => {
+  const store = createAppStore({});
+  navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 1, usage: 0 });
+  saved("GVS_1", "GVS_2");
+
+  store.getState().markUnstreamed("GVS_2");
+  store.getState().markUnstreamed("GVS_1");
+  await store.getState().updateBrowserStorage();
+
+  expect([ ...store.getState().unstreamedRecordings ].sort()).toStrictEqual([ "GVS_1", "GVS_2" ]);
+});
+
+test("a recording deleted from the browser is dropped from the list", async () => {
+  // there is nothing left to re-upload
+  const store = createAppStore({});
+  navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 1, usage: 0 });
+  saved("GVS_2");
+
+  store.getState().markUnstreamed("GVS_1");
+  store.getState().markUnstreamed("GVS_2");
+  await store.getState().updateBrowserStorage();
+
+  expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_2" ]);
+});
+
+test("the recording being made is not dropped before its files exist", async () => {
+  // A recording that cannot stream is marked before its first file is opened, so a look at
+  // browser storage that was already under way does not find it yet.
+  const store = createAppStore({});
+  navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 1, usage: 0 });
+  saved();
+
+  store.getState().setActiveRecording({ state: "starting", name: "LIVE" });
+  store.getState().markUnstreamed("LIVE");
+  await store.getState().updateBrowserStorage();
+
+  expect(store.getState().unstreamedRecordings).toStrictEqual([ "LIVE" ]);
+});
+
+test.each([ "failed", "aborted" ] as const)("a re-upload that ended %s leaves the recording listed", status => {
+  const store = createAppStore({});
+
+  store.getState().markUnstreamed("GVS_1");
+  store.getState().signalManualUploadProgress("GVS_1", 50);
+  store.getState().signalManualUploadFinished("GVS_1", status);
+
+  expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_1" ]);
+  // the upload itself is over either way, so the card gets its buttons back
+  expect(store.getState().reuploadProgress.has("GVS_1")).toBe(false);
+});
+
+test("a successful re-upload takes only its own recording off the list", () => {
+  const store = createAppStore({});
+
+  store.getState().markUnstreamed("GVS_1");
+  store.getState().markUnstreamed("GVS_2");
+  store.getState().signalManualUploadFinished("GVS_1", "ok");
+
+  expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_2" ]);
+});
+
+test("the list of recordings that were not streamed is persisted", () => {
+  const store = createAppStore({});
+
+  store.getState().markUnstreamed("GVS_1");
+
+  expect(createAppStore({}).getState().unstreamedRecordings).toStrictEqual([ "GVS_1" ]);
 });

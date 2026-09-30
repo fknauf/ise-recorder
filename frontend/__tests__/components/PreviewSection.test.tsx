@@ -86,7 +86,7 @@ afterEach(() => {
 
 // --- controls are locked while a recording is in flight --------------------
 
-const RECORDING: ActiveRecording = { state: "recording", name: "GVS", stop: () => {}, streamingImpeded: false };
+const RECORDING: ActiveRecording = { state: "recording", name: "GVS", stop: () => {} };
 
 test("every control is live while idle", () => {
   withOneDisplay();

@@ -51,7 +51,6 @@ const utf8 = new TextEncoder();
 
 const destination: ServerStorageDestination = {
   apiUrl: undefined,
-  streamingImpeded: false,
   getAccessToken: async () => undefined
 };
 
@@ -83,6 +82,7 @@ async function nameFor(lectureTitle: string): Promise<string> {
       recordingName = name;
     },
     (_name, stopFunction) => stopFunction(),
+    () => {},
     () => {},
     () => {}
   );

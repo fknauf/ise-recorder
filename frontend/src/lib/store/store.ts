@@ -5,6 +5,7 @@ import { persist } from "zustand/middleware";
 import { ServerEnv } from "../utils/serverEnv";
 import { gatherRecordingsList, RecordingFileList } from "../utils/browserStorage";
 import { StateCreator } from "zustand";
+import { UploadStatus } from "../utils/serverStorage";
 
 export type ActiveRecording = {
   state: "idle" | "preparing"
@@ -16,7 +17,6 @@ export type ActiveRecording = {
   state: "recording"
   name: string
   stop: () => void
-  streamingImpeded: boolean
 };
 
 export type StateUpdate<T> = T | ((old: T) => T);
@@ -97,6 +97,7 @@ export interface AppStoreState {
   savedRecordings: readonly RecordingFileList[]
   adjustedSavedRecordings: readonly RecordingFileList[]
   reuploadProgress: Map<string, number>
+  unstreamedRecordings: readonly string[]
   quota: number | undefined
   usage: number | undefined
 
@@ -119,7 +120,8 @@ export interface AppStoreState {
   overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) => void
   resetFileSizeOverrides: () => void
   signalManualUploadProgress: (recordingName: string, percentage: number) => void
-  signalManualUploadFinished: (recordingName: string) => void
+  signalManualUploadFinished: (recordingName: string, status: UploadStatus) => void
+  markUnstreamed: (recordingName: string) => void
   updateBrowserStorage: () => Promise<void>
   updateQuotaInformation: () => Promise<void>
 }
@@ -149,6 +151,7 @@ const createRawAppStore = (
   savedRecordings: [],
   adjustedSavedRecordings: [],
   reuploadProgress: new Map<string, number>(),
+  unstreamedRecordings: [],
   quota: undefined,
   usage: undefined,
 
@@ -249,12 +252,18 @@ const createRawAppStore = (
       reuploadProgress: new Map(state.reuploadProgress).set(recordingName, percentage)
     })),
 
-  signalManualUploadFinished: (recordingName: string) =>
+  signalManualUploadFinished: (recordingName: string, status: UploadStatus) =>
     set(state => {
       const newProgress = new Map(state.reuploadProgress);
       newProgress.delete(recordingName);
-      return { reuploadProgress: newProgress };
+      return {
+        reuploadProgress: newProgress,
+        unstreamedRecordings: status === "ok" ? state.unstreamedRecordings.filter(name => name !== recordingName) : state.unstreamedRecordings
+      };
     }),
+
+  markUnstreamed: (recordingName: string) =>
+    set(state => ({ unstreamedRecordings: [ ...state.unstreamedRecordings, recordingName ].toSorted() })),
 
   updateQuotaInformation: async () => {
     const { quota, usage } = await navigator.storage.estimate();
@@ -267,11 +276,14 @@ const createRawAppStore = (
       gatherRecordingsList()
     ]);
 
+    const allRecordingNames = new Set(recordings.map(r => r.name));
+
     set(state => ({
       quota: fs.quota,
       usage: fs.usage,
       savedRecordings: recordings,
-      adjustedSavedRecordings: applyOverrides(recordings, state.fileSizeOverrides)
+      adjustedSavedRecordings: applyOverrides(recordings, state.fileSizeOverrides),
+      unstreamedRecordings: state.unstreamedRecordings.filter(name => allRecordingNames.has(name) || name === state.activeRecording.name)
     }));
   }
 });
@@ -285,7 +297,8 @@ export const createAppStore = (
       name: "app-store",
       partialize: state => ({
         lectureTitle: state.lectureTitle,
-        lecturerEmail: state.lecturerEmail
+        lecturerEmail: state.lecturerEmail,
+        unstreamedRecordings: state.unstreamedRecordings
       })
     }
   )

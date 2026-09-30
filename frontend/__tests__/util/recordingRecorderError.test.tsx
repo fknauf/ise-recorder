@@ -30,7 +30,6 @@ vi.mock("@/lib/utils/notifications", () => ({
 
 const destination: ServerStorageDestination = {
   apiUrl: undefined,
-  streamingImpeded: false,
   getAccessToken: async () => undefined
 };
 
@@ -135,7 +134,8 @@ async function recordWithFailingOverlay(): Promise<Outcome> {
     },
     () => {
       finished = true;
-    }
+    },
+    () => {}
   );
 
   return { written, finished };
@@ -143,7 +143,7 @@ async function recordWithFailingOverlay(): Promise<Outcome> {
 
 beforeEach(() => {
   // the real one always returns a promise, and recordLecture chains on it
-  vi.mocked(sendChunkToServer).mockResolvedValue(true);
+  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
   vi.mocked(showError).mockClear();
 
   FakeMediaRecorder.instances = [];

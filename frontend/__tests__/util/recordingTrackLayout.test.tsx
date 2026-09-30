@@ -16,7 +16,6 @@ vi.mock("@/lib/utils/serverStorage");
 
 const destination: ServerStorageDestination = {
   apiUrl: undefined,
-  streamingImpeded: false,
   getAccessToken: async () => undefined
 };
 
@@ -43,7 +42,7 @@ async function filesFor(bundle: RecordingTrackBundle): Promise<string[]> {
 
   await recordLecture(
     bundle, "GVS", "lecturer@example.com", destination,
-    () => {}, onStarted, () => {}, () => {}
+    () => {}, onStarted, () => {}, () => {}, () => {}
   );
 
   return names;
@@ -293,7 +292,7 @@ test("no tracks means no recording at all", async () => {
 
   await recordLecture(
     emptyBundle, "GVS", "lecturer@example.com", destination,
-    onStarting, onStarted, () => {}, onFinished
+    onStarting, onStarted, () => {}, onFinished, () => {}
   );
 
   expect(onStarting).not.toHaveBeenCalled();

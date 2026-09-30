@@ -8,7 +8,7 @@ vi.mock("@/lib/utils/serverStorage");
 
 beforeEach(() => {
   // the real one always returns a promise, and recordLecture chains on it
-  vi.mocked(sendChunkToServer).mockResolvedValue(true);
+  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
 });
 
 const accessToken = async () => "test-token";
@@ -25,10 +25,10 @@ test("recordLecture does nothing when there are no tracks", async () => {
   const onStarted = vi.fn();
   const onChunkWritten = vi.fn();
   const onFinished = vi.fn();
+  const onStreamingFailed = vi.fn();
 
   const destination: ServerStorageDestination = {
     apiUrl: "http://example.com",
-    streamingImpeded: false,
     getAccessToken: accessToken
   };
 
@@ -44,7 +44,7 @@ test("recordLecture does nothing when there are no tracks", async () => {
     trackBundle,
     "FOO", "lecturer@example.com",
     destination,
-    onStarting, onStarted, onChunkWritten, onFinished);
+    onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed);
 
   expect(onStarting).not.toHaveBeenCalled();
   expect(onStarted).not.toHaveBeenCalled();
@@ -113,6 +113,7 @@ test("recordLecture records lectures", async () => {
   );
   const onChunkWritten = vi.fn();
   const onFinished = vi.fn();
+  const onStreamingFailed = vi.fn();
 
   window.fetch = vi.fn().mockResolvedValue(Response.json("", { status: 201 }));
 
@@ -126,7 +127,6 @@ test("recordLecture records lectures", async () => {
 
   const destination: ServerStorageDestination = {
     apiUrl: "http://example.com",
-    streamingImpeded: false,
     getAccessToken: accessToken
   };
 
@@ -134,7 +134,7 @@ test("recordLecture records lectures", async () => {
     trackBundle,
     "FOO", "lecturer@example.com",
     destination,
-    onStarting, onStarted, onChunkWritten, onFinished);
+    onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed);
 
   await new Promise(resolve => setTimeout(resolve, 6000));
   stopRecording();
@@ -157,9 +157,11 @@ test("recordLecture records lectures", async () => {
   expect(recordings[0].files[1].name).toBe("stream.webm");
 
   expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledTimes(4);
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "stream", 0);
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "stream", 1);
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "overlay", 0);
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "overlay", 1);
-  expect(vi.mocked(schedulePostprocessing)).toHaveBeenCalledWith(destination, recordingName, "lecturer@example.com");
+  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "stream", 0, expect.anything());
+  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "stream", 1, expect.anything());
+  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "overlay", 0, expect.anything());
+  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "overlay", 1, expect.anything());
+  expect(vi.mocked(schedulePostprocessing)).toHaveBeenCalledWith(destination, recordingName, "lecturer@example.com", expect.anything());
+  // every chunk arrived, so there is nothing to re-upload
+  expect(onStreamingFailed).not.toHaveBeenCalled();
 });

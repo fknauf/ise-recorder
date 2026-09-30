@@ -25,7 +25,6 @@ vi.mock("@/lib/utils/notifications", () => ({
 
 const destination: ServerStorageDestination = {
   apiUrl: undefined,
-  streamingImpeded: false,
   getAccessToken: async () => undefined
 };
 
@@ -88,7 +87,8 @@ async function recordBriefly(bundle: RecordingTrackBundle): Promise<Outcome> {
     },
     () => {
       finished = true;
-    }
+    },
+    () => {}
   );
 
   return { writtenFiles: [ ...writtenFiles ].sort(), finished };
@@ -96,7 +96,7 @@ async function recordBriefly(bundle: RecordingTrackBundle): Promise<Outcome> {
 
 beforeEach(() => {
   // the real one always returns a promise, and recordLecture chains on it
-  vi.mocked(sendChunkToServer).mockResolvedValue(true);
+  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
   vi.mocked(schedulePostprocessing).mockReset();
   vi.mocked(showError).mockClear();
 

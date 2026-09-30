@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { ProcessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
 import { useProcessedRecordings, useRefreshProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
-import { purgeRecording, schedulePostprocessing } from "@/lib/utils/serverStorage";
+import { purgeRecording, schedulePostprocessing, UploadResult } from "@/lib/utils/serverStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
@@ -93,7 +93,7 @@ function renderSection(
   refreshProcessedRecordings.mockResolvedValue(undefined);
   vi.mocked(useRefreshProcessedRecordings).mockReturnValue(refreshProcessedRecordings);
   vi.mocked(schedulePostprocessing).mockReset();
-  vi.mocked(schedulePostprocessing).mockResolvedValue(true);
+  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
   vi.mocked(purgeRecording).mockReset();
   vi.mocked(purgeRecording).mockResolvedValue(undefined);
 
@@ -241,7 +241,7 @@ test("a rerender schedules a job for that recording with the form's recipient", 
   // the recipient is whatever the lecture form holds now, not whoever got the first
   // report: the backend keeps no record of that
   expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(
-    { apiUrl: API_URL, streamingImpeded: false, getAccessToken },
+    { apiUrl: API_URL, getAccessToken },
     "PSU_2026",
     LECTURER_EMAIL,
     // somebody is sitting in front of the button and can press it again; a retry loop
@@ -258,21 +258,23 @@ test("a scheduled rerender refreshes the listing so the card turns into a render
   await waitFor(() => expect(refreshProcessedRecordings).toHaveBeenCalledOnce());
 });
 
-test("a rerender the backend refused leaves the listing alone and the button usable", async () => {
-  // schedulePostprocessing has already told the lecturer why; there is nothing new to fetch
+test("a rerender the backend refused still refreshes the listing and gives the button back", async () => {
+  // schedulePostprocessing has already told the lecturer why. A refusal usually means the
+  // listing was out of date -- the recording is rendering already, or gone -- so fetching
+  // it again is what brings the card up to date.
   renderSection();
-  vi.mocked(schedulePostprocessing).mockResolvedValue(false);
+  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "failed", errorMessage: "server responded 409" });
 
   await userEvent.click(rerenderButton(cards()[0]));
 
+  await waitFor(() => expect(refreshProcessedRecordings).toHaveBeenCalledOnce());
   await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
-  expect(refreshProcessedRecordings).not.toHaveBeenCalled();
 });
 
 test("the rerender button is disabled while the job request is in flight", async () => {
   // otherwise an impatient second press schedules a duplicate: the backend drops it, but
   // the lecturer gets two confirmations for one rerender
-  let answer: (scheduled: boolean) => void = () => {};
+  let answer: (result: UploadResult) => void = () => {};
 
   renderSection();
 
@@ -289,7 +291,7 @@ test("the rerender button is disabled while the job request is in flight", async
   await userEvent.click(rerenderButton(cards()[0]));
   expect(schedulePostprocessing).toHaveBeenCalledOnce();
 
-  answer(false);
+  answer({ status: "failed" });
 
   await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
 });
@@ -382,7 +384,7 @@ test("a rerender of a failed recording schedules a job for it and refreshes the 
   await userEvent.click(rerenderButton(unprocessedCards()[1]));
 
   expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(
-    { apiUrl: API_URL, streamingImpeded: false, getAccessToken },
+    { apiUrl: API_URL, getAccessToken },
     "XYZ_2025",
     LECTURER_EMAIL,
     expect.objectContaining({ retries: 0 })
@@ -392,7 +394,7 @@ test("a rerender of a failed recording schedules a job for it and refreshes the 
 });
 
 test("a failed recording's rerender button is disabled while the job request is in flight", async () => {
-  let answer: (scheduled: boolean) => void = () => {};
+  let answer: (result: UploadResult) => void = () => {};
 
   renderSection({ data: UNPROCESSED_LISTING });
 
@@ -407,10 +409,9 @@ test("a failed recording's rerender button is disabled while the job request is 
   expect(rerenderButton(unprocessedCards()[1])).toBeEnabled();
   expect(rerenderButton(cards()[0])).toBeEnabled();
 
-  answer(false);
+  answer({ status: "failed" });
 
   await waitFor(() => expect(rerenderButton(unprocessedCards()[0])).toBeEnabled());
-  expect(refreshProcessedRecordings).not.toHaveBeenCalled();
 });
 
 test("the failed cards come after the finished and the rendering ones", () => {

@@ -152,8 +152,7 @@ test("RecorderControls renders controls correctly when recording", async () => {
     {
       state: "recording",
       name: "PSU_TIMESTAMP",
-      stop: vi.fn(),
-      streamingImpeded: false
+      stop: vi.fn()
     }
   );
 
@@ -342,8 +341,7 @@ test("RecorderControls handles the stop recording button properly", async () => 
     {
       state: "recording",
       name: "PSU_TIMESTAMP",
-      stop: vi.fn(),
-      streamingImpeded: false
+      stop: vi.fn()
     }
   );
 

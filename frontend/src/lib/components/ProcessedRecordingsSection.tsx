@@ -27,23 +27,20 @@ const useRerender = (recordingName: string) => {
   const { getAccessToken } = useAppSession();
   const { lecturerEmail } = useLecture();
   const refreshProcessedRecordings = useRefreshProcessedRecordings();
-
   const [ busy, setBusy ] = useState(false);
 
   const rerender = async () => {
     setBusy(true);
 
     try {
-      const scheduled = await schedulePostprocessing(
-        { apiUrl, streamingImpeded: false, getAccessToken },
+      await schedulePostprocessing(
+        { apiUrl, getAccessToken },
         recordingName,
         lecturerEmail,
-        { retries: 0, intervalMillis: 5000 }
+        { retries: 0, initialWaitMillis: 5000 }
       );
 
-      if(scheduled) {
-        await refreshProcessedRecordings();
-      }
+      await refreshProcessedRecordings();
     } catch(e) {
       console.warn(`Failed to schedule re-render for ${recordingName}`, e);
     }

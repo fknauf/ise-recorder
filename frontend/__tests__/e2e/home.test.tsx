@@ -244,11 +244,10 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
   // complaints might pop up again.
   // Only one toast is shown at a time. cleanupBetweenTests dismisses leftovers, but that
   // races with the toast animation, so allow for waiting out a previous toast's 5s timeout.
-  await screen.findByText(
-    new RegExp(`${recordingName}.*postprocessing scheduled`, "i"),
-    {},
-    { timeout: 8000 }
-  );
+  //
+  // Found as a toast naming the recording rather than by its wording: the name is also on
+  // the recording's card, and the wording is free to change.
+  await screen.findByRole("alertdialog", { name: new RegExp(recordingName) }, { timeout: 8000 });
 
   const recordings = await gatherRecordingsList();
 
@@ -267,10 +266,11 @@ test("e2e recording a stream works", async () => {
   const recordingName = await recordAStream(anonymousTokenSource, "FOO_101");
 
   expect(window.fetch).toHaveBeenCalledTimes(3);
-  expect(window.fetch).toHaveBeenCalledWith("http://localhost:5000/api/chunks", { method: "POST", body: expect.anything() });
+  // chunk and job requests also carry the recording's abort signal, which is not what this is about
+  expect(window.fetch).toHaveBeenCalledWith("http://localhost:5000/api/chunks", expect.objectContaining({ method: "POST", body: expect.anything() }));
   expect(window.fetch).toHaveBeenCalledWith(
     "http://localhost:5000/api/jobs",
-    {
+    expect.objectContaining({
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -279,7 +279,7 @@ test("e2e recording a stream works", async () => {
         recording: recordingName,
         recipient: "speaker@example.com"
       })
-    }
+    })
   );
 });
 
@@ -308,17 +308,17 @@ test("e2e recording a stream sends the access token to the server", async () => 
   );
   expect(window.fetch).toHaveBeenCalledWith(
     "http://localhost:5000/api/chunks",
-    {
+    expect.objectContaining({
       method: "POST",
       headers: {
         Authorization: "Bearer test-token"
       },
       body: expect.anything()
-    }
+    })
   );
   expect(window.fetch).toHaveBeenCalledWith(
     "http://localhost:5000/api/jobs",
-    {
+    expect.objectContaining({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -328,7 +328,7 @@ test("e2e recording a stream sends the access token to the server", async () => 
         recording: recordingName,
         recipient: "speaker@example.com"
       })
-    }
+    })
   );
 });
 

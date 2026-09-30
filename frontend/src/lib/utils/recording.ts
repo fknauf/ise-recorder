@@ -2,7 +2,7 @@
 
 import { openRecordingFileStream } from "./browserStorage";
 import { showError } from "./notifications";
-import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
+import { RetryPolicy, schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
 import { graphemeAwareTruncateToBytes } from "./stringAux";
 
 // used to remove characters from the recording name that could trip up ffmpeg in post
@@ -59,7 +59,8 @@ function prepareTrackRecording(
   tracks: MediaStreamTrack[],
   trackTitle: string,
   options: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkNum: number) => Promise<RecordingBackgroundTask>
+  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkNum: number) => Promise<RecordingBackgroundTask>,
+  onTrackFinished: (trackTitle: string) => Promise<void>
 ): RecordingTask {
   const chunkMillis = 5000;
   const recordedStream = new MediaStream(tracks);
@@ -104,11 +105,14 @@ function prepareTrackRecording(
         if(chunk) {
           // Wait for the quasi-synchronous part to conclude before processing the
           // next chunk, to avoid concurrent writes on the OPFS
+
           chunkPromises.push(await onChunkAvailable(chunk, trackTitle, chunkNum));
           ++chunkNum;
         }
       }
     }
+
+    await onTrackFinished(trackTitle);
 
     // Wait for the fully asynchronous parts (the uploads to the server) to finish
     // before scheduling the postprocessing job.
@@ -146,13 +150,14 @@ function prepareRecording(
   { displayTracks, videoTracks, audioTracks, mainDisplay, overlay }: RecordingTrackBundle,
   videoOptions: MediaRecorderOptions,
   audioOptions: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>
+  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>,
+  onTrackFinished: (trackTitle: string) => Promise<void>
 ) {
   const jobs: RecordingTask[] = [];
 
   if(displayTracks.length > 0 || videoTracks.length > 0 || audioTracks.length > 0) {
-    const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, videoOptions, onChunkAvailable);
-    const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, audioOptions, onChunkAvailable);
+    const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, videoOptions, onChunkAvailable, onTrackFinished);
+    const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, audioOptions, onChunkAvailable, onTrackFinished);
 
     // If there's no bug in the rest of the program, this check should not be necessary, but I've janked the
     // mainDisplay/overlay resetting mechanic on stream removal before. So this is a useful canary.
@@ -220,11 +225,12 @@ export async function recordLecture(
   trackBundle: RecordingTrackBundle,
   lectureTitle: string,
   lecturerEmail: string,
-  destination: ServerStorageDestination,
+  destination: ServerStorageDestination | undefined,
   onStarting: (recordingName: string) => Promise<void> | void,
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,
   onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
-  onFinished: (recordingName: string) => Promise<void> | void
+  onFinished: (recordingName: string) => Promise<void> | void,
+  onStreamingFailed: (recordingName: string) => void
 ) {
   const sanitizedTitle = sanitizeLectureTitle(lectureTitle);
   const lecturePrefix = sanitizedTitle !== "" ? `${sanitizedTitle}_` : "";
@@ -239,11 +245,62 @@ export async function recordLecture(
   // Map of filename to output stream and associated information. This map is captured
   // and shared by the callback function we pass to the recording jobs below.
   const streams = new Map<string, FileSystemWritableFileStream>();
+  const streamingAbort = new AbortController();
+
+  streamingAbort.signal.addEventListener("abort", () => onStreamingFailed(recordingName), { once: true });
+
+  if(destination === undefined) {
+    streamingAbort.abort("impeded");
+    destination = {
+      apiUrl: undefined,
+      getAccessToken: async () => undefined
+    };
+  }
+
+  const chunkRetryPolicy: RetryPolicy = {
+    retries: 9,
+    initialWaitMillis: 2000,
+    abortSignal: streamingAbort.signal
+  };
+
+  const postRetryPolicy: RetryPolicy = {
+    retries: 3,
+    initialWaitMillis: 1000,
+    abortSignal: streamingAbort.signal
+  };
+
+  let stopTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // If backend is unavailable when the user clicks "stop recording", don't wait until all the queued
+  // chunks have timed out. Give them a few seconds, then abort.
+  const rearmStopTimer = () => {
+    clearTimeout(stopTimer);
+    stopTimer = setTimeout(() => streamingAbort.abort("stop"), 10000);
+  };
 
   const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
+    const uploadChunk = async () => {
+      if(streamingAbort.signal.aborted) {
+        return;
+      }
+
+      const result = await sendChunkToServer(destination, chunk, recordingName, trackTitle, chunkIndex, chunkRetryPolicy);
+
+      if(stopTimer !== undefined && result.status === "ok") {
+        // User has already clicked "stop recording", and uploads are slow and succeeding. So reset
+        // the stop timer whenever a chunk succeeds because that means we're not timing out. It's
+        // just going at a relaxed pace.
+        rearmStopTimer();
+      }
+
+      if(result.status === "failed" && !streamingAbort.signal.aborted) {
+        streamingAbort.abort("chunk");
+        showError(`Failed to upload chunk ${chunkIndex} in track ${trackTitle}: ${result.errorMessage ?? "unknown error"}`);
+      }
+    };
+
     // No need to await: we support sending chunks to server out of order and/or concurrently.
-    const backgroundPromise =
-      sendChunkToServer(destination, chunk, recordingName, trackTitle, chunkIndex).then(() => {});
+    const backgroundPromise = uploadChunk();
 
     // For local file storage on the other hand, it's important that chunks to the same file
     // are not written concurrently and that filesystem state updates are correctly ordered.
@@ -271,7 +328,18 @@ export async function recordLecture(
     return { promise: backgroundPromise };
   };
 
-  const jobs = prepareRecording(trackBundle, videoOptions, audioOptions, onChunkAvailable);
+  const onTrackFinished = async (trackTitle: string) => {
+    const filename = formatFilename(trackTitle);
+    const stream = streams.get(filename);
+
+    if(stream !== undefined) {
+      streams.delete(filename);
+      await stream.close().catch(() => null);
+    }
+  };
+
+  const jobs = prepareRecording(trackBundle, videoOptions, audioOptions, onChunkAvailable, onTrackFinished);
+
   const stopJobs = () => {
     for(const job of jobs) {
       try {
@@ -280,6 +348,8 @@ export async function recordLecture(
         console.warn("Failed to stop recording job", e);
       }
     }
+
+    rearmStopTimer();
   };
 
   if(jobs.length > 0) {
@@ -294,12 +364,18 @@ export async function recordLecture(
       }
 
       await onStarted(recordingName, stopJobs);
+
       await Promise.allSettled(jobs.map(job => job.finished));
-      await schedulePostprocessing(destination, recordingName, lecturerEmail);
+      clearTimeout(stopTimer);
+      await schedulePostprocessing(destination, recordingName, lecturerEmail, postRetryPolicy);
     } catch(e) {
       stopJobs();
       throw e;
     } finally {
+      clearTimeout(stopTimer);
+      stopTimer = undefined;
+      // streams should normally be empty here because onTrackFinished closed, but just in case
+      // something slipped through, close all remaining open streams.
       await Promise.allSettled(streams.values().map(stream => stream.close()));
       await onFinished(recordingName);
     }

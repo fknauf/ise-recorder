@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { ServerEnv } from "../utils/serverEnv";
 
 export type SessionTransition =
-  "can-stream" | "cannot-stream" | "was-renewed";
+  "can-stream" | "cannot-stream";
 
 export interface AppSession {
   authRequired: boolean
@@ -66,26 +66,21 @@ function useIsStale(
       const remainingMillis = staleAt - Date.now();
       if(remainingMillis > 0) {
         const timeoutMillis = Math.min(remainingMillis, 2 ** 31 - 1);
-        const timerAction = () => {
-          onChange();
-          armTimer();
-        };
-
-        timer = setTimeout(timerAction, timeoutMillis);
+        timer = setTimeout(triggerFn, timeoutMillis);
       }
     };
 
-    const onVisibilityChange = () => {
+    const triggerFn = () => {
       onChange();
       armTimer();
     };
 
     armTimer();
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("visibilitychange", triggerFn);
 
     return () => {
       clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener("visibilitychange", triggerFn);
     };
   };
 

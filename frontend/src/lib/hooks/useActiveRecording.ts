@@ -8,14 +8,26 @@ import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
 import { SessionTransition, useAppSession } from "../components/SessionProvider";
 import { useRefreshProcessedRecordings } from "./useProcessedRecordings";
+import { ServerStorageDestination } from "../utils/serverStorage";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
 }
 
 // extracted into a function to work around a react compiler limitation where && and || in try blocks cause it to bail.
-function isStreamingImpeded(apiUrl: string | undefined, sessionState: SessionTransition) {
-  return apiUrl !== undefined && sessionState === "cannot-stream";
+function streamingDestination(
+  apiUrl: string | undefined,
+  sessionState: SessionTransition,
+  getAccessToken: () => Promise<string | undefined>
+): ServerStorageDestination | undefined {
+  if(apiUrl !== undefined && sessionState === "cannot-stream") {
+    return undefined;
+  }
+
+  return {
+    apiUrl,
+    getAccessToken
+  };
 }
 
 export const useActiveRecording = () => useAppStore(state => state.activeRecording);
@@ -28,6 +40,7 @@ export function useStartStopRecording() {
   const updateQuotaInformation = useAppStore(state => state.updateQuotaInformation);
   const overrideFileSize = useAppStore(state => state.overrideFileSize);
   const refreshProcessedRecordings = useRefreshProcessedRecordings();
+  const markUnstreamed = useAppStore(state => state.markUnstreamed);
 
   const {
     lectureTitle,
@@ -56,16 +69,6 @@ export function useStartStopRecording() {
     try {
       const sessionState = await expandSession();
 
-      if(sessionState === "was-renewed") {
-        // user just had to re-login. This happens rarely, so user is now slightly confused,
-        // which we don't want to record. Let him press the button again so he knows exactly
-        // where the recording starts.
-        setActiveRecording({ state: "idle" });
-        return;
-      }
-
-      const streamingImpeded = isStreamingImpeded(apiUrl, sessionState);
-
       const onStarting = (recordingName: string) => {
         setActiveRecording({
           state: "starting",
@@ -79,8 +82,7 @@ export function useStartStopRecording() {
         setActiveRecording({
           state: "recording",
           name: recordingName,
-          stop: stopFunction,
-          streamingImpeded
+          stop: stopFunction
         });
 
         await updateBrowserStorage();
@@ -100,11 +102,13 @@ export function useStartStopRecording() {
         refreshProcessedRecordings();
       };
 
+      const onStreamingFailed = markUnstreamed;
+
       await recordLecture(
         trackBundle,
         lectureTitle, lecturerEmail,
-        { apiUrl, streamingImpeded, getAccessToken },
-        onStarting, onStarted, onChunkWritten, onFinished
+        streamingDestination(apiUrl, sessionState, getAccessToken),
+        onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed
       );
     } catch(e) {
       showError("Recording failed", e);

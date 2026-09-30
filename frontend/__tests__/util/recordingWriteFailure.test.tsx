@@ -24,7 +24,6 @@ vi.mock("@/lib/utils/notifications", () => ({
 
 const destination: ServerStorageDestination = {
   apiUrl: undefined,
-  streamingImpeded: false,
   getAccessToken: async () => undefined
 };
 
@@ -73,6 +72,7 @@ async function recordOneChunk(onChunkWritten: (name: string, file: string, size:
       stop();
     },
     onChunkWritten,
+    () => {},
     () => {}
   );
 }
@@ -80,7 +80,7 @@ async function recordOneChunk(onChunkWritten: (name: string, file: string, size:
 beforeEach(() => {
   // the real one always returns a promise, and recordLecture chains on it; the automock's
   // bare undefined would fail there before the local write this file is about
-  vi.mocked(sendChunkToServer).mockResolvedValue(true);
+  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
   audioContext = new AudioContext();
 });
 

@@ -2,33 +2,85 @@
 
 import { showError, showMessage, showSuccess } from "./notifications";
 
-type CallStatus = "ok" | "temp-fail" | "permanent-fail";
+type AttemptStatus = "ok" | "temp-fail" | "permanent-fail" | "aborted";
+export type UploadStatus = "ok" | "failed" | "aborted";
 
-interface CallResult {
-  status: CallStatus
+interface AttemptResult {
+  status: AttemptStatus
   errorMessage?: string
 }
 
-interface RetryPolicy {
-  retries: number
-  intervalMillis: number
+export interface UploadResult {
+  status: UploadStatus
+  errorMessage?: string
 }
+
+export interface RetryPolicy {
+  retries: number
+  initialWaitMillis: number
+  maxWaitMillis?: number
+  backoffFactor?: number
+  abortSignal?: AbortSignal
+}
+
+const DEFAULT_BACKOFF_FACTOR = 2;
+const DEFAULT_MAX_WAIT_MILLIS = 60000;
 
 export interface ServerStorageDestination {
   apiUrl: string | undefined
-  streamingImpeded: boolean
   getAccessToken: () => Promise<string | undefined>
 }
 
+const finalizeResult = (attemptResult: AttemptResult): UploadResult => ({
+  status: attemptResult.status === "temp-fail" || attemptResult.status === "permanent-fail" ? "failed" : attemptResult.status,
+  errorMessage: attemptResult.errorMessage
+});
+
+const abortableTimeout = (timeoutMillis: number, abortSignal?: AbortSignal) =>
+  new Promise<AttemptStatus>(resolve => {
+    if(abortSignal?.aborted) {
+      resolve("aborted");
+      return;
+    }
+
+    const abortHandler = () => {
+      clearTimeout(timer);
+      resolve("aborted");
+    };
+
+    const timeoutHandler = () => {
+      abortSignal?.removeEventListener("abort", abortHandler);
+      resolve("ok");
+    };
+
+    const timer = setTimeout(timeoutHandler, timeoutMillis);
+    abortSignal?.addEventListener("abort", abortHandler, { once: true });
+  });
+
 async function callWithRetries(
-  fn: () => Promise<CallResult> | CallResult,
-  { retries, intervalMillis }: RetryPolicy
-): Promise<CallResult> {
+  fn: () => Promise<AttemptResult> | AttemptResult,
+  {
+    retries,
+    initialWaitMillis,
+    maxWaitMillis,
+    backoffFactor,
+    abortSignal
+  }: RetryPolicy
+): Promise<AttemptResult> {
+  if(abortSignal?.aborted) {
+    return { status: "aborted" };
+  }
+
   let result = await fn();
 
+  let waitMillis = initialWaitMillis;
   for(let attempt = 0; result.status === "temp-fail" && attempt < retries; ++attempt) {
-    await new Promise(resolve => setTimeout(resolve, intervalMillis));
+    if(await abortableTimeout(waitMillis, abortSignal) === "aborted") {
+      return { status: "aborted" };
+    }
+
     result = await fn();
+    waitMillis = Math.min(waitMillis * (backoffFactor ?? DEFAULT_BACKOFF_FACTOR), maxWaitMillis ?? DEFAULT_MAX_WAIT_MILLIS);
   }
 
   return result;
@@ -37,8 +89,9 @@ async function callWithRetries(
 async function sendRequest(
   url: string | URL | Request,
   request: RequestInit,
+  abortSignal: AbortSignal | undefined,
   getAccessToken: () => Promise<string | undefined>
-): Promise<CallResult> {
+): Promise<AttemptResult> {
   try {
     const token = await getAccessToken();
 
@@ -52,7 +105,11 @@ async function sendRequest(
         }
       : request;
 
-    const response = await fetch(url, authorizedRequest);
+    const response = await fetch(url, { ...authorizedRequest, signal: abortSignal });
+
+    if(abortSignal?.aborted) {
+      return { status: "aborted" };
+    }
 
     if(response.ok) {
       return { status: "ok" };
@@ -62,12 +119,18 @@ async function sendRequest(
     // that case it's best to show an immediate error message rather than wait. In principle 409 is transient, though,
     // so I might reconsider this at some point.
     const permanentFailureCodes = [ 400, 404, 409, 422 ];
-    const status: CallStatus = permanentFailureCodes.includes(response.status) ? "permanent-fail" : "temp-fail";
+    const status: AttemptStatus = permanentFailureCodes.includes(response.status) ? "permanent-fail" : "temp-fail";
 
     return { status, errorMessage: `server responded ${response.status}, ${await response.text()}` };
   } catch(e) {
+    if(abortSignal?.aborted) {
+      return { status: "aborted" };
+    }
+
     console.warn("Error occurred when fetching", url, e);
-    return { status: "temp-fail", errorMessage: e instanceof Error ? e.message : "unknown error" };
+
+    const errorMessage = e instanceof Error ? e.message : "unknown error";
+    return { status: "temp-fail", errorMessage };
   }
 }
 
@@ -77,10 +140,14 @@ export async function sendChunkToServer(
   recording: string,
   track: string,
   index: number,
-  retryPolicy: RetryPolicy = { retries: 10, intervalMillis: 2000 }
-) {
-  if(!destination.apiUrl || destination.streamingImpeded) {
-    return false;
+  retryPolicy: RetryPolicy
+): Promise<UploadResult> {
+  if(retryPolicy.abortSignal?.aborted) {
+    return { status: "aborted" };
+  }
+
+  if(!destination.apiUrl) {
+    return { status: "ok" };
   }
 
   const chunkUrl = `${destination.apiUrl}/api/chunks`;
@@ -96,27 +163,23 @@ export async function sendChunkToServer(
     body: data
   };
 
-  const result = await callWithRetries(() => sendRequest(chunkUrl, request, destination.getAccessToken), retryPolicy);
-
-  if(result.status !== "ok") {
-    showError(`Failed to upload ${track} chunk ${index}: ${result.errorMessage}`);
-    return false;
-  }
-
-  return true;
+  const result = await callWithRetries(() => sendRequest(chunkUrl, request, retryPolicy.abortSignal, destination.getAccessToken), retryPolicy);
+  return finalizeResult(result);
 }
 
 export async function schedulePostprocessing(
   destination: ServerStorageDestination,
   recording: string,
   recipient: string | undefined,
-  retryPolicy: RetryPolicy = { retries: 5, intervalMillis: 1000 }
-) {
+  retryPolicy: RetryPolicy
+): Promise<UploadResult> {
+  if(retryPolicy.abortSignal?.aborted) {
+    showMessage("Post-processing could not be scheduled because streaming was impeded.");
+    return { status: "failed" };
+  }
+
   if(!destination.apiUrl) {
-    return;
-  } else if(destination.streamingImpeded) {
-    showMessage("Post-processing could not be scheduled because streaming was impeded. Please download the recording files for manual postprocessing.");
-    return;
+    return { status: "ok" };
   }
 
   const jobUrl = `${destination.apiUrl}/api/jobs`;
@@ -134,15 +197,15 @@ export async function schedulePostprocessing(
     body: JSON.stringify(data)
   };
 
-  const result = await callWithRetries(() => sendRequest(jobUrl, request, destination.getAccessToken), retryPolicy);
+  const result = await callWithRetries(() => sendRequest(jobUrl, request, retryPolicy.abortSignal, destination.getAccessToken), retryPolicy);
 
   if(result.status === "ok") {
-    showSuccess(`Recording "${recording}" finished; postprocessing scheduled.`);
-    return true;
+    showSuccess(`Scheduled postprocessing for recording "${recording}"`);
   } else {
-    showError(`Failed to schedule postprocessing: ${result.errorMessage}`);
-    return false;
+    showError(`Failed to schedule postprocessing: ${result.errorMessage}. The recording was streamed to backend and will be available for re-rendering within five minutes.`);
   }
+
+  return finalizeResult(result);
 }
 
 export const downloadUrl = (
@@ -197,20 +260,22 @@ export async function uploadFile(
   file: Blob,
   recording: string,
   track: string,
-  signalProgress: (bytesSent: number) => void = () => {},
-  retryPolicy?: RetryPolicy
-): Promise<boolean> {
+  retryPolicy: RetryPolicy,
+  signalProgress: (bytesSent: number) => void = () => {}
+): Promise<UploadResult> {
   const CHUNK_SIZE = 4 * 2 ** 20;
 
   for(let index = 0, offset = 0; offset < file.size; ++index, offset += CHUNK_SIZE) {
     const chunk = file.slice(offset, offset + CHUNK_SIZE);
 
-    if(!await sendChunkToServer(destination, chunk, recording, track, index, retryPolicy)) {
-      return false;
+    const chunkResult = await sendChunkToServer(destination, chunk, recording, track, index, retryPolicy);
+
+    if(chunkResult.status !== "ok") {
+      return chunkResult;
     }
 
     signalProgress(chunk.size);
   }
 
-  return true;
+  return { status: "ok" };
 }
