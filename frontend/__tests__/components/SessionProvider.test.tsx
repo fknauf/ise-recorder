@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { act, cleanup, renderHook } from "@testing-library/react";
-import { ReactNode } from "react";
+import { act, cleanup, render, renderHook } from "@testing-library/react";
+import { ReactNode, useLayoutEffect } from "react";
 import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 
@@ -563,6 +563,43 @@ test("a getAccessToken captured at the start of a recording follows later renewa
   await signIn(userAged(0, { access_token: "renewed-token" }));
 
   expect(await capturedGetAccessToken()).toBe("renewed-token");
+});
+
+// SWR starts a key's first fetch in a layout effect of the component that uses it, and a
+// child's layout effects run before any effect of the provider above it. When signing in is
+// what mounts the processed recordings, their first fetch asks for a token in that very
+// commit -- before an ordinary effect in the provider has caught up with the new user.
+test("a token asked for in the commit that signs the user in is the new user's", async () => {
+  const tokens: (string | undefined)[] = [];
+
+  function AsksOnMount() {
+    const { getAccessToken } = useAppSession();
+
+    useLayoutEffect(() => {
+      void getAccessToken().then(token => tokens.push(token));
+    }, [ getAccessToken ]);
+
+    return null;
+  }
+
+  function MountsOnSignIn() {
+    const { isAuthenticated } = useAppSession();
+    return isAuthenticated ? <AsksOnMount/> : null;
+  }
+
+  render(
+    <SessionProvider serverEnv={authenticatedEnv}>
+      <MountsOnSignIn/>
+    </SessionProvider>
+  );
+
+  await act(async () => {
+    oidc.loadUser(null);
+  });
+  await signIn(userAged(0, { access_token: "new-token" }));
+  await settle();
+
+  expect(tokens[0]).toBe("new-token");
 });
 
 // --- renewing on load --------------------------------------------------------

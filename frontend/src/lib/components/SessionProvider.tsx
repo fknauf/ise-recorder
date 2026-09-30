@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, ReactNode, useContext, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, ReactNode, useContext, useEffect, useEffectEvent, useInsertionEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AuthProvider, ErrorContext, useAuth } from "react-oidc-context";
 import { User } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
@@ -100,7 +100,9 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
   const authRef = useRef(auth);
   const isStale = useIsStale(auth.user, maxAge);
 
-  useEffect(() => {
+  // useInsertionEffect instead of useEffect because it runs earlier. Otherwise the ref is one-behind
+  // in render loops where auth is exchanged, and then the first fetch in useProcessedRecordings fails.
+  useInsertionEffect(() => {
     authRef.current = auth;
   }, [auth]);
 

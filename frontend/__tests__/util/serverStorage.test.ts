@@ -180,7 +180,7 @@ test("sending chunk to broken server", async () => {
   const elapsed = Date.now() - before;
 
   expect(result.status).toBe("failed");
-  expect(result.errorMessage).toContain("503");
+  expect(result.message).toContain("503");
 
   // Telling the user is the caller's business: during a recording several chunks give up
   // at once, and only the first of them may say so.
@@ -358,7 +358,7 @@ test("schedule postprocessing reports a refused job", async () => {
   const result = await schedulePostprocessing(destination, "FOO", "lecturer@example.com", noRetries);
 
   expect(result.status).toBe("failed");
-  expect(result.errorMessage).toContain("Recording FOO does not exist");
+  expect(result.message).toContain("Recording FOO does not exist");
   expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining("Recording FOO does not exist"));
   expect(vi.mocked(showSuccess)).not.toHaveBeenCalled();
 });
@@ -625,7 +625,7 @@ test("a permanent failure still reports the server's explanation", async () => {
 
   // giving up early must not cost the diagnosis: without the body the user sees a bare
   // status code for a mistake only the message explains
-  expect(result.errorMessage).toContain("recording name is not acceptable");
+  expect(result.message).toContain("recording name is not acceptable");
 });
 
 // --- backing off -------------------------------------------------------------
@@ -807,17 +807,16 @@ test("an aborted upload of a file stops at the chunk it was on", async () => {
 
 // --- purging ---------------------------------------------------------------
 //
-// The request that deletes a recording for good. What the lecturer has to confirm first is
-// the dialog's business, in ProcessedRecordingsSection.test.tsx; this is what happens once
-// they have.
+// The request that deletes a recording for good. What the lecturer has to confirm first,
+// and telling them how it went, is the dialog's business, in
+// ProcessedRecordingsSection.test.tsx; this is the request once they have confirmed.
 
 const API = "http://record.example.com";
 
 test("a purge sends one authenticated DELETE for the recording", async () => {
   window.fetch = vi.fn().mockResolvedValue(Response.json({ recording: "GVS_2025" }));
-  const refresh = vi.fn();
 
-  await purgeRecording(API, "GVS_2025", accessToken, refresh);
+  await purgeRecording(API, "GVS_2025", accessToken);
 
   expect(window.fetch).toHaveBeenCalledExactlyOnceWith(
     `${API}/api/recordings/GVS_2025`,
@@ -832,19 +831,20 @@ test("a purged recording name is percent-encoded into the path", async () => {
   // has to be encoded before it gets there
   window.fetch = vi.fn().mockResolvedValue(Response.json({}));
 
-  await purgeRecording(API, "Übung_2025", accessToken, vi.fn());
+  await purgeRecording(API, "Übung_2025", accessToken);
 
   expect(vi.mocked(window.fetch).mock.calls[0][0]).toBe(`${API}/api/recordings/${encodeURIComponent("Übung_2025")}`);
 });
 
-test("a successful purge is confirmed and refreshes the listing", async () => {
+test("a successful purge is reported back without telling the lecturer itself", async () => {
   window.fetch = vi.fn().mockResolvedValue(Response.json({ recording: "GVS_2025" }));
-  const refresh = vi.fn();
 
-  await purgeRecording(API, "GVS_2025", accessToken, refresh);
+  const result = await purgeRecording(API, "GVS_2025", accessToken);
 
-  expect(refresh).toHaveBeenCalledOnce();
-  expect(showSuccess).toHaveBeenCalledWith(expect.stringContaining("GVS_2025"));
+  expect(result.status).toBe("ok");
+  // the dialog shows the message; a toast from here as well would be a second one
+  expect(result.message).toBeDefined();
+  expect(showSuccess).not.toHaveBeenCalled();
   expect(showError).not.toHaveBeenCalled();
 });
 
@@ -852,28 +852,25 @@ test("nothing is sent without an access token", async () => {
   // the endpoint would refuse it anyway; asking without a token only produces a 401 that
   // says less than this
   window.fetch = vi.fn();
-  const refresh = vi.fn();
 
-  await purgeRecording(API, "GVS_2025", noAccessToken, refresh);
+  const result = await purgeRecording(API, "GVS_2025", noAccessToken);
 
   expect(window.fetch).not.toHaveBeenCalled();
-  expect(refresh).not.toHaveBeenCalled();
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("Not authenticated"));
+  expect(result.status).toBe("failed");
+  expect(result.message).toBeDefined();
 });
 
-test("a refused purge shows the server's explanation and still refreshes", async () => {
-  // a 409 means the listing was stale -- the recording started rendering in the meantime --
-  // so fetching it again is what brings the page up to date
+test("a refused purge carries the server's explanation", async () => {
+  // a 409 means the listing was stale -- the recording started rendering in the meantime
   window.fetch = vi.fn().mockResolvedValue(
     Response.json({ detail: "Recording GVS_2025 is in use and currently not purgeable" }, { status: 409 })
   );
-  const refresh = vi.fn();
 
-  await purgeRecording(API, "GVS_2025", accessToken, refresh);
+  const result = await purgeRecording(API, "GVS_2025", accessToken);
 
-  expect(refresh).toHaveBeenCalledOnce();
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("in use and currently not purgeable"));
-  expect(showSuccess).not.toHaveBeenCalled();
+  expect(result.status).toBe("failed");
+  expect(result.message).toContain("Recording GVS_2025 is in use and currently not purgeable");
+  expect(showError).not.toHaveBeenCalled();
 });
 
 test("a refusal whose detail is not a string is not stringified", async () => {
@@ -882,19 +879,22 @@ test("a refusal whose detail is not a string is not stringified", async () => {
     Response.json({ detail: [ { loc: [ "path", "recording" ], msg: "String should match pattern" } ] }, { status: 422 })
   );
 
-  await purgeRecording(API, "GVS_2025", accessToken, vi.fn());
+  const result = await purgeRecording(API, "GVS_2025", accessToken);
 
-  const message = vi.mocked(showError).mock.calls[0][0] as string;
-  expect(message).toContain("Unknown error");
-  expect(message).not.toContain("[object Object]");
+  expect(result.status).toBe("failed");
+  expect(result.message).toBeDefined();
+  expect(result.message).not.toContain("[object Object]");
 });
 
 test("a refusal that is not JSON still says something", async () => {
   window.fetch = vi.fn().mockResolvedValue(new Response("<html>502</html>", { status: 502 }));
 
-  await purgeRecording(API, "GVS_2025", accessToken, vi.fn());
+  const result = await purgeRecording(API, "GVS_2025", accessToken);
 
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("Unknown error"));
+  expect(result.status).toBe("failed");
+  expect(result.message).toBeDefined();
+  // a gateway's error page is not something to put in a toast
+  expect(result.message).not.toContain("<html>");
 });
 
 test("a backend that cannot be reached is reported rather than thrown", async () => {
@@ -902,9 +902,11 @@ test("a backend that cannot be reached is reported rather than thrown", async ()
   window.fetch = vi.fn().mockRejectedValue(new TypeError("NetworkError when attempting to fetch resource."));
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-  await expect(purgeRecording(API, "GVS_2025", accessToken, vi.fn())).resolves.toBeUndefined();
+  const result = await purgeRecording(API, "GVS_2025", accessToken);
 
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("NetworkError"));
+  expect(result.status).toBe("failed");
+  // what fetch() said is the only clue to which of the many ways of not arriving it was
+  expect(result.message).toContain("NetworkError when attempting to fetch resource.");
   error.mockRestore();
 });
 
@@ -1010,7 +1012,7 @@ test("the upload stops at the first chunk that fails", async () => {
 
   expect(result.status).toBe("failed");
   // the server's explanation travels with the result, for the caller to show
-  expect(result.errorMessage).toContain("disk full");
+  expect(result.message).toContain("disk full");
   expect((await sentChunks()).map(c => c.index)).toStrictEqual([ 0, 1 ]);
 });
 

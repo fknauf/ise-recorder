@@ -82,7 +82,7 @@ async function renderReupload(recordingName = "GVS_2025") {
 const destination = expect.objectContaining({ apiUrl: "http://localhost:5000", getAccessToken });
 
 const ok: UploadResult = { status: "ok" };
-const failed: UploadResult = { status: "failed", errorMessage: "server responded 507, disk full" };
+const failed: UploadResult = { status: "failed", message: "server responded 507, disk full" };
 
 test("every track goes up under a name of its own, then the job is scheduled", async () => {
   vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("overlay"), trackOf("stream") ]);

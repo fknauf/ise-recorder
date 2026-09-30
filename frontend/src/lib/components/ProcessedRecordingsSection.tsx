@@ -7,11 +7,12 @@ import Download from "@spectrum-icons/workflow/Download";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import Delete from "@spectrum-icons/workflow/Delete";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { DownloadableRecording, RenderingRecording, UnprocessedRecording, useProcessedRecordings, useRefreshProcessedRecordings } from "../hooks/useProcessedRecordings";
+import { useProcessedRecordings, useRefreshProcessedRecordings } from "../hooks/useProcessedRecordings";
 import * as z from "zod";
-import { downloadUrl, purgeRecording, schedulePostprocessing } from "../utils/serverStorage";
+import { DownloadableRecording, downloadUrl, purgeRecording, RenderingRecording, schedulePostprocessing, UnprocessedRecording } from "../utils/serverStorage";
 import { useLecture } from "../hooks/useLecture";
 import { useState } from "react";
+import { showError, showSuccess } from "../utils/notifications";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -54,7 +55,7 @@ const useRerender = (recordingName: string) => {
 function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
   const { apiUrl } = useServerEnv();
   const { getAccessToken } = useAppSession();
-  const refreshProcessedRecordings = useRefreshProcessedRecordings();
+  const { mutate } = useProcessedRecordings();
 
   const { dismiss } = useDialogContainer();
   const [ busy, setBusy ] = useState(false);
@@ -65,7 +66,41 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
 
   const initiatePurge = async () => {
     setBusy(true);
-    await purgeRecording(apiUrl, recordingName, getAccessToken, refreshProcessedRecordings);
+    await mutate(
+      async () => {
+        const result = await purgeRecording(apiUrl, recordingName, getAccessToken);
+
+        if(result.message !== undefined) {
+          if(result.status === "ok") {
+            showSuccess(result.message);
+          } else {
+            showError(result.message);
+            throw new Error(result.message);
+          }
+        }
+
+        return undefined;
+      }, {
+        optimisticData: current => {
+          if(current === undefined) {
+            return undefined;
+          }
+
+          return {
+            ...current,
+            completed: current.completed.filter(rec => rec.name !== recordingName),
+            unprocessed: current.unprocessed.filter(rec => rec.name !== recordingName),
+            rendering: current.rendering.filter(rec => rec.name !== recordingName)
+          };
+        },
+        rollbackOnError: true,
+        revalidate: true,
+        throwOnError: false,
+        populateCache: false
+      }
+    );
+
+
     setBusy(false);
     dismiss();
   };
@@ -207,7 +242,7 @@ function ProcessedRecordingsSectionImpl({ id }: Readonly<{ id: string }>) {
     );
   }
 
-  if(data === null || data.completed.length + data.rendering.length + data.unprocessed.length === 0) {
+  if(data === undefined || data.completed.length + data.rendering.length + data.unprocessed.length === 0) {
     return null;
   }
 

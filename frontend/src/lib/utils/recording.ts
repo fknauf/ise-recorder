@@ -295,7 +295,7 @@ export async function recordLecture(
 
       if(result.status === "failed" && !streamingAbort.signal.aborted) {
         streamingAbort.abort("chunk");
-        showError(`Streaming aborted: failed to upload chunk ${chunkIndex} of track ${trackTitle}: ${result.errorMessage ?? "unknown error"}`);
+        showError(`Streaming aborted: failed to upload chunk ${chunkIndex} of track ${trackTitle}: ${result.message ?? "unknown error"}`);
       }
     };
 

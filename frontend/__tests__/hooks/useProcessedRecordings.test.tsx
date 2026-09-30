@@ -21,10 +21,10 @@ const API_URL = "https://record.example.edu";
 
 type AppSession = ReturnType<typeof useAppSession>;
 
-const session = (getAccessToken: AppSession["getAccessToken"]): AppSession => ({
+const session = (getAccessToken: AppSession["getAccessToken"], isAuthenticated = true): AppSession => ({
   authRequired: true,
   autoSignin: false,
-  isAuthenticated: true,
+  isAuthenticated,
   isLoading: false,
   isExpired: false,
   isStale: false,
@@ -69,11 +69,12 @@ function swrWrapper() {
 function renderPreprocessedRecordings(
   {
     serverEnv = { apiUrl: API_URL } as ServerEnv,
-    getAccessToken = (async () => "test-token") as AppSession["getAccessToken"]
+    getAccessToken = (async () => "test-token") as AppSession["getAccessToken"],
+    isAuthenticated = true
   } = {}
 ) {
   mockServerEnv.mockReturnValue(serverEnv);
-  mockUseAppSession.mockReturnValue(session(getAccessToken));
+  mockUseAppSession.mockReturnValue(session(getAccessToken, isAuthenticated));
 
   return renderHook(useProcessedRecordings, { wrapper: swrWrapper() });
 }
@@ -126,19 +127,58 @@ test("nothing is fetched when the deployment has no backend", async () => {
   await waitFor(() => expect(result.current.isLoading).toBe(false));
 
   expect(fetchMock).not.toHaveBeenCalled();
-  expect(result.current.data).toBeNull();
+  expect(result.current.data).toBeUndefined();
 });
 
-test("no request is made when there is no access token to send", async () => {
-  const { result } = renderPreprocessedRecordings({ getAccessToken: async () => undefined });
+test("nothing is fetched while nobody is signed in", async () => {
+  const { result } = renderPreprocessedRecordings({ isAuthenticated: false });
 
   await waitFor(() => expect(result.current.isLoading).toBe(false));
 
   expect(fetchMock).not.toHaveBeenCalled();
-  expect(result.current.data).toBeNull();
-  // not a failure, so no alert: this is the gap between the session going away and the
-  // section noticing and unmounting
+  expect(result.current.data).toBeUndefined();
+  // not a failure, so no alert: there is simply no listing to have
   expect(result.current.error).toBeUndefined();
+});
+
+test("signing in fetches the listing without waiting for the poll", async () => {
+  respondWith(() => jsonResponse(LISTING));
+
+  const { result, rerender } = renderPreprocessedRecordings({ isAuthenticated: false });
+
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+  mockUseAppSession.mockReturnValue(session(async () => "test-token", true));
+  rerender();
+
+  await waitFor(() => expect(result.current.data).toEqual(LISTING));
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+test("signing out drops the listing", async () => {
+  // every TOTP in it is a download link, and they are not the next user's to have
+  respondWith(() => jsonResponse(LISTING));
+
+  const { result, rerender } = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(result.current.data).toEqual(LISTING));
+
+  mockUseAppSession.mockReturnValue(session(async () => undefined, false));
+  rerender();
+
+  await waitFor(() => expect(result.current.data).toBeUndefined());
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+test("a signed-in session that yields no token is a failure rather than an empty listing", async () => {
+  // what is left when a renewal failed: the session still says signed in, but there is
+  // nothing to send. An empty listing would tell the lecturer they have no recordings.
+  const { result } = renderPreprocessedRecordings({ getAccessToken: async () => undefined });
+
+  await waitFor(() => expect(result.current.error).toBeDefined());
+
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(result.current.data).toBeUndefined();
 });
 
 test("a fresh token is requested for every poll rather than captured once", async () => {
@@ -179,9 +219,9 @@ test("re-rendering does not set off another request", async () => {
 
   await waitFor(() => expect(result.current.data).toEqual(LISTING));
 
-  // The fetcher is built fresh on every render rather than memoised, which is fine because
-  // SWR reads it through a ref at revalidation time -- and is what keeps the retry chain
-  // on the current getAccessToken. It would not be fine if its identity reached the key.
+  // The fetcher may be built afresh on any render, which is fine because SWR reads it
+  // through a ref at revalidation time -- and is what keeps the retry chain on the current
+  // getAccessToken. It would not be fine if its identity reached the key.
   rerender();
   rerender();
 
@@ -249,7 +289,7 @@ test("a malformed listing is a failure rather than something to render", async (
   // the section branches on this type to prettify it, so letting zod's own error through
   // rather than rewrapping it is part of the contract
   expect(result.current.error).toBeInstanceOf(z.ZodError);
-  expect(result.current.data).toBeNull();
+  expect(result.current.data).toBeUndefined();
 });
 
 test("a backend that cannot be reached at all fails the same way", async () => {

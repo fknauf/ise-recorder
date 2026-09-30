@@ -49,7 +49,7 @@ export function useReupload(recordingName: string) {
           const fileResult = await uploadFile(destination, file, uploadName, trackName, retryPolicy, signalProgress);
 
           if(fileResult.status !== "ok") {
-            showError(`Failed manual upload of ${uploadName} track ${trackName}: ${fileResult.errorMessage ?? "unknown error"}`);
+            showError(`Failed manual upload of ${uploadName} track ${trackName}: ${fileResult.message ?? "unknown error"}`);
             finalStatus = fileResult.status;
             return false;
           }

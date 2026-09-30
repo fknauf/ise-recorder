@@ -1,18 +1,19 @@
 "use client";
 
 import { showError, showMessage, showSuccess } from "./notifications";
+import * as z from "zod";
 
 type AttemptStatus = "ok" | "temp-fail" | "permanent-fail" | "aborted";
 export type UploadStatus = "ok" | "failed" | "aborted";
 
 interface AttemptResult {
   status: AttemptStatus
-  errorMessage?: string
+  message?: string
 }
 
 export interface UploadResult {
   status: UploadStatus
-  errorMessage?: string
+  message?: string
 }
 
 export interface RetryPolicy {
@@ -31,9 +32,45 @@ export interface ServerStorageDestination {
   getAccessToken: () => Promise<string | undefined>
 }
 
+export interface DownloadableRecording {
+  name: string
+  size: number
+  totp: string
+}
+
+export interface RenderingRecording {
+  name: string
+}
+
+export interface UnprocessedRecording {
+  name: string
+}
+
+export interface ProcessedRecordings {
+  user: string
+  completed: DownloadableRecording[]
+  rendering: RenderingRecording[]
+  unprocessed: UnprocessedRecording[]
+}
+
+const ProcessedRecordingsSchema = z.object({
+  user: z.string(),
+  completed: z.array(z.object({
+    name: z.string(),
+    size: z.number(),
+    totp: z.string()
+  })),
+  rendering: z.array(z.object({
+    name: z.string()
+  })),
+  unprocessed: z.array(z.object({
+    name: z.string()
+  }))
+});
+
 const finalizeResult = (attemptResult: AttemptResult): UploadResult => ({
   status: attemptResult.status === "temp-fail" || attemptResult.status === "permanent-fail" ? "failed" : attemptResult.status,
-  errorMessage: attemptResult.errorMessage
+  message: attemptResult.message
 });
 
 const abortableTimeout = (timeoutMillis: number, abortSignal?: AbortSignal) =>
@@ -121,7 +158,7 @@ async function sendRequest(
     const permanentFailureCodes = [ 400, 404, 409, 422 ];
     const status: AttemptStatus = permanentFailureCodes.includes(response.status) ? "permanent-fail" : "temp-fail";
 
-    return { status, errorMessage: `server responded ${response.status}, ${await response.text()}` };
+    return { status, message: `server responded ${response.status}, ${await response.text()}` };
   } catch(e) {
     if(abortSignal?.aborted) {
       return { status: "aborted" };
@@ -130,7 +167,7 @@ async function sendRequest(
     console.warn("Error occurred when fetching", url, e);
 
     const errorMessage = e instanceof Error ? e.message : "unknown error";
-    return { status: "temp-fail", errorMessage };
+    return { status: "temp-fail", message: errorMessage };
   }
 }
 
@@ -202,7 +239,7 @@ export async function schedulePostprocessing(
   if(result.status === "ok") {
     showSuccess(`Scheduled postprocessing for recording "${recording}"`);
   } else {
-    showError(`Failed to schedule postprocessing: ${result.errorMessage}. The recording was streamed to backend and will be available for re-rendering within five minutes.`);
+    showError(`Failed to schedule postprocessing: ${result.message}. The recording was streamed to backend and will be available for re-rendering within five minutes.`);
   }
 
   return finalizeResult(result);
@@ -216,16 +253,52 @@ export const downloadUrl = (
 ) =>
   `${apiUrl}/api/recordings/${user}/${encodeURIComponent(recordingName)}?totp=${totp}`;
 
-export async function purgeRecording(
-  apiUrl: string,
-  recordingName: string,
-  getAccessToken: () => Promise<string | undefined>,
-  refreshList: () => void) {
+export async function fetchProcessedRecordings(
+  apiUrl: string | undefined,
+  getAccessToken: () => Promise<string | undefined>
+): Promise<ProcessedRecordings | undefined> {
+  if(apiUrl === undefined) {
+    return undefined;
+  }
+
   const token = await getAccessToken();
 
   if(token === undefined) {
-    showError(`Failed to purge ${recordingName}: Not authenticated`);
-    return;
+    throw new Error("Unable to fetch list of processed recordings: not authenticated");
+  }
+
+  const request: RequestInit = {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`
+    }
+  };
+
+  const response = await fetch(`${apiUrl}/api/recordings`, request);
+
+  if(!response.ok) {
+    // parse detail from fastapi response if possible, omit detail otherwise.
+    const body = await response.json().catch(() => null);
+    const detail = typeof body?.detail === "string" ? ` ${body.detail}` : "";
+    throw new Error(`Unable to fetch list of processed recordings, server responded ${response.status}${detail}`);
+  }
+
+  return ProcessedRecordingsSchema.parse(await response.json());
+}
+
+export async function purgeRecording(
+  apiUrl: string,
+  recordingName: string,
+  getAccessToken: () => Promise<string | undefined>
+): Promise<UploadResult> {
+  const token = await getAccessToken();
+
+  if(token === undefined) {
+    return {
+      status: "failed",
+      message: `Failed to purge ${recordingName}: Not authenticated`
+    };
   }
 
   const endpoint = `${apiUrl}/api/recordings/${encodeURIComponent(recordingName)}`;
@@ -239,19 +312,29 @@ export async function purgeRecording(
 
   try {
     const response = await fetch(endpoint, request);
-    refreshList();
 
-    if(response.ok) {
-      showSuccess(`Purged ${recordingName}`);
-    } else {
+    if(!response.ok) {
       const body = await response.json().catch(() => null);
       const detail = typeof body?.detail === "string" ? body.detail : "Unknown error";
-      showError(`Failed to purge ${recordingName}: ${detail}`);
+
+      return {
+        status: "failed",
+        message: `Failed to purge ${recordingName}: ${detail}`
+      };
     }
+
+    return {
+      status: "ok",
+      message: `Purged ${recordingName}`
+    };
   } catch(e) {
     console.error(`Failed to purge ${recordingName}`, e);
     const errMsg = e instanceof Error ? e.message : "Unknown error";
-    showError(`Failed to purge ${recordingName}: ${errMsg}`);
+
+    return {
+      status: "failed",
+      message: `Failed to purge ${recordingName}: ${errMsg}`
+    };
   }
 }
 

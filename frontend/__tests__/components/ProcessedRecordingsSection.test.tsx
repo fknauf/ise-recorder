@@ -4,9 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { ProcessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
 import { useProcessedRecordings, useRefreshProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
-import { purgeRecording, schedulePostprocessing, UploadResult } from "@/lib/utils/serverStorage";
+import { fetchProcessedRecordings, purgeRecording, schedulePostprocessing, UploadResult } from "@/lib/utils/serverStorage";
+import { showError, showSuccess } from "@/lib/utils/notifications";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
+import { SWRConfig } from "swr";
 import * as z from "zod";
 import { ExpandedSection, SECTION_ID } from "./ExpandedSection";
 
@@ -15,8 +17,16 @@ vi.mock("@/lib/hooks/useProcessedRecordings");
 // exactly what the download tests below are about
 vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/utils/serverStorage")>(),
+  fetchProcessedRecordings: vi.fn(),
   schedulePostprocessing: vi.fn(),
   purgeRecording: vi.fn()
+}));
+vi.mock("@/lib/utils/notifications", () => ({
+  // An explicit factory, not automocking: vi.mock() alone yields spies that still call
+  // through, and real toasts outlive the test that raised them.
+  showError: vi.fn(),
+  showSuccess: vi.fn(),
+  showMessage: vi.fn()
 }));
 
 // the rerender button reads the recipient from the lecture form, which lives in the app
@@ -56,15 +66,30 @@ const LISTING = {
   unprocessed: [] as { name: string }[]
 };
 
-function renderSection(
-  {
+type Listing = typeof LISTING;
+
+interface SectionOptions {
+  serverEnv?: ServerEnv
+  isAuthenticated?: boolean
+  isExpired?: boolean | undefined
+  /** What the mocked hook reports. Left out, the listing above; undefined, nothing yet. */
+  data?: Listing | undefined
+  error?: unknown
+  /** In place of data and error: run this as the hook, e.g. the real one over its cache. */
+  hook?: typeof useProcessedRecordings
+}
+
+function renderSection(options: SectionOptions = {}) {
+  const {
     serverEnv = { apiUrl: API_URL } as ServerEnv,
     isAuthenticated = true,
-    isExpired = false as boolean | undefined,
-    data = LISTING as typeof LISTING | null,
-    error = undefined as unknown
-  } = {}
-) {
+    isExpired = false,
+    error = undefined,
+    hook
+  } = options;
+  // told apart from the default by presence, since undefined is itself a state to render
+  const data = "data" in options ? options.data : LISTING;
+
   mockServerEnv.mockReturnValue(serverEnv);
 
   mockUseAppSession.mockReturnValue({
@@ -96,18 +121,25 @@ function renderSection(
   vi.mocked(schedulePostprocessing).mockReset();
   vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
   vi.mocked(purgeRecording).mockReset();
-  vi.mocked(purgeRecording).mockResolvedValue(undefined);
+  vi.mocked(purgeRecording).mockResolvedValue({ status: "ok", message: "Purged" });
 
-  vi.mocked(useProcessedRecordings).mockReturnValue(
-    { data, error } as ReturnType<typeof useProcessedRecordings>
-  );
+  if(hook !== undefined) {
+    vi.mocked(useProcessedRecordings).mockImplementation(hook);
+  } else {
+    vi.mocked(useProcessedRecordings).mockReturnValue(
+      { data, error } as ReturnType<typeof useProcessedRecordings>
+    );
+  }
 
+  // a cache per test, for the tests that run the real hook; the others never reach it
   render(
-    <Provider theme={defaultTheme}>
-      <ExpandedSection>
-        <ProcessedRecordingsSection id={SECTION_ID}/>
-      </ExpandedSection>
-    </Provider>
+    <SWRConfig value={{ provider: () => new Map() }}>
+      <Provider theme={defaultTheme}>
+        <ExpandedSection>
+          <ProcessedRecordingsSection id={SECTION_ID}/>
+        </ExpandedSection>
+      </Provider>
+    </SWRConfig>
   );
 }
 
@@ -268,7 +300,7 @@ test("a rerender the backend refused still refreshes the listing and gives the b
   // listing was out of date -- the recording is rendering already, or gone -- so fetching
   // it again is what brings the card up to date.
   renderSection();
-  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "failed", errorMessage: "server responded 409" });
+  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "failed", message: "server responded 409" });
 
   await userEvent.click(rerenderButton(cards()[0]));
 
@@ -444,8 +476,8 @@ test("a stale listing's failed cards are withdrawn with the rest while the error
 // --- purging ----------------------------------------------------------------
 //
 // Deleting a recording cannot be undone, so the button only opens a dialog, and nothing is
-// sent until the lecturer confirms in it. What the request does once it is sent is
-// purgeRecording's business, in serverStorage.test.ts.
+// sent until the lecturer confirms in it. The request itself is purgeRecording's business,
+// in serverStorage.test.ts; what the dialog does with the listing around it is below.
 
 const purgeButton = (card: HTMLElement) => within(card).getByTestId("prec-btn-purge");
 const dialog = () => screen.getByRole("dialog");
@@ -505,33 +537,56 @@ test("escape closes the dialog and sends nothing", async () => {
   expect(purgeRecording).not.toHaveBeenCalled();
 });
 
-test("confirming purges that one recording and refreshes through the section's cache", async () => {
-  renderSection();
+/**
+ * The purge goes through SWR's mutate -- the card leaves the listing at once, and comes back
+ * if the backend refuses -- so these run the real hook over a cache of their own, with only
+ * the request beneath it faked. Resolves once the listing is on screen.
+ */
+async function renderSectionWithCache(listing: Listing = LISTING) {
+  const actual = await vi.importActual<typeof import("@/lib/hooks/useProcessedRecordings")>("@/lib/hooks/useProcessedRecordings");
+
+  vi.mocked(fetchProcessedRecordings).mockResolvedValue(listing);
+  renderSection({ hook: actual.useProcessedRecordings });
+
+  await waitFor(() => expect(screen.getByText("Server-Side Processed Recordings")).toBeInTheDocument());
+}
+
+/** From here on the listing is not answered, so whatever is on screen is what the cache holds. */
+const holdFurtherListings = () =>
+  vi.mocked(fetchProcessedRecordings).mockReturnValue(new Promise(() => {}));
+
+const names = (cardList: HTMLElement[]) =>
+  cardList.map(card => within(card).getByText(/_20\d\d$/).textContent);
+
+test("confirming purges that one recording and closes the dialog", async () => {
+  await renderSectionWithCache();
 
   await userEvent.click(purgeButton(cards()[1]));
   await userEvent.click(confirmButton());
 
-  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(API_URL, "PSU_2026", getAccessToken, refreshProcessedRecordings);
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(API_URL, "PSU_2026", getAccessToken);
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(showSuccess).toHaveBeenCalledOnce();
+  expect(showError).not.toHaveBeenCalled();
 });
 
 test("a failed recording can be purged the same way", async () => {
-  renderSection({ data: UNPROCESSED_LISTING });
+  await renderSectionWithCache(UNPROCESSED_LISTING);
 
   await userEvent.click(purgeButton(unprocessedCards()[0]));
   await userEvent.click(confirmButton());
 
-  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(API_URL, "OLD_2024", getAccessToken, refreshProcessedRecordings);
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(API_URL, "OLD_2024", getAccessToken);
 });
 
 test("the dialog stays open and locked while the purge is in flight", async () => {
   // a second press would send a second DELETE, and Cancel would promise something it can
   // no longer deliver once the first one is on its way
-  let done: () => void = () => {};
+  let done: (result: UploadResult) => void = () => {};
 
-  renderSection();
+  await renderSectionWithCache();
 
-  vi.mocked(purgeRecording).mockReturnValue(new Promise<void>(resolve => {
+  vi.mocked(purgeRecording).mockReturnValue(new Promise(resolve => {
     done = resolve;
   }));
 
@@ -544,13 +599,92 @@ test("the dialog stays open and locked while the purge is in flight", async () =
   await userEvent.click(confirmButton());
   expect(purgeRecording).toHaveBeenCalledOnce();
 
-  done();
+  done({ status: "ok", message: "Purged" });
 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
+test("the purged card leaves the listing while the request is in flight, and only that one", async () => {
+  // the lecturer has confirmed; the card staying up until the backend answers would look
+  // like the press did nothing
+  await renderSectionWithCache(UNPROCESSED_LISTING);
+
+  vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
+
+  await userEvent.click(purgeButton(cards()[1]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(names(cards())).toStrictEqual([ "GVS_2025" ]));
+  // the other two kinds are filtered by name too, each on its own
+  expect(names(renderingCards())).toStrictEqual([ "ABC_2026" ]);
+  expect(names(unprocessedCards())).toStrictEqual([ "OLD_2024", "XYZ_2025" ]);
+});
+
+test("a failed recording's card leaves the listing the same way", async () => {
+  await renderSectionWithCache(UNPROCESSED_LISTING);
+
+  vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
+
+  await userEvent.click(purgeButton(unprocessedCards()[0]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(names(unprocessedCards())).toStrictEqual([ "XYZ_2025" ]));
+  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  expect(names(renderingCards())).toStrictEqual([ "ABC_2026" ]);
+});
+
+test("a refused purge puts the card back and says why", async () => {
+  await renderSectionWithCache();
+  // so that nothing but the rollback can bring the card back
+  holdFurtherListings();
+
+  vi.mocked(purgeRecording).mockResolvedValue({ status: "failed", message: "in use" });
+
+  await userEvent.click(purgeButton(cards()[1]));
+  await userEvent.click(confirmButton());
+
+  // the dialog is not left hanging on a refusal either
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  expect(showError).toHaveBeenCalledOnce();
+  expect(showSuccess).not.toHaveBeenCalled();
+});
+
+test("the rest of the listing stays up while it is fetched again after a purge", async () => {
+  // what the purge resolves with is not a listing, and must not stand in for one until
+  // the refetch lands
+  await renderSectionWithCache();
+  holdFurtherListings();
+
+  await userEvent.click(purgeButton(cards()[1]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(names(cards())).toStrictEqual([ "GVS_2025" ]);
+});
+
+test("a purge fetches the listing again rather than trusting its own guess", async () => {
+  // anything else that changed on the backend in the meantime comes along with it
+  await renderSectionWithCache();
+
+  const after = { ...LISTING, completed: [ LISTING.completed[0] ], rendering: [ { name: "NEW_2026" } ] };
+
+  // the backend only answers with the new listing once the DELETE is through, so a fetch
+  // that merely happened to run earlier cannot pass for the one after the purge
+  vi.mocked(purgeRecording).mockImplementation(async () => {
+    vi.mocked(fetchProcessedRecordings).mockResolvedValue(after);
+    return { status: "ok", message: "Purged" };
+  });
+
+  await userEvent.click(purgeButton(cards()[1]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(names(renderingCards())).toStrictEqual([ "NEW_2026" ]));
+  expect(names(cards())).toStrictEqual([ "GVS_2025" ]);
+});
+
 test("nothing is rendered before the first listing arrives", () => {
-  renderSection({ data: null });
+  renderSection({ data: undefined });
 
   expect(screen.queryByText("Server-Side Processed Recordings")).toBeNull();
 });

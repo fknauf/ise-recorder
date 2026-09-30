@@ -116,7 +116,7 @@ function fakeUploads() {
   vi.mocked(sendChunkToServer).mockImplementation((_destination, _chunk, _recording, track, index, policy) =>
     new Promise(resolve => {
       const answer = (status: UploadStatus) =>
-        resolve({ status, errorMessage: status === "failed" ? "server responded 503" : undefined });
+        resolve({ status, message: status === "failed" ? "server responded 503" : undefined });
 
       policy.abortSignal?.addEventListener("abort", () => answer("aborted"), { once: true });
       uploads.push({ track, index, policy, answer });
