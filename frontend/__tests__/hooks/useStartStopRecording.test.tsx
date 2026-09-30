@@ -4,8 +4,7 @@ import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { SessionTransition, useAppSession } from "@/lib/components/SessionProvider";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
-import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
-import { ServerStorageDestination } from "@/lib/utils/serverStorage";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
 import { ServerEnv } from "@/lib/utils/serverEnv";
@@ -40,7 +39,7 @@ interface CapturedRecording {
   trackBundle: RecordingTrackBundle
   lectureTitle: string
   lecturerEmail: string
-  destination: ServerStorageDestination | undefined
+  destination: RecordingDestination
   onStarting: (recordingName: string) => Promise<void> | void
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void
   onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void
@@ -173,7 +172,7 @@ test("startRecording hands the lecture details and tracks to recordLecture", asy
   expect(call.trackBundle.displayTracks).toStrictEqual(displayTracks);
   // first captured display becomes the main display
   expect(call.trackBundle.mainDisplay).toBe(displayTracks[0]);
-  expect(call.destination?.apiUrl).toBe("http://localhost:5000");
+  expect(call.destination.apiUrl).toBe("http://localhost:5000");
 });
 
 test("startRecording is a no-op while a recording is already active", async () => {
@@ -208,16 +207,19 @@ test("the session headroom is expanded before every recording", async () => {
   expect(tokenSource.expandSession).toHaveBeenCalledOnce();
 });
 
-test("a session that cannot stream records without a destination", async () => {
+test("a session that cannot stream records to an impeded destination", async () => {
   // an expired session, nobody signed in, or a user store that could not be read: the
   // session knows which, and all of them mean the chunks would go out without a token.
-  // No destination is what makes recordLecture mark the recording for re-upload.
+  // The impeded flag is what makes recordLecture send nothing and mark the recording for
+  // re-upload.
   const tokenSource = makeTokenSource(true, undefined, "cannot-stream");
   const { result } = await renderRecorder(tokenSource);
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(call.destination).toBeUndefined();
+  expect(call.destination.impeded).toBe(true);
+  // still the backend: it is where the recording goes once it is re-uploaded
+  expect(call.destination.apiUrl).toBe("http://localhost:5000");
 });
 
 test("a session that can stream records to the backend with the session's tokens", async () => {
@@ -226,9 +228,10 @@ test("a session that can stream records to the backend with the session's tokens
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(call.destination?.apiUrl).toBe("http://localhost:5000");
+  expect(call.destination.impeded).toBe(false);
+  expect(call.destination.apiUrl).toBe("http://localhost:5000");
   // the session's own function, so every chunk asks for the token that is current then
-  expect(call.destination?.getAccessToken).toBe(tokenSource.getAccessToken);
+  expect(call.destination.getAccessToken).toBe(tokenSource.getAccessToken);
 });
 
 test("without a backend a recording is not impeded, whatever the session state", async () => {
@@ -238,8 +241,9 @@ test("without a backend a recording is not impeded, whatever the session state",
 
   const call = await startAndCapture(result.current.startRecording);
 
-  expect(call.destination).toBeDefined();
-  expect(call.destination?.apiUrl).toBeUndefined();
+  // without a backend there is nothing to be impeded from, whatever the session says
+  expect(call.destination.impeded).toBe(false);
+  expect(call.destination.apiUrl).toBeUndefined();
 });
 
 test("a recording whose streaming failed is listed for re-upload", async () => {

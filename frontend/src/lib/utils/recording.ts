@@ -31,6 +31,8 @@ export function sanitizeLectureTitle(lectureTitle: string) {
   return graphemeAwareTruncateToBytes(sanitizedLongTitle, 192);
 }
 
+export type RecordingDestination = ServerStorageDestination & { impeded: boolean };
+
 export interface RecordingTrackBundle {
   displayTracks: readonly MediaStreamTrack[]
   videoTracks: readonly MediaStreamTrack[]
@@ -105,7 +107,6 @@ function prepareTrackRecording(
         if(chunk) {
           // Wait for the quasi-synchronous part to conclude before processing the
           // next chunk, to avoid concurrent writes on the OPFS
-
           chunkPromises.push(await onChunkAvailable(chunk, trackTitle, chunkNum));
           ++chunkNum;
         }
@@ -116,7 +117,7 @@ function prepareTrackRecording(
 
     // Wait for the fully asynchronous parts (the uploads to the server) to finish
     // before scheduling the postprocessing job.
-    await Promise.all(chunkPromises.map(job => job.promise));
+    await Promise.allSettled(chunkPromises.map(job => job.promise));
   };
 
   const finishedPromise = processChunks();
@@ -225,7 +226,7 @@ export async function recordLecture(
   trackBundle: RecordingTrackBundle,
   lectureTitle: string,
   lecturerEmail: string,
-  destination: ServerStorageDestination | undefined,
+  destination: RecordingDestination,
   onStarting: (recordingName: string) => Promise<void> | void,
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,
   onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
@@ -249,16 +250,12 @@ export async function recordLecture(
 
   streamingAbort.signal.addEventListener("abort", () => onStreamingFailed(recordingName), { once: true });
 
-  if(destination === undefined) {
+  if(destination.impeded) {
     streamingAbort.abort("impeded");
-    destination = {
-      apiUrl: undefined,
-      getAccessToken: async () => undefined
-    };
   }
 
   const chunkRetryPolicy: RetryPolicy = {
-    retries: 9,
+    retries: 6,
     initialWaitMillis: 2000,
     abortSignal: streamingAbort.signal
   };
@@ -275,7 +272,10 @@ export async function recordLecture(
   // chunks have timed out. Give them a few seconds, then abort.
   const rearmStopTimer = () => {
     clearTimeout(stopTimer);
-    stopTimer = setTimeout(() => streamingAbort.abort("stop"), 10000);
+
+    if(!streamingAbort.signal.aborted) {
+      stopTimer = setTimeout(() => streamingAbort.abort("stop"), 10000);
+    }
   };
 
   const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
@@ -295,12 +295,20 @@ export async function recordLecture(
 
       if(result.status === "failed" && !streamingAbort.signal.aborted) {
         streamingAbort.abort("chunk");
-        showError(`Failed to upload chunk ${chunkIndex} in track ${trackTitle}: ${result.errorMessage ?? "unknown error"}`);
+        showError(`Streaming aborted: failed to upload chunk ${chunkIndex} of track ${trackTitle}: ${result.errorMessage ?? "unknown error"}`);
       }
     };
 
     // No need to await: we support sending chunks to server out of order and/or concurrently.
-    const backgroundPromise = uploadChunk();
+    const backgroundPromise = uploadChunk().catch(e => {
+      // purely defensive: uploadChunk should not be able to throw. Guard against signal.aborted because in that
+      // case a toast has already been shown. It's a .catch instead of a try-catch in uploadChunk because reactCompiler
+      // bails with "&&/|| in try-except" otherwise. That'll probably become unnecessary at some point.
+      if(!streamingAbort.signal.aborted) {
+        streamingAbort.abort("chunk");
+        showError(`Streaming aborted: unexpected error when uploading chunk ${chunkIndex} of track ${trackTitle}`, e);
+      }
+    });
 
     // For local file storage on the other hand, it's important that chunks to the same file
     // are not written concurrently and that filesystem state updates are correctly ordered.
@@ -349,7 +357,9 @@ export async function recordLecture(
       }
     }
 
-    rearmStopTimer();
+    if(destination.apiUrl !== undefined) {
+      rearmStopTimer();
+    }
   };
 
   if(jobs.length > 0) {

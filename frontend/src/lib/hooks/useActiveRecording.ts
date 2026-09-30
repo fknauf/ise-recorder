@@ -1,34 +1,29 @@
 "use client";
 
 import { useAppStore } from "./useAppStore";
-import { recordLecture } from "../utils/recording";
+import { RecordingDestination, recordLecture } from "../utils/recording";
 import { useLecture } from "./useLecture";
 import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
 import { SessionTransition, useAppSession } from "../components/SessionProvider";
 import { useRefreshProcessedRecordings } from "./useProcessedRecordings";
-import { ServerStorageDestination } from "../utils/serverStorage";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
 }
 
 // extracted into a function to work around a react compiler limitation where && and || in try blocks cause it to bail.
-function streamingDestination(
+const streamingDestination = (
   apiUrl: string | undefined,
   sessionState: SessionTransition,
   getAccessToken: () => Promise<string | undefined>
-): ServerStorageDestination | undefined {
-  if(apiUrl !== undefined && sessionState === "cannot-stream") {
-    return undefined;
-  }
-
-  return {
+): RecordingDestination =>
+  ({
     apiUrl,
+    impeded: apiUrl !== undefined && sessionState === "cannot-stream",
     getAccessToken
-  };
-}
+  });
 
 export const useActiveRecording = () => useAppStore(state => state.activeRecording);
 

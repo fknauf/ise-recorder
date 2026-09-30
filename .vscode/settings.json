@@ -85,6 +85,7 @@
         "totp",
         "unconfigured",
         "unsanitized",
+        "Unstreamed",
         "unstub",
         "unvalidated",
         "usecase",

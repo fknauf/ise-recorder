@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
-import { schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "@/lib/utils/serverStorage";
+import { schedulePostprocessing, sendChunkToServer } from "@/lib/utils/serverStorage";
 
 /**
  * What happens when a MediaRecorder refuses to start, e.g. with a NotSupportedError for a
@@ -23,8 +23,9 @@ vi.mock("@/lib/utils/notifications", () => ({
   showMessage: vi.fn()
 }));
 
-const destination: ServerStorageDestination = {
+const destination: RecordingDestination = {
   apiUrl: undefined,
+  impeded: false,
   getAccessToken: async () => undefined
 };
 

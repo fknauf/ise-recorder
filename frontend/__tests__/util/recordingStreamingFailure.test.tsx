@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
-import { RetryPolicy, sendChunkToServer, ServerStorageDestination, UploadStatus } from "@/lib/utils/serverStorage";
+import { RetryPolicy, sendChunkToServer, UploadStatus } from "@/lib/utils/serverStorage";
 
 /**
  * What a live recording does when its stream to the backend breaks.
@@ -96,7 +96,7 @@ const videoTrack = () => {
 };
 
 const API = "http://record.example.com";
-const backend: ServerStorageDestination = { apiUrl: API, getAccessToken: async () => "test-token" };
+const backend: RecordingDestination = { apiUrl: API, impeded: false, getAccessToken: async () => "test-token" };
 
 /** A chunk upload that has been handed to the (fake) network and not answered yet. */
 interface PendingUpload {
@@ -142,11 +142,11 @@ let closedStreams: Set<string>;
  * Start recording slides ("stream") and a camera ("overlay") and wait until it is running.
  * Stopping produces one final chunk per track, the way a real recorder flushes on stop.
  *
- * "impeded" records without a destination, as the recorder does when the session could not
- * be renewed. (Not `undefined`, which would quietly fall back to the default.)
+ * "impeded" records to the backend with the destination marked impeded, as the recorder does
+ * when the session could not be renewed.
  */
-async function startRecording(destinationOrImpeded: ServerStorageDestination | "impeded" = backend) {
-  const destination = destinationOrImpeded === "impeded" ? undefined : destinationOrImpeded;
+async function startRecording(destinationOrImpeded: RecordingDestination | "impeded" = backend) {
+  const destination = destinationOrImpeded === "impeded" ? { ...backend, impeded: true } : destinationOrImpeded;
   const display = videoTrack();
   const camera = videoTrack();
   const bundle: RecordingTrackBundle = {
@@ -300,6 +300,33 @@ test("uploads in flight when a chunk gives up are told to stop", async () => {
   expect(showError).toHaveBeenCalledOnce();
 });
 
+test("an upload that throws ends streaming the same way as one that gives up", async () => {
+  // Nothing in the upload is meant to throw -- failures come back as a status -- but should a
+  // later change make it, the recording must not carry on as though its chunks had arrived:
+  // it would be sent for postprocessing with a gap in it, and never marked for re-upload.
+  const rec = await startRecording();
+
+  await rec.overlay.emit();
+  const overlayChunk = await upload("overlay", 0);
+
+  vi.mocked(sendChunkToServer).mockImplementationOnce(async () => {
+    throw new TypeError("upload blew up");
+  });
+  await rec.stream.emit();
+
+  await until(() => rec.onStreamingFailed.mock.calls.length > 0);
+  expect(rec.onStreamingFailed).toHaveBeenCalledExactlyOnceWith(rec.recordingName());
+  // the other uploads are stopped just as they are for a chunk that gave up
+  expect(overlayChunk.policy.abortSignal?.aborted).toBe(true);
+
+  rec.stop();
+  await rec.done;
+
+  expect(jobRequests()).toHaveLength(0);
+  expect(showError).toHaveBeenCalledOnce();
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("stream"), expect.any(TypeError));
+});
+
 test("no chunk is sent once one has given up", async () => {
   const rec = await startRecording();
 
@@ -382,7 +409,7 @@ test("a frontend-only deployment is not marked for re-upload", async () => {
   // no backend is not the same as no stream: there is nowhere to re-upload to either
   vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
 
-  const rec = await startRecording({ apiUrl: undefined, getAccessToken: async () => undefined });
+  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
 
   await rec.stream.emit();
   rec.stop();
@@ -419,7 +446,7 @@ test("storage is refreshed only once the local files are saved", async () => {
   // browser and then drops the live size estimates, and a file that is still being
   // committed reads as empty.
   vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
-  const rec = await startRecording({ apiUrl: undefined, getAccessToken: async () => undefined });
+  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
 
   let savedWhenFinished: string[] = [];
   rec.onFinished.mockImplementation(() => {
@@ -465,6 +492,30 @@ test("uploads still unanswered after stop are given up on after a grace period",
   expect(chunk.policy.abortSignal?.aborted).toBe(true);
   expect(rec.onStreamingFailed).toHaveBeenCalledOnce();
   expect(jobRequests()).toHaveLength(0);
+});
+
+test("a frontend-only deployment is not given up on however long stopping takes", async () => {
+  // There is no backend whose absence the grace period could be about, so it must not run:
+  // giving up would mark a recording for re-upload in a deployment with nowhere to upload
+  // to. The (faked) uploads are left hanging to make stopping take as long as it likes.
+  useStopClock();
+  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
+
+  await rec.stream.emit();
+  rec.stop();
+  const lastChunks = [ await upload("stream", 1), await upload("overlay", 0) ];
+
+  await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+
+  expect(lastChunks.every(chunk => chunk.policy.abortSignal?.aborted === false)).toBe(true);
+  expect(rec.onStreamingFailed).not.toHaveBeenCalled();
+
+  for(const pending of uploads) {
+    pending.answer("ok");
+  }
+  await rec.done;
+
+  expect(rec.onStreamingFailed).not.toHaveBeenCalled();
 });
 
 test("uploads that keep arriving after stop are not given up on", async () => {

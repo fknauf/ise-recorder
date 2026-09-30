@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { recordLecture, RecordingTrackBundle } from "@/lib/utils/recording";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
-import { sendChunkToServer, ServerStorageDestination } from "@/lib/utils/serverStorage";
+import { sendChunkToServer } from "@/lib/utils/serverStorage";
 
 /**
  * What happens when the OPFS refuses a write -- in practice, an exhausted browser
@@ -22,8 +22,9 @@ vi.mock("@/lib/utils/notifications", () => ({
   showMessage: vi.fn()
 }));
 
-const destination: ServerStorageDestination = {
+const destination: RecordingDestination = {
   apiUrl: undefined,
+  impeded: false,
   getAccessToken: async () => undefined
 };
 
