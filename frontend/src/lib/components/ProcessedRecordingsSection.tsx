@@ -106,13 +106,13 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
   };
 
   return (
-    <Dialog>
+    <Dialog size="L">
       <Heading>
-        Confirm purge of {recordingName}
+        Confirm Purge
       </Heading>
       <Divider/>
       <Content>
-        <Text>You are about to permanently delete the recording {recordingName} from the server. This can not be undone. Are you sure?</Text>
+        <Text>You are about to permanently delete the recording <strong>{recordingName}</strong> from the server. This cannot be undone. Are you sure?</Text>
       </Content>
       <ButtonGroup>
         <Button isDisabled={busy} variant="secondary" onPress={dismiss} autoFocus data-testid="pd-btn-cancel">Cancel</Button>

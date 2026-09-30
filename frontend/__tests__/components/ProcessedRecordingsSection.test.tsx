@@ -499,8 +499,8 @@ test("the purge button asks first and sends nothing", async () => {
   await userEvent.click(purgeButton(cards()[1]));
 
   // the dialog names the recording, so the lecturer can tell which one they are about to lose
-  expect(within(dialog()).getByRole("heading", { name: /PSU_2026/ })).toBeInTheDocument();
-  expect(within(dialog()).getByText(/can not be undone/)).toBeInTheDocument();
+  expect(within(dialog()).getByText(/PSU_2026/)).toBeInTheDocument();
+  expect(within(dialog()).getByText(/cannot be undone/)).toBeInTheDocument();
   expect(purgeRecording).not.toHaveBeenCalled();
 });
 
