@@ -1,6 +1,6 @@
 "use client";
 
-import { Flex, ToastContainer } from "@adobe/react-spectrum";
+import { Accordion, Flex, ToastContainer } from "@adobe/react-spectrum";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
 import { RecorderControls } from "@/lib/components/RecorderControls";
 import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
@@ -38,8 +38,10 @@ export function Home() {
         <QuotaWarning thresholdBytes={2 ** 30}/>
       </Flex>
       <PreviewSection canvasWidth={384} canvasHeight={216}/>
-      <SavedRecordingsSection/>
-      <ProcessedRecordingsSection/>
+      <Accordion isQuiet allowsMultipleExpanded defaultExpandedKeys={["saved", "processed"]}>
+        <SavedRecordingsSection id="saved"/>
+        <ProcessedRecordingsSection id="processed"/>
+      </Accordion>
       <ToastContainer/>
     </Flex>
   );

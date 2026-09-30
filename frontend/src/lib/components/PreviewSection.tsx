@@ -6,10 +6,12 @@ import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { useActiveRecording } from "../hooks/useActiveRecording";
+import Cross from "@spectrum-icons/ui/CrossSmall";
 
 interface PreviewCardProps {
   label: string | undefined
   hasDisabledButtons: boolean
+  canvasWidth: number
   onRemove: () => void
   children: ReactNode
 }
@@ -22,15 +24,27 @@ const PreviewCard = (
   {
     label,
     hasDisabledButtons,
+    canvasWidth,
     onRemove,
     children
   }: Readonly<PreviewCardProps>
 ) =>
-  <View borderWidth="thin" borderColor="light" borderRadius="medium" padding="size-100">
-    <Flex direction="column" justifyContent="center" gap="size-100" height="100%">
-      <Text>{label}</Text>
+  <View borderWidth="thin" borderColor="mid" borderRadius="medium" padding="size-100">
+    <Flex direction="column" justifyContent="start" gap="size-100" height="100%">
+      <Flex direction="row" justifyContent="space-between" alignItems="center" maxWidth={canvasWidth}>
+        <Text>{label}</Text>
+        {
+          !hasDisabledButtons &&
+            <ActionButton
+              isQuiet
+              onPress={onRemove}
+              alignSelf="start"
+            >
+              <Cross/>
+            </ActionButton>
+        }
+      </Flex>
       {children}
-      <ActionButton marginTop="auto" onPress={onRemove} isDisabled={hasDisabledButtons}>Remove</ActionButton>
     </Flex>
   </View>;
 
@@ -76,6 +90,7 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={label}
             hasDisabledButtons={hasDisabledButtons}
+            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <VideoPreview
@@ -97,6 +112,7 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={track.label}
             hasDisabledButtons={hasDisabledButtons}
+            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <AudioPreview

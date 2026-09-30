@@ -184,14 +184,14 @@ function prettifyError(error: unknown) {
   return "Unknown error";
 }
 
-function ProcessedRecordingsSectionImpl() {
+function ProcessedRecordingsSectionImpl({ id }: Readonly<{ id: string }>) {
   const { data, error } = useProcessedRecordings();
   const sectionTitle = "Server-Side Processed Recordings";
   const [ purgeCandidate, setPurgeCandidate ] = useState<string | null>(null);
 
   if(error !== undefined) {
     return (
-      <RecordingCardSection title={sectionTitle}>
+      <RecordingCardSection id={id} title={sectionTitle}>
         <InlineAlert variant="negative">
           <Heading>
             Error fetching list of processed recordings
@@ -209,7 +209,7 @@ function ProcessedRecordingsSectionImpl() {
   }
 
   return (
-    <RecordingCardSection title={sectionTitle}>
+    <RecordingCardSection id={id} title={sectionTitle}>
       <DialogContainer onDismiss={() => setPurgeCandidate(null)}>
         { purgeCandidate !== null && <PurgeDialog recordingName={purgeCandidate}/> }
       </DialogContainer>
@@ -241,7 +241,7 @@ function ProcessedRecordingsSectionImpl() {
   );
 }
 
-export function ProcessedRecordingsSection() {
+export function ProcessedRecordingsSection({ id }: Readonly<{ id: string }>) {
   const { isAuthenticated, isExpired } = useAppSession();
   const { apiUrl } = useServerEnv();
 
@@ -249,5 +249,5 @@ export function ProcessedRecordingsSection() {
     return null;
   }
 
-  return <ProcessedRecordingsSectionImpl/>;
+  return <ProcessedRecordingsSectionImpl id={id}/>;
 }

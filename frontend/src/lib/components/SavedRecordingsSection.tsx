@@ -93,7 +93,7 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
  * Shows download buttons for the individual files and a remove button for the whole recording.
  * Buttons are disabled for the currently active recording.
  */
-export function SavedRecordingsSection() {
+export function SavedRecordingsSection({ id }: Readonly<{ id: string }>) {
   const { savedRecordings } = useBrowserStorage();
 
   if(savedRecordings.length === 0) {
@@ -101,7 +101,7 @@ export function SavedRecordingsSection() {
   }
 
   return (
-    <RecordingCardSection title="Browser-Local Raw Recordings">
+    <RecordingCardSection id={id} title="Browser-Local Raw Recordings">
       {
         savedRecordings.map(rec =>
           <SavedRecordingCard

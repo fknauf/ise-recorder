@@ -1,4 +1,4 @@
-import { Flex, Heading, Text, View } from "@adobe/react-spectrum";
+import { Disclosure, DisclosureTitle, DisclosurePanel, Flex, Text, View } from "@adobe/react-spectrum";
 import { ReactNode } from "react";
 
 interface RecordingCardProps {
@@ -8,6 +8,7 @@ interface RecordingCardProps {
 }
 
 interface RecordingCardSectionProps {
+  id: string
   title: string
   children: ReactNode
 }
@@ -26,20 +27,14 @@ export const RecordingCard = ({ title, testid, children }: Readonly<RecordingCar
     </Flex>
   </View>;
 
-export const RecordingCardSection = ({ title, children }: Readonly<RecordingCardSectionProps>) =>
-  <View
-    borderWidth="thin"
-    borderColor="light"
-    borderRadius="medium"
-    padding="size-100"
-    marginX="size-100"
-  >
-    <Flex direction="column" gap="size-100">
-      <Heading level={4}>
-        {title}
-      </Heading>
+export const RecordingCardSection = ({ id, title, children }: Readonly<RecordingCardSectionProps>) =>
+  <Disclosure id={id}>
+    <DisclosureTitle>
+      {title}
+    </DisclosureTitle>
+    <DisclosurePanel>
       <Flex direction="row" gap="size-100" wrap>
         {children}
       </Flex>
-    </Flex>
-  </View>;
+    </DisclosurePanel>
+  </Disclosure>;
