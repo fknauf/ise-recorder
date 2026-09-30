@@ -6,7 +6,7 @@ import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { useActiveRecording } from "../hooks/useActiveRecording";
-import Cross from "@spectrum-icons/ui/CrossSmall";
+import Close from "@spectrum-icons/workflow/Close";
 
 interface PreviewCardProps {
   label: string | undefined
@@ -39,8 +39,10 @@ const PreviewCard = (
               isQuiet
               onPress={onRemove}
               alignSelf="start"
+              aria-label="Close"
+              data-testid="ps-btn-remove"
             >
-              <Cross/>
+              <Close/>
             </ActionButton>
         }
       </Flex>

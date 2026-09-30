@@ -56,8 +56,12 @@ beforeEach(() => {
 /**
  * The hook for one recording, plus a second one for a recording next to it and the store's
  * progress map, so a test can see that an upload touches its own recording and no other.
+ *
+ * Returns once the provider's look at browser storage on mount has landed. Otherwise a test
+ * with nothing of its own to wait for ends with that still under way, and the store update
+ * it makes arrives outside act.
  */
-function renderReupload(recordingName = "GVS_2025") {
+async function renderReupload(recordingName = "GVS_2025") {
   const rendered = renderHook(() => ({
     upload: useReupload(recordingName),
     neighbour: useReupload("PSU_2026"),
@@ -68,6 +72,8 @@ function renderReupload(recordingName = "GVS_2025") {
     store: useAppStore(state => state)
   }), { wrapper });
 
+  // the quota is one of the things the look at browser storage fills in
+  await waitFor(() => expect(rendered.result.current.store.quota).toBeDefined());
   act(() => rendered.result.current.lecture.setLecturerEmail("lecturer@example.edu"));
 
   return rendered;
@@ -80,7 +86,7 @@ const failed: UploadResult = { status: "failed", errorMessage: "server responded
 
 test("every track goes up under a name of its own, then the job is scheduled", async () => {
   vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("overlay"), trackOf("stream") ]);
-  const { result } = renderReupload();
+  const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
@@ -108,15 +114,15 @@ test("the job is only scheduled once every track is up", async () => {
     order.push("schedule");
     return ok;
   });
-  const { result } = renderReupload();
+  const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
   expect(order).toStrictEqual([ "upload overlay", "upload stream", "schedule" ]);
 });
 
-test("a recording that is not being uploaded says so", () => {
-  const { result } = renderReupload();
+test("a recording that is not being uploaded says so", async () => {
+  const { result } = await renderReupload();
 
   expect(result.current.upload.isUploading).toBe(false);
   expect(result.current.upload.progress).toBeUndefined();
@@ -128,7 +134,7 @@ test("the recording is marked as uploading for exactly as long as the upload run
   vi.mocked(uploadFile).mockReturnValue(new Promise(resolve => {
     finishUpload = resolve;
   }));
-  const { result } = renderReupload();
+  const { result } = await renderReupload();
 
   let running: Promise<void> = Promise.resolve();
   act(() => {
@@ -158,7 +164,7 @@ test("a failed track stops the upload before anything is scheduled", async () =>
   vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0"), trackOf("overlay"), trackOf("stream") ]);
   vi.mocked(uploadFile).mockResolvedValueOnce(ok)
     .mockResolvedValueOnce(failed);
-  const { result } = renderReupload();
+  const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
@@ -175,7 +181,7 @@ test("a failed track stops the upload before anything is scheduled", async () =>
 
 test("a recording without any tracks says so instead of doing nothing", async () => {
   vi.mocked(getAllRecordingTracks).mockResolvedValue([]);
-  const { result } = renderReupload();
+  const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
@@ -189,7 +195,7 @@ test("an upload that blows up is reported and gives the button back", async () =
   vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
   vi.mocked(uploadFile).mockRejectedValue(new Error("boom"));
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
-  const { result } = renderReupload();
+  const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
@@ -220,7 +226,7 @@ test("progress is the share of all tracks' bytes that has arrived", async () => 
       return ok;
     });
 
-  const { result } = renderReupload();
+  const { result } = await renderReupload();
 
   let running: Promise<void> = Promise.resolve();
   act(() => {
@@ -279,7 +285,7 @@ async function renderWithUnstreamed(...names: string[]) {
     { name: "GVS_2025", files: [] },
     { name: "PSU_2026", files: [] }
   ]);
-  const rendered = renderReupload();
+  const rendered = await renderReupload();
   await act(() => rendered.result.current.store.updateBrowserStorage());
 
   act(() => names.forEach(name => rendered.result.current.markUnstreamed(name)));

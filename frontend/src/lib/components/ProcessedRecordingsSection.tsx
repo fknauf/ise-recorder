@@ -80,11 +80,12 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
         <Text>You are about to permanently delete the recording {recordingName} from the server. This can not be undone. Are you sure?</Text>
       </Content>
       <ButtonGroup>
-        <Button isDisabled={busy} variant="secondary" onPress={dismiss} autoFocus>Cancel</Button>
+        <Button isDisabled={busy} variant="secondary" onPress={dismiss} autoFocus data-testid="pd-btn-cancel">Cancel</Button>
         <Button
           isDisabled={busy}
           variant="negative"
           onPress={initiatePurge}
+          data-testid="pd-btn-purge"
         >
           Purge
         </Button>
@@ -125,12 +126,13 @@ function ProcessedRecordingCard(
         width="100%"
         onPress={rerender}
         isDisabled={busy}
+        data-testid="prec-btn-rerender"
       >
         <Refresh/>
         <Text>Rerender</Text>
       </ActionButton>
 
-      <ActionButton width="100%" onPress={() => onPurge()}>
+      <ActionButton width="100%" onPress={() => onPurge()} data-testid="prec-btn-purge">
         <Delete/>
         <Text>Purge</Text>
       </ActionButton>
@@ -160,11 +162,12 @@ function UnprocessedRecordingCard(
         width="100%"
         onPress={rerender}
         isDisabled={busy}
+        data-testid="prec-btn-rerender"
       >
         <Refresh/>
         <Text>Rerender</Text>
       </ActionButton>
-      <ActionButton width="100%" onPress={onPurge}>
+      <ActionButton width="100%" onPress={onPurge} data-testid="prec-btn-purge">
         <Delete/>
         <Text>Purge</Text>
       </ActionButton>

@@ -9,6 +9,7 @@ import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 import { useReupload } from "@/lib/hooks/useReupload";
 import { downloadFile } from "@/lib/utils/browserStorage";
 import { ServerEnv } from "@/lib/utils/serverEnv";
+import { ExpandedSection, SECTION_ID } from "./ExpandedSection";
 
 vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useBrowserStorage");
@@ -105,7 +106,9 @@ test("SavedRecordingsSection displays recordings and reacts to clicks", async ()
 
   render(
     <Provider theme={defaultTheme}>
-      <SavedRecordingsSection/>
+      <ExpandedSection>
+        <SavedRecordingsSection id={SECTION_ID}/>
+      </ExpandedSection>
     </Provider>
   );
 
@@ -158,7 +161,9 @@ test("SavedRecordingsSection is empty when there are no recordings", async () =>
 
   render(
     <Provider theme={defaultTheme}>
-      <SavedRecordingsSection/>
+      <ExpandedSection>
+        <SavedRecordingsSection id={SECTION_ID}/>
+      </ExpandedSection>
     </Provider>
   );
 
@@ -219,7 +224,9 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
 
   render(
     <Provider theme={defaultTheme}>
-      <SavedRecordingsSection/>
+      <ExpandedSection>
+        <SavedRecordingsSection id={SECTION_ID}/>
+      </ExpandedSection>
     </Provider>
   );
 
@@ -285,7 +292,9 @@ function renderWithBackend(
 
   render(
     <Provider theme={defaultTheme} scale={scale}>
-      <SavedRecordingsSection/>
+      <ExpandedSection>
+        <SavedRecordingsSection id={SECTION_ID}/>
+      </ExpandedSection>
     </Provider>
   );
 
@@ -312,7 +321,9 @@ test("without a backend, nothing is offered for re-upload", async () => {
 
   render(
     <Provider theme={defaultTheme}>
-      <SavedRecordingsSection/>
+      <ExpandedSection>
+        <SavedRecordingsSection id={SECTION_ID}/>
+      </ExpandedSection>
     </Provider>
   );
 

@@ -88,10 +88,20 @@ afterEach(() => {
 
 const RECORDING: ActiveRecording = { state: "recording", name: "GVS", stop: () => {} };
 
+/**
+ * Whether the preview's remove button is there to be pressed. A locked one may be disabled or
+ * left out altogether -- which of the two is presentation, so the tests accept either.
+ */
+const canRemove = () => {
+  const button = screen.queryByTestId("ps-btn-remove");
+  return button !== null && !(button as HTMLButtonElement).disabled;
+};
+
 test("every control is live while idle", () => {
   withOneDisplay();
 
-  expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
+  expect(screen.getByTestId("ps-btn-remove")).toBeVisible();
+  expect(canRemove()).toBe(true);
   expect(screen.getByTestId("vp-toggle-main")).not.toBeDisabled();
   expect(screen.getByTestId("vp-toggle-overlay")).not.toBeDisabled();
 });
@@ -107,7 +117,7 @@ test.each([
   // Removing a track mid-recording pulls it out from under a live MediaRecorder, and
   // changing the main display or overlay after the output files are laid out would put
   // the wrong content in them. Every non-idle state has to be locked, not just "recording".
-  expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+  expect(canRemove()).toBe(false);
   expect(screen.getByTestId("vp-toggle-main")).toBeDisabled();
   expect(screen.getByTestId("vp-toggle-overlay")).toBeDisabled();
 });
@@ -116,11 +126,11 @@ test("controls come back once the recording is finished", () => {
   withOneDisplay();
 
   act(() => handles.setActiveRecording(RECORDING));
-  expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+  expect(canRemove()).toBe(false);
 
   act(() => handles.setActiveRecording({ state: "idle" }));
 
-  expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
+  expect(canRemove()).toBe(true);
 });
 
 // --- switching a role off clears it ----------------------------------------

@@ -8,6 +8,7 @@ import { purgeRecording, schedulePostprocessing, UploadResult } from "@/lib/util
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import * as z from "zod";
+import { ExpandedSection, SECTION_ID } from "./ExpandedSection";
 
 vi.mock("@/lib/hooks/useProcessedRecordings");
 // the requests are mocked, but the URL builder is kept: which href the link carries is
@@ -103,7 +104,9 @@ function renderSection(
 
   render(
     <Provider theme={defaultTheme}>
-      <ProcessedRecordingsSection/>
+      <ExpandedSection>
+        <ProcessedRecordingsSection id={SECTION_ID}/>
+      </ExpandedSection>
     </Provider>
   );
 }
@@ -184,7 +187,7 @@ test("a recording that is still rendering gets a card that says so", () => {
   expect(renderingCards()).toHaveLength(1);
   expect(within(renderingCards()[0]).getByText("ABC_2026")).toBeInTheDocument();
   expect(within(renderingCards()[0]).getByText("Rendering...")).toBeInTheDocument();
-  expect(within(renderingCards()[0]).getByRole("progressbar", { name: "Rendering" })).toBeInTheDocument();
+  expect(within(renderingCards()[0]).getByRole("progressbar")).toBeVisible();
   // not counted among the downloads
   expect(cards()).toHaveLength(0);
 });
@@ -224,7 +227,9 @@ test("a stale listing's rendering cards are withdrawn with the rest while the er
 
 // --- rerendering a finished recording --------------------------------------
 
-const rerenderButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Rerender/ });
+// Controls are found by test id rather than by label, so rewording or restyling a button --
+// down to an icon with no text -- does not break the tests that are about what it does.
+const rerenderButton = (card: HTMLElement) => within(card).getByTestId("prec-btn-rerender");
 
 test("each finished recording offers a rerender", () => {
   renderSection();
@@ -442,10 +447,10 @@ test("a stale listing's failed cards are withdrawn with the rest while the error
 // sent until the lecturer confirms in it. What the request does once it is sent is
 // purgeRecording's business, in serverStorage.test.ts.
 
-const purgeButton = (card: HTMLElement) => within(card).getByRole("button", { name: /Purge/ });
+const purgeButton = (card: HTMLElement) => within(card).getByTestId("prec-btn-purge");
 const dialog = () => screen.getByRole("dialog");
-const confirmButton = () => within(dialog()).getByRole("button", { name: "Purge" });
-const cancelButton = () => within(dialog()).getByRole("button", { name: "Cancel" });
+const confirmButton = () => within(dialog()).getByTestId("pd-btn-purge");
+const cancelButton = () => within(dialog()).getByTestId("pd-btn-cancel");
 
 test("finished and failed recordings offer a purge, rendering ones do not", () => {
   renderSection({ data: UNPROCESSED_LISTING });
@@ -453,7 +458,7 @@ test("finished and failed recordings offer a purge, rendering ones do not", () =
   cards().forEach(card => expect(purgeButton(card)).toBeInTheDocument());
   unprocessedCards().forEach(card => expect(purgeButton(card)).toBeInTheDocument());
   // deleting it would pull the chunks out from under the render; the backend refuses too
-  expect(within(renderingCards()[0]).queryByRole("button", { name: /Purge/ })).toBeNull();
+  expect(within(renderingCards()[0]).queryByTestId("prec-btn-purge")).toBeNull();
 });
 
 test("the purge button asks first and sends nothing", async () => {
