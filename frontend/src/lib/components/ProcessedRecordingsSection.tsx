@@ -7,10 +7,9 @@ import Download from "@spectrum-icons/workflow/Download";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import Delete from "@spectrum-icons/workflow/Delete";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { useProcessedRecordings, useRefreshProcessedRecordings } from "../hooks/useProcessedRecordings";
+import { useProcessedRecordings } from "../hooks/useProcessedRecordings";
 import * as z from "zod";
-import { DownloadableRecording, downloadUrl, purgeRecording, RenderingRecording, schedulePostprocessing, UnprocessedRecording } from "../utils/serverStorage";
-import { useLecture } from "../hooks/useLecture";
+import { DownloadableRecording, assembleDownloadUrl, RenderingRecording, UnprocessedRecording } from "../utils/serverStorage";
 import { useState } from "react";
 import { showError, showSuccess } from "../utils/notifications";
 
@@ -23,39 +22,24 @@ const mibFormatter = new Intl.NumberFormat(
   }
 );
 
-const useRerender = (recordingName: string) => {
-  const { apiUrl } = useServerEnv();
-  const { getAccessToken } = useAppSession();
-  const { lecturerEmail } = useLecture();
-  const refreshProcessedRecordings = useRefreshProcessedRecordings();
-  const [ busy, setBusy ] = useState(false);
-
-  const rerender = async () => {
-    setBusy(true);
-
-    try {
-      await schedulePostprocessing(
-        { apiUrl, getAccessToken },
-        recordingName,
-        lecturerEmail,
-        { retries: 0, initialWaitMillis: 5000 }
-      );
-
-      await refreshProcessedRecordings();
-    } catch(e) {
-      console.warn(`Failed to schedule re-render for ${recordingName}`, e);
-    }
-
-    setBusy(false);
-  };
-
-  return [ busy, rerender ] as const;
+const onRerenderHandler = (
+  recordingName: string,
+  rerender: (recordingName: string) => Promise<unknown>,
+  setBusy: (busy: boolean) => void
+) => async () => {
+  setBusy(true);
+  try {
+    await rerender(recordingName);
+    showSuccess(`Re-rendering scheduled for ${recordingName}`);
+  } catch(e) {
+    showError(`Unable to schedule re-rendering for ${recordingName}`, e);
+  }
+  setBusy(false);
 };
 
 function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
   const { apiUrl } = useServerEnv();
-  const { getAccessToken } = useAppSession();
-  const { mutate } = useProcessedRecordings();
+  const { purge } = useProcessedRecordings();
 
   const { dismiss } = useDialogContainer();
   const [ busy, setBusy ] = useState(false);
@@ -66,41 +50,12 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
 
   const initiatePurge = async () => {
     setBusy(true);
-    await mutate(
-      async () => {
-        const result = await purgeRecording(apiUrl, recordingName, getAccessToken);
-
-        if(result.message !== undefined) {
-          if(result.status === "ok") {
-            showSuccess(result.message);
-          } else {
-            showError(result.message);
-            throw new Error(result.message);
-          }
-        }
-
-        return undefined;
-      }, {
-        optimisticData: current => {
-          if(current === undefined) {
-            return undefined;
-          }
-
-          return {
-            ...current,
-            completed: current.completed.filter(rec => rec.name !== recordingName),
-            unprocessed: current.unprocessed.filter(rec => rec.name !== recordingName),
-            rendering: current.rendering.filter(rec => rec.name !== recordingName)
-          };
-        },
-        rollbackOnError: true,
-        revalidate: true,
-        throwOnError: false,
-        populateCache: false
-      }
-    );
-
-
+    try {
+      await purge(recordingName);
+      showSuccess(`Purged ${recordingName}`);
+    } catch(e) {
+      showError(`Failed to purge ${recordingName}`, e);
+    }
     setBusy(false);
     dismiss();
   };
@@ -133,13 +88,14 @@ function ProcessedRecordingCard(
   { user, recording, onPurge }: Readonly<{ user: string; recording: DownloadableRecording; onPurge: () => void }>
 ) {
   const { apiUrl } = useServerEnv();
-  const [ busy, rerender ] = useRerender(recording.name);
+  const { rerender } = useProcessedRecordings();
+  const [ busy, setBusy ] = useState(false);
 
   if(apiUrl === undefined) {
     return null;
   }
 
-  const url = downloadUrl(apiUrl, user, recording.name, recording.totp);
+  const url = assembleDownloadUrl(apiUrl, user, recording.name, recording.totp);
 
   return (
     <RecordingCard title={recording.name} testid="prec-card">
@@ -159,7 +115,7 @@ function ProcessedRecordingCard(
 
       <ActionButton
         width="100%"
-        onPress={rerender}
+        onPress={onRerenderHandler(recording.name, rerender, setBusy)}
         isDisabled={busy}
         data-testid="prec-btn-rerender"
       >
@@ -167,7 +123,12 @@ function ProcessedRecordingCard(
         <Text>Rerender</Text>
       </ActionButton>
 
-      <ActionButton width="100%" onPress={() => onPurge()} data-testid="prec-btn-purge">
+      <ActionButton
+        width="100%"
+        onPress={() => onPurge()}
+        isDisabled={busy}
+        data-testid="prec-btn-purge"
+      >
         <Delete/>
         <Text>Purge</Text>
       </ActionButton>
@@ -188,21 +149,27 @@ const RenderingRecordingCard = (
 function UnprocessedRecordingCard(
   { recording, onPurge }: Readonly<{ recording: UnprocessedRecording; onPurge: () => void }>
 ) {
-  const [ busy, rerender ] = useRerender(recording.name);
+  const { rerender } = useProcessedRecordings();
+  const [ busy, setBusy ] = useState(false);
 
   return (
     <RecordingCard title={recording.name} testid="unprocessed-card">
       <Text>Postprocessing failed.</Text>
       <ActionButton
         width="100%"
-        onPress={rerender}
+        onPress={onRerenderHandler(recording.name, rerender, setBusy)}
         isDisabled={busy}
         data-testid="prec-btn-rerender"
       >
         <Refresh/>
         <Text>Rerender</Text>
       </ActionButton>
-      <ActionButton width="100%" onPress={onPurge} data-testid="prec-btn-purge">
+      <ActionButton
+        width="100%"
+        onPress={onPurge}
+        isDisabled={busy}
+        data-testid="prec-btn-purge"
+      >
         <Delete/>
         <Text>Purge</Text>
       </ActionButton>

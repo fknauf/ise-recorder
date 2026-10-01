@@ -11,7 +11,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx2
 
 from ise_record.core.auth import (
-    DownloadTotpAuthority,
     OidcClient,
     ProviderUnreachable,
     Unauthenticated,
@@ -134,8 +133,3 @@ async def get_user_info(
     cached_users[subject] = user_info
 
     return user_info
-
-
-async def get_download_totp(request: Request) -> DownloadTotpAuthority:
-    """FastAPI dependable to obtain the TOTP authority"""
-    return request.app.state.download_totp

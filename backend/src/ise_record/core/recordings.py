@@ -3,6 +3,7 @@ Lists of recordings for display in the UI as server-side recordings, binned into
 rendering, and unprocessed/failed-postprocessing recordings.
 """
 
+from collections import defaultdict
 from datetime import datetime, timedelta, UTC
 from enum import auto, Enum
 from pathlib import Path
@@ -28,6 +29,14 @@ class RecordingInfo(NamedTuple):
     path: Path
     state: RecordingState
     size: int | None = None
+
+
+class RecordingClasses(NamedTuple):
+    """Recordings sorted into classes depending on their current state of processing"""
+
+    finished: list[RecordingInfo]
+    rendering: list[RecordingInfo]
+    unprocessed: list[RecordingInfo]
 
 
 def _unfinished_state(main_track_dir: Path) -> RecordingState:
@@ -85,6 +94,17 @@ def classify_recording(recording_dir: Path, running_jobs: frozenset[Path]) -> Re
     return RecordingInfo(path=recording_dir, state=state)
 
 
-def classify_all_recordings(user_home: Path, running_jobs: frozenset[Path]) -> list[RecordingInfo]:
-    """Classifies all recordings a user has"""
-    return [classify_recording(path, running_jobs) for path in sorted(user_home.iterdir())]
+def recording_classes(user_home: Path, running_jobs: frozenset[Path]) -> RecordingClasses:
+    """Returns a user's recordings arranged in classes according to their state"""
+
+    recordings = [classify_recording(path, running_jobs) for path in sorted(user_home.iterdir())]
+    bins = defaultdict[RecordingState, list[RecordingInfo]](list[RecordingInfo])
+
+    for r in recordings:
+        bins[r.state].append(r)
+
+    return RecordingClasses(
+        finished=bins[RecordingState.FINISHED],
+        rendering=bins[RecordingState.RENDERING],
+        unprocessed=bins[RecordingState.UNPROCESSED],
+    )

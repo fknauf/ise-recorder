@@ -8,7 +8,6 @@ preferred_username claim suffixed with the first few characters of the hash so i
 if preferred usernames overlap.
 """
 
-import hashlib
 from pathlib import Path
 import re
 import unicodedata
@@ -18,7 +17,7 @@ from pathvalidate import sanitize_filename
 from ise_record.core.auth import UserInfo
 
 
-def fs_safe_user_name(preferred_username: str | None) -> str | None:
+def _fs_safe_user_name(preferred_username: str | None) -> str | None:
     """
     Tries to create a file-system-safe, human-readable identifier for the user for use in a symlink
     to the cryptic digest dir so someone with shell access can identify user homes.
@@ -48,11 +47,11 @@ async def prepare_user_home_dir(user_info: UserInfo, base_dir: Path) -> Path:
     :return path to the stable home directory.
     """
     # Infer the stable directory name from the token subject
-    digest = hashlib.sha3_256(user_info.sub.encode("utf-8")).hexdigest()
+    digest = user_info.stable_digest()
     stable_home = base_dir / digest
     stable_home.mkdir(exist_ok=True, parents=True)
 
-    prefix = fs_safe_user_name(user_info.preferred_username)
+    prefix = _fs_safe_user_name(user_info.preferred_username)
 
     # if username can't be obtained, leave it. Otherwise, append part of the digest to make it
     # unique, then make it a symlink to the stable directory name.

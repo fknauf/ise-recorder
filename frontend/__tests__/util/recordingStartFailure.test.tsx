@@ -29,6 +29,12 @@ const destination: RecordingDestination = {
   getAccessToken: async () => undefined
 };
 
+// for the tests about what is handed on to the backend once the recording ends
+const backendDestination: RecordingDestination = {
+  ...destination,
+  apiUrl: "https://backend.example.edu"
+};
+
 const videoTrack = () => {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
@@ -72,12 +78,15 @@ interface Outcome {
  * Record briefly and stop. MediaRecorder flushes a final chunk on stop, so every track that
  * did start delivers a chunk without waiting out the 5s timeslice.
  */
-async function recordBriefly(bundle: RecordingTrackBundle): Promise<Outcome> {
+async function recordBriefly(
+  bundle: RecordingTrackBundle,
+  to: RecordingDestination = destination
+): Promise<Outcome> {
   const writtenFiles = new Set<string>();
   let finished = false;
 
   await recordLecture(
-    bundle, "GVS", "lecturer@example.com", destination,
+    bundle, "GVS", "lecturer@example.com", to,
     () => {},
     async (_name, stop) => {
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -96,9 +105,10 @@ async function recordBriefly(bundle: RecordingTrackBundle): Promise<Outcome> {
 }
 
 beforeEach(() => {
-  // the real one always returns a promise, and recordLecture chains on it
+  // the real ones always return a promise, and recordLecture reads the status of each
   vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
   vi.mocked(schedulePostprocessing).mockReset();
+  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
   vi.mocked(showError).mockClear();
 
   streams = new Map();
@@ -128,7 +138,7 @@ test("a track that cannot start does not hold up the end of the recording", asyn
   const outcome = await recordBriefly({
     displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
     mainDisplay: display, overlay: camera
-  });
+  }, backendDestination);
 
   expect(outcome.finished).toBe(true);
   // the rest of the recording is still handed on for postprocessing

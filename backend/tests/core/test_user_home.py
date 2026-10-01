@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from ise_record.core.auth import UserInfo
-from ise_record.core.user_home import fs_safe_user_name, prepare_user_home_dir
+from ise_record.core.user_home import _fs_safe_user_name, prepare_user_home_dir
 
 from ..harness import (
     alias_of,
@@ -164,7 +164,7 @@ async def test_the_directory_name_does_not_depend_on_the_composition_of_the_user
     ],
 )
 def test_alias_name_is_always_a_safe_single_path_segment(username: Any):
-    name = fs_safe_user_name(username)
+    name = _fs_safe_user_name(username)
 
     assert name, "an empty directory name would put chunks in the destination root"
     assert not name.startswith((".", "-")), "hidden on unix, an option to anything argv-shaped"
@@ -204,7 +204,7 @@ def test_no_alias_for_broken_usernames(username: Any):
     # a recording name, there is no pattern behind it -- so this one check is the entire
     # guarantee, and it is worth keeping obvious. Dropping the alias costs nothing: the
     # home directory does not depend on it.
-    assert fs_safe_user_name(username) is None
+    assert _fs_safe_user_name(username) is None
 
 
 @pytest.mark.asyncio

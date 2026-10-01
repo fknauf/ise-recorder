@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { downloadUrl, purgeRecording, RetryPolicy, sendChunkToServer, schedulePostprocessing, ServerStorageDestination, uploadFile } from "@/lib/utils/serverStorage";
+import { assembleDownloadUrl, purgeRecording, RetryPolicy, sendChunkToServer, schedulePostprocessing, ServerStorageDestination, uploadFile } from "@/lib/utils/serverStorage";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
+import * as z from "zod";
 
 interface FetchRequest {
   url: string | URL | Request
@@ -243,10 +244,6 @@ test("schedule postprocessing", async () => {
 
   const requestBody = JSON.parse(fetchRequest.data?.body as string);
   expect(requestBody).toStrictEqual({ recording: "FOO", recipient: "lecturer@example.com" });
-
-  // the confirmation is the only sign the lecturer gets that postprocessing was accepted
-  expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining("FOO"));
-  expect(vi.mocked(showError)).not.toHaveBeenCalled();
 });
 
 test("schedule postprocessing to flaky server", async () => {
@@ -314,8 +311,8 @@ test("schedule postprocessing to broken server", async () => {
   expect(result.status).toBe("failed");
   expect(fetchRequests.length).toBe(4);
   expect(elapsed).toBe(350);
-  // unlike a chunk, a job request is one request per recording, so it reports its own failure
-  expect(vi.mocked(showError)).toHaveBeenCalledOnce();
+  // the caller says so: a live recording and the Rerender button have different advice
+  expect(vi.mocked(showError)).not.toHaveBeenCalled();
 
   for(const req of fetchRequests) {
     expect(req.url).toBe(`${destination.apiUrl}/api/jobs`);
@@ -330,9 +327,10 @@ test("schedule postprocessing to broken server", async () => {
   }
 });
 
-// The rerender button refreshes the listing afterwards, and a live recording decides from
-// the result whether the lecturer has to do anything, so the result is part of the
-// contract rather than only the notification.
+// The result is the whole of the report: telling the lecturer is the caller's business,
+// because only the caller knows what to tell them -- a live recording that was streamed in
+// full can be rerendered later, a press of the Rerender button can simply be retried. So
+// none of these raise a toast of their own.
 
 test("schedule postprocessing reports an accepted job", async () => {
   const destination: ServerStorageDestination = {
@@ -343,6 +341,9 @@ test("schedule postprocessing reports an accepted job", async () => {
   window.fetch = vi.fn().mockImplementation(async () => Response.json("", { status: 202 }));
 
   await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com", noRetries)).resolves.toMatchObject({ status: "ok" });
+  expect(vi.mocked(showSuccess)).not.toHaveBeenCalled();
+  expect(vi.mocked(showMessage)).not.toHaveBeenCalled();
+  expect(vi.mocked(showError)).not.toHaveBeenCalled();
 });
 
 test("schedule postprocessing reports a refused job", async () => {
@@ -359,7 +360,7 @@ test("schedule postprocessing reports a refused job", async () => {
 
   expect(result.status).toBe("failed");
   expect(result.message).toContain("Recording FOO does not exist");
-  expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining("Recording FOO does not exist"));
+  expect(vi.mocked(showError)).not.toHaveBeenCalled();
   expect(vi.mocked(showSuccess)).not.toHaveBeenCalled();
 });
 
@@ -384,7 +385,7 @@ test("schedule postprocessing without retries gives up after one attempt", async
   expect(Date.now() - before).toBe(0);
 });
 
-test("schedule postprocessing after aborted streaming sends nothing and says so", async () => {
+test("schedule postprocessing after aborted streaming sends nothing and reports the abort", async () => {
   // A recording whose chunks did not all arrive: rendering it would produce a video with a
   // hole in it, and the lecturer would be told it had worked.
   const aborted = new AbortController();
@@ -398,10 +399,29 @@ test("schedule postprocessing after aborted streaming sends nothing and says so"
     { ...noRetries, abortSignal: aborted.signal }
   );
 
-  expect(result.status).toBe("failed");
+  // told apart from a failure: the lecturer is not to be told the backend refused anything
+  expect(result.status).toBe("aborted");
   expect(window.fetch).not.toHaveBeenCalled();
-  expect(vi.mocked(showMessage)).toHaveBeenCalledOnce();
+  expect(vi.mocked(showMessage)).not.toHaveBeenCalled();
   expect(vi.mocked(showSuccess)).not.toHaveBeenCalled();
+  expect(vi.mocked(showError)).not.toHaveBeenCalled();
+});
+
+test("schedule postprocessing after aborted streaming reports the abort even without a backend", async () => {
+  // the abort is checked first, so a recording with a hole in it is never confirmed
+  const aborted = new AbortController();
+  aborted.abort("chunk");
+
+  window.fetch = vi.fn();
+
+  const result = await schedulePostprocessing(
+    { apiUrl: undefined, getAccessToken: accessToken },
+    "FOO", "lecturer@example.com",
+    { ...noRetries, abortSignal: aborted.signal }
+  );
+
+  expect(result.status).toBe("aborted");
+  expect(window.fetch).not.toHaveBeenCalled();
 });
 
 test("chunk upload is unauthenticated if no access token is available", async () => {
@@ -606,11 +626,10 @@ test.each([ 400, 404, 422 ])("postprocessing rejected with %i is not retried", a
 
   const requests = brokenServerResponding(status);
 
-  await settleRetries(schedulePostprocessing(brokenDestination, "FOO", "lecturer@example.com", { retries: 3, initialWaitMillis: 50 }));
+  const result = await settleRetries(schedulePostprocessing(brokenDestination, "FOO", "lecturer@example.com", { retries: 3, initialWaitMillis: 50 }));
 
   expect(requests.length).toBe(1);
-  expect(vi.mocked(showError)).toHaveBeenCalled();
-  expect(vi.mocked(showSuccess)).not.toHaveBeenCalled();
+  expect(result.status).toBe("failed");
 });
 
 test("a permanent failure still reports the server's explanation", async () => {
@@ -810,11 +829,22 @@ test("an aborted upload of a file stops at the chunk it was on", async () => {
 // The request that deletes a recording for good. What the lecturer has to confirm first,
 // and telling them how it went, is the dialog's business, in
 // ProcessedRecordingsSection.test.tsx; this is the request once they have confirmed.
+//
+// The backend answers a purge with the listing as it stands afterwards, which the section
+// puts in place of its own without fetching it again. So a purge that went through resolves
+// with that listing, and anything else throws: there is no listing to hand back.
 
 const API = "http://record.example.com";
 
+const LISTING_AFTER_PURGE = {
+  user: "8f14e45fceea167a",
+  completed: [ { name: "PSU_2026", size: 2048, totp: "9876543210" } ],
+  rendering: [ { name: "ABC_2026" } ],
+  unprocessed: []
+};
+
 test("a purge sends one authenticated DELETE for the recording", async () => {
-  window.fetch = vi.fn().mockResolvedValue(Response.json({ recording: "GVS_2025" }));
+  window.fetch = vi.fn().mockResolvedValue(Response.json(LISTING_AFTER_PURGE));
 
   await purgeRecording(API, "GVS_2025", accessToken);
 
@@ -829,23 +859,28 @@ test("a purge sends one authenticated DELETE for the recording", async () => {
 test("a purged recording name is percent-encoded into the path", async () => {
   // a name is a path segment here, so anything the browser would not encode on its own
   // has to be encoded before it gets there
-  window.fetch = vi.fn().mockResolvedValue(Response.json({}));
+  window.fetch = vi.fn().mockResolvedValue(Response.json(LISTING_AFTER_PURGE));
 
   await purgeRecording(API, "Übung_2025", accessToken);
 
   expect(vi.mocked(window.fetch).mock.calls[0][0]).toBe(`${API}/api/recordings/${encodeURIComponent("Übung_2025")}`);
 });
 
-test("a successful purge is reported back without telling the lecturer itself", async () => {
-  window.fetch = vi.fn().mockResolvedValue(Response.json({ recording: "GVS_2025" }));
+test("a successful purge resolves with the listing the backend answered with", async () => {
+  window.fetch = vi.fn().mockResolvedValue(Response.json(LISTING_AFTER_PURGE));
 
-  const result = await purgeRecording(API, "GVS_2025", accessToken);
-
-  expect(result.status).toBe("ok");
-  // the dialog shows the message; a toast from here as well would be a second one
-  expect(result.message).toBeDefined();
+  await expect(purgeRecording(API, "GVS_2025", accessToken)).resolves.toStrictEqual(LISTING_AFTER_PURGE);
+  // the dialog tells the lecturer; a toast from here as well would be a second one
   expect(showSuccess).not.toHaveBeenCalled();
   expect(showError).not.toHaveBeenCalled();
+});
+
+test("a malformed listing after a purge is a failure rather than a listing", async () => {
+  // it becomes the section's listing as it is, so it gets the same check as a fetched one --
+  // a backend from before the purge answered with a listing would send something like this
+  window.fetch = vi.fn().mockResolvedValue(Response.json({ recording: "GVS_2025" }));
+
+  await expect(purgeRecording(API, "GVS_2025", accessToken)).rejects.toBeInstanceOf(z.ZodError);
 });
 
 test("nothing is sent without an access token", async () => {
@@ -853,23 +888,19 @@ test("nothing is sent without an access token", async () => {
   // says less than this
   window.fetch = vi.fn();
 
-  const result = await purgeRecording(API, "GVS_2025", noAccessToken);
-
+  await expect(purgeRecording(API, "GVS_2025", noAccessToken))
+    .rejects.toThrow("Failed to purge GVS_2025: Not authenticated");
   expect(window.fetch).not.toHaveBeenCalled();
-  expect(result.status).toBe("failed");
-  expect(result.message).toBeDefined();
 });
 
-test("a refused purge carries the server's explanation", async () => {
+test("a refused purge fails with the server's explanation", async () => {
   // a 409 means the listing was stale -- the recording started rendering in the meantime
   window.fetch = vi.fn().mockResolvedValue(
     Response.json({ detail: "Recording GVS_2025 is in use and currently not purgeable" }, { status: 409 })
   );
 
-  const result = await purgeRecording(API, "GVS_2025", accessToken);
-
-  expect(result.status).toBe("failed");
-  expect(result.message).toContain("Recording GVS_2025 is in use and currently not purgeable");
+  await expect(purgeRecording(API, "GVS_2025", accessToken))
+    .rejects.toThrow("Failed to purge GVS_2025: Recording GVS_2025 is in use and currently not purgeable");
   expect(showError).not.toHaveBeenCalled();
 });
 
@@ -879,39 +910,35 @@ test("a refusal whose detail is not a string is not stringified", async () => {
     Response.json({ detail: [ { loc: [ "path", "recording" ], msg: "String should match pattern" } ] }, { status: 422 })
   );
 
-  const result = await purgeRecording(API, "GVS_2025", accessToken);
+  const error = await purgeRecording(API, "GVS_2025", accessToken).catch((e: unknown) => e);
 
-  expect(result.status).toBe("failed");
-  expect(result.message).toBeDefined();
-  expect(result.message).not.toContain("[object Object]");
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe("Failed to purge GVS_2025: Unknown error");
+  expect((error as Error).message).not.toContain("[object Object]");
 });
 
 test("a refusal that is not JSON still says something", async () => {
   window.fetch = vi.fn().mockResolvedValue(new Response("<html>502</html>", { status: 502 }));
 
-  const result = await purgeRecording(API, "GVS_2025", accessToken);
+  const error = await purgeRecording(API, "GVS_2025", accessToken).catch((e: unknown) => e);
 
-  expect(result.status).toBe("failed");
-  expect(result.message).toBeDefined();
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe("Failed to purge GVS_2025: Unknown error");
   // a gateway's error page is not something to put in a toast
-  expect(result.message).not.toContain("<html>");
+  expect((error as Error).message).not.toContain("<html>");
 });
 
-test("a backend that cannot be reached is reported rather than thrown", async () => {
-  // the dialog awaits this and then closes; a rejection would leave it stuck half-busy
-  window.fetch = vi.fn().mockRejectedValue(new TypeError("NetworkError when attempting to fetch resource."));
-  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+test("a backend that cannot be reached fails the purge with fetch's own error", async () => {
+  // what fetch() said is the only clue to which of the many ways of not arriving it was,
+  // and the dialog puts it in the toast
+  const unreachable = new TypeError("NetworkError when attempting to fetch resource.");
+  window.fetch = vi.fn().mockRejectedValue(unreachable);
 
-  const result = await purgeRecording(API, "GVS_2025", accessToken);
-
-  expect(result.status).toBe("failed");
-  // what fetch() said is the only clue to which of the many ways of not arriving it was
-  expect(result.message).toContain("NetworkError when attempting to fetch resource.");
-  error.mockRestore();
+  await expect(purgeRecording(API, "GVS_2025", accessToken)).rejects.toBe(unreachable);
 });
 
 test("the download URL carries the user, the encoded recording name and the OTP", () => {
-  expect(downloadUrl(API, "8f14e45f", "Übung_2025", "0123456789"))
+  expect(assembleDownloadUrl(API, "8f14e45f", "Übung_2025", "0123456789"))
     .toBe(`${API}/api/recordings/8f14e45f/${encodeURIComponent("Übung_2025")}?totp=0123456789`);
 });
 

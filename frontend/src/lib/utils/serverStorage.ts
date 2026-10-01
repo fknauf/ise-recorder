@@ -1,6 +1,5 @@
 "use client";
 
-import { showError, showMessage, showSuccess } from "./notifications";
 import * as z from "zod";
 
 type AttemptStatus = "ok" | "temp-fail" | "permanent-fail" | "aborted";
@@ -211,8 +210,7 @@ export async function schedulePostprocessing(
   retryPolicy: RetryPolicy
 ): Promise<UploadResult> {
   if(retryPolicy.abortSignal?.aborted) {
-    showMessage("Post-processing could not be scheduled because streaming was impeded.");
-    return { status: "failed" };
+    return { status: "aborted" };
   }
 
   if(!destination.apiUrl) {
@@ -235,17 +233,10 @@ export async function schedulePostprocessing(
   };
 
   const result = await callWithRetries(() => sendRequest(jobUrl, request, retryPolicy.abortSignal, destination.getAccessToken), retryPolicy);
-
-  if(result.status === "ok") {
-    showSuccess(`Scheduled postprocessing for recording "${recording}"`);
-  } else {
-    showError(`Failed to schedule postprocessing: ${result.message}. The recording was streamed to backend and will be available for re-rendering within five minutes.`);
-  }
-
   return finalizeResult(result);
 }
 
-export const downloadUrl = (
+export const assembleDownloadUrl = (
   apiUrl: string,
   user: string,
   recordingName: string,
@@ -291,14 +282,11 @@ export async function purgeRecording(
   apiUrl: string,
   recordingName: string,
   getAccessToken: () => Promise<string | undefined>
-): Promise<UploadResult> {
+): Promise<ProcessedRecordings> {
   const token = await getAccessToken();
 
   if(token === undefined) {
-    return {
-      status: "failed",
-      message: `Failed to purge ${recordingName}: Not authenticated`
-    };
+    throw new Error(`Failed to purge ${recordingName}: Not authenticated`);
   }
 
   const endpoint = `${apiUrl}/api/recordings/${encodeURIComponent(recordingName)}`;
@@ -310,32 +298,16 @@ export async function purgeRecording(
     }
   };
 
-  try {
-    const response = await fetch(endpoint, request);
+  const response = await fetch(endpoint, request);
 
-    if(!response.ok) {
-      const body = await response.json().catch(() => null);
-      const detail = typeof body?.detail === "string" ? body.detail : "Unknown error";
+  if(!response.ok) {
+    const body = await response.json().catch(() => null);
+    const detail = typeof body?.detail === "string" ? body.detail : "Unknown error";
 
-      return {
-        status: "failed",
-        message: `Failed to purge ${recordingName}: ${detail}`
-      };
-    }
-
-    return {
-      status: "ok",
-      message: `Purged ${recordingName}`
-    };
-  } catch(e) {
-    console.error(`Failed to purge ${recordingName}`, e);
-    const errMsg = e instanceof Error ? e.message : "Unknown error";
-
-    return {
-      status: "failed",
-      message: `Failed to purge ${recordingName}: ${errMsg}`
-    };
+    throw new Error(`Failed to purge ${recordingName}: ${detail}`);
   }
+
+  return ProcessedRecordingsSchema.parse(await response.json());
 }
 
 export async function uploadFile(

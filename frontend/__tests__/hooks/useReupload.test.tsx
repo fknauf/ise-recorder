@@ -6,7 +6,7 @@ import { useReupload } from "@/lib/hooks/useReupload";
 import { useLecture } from "@/lib/hooks/useLecture";
 import { gatherRecordingsList, getAllRecordingTracks } from "@/lib/utils/browserStorage";
 import { schedulePostprocessing, UploadResult, uploadFile } from "@/lib/utils/serverStorage";
-import { showError } from "@/lib/utils/notifications";
+import { showError, showSuccess } from "@/lib/utils/notifications";
 
 // Sends a locally saved recording to the server under a name of its own, so it cannot mix
 // with whatever the live upload left there, and schedules its postprocessing. How a file is
@@ -48,6 +48,7 @@ beforeEach(() => {
   vi.mocked(schedulePostprocessing).mockReset();
   vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
   vi.mocked(showError).mockClear();
+  vi.mocked(showSuccess).mockClear();
   refreshProcessedRecordings.mockClear();
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 0 });
@@ -99,6 +100,31 @@ test("every track goes up under a name of its own, then the job is scheduled", a
   // the report goes to whoever is in the lecture form now; the backend keeps no record of
   // the original recipient
   expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-reupload", "lecturer@example.edu", expect.anything());
+  expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
+});
+
+test("a scheduled job is confirmed to the user", async () => {
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
+  const { result } = await renderReupload();
+
+  await act(() => result.current.upload.reupload());
+
+  expect(showSuccess).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("GVS_2025"));
+  expect(showError).not.toHaveBeenCalled();
+});
+
+test("a job the backend refused is reported with what it said", async () => {
+  // the tracks are all up by now, so this is a matter of re-rendering rather than uploading
+  // again -- but the lecturer has to know that nothing is rendering yet
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
+  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "failed", message: "server responded 503" });
+  const { result } = await renderReupload();
+
+  await act(() => result.current.upload.reupload());
+
+  expect(showError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("server responded 503"));
+  expect(showSuccess).not.toHaveBeenCalled();
+  expect(result.current.upload.isUploading).toBe(false);
   expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
 });
 

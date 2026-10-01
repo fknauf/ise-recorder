@@ -1,6 +1,6 @@
 import { useAppSession } from "../components/SessionProvider";
 import { getAllRecordingTracks } from "../utils/browserStorage";
-import { showError } from "../utils/notifications";
+import { showError, showSuccess } from "../utils/notifications";
 import { uploadFile, schedulePostprocessing, RetryPolicy, UploadStatus } from "../utils/serverStorage";
 import { useAppStore } from "./useAppStore";
 import { useLecture } from "./useLecture";
@@ -64,7 +64,13 @@ export function useReupload(recordingName: string) {
       if(trackBlobs.length === 0) {
         showError(`Nothing to upload for ${recordingName}`);
       } else if(await uploadTracks()) {
-        await schedulePostprocessing(destination, uploadName, lecturerEmail, retryPolicy);
+        const postResult = await schedulePostprocessing(destination, uploadName, lecturerEmail, retryPolicy);
+
+        if(postResult.status === "ok") {
+          showSuccess(`Scheduled postprocessing for recording "${uploadName}"`);
+        } else {
+          showError(`Failed to schedule postprocessing: ${postResult.message}.`);
+        }
       }
     } catch(e) {
       console.error(`Unexpected error during manual upload of ${uploadName}`, e);

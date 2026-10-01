@@ -19,14 +19,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
-from ise_record.glue.jobs import (
-    get_job_queue,
-    get_jobs_state,
-    get_running_jobs,
-    get_running_jobs_snapshot,
-    JobQueue,
-    postprocessing_task,
-)
+from ise_record.glue.enclave import Enclave
+from ise_record.glue.jobs import get_job_queue, JobQueue, postprocessing_task
 from ise_record.settings import Settings, SmtpSettings
 
 from .conftest import request_for
@@ -220,20 +214,35 @@ async def test_a_running_job_is_registered_while_it_runs(mocker: MockerFixture):
 
 
 # --- the per-user record of running jobs -----------------------------------
+#
+# Which enclave a caller gets is get_enclave's business, in test_enclave.py; these cover what
+# the queue makes of the enclave it is handed.
 
 
 @pytest.mark.asyncio
-async def test_each_user_has_a_running_job_set_of_their_own(tmp_path: Path):
-    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
-    home_a, home_b = tmp_path / "a", tmp_path / "b"
+async def test_the_queue_registers_jobs_in_the_enclave_it_was_built_for(
+    mocker: MockerFixture, tmp_path: Path
+):
+    # the enclave's set is what the listing, the upload check and the purge check read, so a
+    # queue that kept a set of its own would let all three miss a running job
+    request = request_for(Settings(destdir=tmp_path, auth="disabled"))
+    enclave = Enclave(tmp_path)
+    seen_while_running: list[set[Path]] = []
 
-    mine = await get_running_jobs(jobs_state, home_a)
-    theirs = await get_running_jobs(jobs_state, home_b)
+    async def fake_postprocess(_recording_path: Path) -> Result:
+        seen_while_running.append(set(enclave.running_jobs))
+        return Result(reason=ResultReason.SUCCESS, output_file=None)
 
-    # the same set every time for the same user, or a job would register in one set and the
-    # listing would look in another
-    assert await get_running_jobs(jobs_state, home_a) is mine
-    assert mine is not theirs
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, side_effect=fake_postprocess
+    )
+
+    queue = await get_job_queue(request, enclave)
+    await postprocessing_task(tmp_path / "foo", None, None, queue)
+
+    assert queue.running_jobs is enclave.running_jobs
+    assert seen_while_running == [{tmp_path / "foo"}]
+    assert enclave.running_jobs == set()
 
 
 @pytest.mark.asyncio
@@ -242,9 +251,10 @@ async def test_another_users_job_does_not_block_a_recording_of_the_same_name(
 ):
     # two lecturers naming a lecture alike is ordinary; only the same recording of the same
     # user counts as a duplicate
-    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
+    request = request_for(Settings(destdir=tmp_path, auth="disabled"))
     home_a, home_b = tmp_path / "a", tmp_path / "b"
-    (await get_running_jobs(jobs_state, home_a)).add(home_a / "foo")
+    enclave_a, enclave_b = Enclave(home_a), Enclave(home_b)
+    enclave_a.running_jobs.add(home_a / "foo")
 
     mock_postprocess = mocker.patch(
         "ise_record.glue.jobs.postprocess_recording",
@@ -252,27 +262,10 @@ async def test_another_users_job_does_not_block_a_recording_of_the_same_name(
         return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
     )
 
-    queue_b = await get_job_queue(jobs_state, await get_running_jobs(jobs_state, home_b))
-    await postprocessing_task(home_b / "foo", None, None, queue_b)
+    await postprocessing_task(home_b / "foo", None, None, await get_job_queue(request, enclave_b))
 
     mock_postprocess.assert_called_once_with(home_b / "foo")
-
-
-@pytest.mark.asyncio
-async def test_the_snapshot_does_not_follow_later_changes(tmp_path: Path):
-    # the snapshot is handed to a dependency that scans the filesystem in the thread pool,
-    # while jobs on the event loop keep adding and removing entries. A live view would be
-    # iterated mid-change; a copy cannot be.
-    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
-    running_jobs = await get_running_jobs(jobs_state, tmp_path)
-    running_jobs.add(tmp_path / "foo")
-
-    snapshot = await get_running_jobs_snapshot(running_jobs)
-    running_jobs.add(tmp_path / "bar")
-    running_jobs.discard(tmp_path / "foo")
-
-    assert snapshot == frozenset({tmp_path / "foo"})
-    assert isinstance(snapshot, frozenset)
+    assert enclave_a.running_jobs == {home_a / "foo"}
 
 
 # --- the limit on jobs rendering at once -----------------------------------
@@ -468,10 +461,10 @@ async def test_the_report_is_sent_after_the_slot_is_given_back(
 async def test_all_users_share_the_limit(tmp_path: Path, renders: GatedRenders):
     # the limit protects the machine, so a second lecturer's job waits for the first
     # lecturer's like any other
-    jobs_state = await get_jobs_state(request_for(Settings(destdir=tmp_path, auth="disabled")))
+    request = request_for(Settings(destdir=tmp_path, auth="disabled"))
     home_a, home_b = tmp_path / "a", tmp_path / "b"
-    queue_a = await get_job_queue(jobs_state, await get_running_jobs(jobs_state, home_a))
-    queue_b = await get_job_queue(jobs_state, await get_running_jobs(jobs_state, home_b))
+    queue_a = await get_job_queue(request, Enclave(home_a))
+    queue_b = await get_job_queue(request, Enclave(home_b))
 
     first = asyncio.create_task(postprocessing_task(home_a / "foo", None, None, queue_a))
     second = asyncio.create_task(postprocessing_task(home_b / "foo", None, None, queue_b))

@@ -1,7 +1,7 @@
 "use client";
 
 import { openRecordingFileStream } from "./browserStorage";
-import { showError } from "./notifications";
+import { showError, showMessage, showSuccess } from "./notifications";
 import { RetryPolicy, schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
 import { graphemeAwareTruncateToBytes } from "./stringAux";
 
@@ -371,7 +371,18 @@ export async function recordLecture(
 
       await Promise.allSettled(jobs.map(job => job.finished));
       clearTimeout(stopTimer);
-      await schedulePostprocessing(destination, recordingName, lecturerEmail, postRetryPolicy);
+
+      if(destination.apiUrl !== undefined) {
+        const postResult = await schedulePostprocessing(destination, recordingName, lecturerEmail, postRetryPolicy);
+
+        if(postResult.status === "ok") {
+          showSuccess(`Scheduled postprocessing for recording "${recordingName}"`);
+        } else if(postResult.status === "aborted") {
+          showMessage("Post-processing could not be scheduled because streaming was impeded.");
+        } else {
+          showError(`Failed to schedule postprocessing: ${postResult.message}. The recording was streamed to backend and will be available for re-rendering within five minutes.`);
+        }
+      }
     } catch(e) {
       stopJobs();
       throw e;

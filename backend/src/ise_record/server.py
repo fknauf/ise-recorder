@@ -9,8 +9,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 import logging
 import os
-from pathlib import Path
-import shutil
 from typing import Annotated
 
 import aiofiles
@@ -19,20 +17,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import Field
 
-from ise_record.core.auth import DownloadTotpAuthority
+from ise_record.core.auth import UserInfo
 from ise_record.core.logconfig import setup_logging
 from ise_record.core.postprocess import OUTPUT_FILENAME
-from ise_record.glue.auth import get_download_totp, load_oidc_client, OidcServerState
+from ise_record.glue.auth import get_user_info, load_oidc_client, OidcServerState
+from ise_record.glue.enclave import Enclave, get_enclave, get_enclave_by_user_digest
 from ise_record.glue.jobs import (
     get_job_queue,
-    get_running_jobs,
     JobQueue,
-    JobsState,
     postprocessing_task,
 )
 from ise_record.glue.models import ChunkUpload, PostProcessingJob, RecordingsList, SafeRecording
-from ise_record.glue.recordings import get_recording_path_for_purge, get_recordings_list
-from ise_record.glue.user_home import get_current_user_home
+from ise_record.glue.recordings import purge_recording, user_recordings_list
 from ise_record.settings import get_settings, Settings
 
 
@@ -50,11 +46,10 @@ router = APIRouter(prefix="/api")
 
 
 @router.post("/chunks", status_code=status.HTTP_201_CREATED)
-async def upload_chunk(
+async def upload_chunk_endpoint(
     upload: Annotated[ChunkUpload, Form()],
     settings: Annotated[Settings, Depends(get_settings)],
-    user_home: Annotated[Path, Depends(get_current_user_home)],
-    running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
+    enclave: Annotated[Enclave, Depends(get_enclave)],
 ) -> dict[str, str | int]:
     """
     POST endpoint for the upload of chunk files.
@@ -69,7 +64,7 @@ async def upload_chunk(
             ),
         )
 
-    if user_home / upload.recording in running_jobs:
+    if enclave.home_dir / upload.recording in enclave.running_jobs:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Unable to accept uploads: {upload.recording} is currently being rendered.",
@@ -77,7 +72,7 @@ async def upload_chunk(
 
     filename = f"chunk.{upload.index:0{settings.chunk_file_digits}d}"
 
-    track_path = user_home / upload.recording / upload.track
+    track_path = enclave.home_dir / upload.recording / upload.track
     filepath = track_path / filename
     logger.debug("saving %s", filepath)
 
@@ -96,16 +91,16 @@ async def upload_chunk(
 
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
-def schedule_job(
+def schedule_job_endpoint(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
-    user_home: Annotated[Path, Depends(get_current_user_home)],
+    enclave: Annotated[Enclave, Depends(get_enclave)],
     job_queue: Annotated[JobQueue, Depends(get_job_queue)],
 ):
     """Endpoint for the scheduling of postprocessing jobs"""
 
-    recording_path = user_home / job.recording
+    recording_path = enclave.home_dir / job.recording
 
     if not recording_path.is_dir():
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
@@ -122,38 +117,37 @@ def schedule_job(
 
 
 @router.get("/health")
-def health_check():
+def health_check_endpoint():
     """Endpoint for container health checks"""
     logger.debug("health check requested")
     return {"status": "healthy"}
 
 
 @router.get("/recordings", dependencies=[Depends(_require_auth_configured)])
-async def recordings_list(
-    recordings: Annotated[RecordingsList, Depends(get_recordings_list)],
+async def recordings_list_endpoint(
+    enclave: Annotated[Enclave, Depends(get_enclave)],
 ) -> RecordingsList:
     """Endpoint to obtain a list of completed and rendering recordings for the active user"""
-    return recordings
+    return await user_recordings_list(enclave)
 
 
 @router.get(
     "/recordings/{user_digest}/{recording}", dependencies=[Depends(_require_auth_configured)]
 )
-async def download_completed(
+async def download_endpoint(
     recording: SafeRecording,
-    user_digest: Annotated[str, Field(pattern=r"\A[0-9a-f]+\z")],
     totp: Annotated[str, Field(pattern=r"[0-9]+")],
-    settings: Annotated[Settings, Depends(get_settings)],
-    download_totp: Annotated[DownloadTotpAuthority, Depends(get_download_totp)],
+    enclave: Annotated[Enclave | None, Depends(get_enclave_by_user_digest)],
 ) -> FileResponse:
     """Endpoint for downloading a completed recording that the active user owns"""
 
-    file_path = settings.destdir / user_digest / recording / OUTPUT_FILENAME
+    if enclave is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
-    if not download_totp.verify(totp, file_path):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP could not be verified"
-        )
+    file_path = enclave.home_dir / recording / OUTPUT_FILENAME
+
+    if not enclave.download_totp.verify(totp, file_path):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -162,22 +156,14 @@ async def download_completed(
 
 
 @router.delete("/recordings/{recording}", dependencies=[Depends(_require_auth_configured)])
-async def purge_recording(
-    recording_path: Annotated[Path, Depends(get_recording_path_for_purge)],
-    download_totp: Annotated[DownloadTotpAuthority, Depends(get_download_totp)],
-):
+async def purge_endpoint(
+    recording: SafeRecording,
+    enclave: Annotated[Enclave, Depends(get_enclave)],
+    user_info: Annotated[UserInfo | None, Depends(get_user_info)],
+) -> RecordingsList:
     """Endpoint to purge a recording directory"""
-    try:
-        await asyncio.to_thread(shutil.rmtree, recording_path)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.exception("Filesystem error")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Filesystem error"
-        ) from exc
-
-    download_totp.forget(recording_path / OUTPUT_FILENAME)
-
-    return {"recording": recording_path.name, "detail": "deleted successfully"}
+    await purge_recording(recording, enclave, user_info)
+    return await user_recordings_list(enclave)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -198,9 +184,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application = FastAPI(lifespan=lifespan)
 
     application.state.oidc = OidcServerState()
-    application.state.cached_home_dirs = dict[str, Path]()
-    application.state.download_totp = DownloadTotpAuthority()
-    application.state.jobs = JobsState.create(settings.max_parallel_jobs)
+    application.state.jobs_semaphore = asyncio.Semaphore(settings.max_parallel_jobs)
+    application.state.enclaves = dict[str | None, Enclave]()
 
     if override_settings is not None:
         application.dependency_overrides[get_settings] = lambda: override_settings

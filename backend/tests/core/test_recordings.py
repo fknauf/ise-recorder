@@ -17,8 +17,9 @@ from pathlib import Path
 import pytest
 
 from ise_record.core.recordings import (
-    classify_all_recordings,
     classify_recording,
+    recording_classes,
+    RecordingClasses,
     RecordingInfo,
     RecordingState,
 )
@@ -225,39 +226,60 @@ def test_a_symlink_is_not_followed(home: Path, tmp_path: Path):
     assert state_of(home / "link") == RecordingState.NONEXISTENT
 
 
-# --- every recording at once -----------------------------------------------
+# --- every recording at once, sorted into the lists the frontend shows -------
 
 
-def test_every_entry_of_the_home_directory_is_classified_in_name_order(home: Path):
+def names(recordings: list[RecordingInfo]) -> list[str]:
+    return [r.path.name for r in recordings]
+
+
+def test_each_recording_lands_in_the_list_for_its_state(home: Path):
+    finish_recording(home, "DONE_2025")
+    abandon_recording(home, "FAILED_2025")
+    busy = abandon_recording(home, "BUSY_2025")
+
+    classes = recording_classes(home, frozenset({busy}))
+
+    assert names(classes.finished) == ["DONE_2025"]
+    assert names(classes.rendering) == ["BUSY_2025"]
+    assert names(classes.unprocessed) == ["FAILED_2025"]
+
+
+def test_a_finished_recording_keeps_its_size_in_the_list(home: Path):
+    finish_recording(home, "DONE_2025", b"twelve bytes")
+
+    assert [r.size for r in recording_classes(home, NO_JOBS).finished] == [12]
+
+
+def test_an_empty_home_directory_gives_three_empty_lists(home: Path):
+    # every list is looked up whether or not anything landed in it
+    assert recording_classes(home, NO_JOBS) == RecordingClasses([], [], [])
+
+
+def test_recordings_the_frontend_has_no_card_for_are_left_out(home: Path, tmp_path: Path):
+    write_chunks(home / "LIVE_2026", [5])
+    write_chunks(home / "NO_MAIN_2025", [30 * 60], track="overlay")
+    (home / "notes.txt").write_text("not a recording")
+    finish_recording(tmp_path, "victim")
+    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+
+    assert recording_classes(home, NO_JOBS) == RecordingClasses([], [], [])
+
+
+def test_each_list_keeps_the_name_order(home: Path):
     # the listing renders them as they come, so without the sort the cards would appear in
     # whatever order the filesystem hands them out
     for name in ["PSU_2026", "ABC_2026", "XYZ_2024", "GVS_2025", "MMM_2025"]:
         finish_recording(home, name)
+        abandon_recording(home, f"FAILED_{name}")
 
-    assert [r.path.name for r in classify_all_recordings(home, NO_JOBS)] == [
-        "ABC_2026",
-        "GVS_2025",
-        "MMM_2025",
-        "PSU_2026",
-        "XYZ_2024",
+    classes = recording_classes(home, NO_JOBS)
+
+    assert names(classes.finished) == ["ABC_2026", "GVS_2025", "MMM_2025", "PSU_2026", "XYZ_2024"]
+    assert names(classes.unprocessed) == [
+        "FAILED_ABC_2026",
+        "FAILED_GVS_2025",
+        "FAILED_MMM_2025",
+        "FAILED_PSU_2026",
+        "FAILED_XYZ_2024",
     ]
-
-
-def test_every_entry_gets_its_own_state(home: Path):
-    finish_recording(home, "DONE_2025")
-    abandon_recording(home, "FAILED_2025")
-    busy = abandon_recording(home, "BUSY_2025")
-    write_chunks(home / "LIVE_2026", [5])
-    (home / "notes.txt").write_text("not a recording")
-
-    assert {r.path.name: r.state for r in classify_all_recordings(home, frozenset({busy}))} == {
-        "BUSY_2025": RecordingState.RENDERING,
-        "DONE_2025": RecordingState.FINISHED,
-        "FAILED_2025": RecordingState.UNPROCESSED,
-        "LIVE_2026": RecordingState.STREAMING,
-        "notes.txt": RecordingState.NONEXISTENT,
-    }
-
-
-def test_an_empty_home_directory_has_no_recordings(home: Path):
-    assert not classify_all_recordings(home, NO_JOBS)

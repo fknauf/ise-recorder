@@ -103,7 +103,7 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
     job_queue = mock_add_task.call_args.args[4]
     assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
     # and the app's one semaphore, which is what makes the limit apply across all jobs
-    assert job_queue.semaphore is app_of(client).state.jobs.semaphore
+    assert job_queue.semaphore is app_of(client).state.jobs_semaphore
 
 
 def test_schedule_postprocessing_recipient_omitted(
@@ -126,7 +126,7 @@ def test_schedule_postprocessing_recipient_omitted(
     job_queue = mock_add_task.call_args.args[4]
     assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
     # and the app's one semaphore, which is what makes the limit apply across all jobs
-    assert job_queue.semaphore is app_of(client).state.jobs.semaphore
+    assert job_queue.semaphore is app_of(client).state.jobs_semaphore
 
 
 def test_schedule_postprocessing_error(
@@ -181,7 +181,7 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(
     job_queue = mock_add_task.call_args.args[4]
     assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
     # and the app's one semaphore, which is what makes the limit apply across all jobs
-    assert job_queue.semaphore is app_of(client).state.jobs.semaphore
+    assert job_queue.semaphore is app_of(client).state.jobs_semaphore
 
 
 def test_chunk_upload(client: TestClient, settings: Settings):
@@ -509,19 +509,17 @@ def test_two_apps_share_no_state(tmp_path: Path):
     first = create_app(Settings(destdir=tmp_path, auth="disabled"))
     second = create_app(Settings(destdir=tmp_path, auth="disabled"))
 
-    assert first.state.cached_home_dirs is not second.state.cached_home_dirs
-    assert first.state.jobs.per_user_running_jobs is not second.state.jobs.per_user_running_jobs
+    assert first.state.enclaves is not second.state.enclaves
     # one limit per app: a semaphore shared between apps would let one app's jobs hold up
     # another's, and bind it to whichever event loop got to it first
-    assert first.state.jobs.semaphore is not second.state.jobs.semaphore
-    assert first.state.download_totp.factories is not second.state.download_totp.factories
+    assert first.state.jobs_semaphore is not second.state.jobs_semaphore
 
 
 @pytest.mark.asyncio
 async def test_the_app_allows_as_many_jobs_at_once_as_configured(tmp_path: Path):
     semaphore = create_app(
         Settings(destdir=tmp_path, auth="disabled", max_parallel_jobs=3)
-    ).state.jobs.semaphore
+    ).state.jobs_semaphore
 
     for _ in range(3):
         await semaphore.acquire()
@@ -531,16 +529,19 @@ async def test_the_app_allows_as_many_jobs_at_once_as_configured(tmp_path: Path)
 
 
 def test_requests_do_not_replace_the_app_state(client: TestClient, app: FastAPI):
-    # the listing and /jobs both resolve get_running_jobs, and a job registers in the set it
-    # was handed; a request that swapped the dict out would strand it there
-    jobs = app.state.jobs
-    download_totp = app.state.download_totp
+    # the listing and /jobs both resolve get_enclave, and a job registers in the set of the
+    # enclave it was handed; a request that swapped either out would strand it there
+    enclaves = app.state.enclaves
+    semaphore = app.state.jobs_semaphore
 
+    client.post("/api/jobs", json={"recording": "missing"})
+    enclave = enclaves[None]
     client.post("/api/jobs", json={"recording": "missing"})
     client.get("/api/recordings")
 
-    assert app.state.jobs is jobs
-    assert app.state.download_totp is download_totp
+    assert app.state.enclaves is enclaves
+    assert app.state.enclaves[None] is enclave
+    assert app.state.jobs_semaphore is semaphore
 
 
 def test_health_endpoint(client: TestClient):
@@ -750,7 +751,7 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     # the names the auth_client has to send back to /api/recordings/{recording}, not the name of
     # the file inside each of them -- which is "presentation.webm" for every recording
     data = response.json()
-    download_totp = download_totp_of(auth_client)
+    download_totp = download_totp_of(auth_client, home)
 
     assert isinstance(data, dict)
     assert "user" in data
@@ -1117,6 +1118,49 @@ def test_a_totp_does_not_open_another_subjects_recording(
     assert b"not yours" not in response.content
 
 
+def test_a_totp_does_not_open_the_recording_of_another_subject_who_has_listed_theirs(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the same, once user-b has an enclave and an OTP of their own for the same name: the
+    # link's digest picks user-b's authority, which never issued user-a's OTP
+    finish_recording(tmp_path / digest_of("user-a"), "shared_name")
+    finish_recording(tmp_path / digest_of("user-b"), "shared_name", b"not yours")
+
+    server_list = list_recordings(auth_client, provider.mint(sub="user-a")).json()
+    list_recordings(auth_client, provider.mint(sub="user-b"))
+
+    response = download_completed(
+        auth_client, digest_of("user-b"), "shared_name", server_list["completed"][0]["totp"]
+    )
+
+    assert response.status_code == 401
+    assert b"not yours" not in response.content
+
+
+def test_a_link_for_a_user_nobody_has_seen_is_refused_like_a_wrong_totp(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # Whether a digest has an enclave says which lecturers used the server since it started.
+    # Both refusals look the same, so a link guessed at says nothing about that.
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+    finish_recording(tmp_path / digest_of("nobody"), "GVS_2025")
+    list_recordings(auth_client, provider.mint())
+
+    wrong_totp = download_completed(auth_client, DEFAULT_SUBJECT_DIGEST, "GVS_2025", "0000000000")
+    unknown_user = download_completed(auth_client, digest_of("nobody"), "GVS_2025", "0000000000")
+
+    assert wrong_totp.status_code == unknown_user.status_code == 401
+    assert wrong_totp.json() == unknown_user.json()
+
+
+def test_following_a_download_link_makes_no_enclave(auth_client: TestClient):
+    # the download route takes no token, so anybody can make it look a digest up
+    download_completed(auth_client, digest_of("nobody"), "GVS_2025", "0000000000")
+
+    assert app_of(auth_client).state.enclaves == {}
+
+
 def test_a_recording_that_was_never_listed_cannot_be_downloaded(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1144,7 +1188,7 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
     server_list = list_recordings(auth_client, provider.mint()).json()
 
     key = str((home / "GVS_2025" / "presentation.webm").absolute())
-    generator = download_totp_of(auth_client).factories[key]
+    generator = download_totp_of(auth_client, home).factories[key]
     three_intervals = datetime.timedelta(seconds=3 * generator.interval)
     three_intervals_ago = datetime.datetime.now(datetime.UTC) - three_intervals
     stale = generator.at(three_intervals_ago)
@@ -1166,7 +1210,7 @@ def test_a_totp_from_the_previous_interval_is_accepted_by_the_endpoint(
     server_list = list_recordings(auth_client, provider.mint()).json()
 
     key = str((home / "GVS_2025" / "presentation.webm").absolute())
-    generator = download_totp_of(auth_client).factories[key]
+    generator = download_totp_of(auth_client, home).factories[key]
     one_interval = datetime.timedelta(seconds=generator.interval)
     one_interval_ago = datetime.datetime.now(datetime.UTC) - one_interval
     previous = generator.at(one_interval_ago)
@@ -1210,7 +1254,6 @@ def test_a_purge_deletes_the_whole_recording(
     response = purge(auth_client, provider.mint(), "GVS_2025")
 
     assert response.status_code == 200
-    assert response.json()["recording"] == "GVS_2025"
     assert not recording_dir.exists()
 
 
@@ -1249,6 +1292,71 @@ def test_a_purged_recording_leaves_the_listing(
     assert data["completed"] == [] and data["rendering"] == [] and data["unprocessed"] == []
 
 
+def test_a_purge_answers_with_the_listing_as_it_is_now(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the frontend puts this straight into its cache instead of asking for the listing again,
+    # so it has to be the whole listing, in the same shape, without the purged recording
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(home, "PSU_2026")
+    abandon_recording(home, "FAILED_2025")
+    token = provider.mint()
+
+    data = purge(auth_client, token, "GVS_2025").json()
+
+    assert data["user"] == DEFAULT_SUBJECT_DIGEST
+    assert [r["name"] for r in data["completed"]] == ["PSU_2026"]
+    assert data["rendering"] == []
+    assert data["unprocessed"] == [{"name": "FAILED_2025"}]
+    assert data == list_recordings(auth_client, token).json() | {"completed": ANY}
+
+
+def test_the_download_links_in_a_purges_answer_work(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(home, "PSU_2026")
+
+    data = purge(auth_client, provider.mint(), "GVS_2025").json()
+    response = download_completed(
+        auth_client, data["user"], "PSU_2026", data["completed"][0]["totp"]
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"the rendered lecture"
+
+
+def test_a_purge_that_empties_the_home_answers_with_an_empty_listing(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+
+    data = purge(auth_client, provider.mint(), "GVS_2025").json()
+
+    assert data == {
+        "user": DEFAULT_SUBJECT_DIGEST,
+        "completed": [],
+        "rendering": [],
+        "unprocessed": [],
+    }
+
+
+def test_a_refused_purge_answers_with_the_reason_rather_than_a_listing(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the frontend rolls its optimistic removal back on this, and shows the detail
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    running_jobs_of(auth_client, home).add(abandon_recording(home, "BUSY_2025"))
+
+    response = purge(auth_client, provider.mint(), "BUSY_2025")
+
+    assert response.status_code == 409
+    assert set(response.json()) == {"detail"}
+    assert "BUSY_2025" in response.json()["detail"]
+
+
 def test_a_purged_recording_takes_its_download_otp_with_it(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1269,7 +1377,7 @@ def test_a_purged_recording_takes_its_download_otp_with_it(
     assert response.status_code == 401
     assert (
         str((home / "GVS_2025" / "presentation.webm").absolute())
-        not in download_totp_of(auth_client).factories
+        not in download_totp_of(auth_client, home).factories
     )
 
 

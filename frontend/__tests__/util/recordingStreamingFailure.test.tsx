@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
-import { showError } from "@/lib/utils/notifications";
+import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import { RetryPolicy, sendChunkToServer, UploadStatus } from "@/lib/utils/serverStorage";
 
 /**
@@ -385,6 +385,84 @@ test("a job request that fails does not mark a fully streamed recording for re-u
 
   expect(jobRequests()).toHaveLength(1);
   expect(rec.onStreamingFailed).not.toHaveBeenCalled();
+});
+
+// --- telling the lecturer how the job request went -------------------------
+//
+// schedulePostprocessing only reports back; the toast is recordLecture's, since only it
+// knows whether the recording was streamed at all and what the lecturer can do about it.
+
+test("an accepted job request is confirmed with the recording's name", async () => {
+  const rec = await startRecording();
+
+  rec.stop();
+  (await upload("stream", 0)).answer("ok");
+  (await upload("overlay", 0)).answer("ok");
+  await rec.done;
+
+  // the confirmation is the only sign the lecturer gets that postprocessing was accepted
+  expect(showSuccess).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(rec.recordingName()));
+  expect(showMessage).not.toHaveBeenCalled();
+  expect(showError).not.toHaveBeenCalled();
+});
+
+test("a refused job request says why and that the recording can still be rerendered", async () => {
+  window.fetch = vi.fn().mockImplementation(async () =>
+    Response.json({ detail: "Recording does not exist" }, { status: 400 }));
+
+  const rec = await startRecording();
+
+  rec.stop();
+  (await upload("stream", 0)).answer("ok");
+  (await upload("overlay", 0)).answer("ok");
+  await rec.done;
+
+  expect(showError).toHaveBeenCalledOnce();
+  // the server's explanation, and that nothing has to be re-uploaded: every chunk is there
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("Recording does not exist"));
+  expect(showError).toHaveBeenCalledWith(expect.stringContaining("re-rendering"));
+  expect(showSuccess).not.toHaveBeenCalled();
+  expect(showMessage).not.toHaveBeenCalled();
+});
+
+test("a recording with a chunk missing says no job was requested, without a second error", async () => {
+  // the chunk that gave up has already raised the error; that no job follows is a
+  // consequence of it, not a failure of its own
+  const rec = await startRecording();
+
+  await rec.stream.emit();
+  (await upload("stream", 0)).answer("failed");
+
+  rec.stop();
+  await rec.done;
+
+  expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("could not be scheduled"));
+  expect(showError).toHaveBeenCalledOnce();
+  expect(showSuccess).not.toHaveBeenCalled();
+});
+
+test("a recording that could not stream from the start says no job was requested", async () => {
+  const rec = await startRecording("impeded");
+
+  rec.stop();
+  await rec.done;
+
+  expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("could not be scheduled"));
+  expect(showSuccess).not.toHaveBeenCalled();
+});
+
+test("a frontend-only deployment does not claim a job was scheduled", async () => {
+  // there is no backend to have accepted one, so a confirmation would be a false one
+  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
+
+  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
+
+  rec.stop();
+  await rec.done;
+
+  expect(showSuccess).not.toHaveBeenCalled();
+  expect(showMessage).not.toHaveBeenCalled();
+  expect(showError).not.toHaveBeenCalled();
 });
 
 // --- streaming impeded from the start --------------------------------------

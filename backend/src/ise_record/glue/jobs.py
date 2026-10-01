@@ -3,7 +3,6 @@ background job implementation + accessor for the list of currently running jobs
 """
 
 import asyncio
-from collections import defaultdict
 import logging
 from pathlib import Path
 from typing import Annotated, NamedTuple
@@ -12,25 +11,10 @@ from fastapi import Depends, Request
 
 from ise_record.core.postprocess import postprocess_recording
 from ise_record.core.reporting import normalize_recipient, send_report
-from ise_record.glue.user_home import get_current_user_home
+from ise_record.glue.enclave import Enclave, get_enclave
 from ise_record.settings import SmtpSettings
 
 logger = logging.getLogger(__name__)
-
-
-class JobsState(NamedTuple):
-    """Jobs-related state attached to the server instance"""
-
-    semaphore: asyncio.Semaphore
-    per_user_running_jobs: dict[Path, set[Path]]
-
-    @classmethod
-    def create(cls, max_parallelism: int) -> JobsState:
-        """Create a JobsState instance from the relevant settings"""
-        return cls(
-            semaphore=asyncio.Semaphore(max_parallelism),
-            per_user_running_jobs=defaultdict[Path, set[Path]](set),
-        )
 
 
 class JobQueue(NamedTuple):
@@ -43,35 +27,11 @@ class JobQueue(NamedTuple):
     running_jobs: set[Path]
 
 
-async def get_jobs_state(request: Request) -> JobsState:
-    """Access the jobs-related state attached to the server instance"""
-    return request.app.state.jobs
-
-
-async def get_running_jobs(
-    jobs_state: Annotated[JobsState, Depends(get_jobs_state)],
-    user_home: Annotated[Path, Depends(get_current_user_home)],
-) -> set[Path]:
-    """Recordings that currently have a postprocessing job in flight."""
-    return jobs_state.per_user_running_jobs[user_home]
-
-
 async def get_job_queue(
-    jobs_state: Annotated[JobsState, Depends(get_jobs_state)],
-    running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
+    request: Request, enclave: Annotated[Enclave, Depends(get_enclave)]
 ) -> JobQueue:
     """user-specific jobs queue, allows waiting for a slot to run"""
-    return JobQueue(semaphore=jobs_state.semaphore, running_jobs=running_jobs)
-
-
-async def get_running_jobs_snapshot(
-    running_jobs: Annotated[set[Path], Depends(get_running_jobs)],
-) -> frozenset[Path]:
-    """
-    Snapshot of the currently running jobs for use in concurrent (def-declared)
-    handlers/dependencies
-    """
-    return frozenset(running_jobs)
+    return JobQueue(semaphore=request.app.state.jobs_semaphore, running_jobs=enclave.running_jobs)
 
 
 async def postprocessing_task(

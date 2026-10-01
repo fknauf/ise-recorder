@@ -164,6 +164,10 @@ class UserInfo(NamedTuple):
     sub: str
     preferred_username: str | None = None
 
+    def stable_digest(self) -> str:
+        """Stable, alphanumeric (i.e., filesystem-safe) digest derived from the user's oidc sub"""
+        return hashlib.sha3_256(self.sub.encode("utf-8")).hexdigest()
+
 
 class DownloadTotpAuthority:
     """

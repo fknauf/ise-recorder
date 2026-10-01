@@ -17,7 +17,14 @@ vi.mock("@/lib/hooks/useServerEnv", () => ({
   useServerEnv: () => mockServerEnv()
 }));
 
+// a rerender reports to whoever is in the lecture form, which lives in the app store; a
+// factory keeps the store out of these tests
+vi.mock("@/lib/hooks/useLecture", () => ({
+  useLecture: () => ({ lecturerEmail: LECTURER_EMAIL })
+}));
+
 const API_URL = "https://record.example.edu";
+const LECTURER_EMAIL = "lecturer@example.edu";
 
 type AppSession = ReturnType<typeof useAppSession>;
 
@@ -52,9 +59,9 @@ const LISTING = {
  * one test would be served from cache as the initial data of the next one, hiding whether
  * the hook fetched at all. A fresh Map per render isolates them.
  *
- * Note that anything which drives a revalidation by hand -- `mutate()` below -- has to run
- * inside act(): what settles at the end of it is React state, and React warns about the
- * update otherwise.
+ * Note that anything which drives a revalidation or a mutation by hand -- `refresh()`,
+ * `purge()` and `rerender()` below -- has to run inside act(): what settles at the end of it
+ * is React state, and React warns about the update otherwise.
  */
 function swrWrapper() {
   const Wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
@@ -195,7 +202,7 @@ test("a fresh token is requested for every poll rather than captured once", asyn
   await waitFor(() => expect(result.current.data).toEqual(LISTING));
 
   await act(async () => {
-    await result.current.mutate();
+    await result.current.refresh();
   });
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -319,7 +326,7 @@ test("a failed poll leaves the previous listing in the cache for the section to 
   respondWith(() => new Response("nope", { status: 500 }));
 
   await act(async () => {
-    await result.current.mutate().catch(() => null);
+    await result.current.refresh().catch(() => null);
   });
 
   await waitFor(() => expect(result.current.error).toBeDefined());
@@ -340,7 +347,7 @@ test("a recovered poll clears the error so the minute refresh resumes", async ()
   respondWith(() => jsonResponse(LISTING));
 
   await act(async () => {
-    await result.current.mutate();
+    await result.current.refresh();
   });
 
   // refreshInterval skips revalidation entirely while an error is cached, so clearing it
@@ -455,4 +462,263 @@ test("a refresh from outside the listing's cache does not reach it", async () =>
   });
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+// --- purging and rerendering -----------------------------------------------
+//
+// Both go through the listing's own mutate, so the card moves the moment the lecturer has
+// pressed the button and moves back if the backend refuses. Whether a request goes out is
+// the listing's business here; which toast follows is the section's, in
+// ProcessedRecordingsSection.test.tsx.
+
+/**
+ * Answers each endpoint the hook talks to with a builder of its own: the listing, the DELETE
+ * of a purge and the job request of a rerender. One that is left out is never answered, so
+ * whatever is on screen meanwhile is what the cache holds.
+ */
+function backend(
+  { listing, purge, job }: Partial<Record<"listing" | "purge" | "job", () => Response>>
+) {
+  fetchMock.mockImplementation(async (url: string, request: RequestInit) => {
+    let make = listing;
+
+    if(request.method === "DELETE") {
+      make = purge;
+    } else if(url.endsWith("/api/jobs")) {
+      make = job;
+    }
+
+    return make === undefined ? new Promise<Response>(() => {}) : make();
+  });
+}
+
+const requestsOf = (method: string) =>
+  fetchMock.mock.calls.filter(([ , request ]) => (request as RequestInit).method === method);
+
+/** The hook over LISTING, once that is in. */
+async function renderWithListing(listing = LISTING) {
+  backend({ listing: () => jsonResponse(listing) });
+
+  const rendered = renderPreprocessedRecordings();
+
+  await waitFor(() => expect(rendered.result.current.data).toEqual(listing));
+  return rendered;
+}
+
+test("a purge sends the DELETE for that recording", async () => {
+  const { result } = await renderWithListing();
+
+  backend({ purge: () => jsonResponse(LISTING) });
+
+  await act(async () => {
+    await result.current.purge("PSU_2026");
+  });
+
+  const [ [ url, request ] ] = requestsOf("DELETE");
+
+  expect(url).toBe(`${API_URL}/api/recordings/PSU_2026`);
+  expect((request.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
+});
+
+test("a purged recording leaves the listing before the backend has answered", async () => {
+  const { result } = await renderWithListing();
+
+  // the DELETE is never answered
+  backend({});
+
+  act(() => {
+    void result.current.purge("PSU_2026");
+  });
+
+  await waitFor(() => expect(result.current.data?.completed.map(rec => rec.name)).toStrictEqual([ "GVS_2025" ]));
+  // the other kinds are filtered by name too, and lose nothing that is not called that
+  expect(result.current.data?.rendering).toStrictEqual(LISTING.rendering);
+  expect(result.current.data?.unprocessed).toStrictEqual(LISTING.unprocessed);
+});
+
+test("a purged recording leaves the listing whichever kind it is", async () => {
+  const { result } = await renderWithListing();
+
+  backend({});
+
+  act(() => {
+    void result.current.purge("XYZ_2024");
+  });
+
+  await waitFor(() => expect(result.current.data?.unprocessed).toStrictEqual([]));
+  expect(result.current.data?.completed).toStrictEqual(LISTING.completed);
+});
+
+test("a purge takes the listing the backend answered with rather than fetching it again", async () => {
+  // anything else that changed on the backend in the meantime comes along with the answer
+  const { result } = await renderWithListing();
+
+  const after = { ...LISTING, completed: [ LISTING.completed[0] ], rendering: [ { name: "NEW_2026" } ] };
+
+  // a listing fetched now would be the stale one, and would undo the purge on screen
+  backend({ listing: () => jsonResponse(LISTING), purge: () => jsonResponse(after) });
+
+  let purged: unknown;
+
+  await act(async () => {
+    purged = await result.current.purge("PSU_2026");
+  });
+
+  expect(result.current.data).toEqual(after);
+  expect(purged).toEqual(after);
+
+  // give a revalidation every chance to go out before checking that none did
+  await act(async () => {});
+  expect(requestsOf("GET")).toHaveLength(1);
+  expect(result.current.data).toEqual(after);
+});
+
+test("a refused purge puts the recording back and throws the server's explanation", async () => {
+  const { result } = await renderWithListing();
+
+  // the listing is held from here on, so nothing but the rollback can bring it back
+  backend({ purge: () => jsonResponse({ detail: "Recording PSU_2026 is in use and currently not purgeable" }, 409) });
+
+  let failure: unknown;
+
+  await act(async () => {
+    failure = await result.current.purge("PSU_2026").catch((e: unknown) => e);
+  });
+
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toContain("Recording PSU_2026 is in use and currently not purgeable");
+  expect(result.current.data).toEqual(LISTING);
+  // nor is it fetched again: the rollback is the listing from before the purge
+  expect(requestsOf("GET")).toHaveLength(1);
+});
+
+test("a purge the backend cannot be reached for puts the recording back", async () => {
+  const { result } = await renderWithListing();
+
+  fetchMock.mockRejectedValue(new TypeError("NetworkError when attempting to fetch resource."));
+
+  let failure: unknown;
+
+  await act(async () => {
+    failure = await result.current.purge("PSU_2026").catch((e: unknown) => e);
+  });
+
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(result.current.data).toEqual(LISTING);
+});
+
+test("a rerender schedules a job for that recording with the form's recipient", async () => {
+  const { result } = await renderWithListing();
+
+  backend({ job: () => jsonResponse({}, 202) });
+
+  await act(async () => {
+    await result.current.rerender("PSU_2026");
+  });
+
+  const [ [ url, request ] ] = requestsOf("POST");
+
+  expect(url).toBe(`${API_URL}/api/jobs`);
+  // the recipient is whatever the lecture form holds now, not whoever got the first
+  // report: the backend keeps no record of that
+  expect(JSON.parse(request.body as string)).toStrictEqual({ recording: "PSU_2026", recipient: LECTURER_EMAIL });
+  expect((request.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
+});
+
+test("a rerender is not retried", async () => {
+  // somebody is sitting in front of the button and can press it again; a retry loop would
+  // only leave them waiting for no visible reason
+  const { result } = await renderWithListing();
+
+  backend({ job: () => jsonResponse({ detail: "upstream unavailable" }, 503) });
+
+  await act(async () => {
+    await result.current.rerender("PSU_2026").catch(() => null);
+  });
+
+  expect(requestsOf("POST")).toHaveLength(1);
+});
+
+test("a rerendered recording shows as rendering before the backend has answered", async () => {
+  const { result } = await renderWithListing();
+
+  // neither the job request nor the listing after it is answered
+  backend({});
+
+  act(() => {
+    void result.current.rerender("PSU_2026");
+  });
+
+  await waitFor(() => expect(result.current.data?.completed.map(rec => rec.name)).toStrictEqual([ "GVS_2025" ]));
+  // in order of name, as the backend lists them
+  expect(result.current.data?.rendering).toStrictEqual([ { name: "ABC_2026" }, { name: "PSU_2026" } ]);
+  expect(result.current.data?.unprocessed).toStrictEqual(LISTING.unprocessed);
+});
+
+test("a failed recording that is rerendered shows as rendering the same way", async () => {
+  const { result } = await renderWithListing({
+    ...LISTING,
+    rendering: [ { name: "XYZ_2026" } ],
+    unprocessed: [ { name: "OLD_2024" } ]
+  });
+
+  backend({});
+
+  act(() => {
+    void result.current.rerender("OLD_2024");
+  });
+
+  await waitFor(() => expect(result.current.data?.unprocessed).toStrictEqual([]));
+  expect(result.current.data?.rendering).toStrictEqual([ { name: "OLD_2024" }, { name: "XYZ_2026" } ]);
+  expect(result.current.data?.completed).toStrictEqual(LISTING.completed);
+});
+
+test("an accepted rerender fetches the listing again rather than trusting its own guess", async () => {
+  // the job request answers with nothing to stand in for a listing
+  const { result } = await renderWithListing();
+
+  const after = { ...LISTING, completed: [ LISTING.completed[0] ], rendering: [ { name: "ABC_2026" }, { name: "PSU_2026" } ], unprocessed: [] };
+
+  backend({ listing: () => jsonResponse(after), job: () => jsonResponse({}, 202) });
+
+  await act(async () => {
+    await result.current.rerender("PSU_2026");
+  });
+
+  await waitFor(() => expect(result.current.data).toEqual(after));
+  expect(requestsOf("GET")).toHaveLength(2);
+});
+
+test("a refused rerender puts the recording back and throws the server's explanation", async () => {
+  const { result } = await renderWithListing();
+
+  // the listing after it is held, so nothing but the rollback can bring the card back
+  backend({ job: () => jsonResponse({ detail: "Recording PSU_2026 is already rendering" }, 409) });
+
+  let failure: unknown;
+
+  await act(async () => {
+    failure = await result.current.rerender("PSU_2026").catch((e: unknown) => e);
+  });
+
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toContain("Recording PSU_2026 is already rendering");
+  expect(result.current.data).toEqual(LISTING);
+});
+
+test("a refused rerender still fetches the listing again", async () => {
+  // a refusal usually means the listing was out of date -- the recording is rendering
+  // already, or gone -- so fetching it is what brings the card up to date
+  const { result } = await renderWithListing();
+
+  const after = { ...LISTING, completed: [ LISTING.completed[0] ], rendering: [ { name: "ABC_2026" }, { name: "PSU_2026" } ] };
+
+  backend({ listing: () => jsonResponse(after), job: () => jsonResponse({ detail: "Recording PSU_2026 is already rendering" }, 409) });
+
+  await act(async () => {
+    await result.current.rerender("PSU_2026").catch(() => null);
+  });
+
+  await waitFor(() => expect(result.current.data).toEqual(after));
+  expect(requestsOf("GET")).toHaveLength(2);
 });

@@ -56,7 +56,7 @@ def normalize_recipient(address: str | None, domain_whitelist: list[str]) -> str
     return None
 
 
-def generate_report(
+def _generate_report(
     sender: str | None, recipient: str | None, job_title: str | None, result: Result
 ) -> EmailMessage:
     """
@@ -119,7 +119,7 @@ async def send_report(
     """
 
     # Generate report first just so it'll show up in debug logs.
-    msg = generate_report(smtp_settings.sender, recipient, job_title, result)
+    msg = _generate_report(smtp_settings.sender, recipient, job_title, result)
     logger.debug("Report generated: \n%s", msg)
 
     if recipient is None or recipient.strip() == "":

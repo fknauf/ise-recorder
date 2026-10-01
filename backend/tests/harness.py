@@ -33,6 +33,8 @@ from fastapi.testclient import TestClient
 import jwt
 
 from ise_record.core.auth import DownloadTotpAuthority
+from ise_record.glue.enclave import Enclave
+from ise_record.settings import get_settings, Settings
 
 CLIENT_ID = "ise-recorder"
 # Distinct from CLIENT_ID on purpose, and that is the normal deployment: an OIDC ID token's
@@ -240,6 +242,23 @@ def app_of(client: TestClient) -> FastAPI:
     return client.app  # type: ignore[return-value]
 
 
+def enclave_of(client: TestClient, user_home: Path) -> Enclave:
+    """
+    The enclave whose recordings live in `user_home`, made the way the server would make it
+    if no request has yet.
+
+    An authenticated deployment files each enclave under the digest that names its home
+    directory, which is also what the download links carry; an open one has a single enclave,
+    filed under None. Restated here for the same reason as the directory scheme below.
+    """
+    app = app_of(client)
+    settings: Settings = app.dependency_overrides[get_settings]()
+    key = user_home.name if settings.auth_required else None
+    enclaves: dict[str | None, Enclave] = app.state.enclaves
+
+    return enclaves.setdefault(key, Enclave(user_home))
+
+
 def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
     """
     The set of recordings `user_home` has a postprocessing job in flight for.
@@ -247,12 +266,12 @@ def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
     A TestClient runs background tasks to completion before it returns, so a test that wants
     to catch a job mid-flight seeds this set by hand.
     """
-    return app_of(client).state.jobs.per_user_running_jobs[user_home]
+    return enclave_of(client, user_home).running_jobs
 
 
-def download_totp_of(client: TestClient) -> DownloadTotpAuthority:
-    """The authority that issued the OTPs in this client's listings."""
-    return app_of(client).state.download_totp
+def download_totp_of(client: TestClient, user_home: Path) -> DownloadTotpAuthority:
+    """The authority that issued the OTPs in the listings of `user_home`'s owner."""
+    return enclave_of(client, user_home).download_totp
 
 
 def purge(client: TestClient, token: str | None, recording: str):

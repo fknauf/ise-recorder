@@ -5,10 +5,17 @@ import { render, screen } from "@testing-library/react";
 import { sendChunkToServer, schedulePostprocessing } from "@/lib/utils/serverStorage";
 
 vi.mock("@/lib/utils/serverStorage");
+vi.mock("@/lib/utils/notifications", () => ({
+  // recordLecture says how the job request went; a real toast would outlive the test
+  showError: vi.fn(),
+  showSuccess: vi.fn(),
+  showMessage: vi.fn()
+}));
 
 beforeEach(() => {
-  // the real one always returns a promise, and recordLecture chains on it
+  // the real ones always return a promise, and recordLecture reads the status of each
   vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
+  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
 });
 
 const accessToken = async () => "test-token";

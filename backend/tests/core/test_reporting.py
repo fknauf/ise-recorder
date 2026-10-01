@@ -13,7 +13,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
-from ise_record.core.reporting import generate_report, normalize_recipient, send_report
+from ise_record.core.reporting import _generate_report, normalize_recipient, send_report
 from ise_record.settings import SmtpSettings
 
 
@@ -149,7 +149,7 @@ def test_generate_report():
     job_title = "foo_1234"
     result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    report = generate_report(sender, recipient, job_title, result)
+    report = _generate_report(sender, recipient, job_title, result)
 
     assert report["From"] == sender
     assert report["To"] == recipient
@@ -165,7 +165,7 @@ def test_generate_report_failure():
     job_title = "foo_1234"
     result = Result(reason=ResultReason.FAILURE, output_file=None)
 
-    report = generate_report(sender, recipient, job_title, result)
+    report = _generate_report(sender, recipient, job_title, result)
 
     assert report["From"] == sender
     assert report["To"] == recipient
@@ -180,7 +180,7 @@ def test_generate_report_missing():
     job_title = "foo_1234"
     result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
 
-    report = generate_report(sender, recipient, job_title, result)
+    report = _generate_report(sender, recipient, job_title, result)
 
     assert report["From"] == sender
     assert report["To"] == recipient
@@ -195,7 +195,7 @@ def test_generate_report_partial_success():
     job_title = "foo_1234"
     result = Result(reason=ResultReason.PARTIAL_SUCCESS, output_file=Path("foo/presentation.webm"))
 
-    report = generate_report(sender, recipient, job_title, result)
+    report = _generate_report(sender, recipient, job_title, result)
 
     assert report["From"] == sender
     assert report["To"] == recipient
@@ -211,7 +211,7 @@ def test_generate_report_covers_every_result_reason():
     # `message` unbound and raises UnboundLocalError instead of sending a degraded mail.
     # This fails the moment a variant is added without a case for it.
     for reason in ResultReason:
-        report = generate_report(
+        report = _generate_report(
             "render@example.de",
             "lecturer@example.de",
             "foo_1234",
@@ -244,7 +244,7 @@ async def test_send_report(mocker: MockerFixture):
         smtp_settings=smtp_settings, recipient=recipient, job_title=job_title, result=result
     )
 
-    report = generate_report(sender, recipient, job_title, result)
+    report = _generate_report(sender, recipient, job_title, result)
 
     mock_send.assert_called_once_with(
         ANY,
