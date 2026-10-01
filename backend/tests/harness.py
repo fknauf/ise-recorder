@@ -266,7 +266,12 @@ def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
     A TestClient runs background tasks to completion before it returns, so a test that wants
     to catch a job mid-flight seeds this set by hand.
     """
-    return enclave_of(client, user_home).running_jobs
+    return enclave_of(client, user_home).busy_recordings.rendering
+
+
+def purging_of(client: TestClient, user_home: Path) -> set[Path]:
+    """The set of recordings of `user_home` that a purge is deleting right now."""
+    return enclave_of(client, user_home).busy_recordings.purging
 
 
 def download_totp_of(client: TestClient, user_home: Path) -> DownloadTotpAuthority:

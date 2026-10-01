@@ -20,6 +20,7 @@ from pydantic import Field
 from ise_record.core.auth import UserInfo
 from ise_record.core.logconfig import setup_logging
 from ise_record.core.postprocess import OUTPUT_FILENAME
+from ise_record.core.recordings import RecordingState
 from ise_record.glue.auth import get_user_info, load_oidc_client, OidcServerState
 from ise_record.glue.enclave import Enclave, get_enclave, get_enclave_by_user_digest
 from ise_record.glue.jobs import (
@@ -64,11 +65,7 @@ async def upload_chunk_endpoint(
             ),
         )
 
-    if enclave.home_dir / upload.recording in enclave.running_jobs:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Unable to accept uploads: {upload.recording} is currently being rendered.",
-        )
+    enclave.assert_not_busy(upload.recording)
 
     filename = f"chunk.{upload.index:0{settings.chunk_file_digits}d}"
 
@@ -91,7 +88,7 @@ async def upload_chunk_endpoint(
 
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
-def schedule_job_endpoint(
+async def schedule_job_endpoint(
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -102,18 +99,37 @@ def schedule_job_endpoint(
 
     recording_path = enclave.home_dir / job.recording
 
-    if not recording_path.is_dir():
+    if not await asyncio.to_thread(recording_path.is_dir):
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Recording {job.recording} does not exist",
         )
 
-    background_tasks.add_task(
-        postprocessing_task, recording_path, job.recipient, settings.smtp, job_queue
-    )
+    busy_state = enclave.busy_recordings.classify(recording_path)
 
-    return job
+    if busy_state == RecordingState.PURGING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Recording {job.recording} is being purged",
+        )
+
+    if busy_state is None:
+        enclave.busy_recordings.rendering.add(recording_path)
+
+        background_tasks.add_task(
+            postprocessing_task, recording_path, job.recipient, settings.smtp, job_queue
+        )
+
+    if settings.auth_required:
+        try:
+            return await user_recordings_list(enclave)
+        except Exception:  # pylint: disable=broad-exception-caught
+            # swallow exception so the background job still starts. Just respond with an empty
+            # body, frontend will handle that case.
+            logger.exception("Failed to retrieve recordings list for %s", job.recording)
+
+    return None
 
 
 @router.get("/health")
@@ -162,6 +178,8 @@ async def purge_endpoint(
     user_info: Annotated[UserInfo | None, Depends(get_user_info)],
 ) -> RecordingsList:
     """Endpoint to purge a recording directory"""
+    enclave.assert_not_busy(recording)
+
     await purge_recording(recording, enclave, user_info)
     return await user_recordings_list(enclave)
 

@@ -31,7 +31,9 @@ async def get_job_queue(
     request: Request, enclave: Annotated[Enclave, Depends(get_enclave)]
 ) -> JobQueue:
     """user-specific jobs queue, allows waiting for a slot to run"""
-    return JobQueue(semaphore=request.app.state.jobs_semaphore, running_jobs=enclave.running_jobs)
+    return JobQueue(
+        semaphore=request.app.state.jobs_semaphore, running_jobs=enclave.busy_recordings.rendering
+    )
 
 
 async def postprocessing_task(
@@ -48,14 +50,6 @@ async def postprocessing_task(
     :param smtp_settings SMTP mailer configuration
     :param job_queue queue to job as running and wait for a slot to do the processing
     """
-
-    # Job's already running, so don't start it a second time.
-    if recording_path in job_queue.running_jobs:
-        logger.warning("Already postprocessing %s, ignoring duplicate job", recording_path)
-        return
-
-    job_queue.running_jobs.add(recording_path)
-
     try:
         async with job_queue.semaphore:
             job_result = await postprocess_recording(recording_path)
@@ -74,6 +68,5 @@ async def postprocessing_task(
                 )
         else:
             logger.debug("Not sending report: SMTP not configured.")
-
     finally:
         job_queue.running_jobs.discard(recording_path)

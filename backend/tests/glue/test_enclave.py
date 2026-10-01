@@ -17,6 +17,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.auth import UserInfo
+from ise_record.core.recordings import BusyRecordings
 from ise_record.core.user_home import prepare_user_home_dir
 from ise_record.glue.enclave import Enclave, get_enclave, get_enclave_by_user_digest
 from ise_record.settings import Settings
@@ -39,7 +40,7 @@ async def test_the_home_directory_is_prepared_under_destdir(
 async def test_a_new_enclave_has_nothing_running(request_: Request, settings: Settings):
     enclave = await get_enclave(request_, settings, UserInfo("abc", "lecturer"))
 
-    assert enclave.running_jobs == set()
+    assert enclave.busy_recordings == BusyRecordings()
     assert not enclave.download_totp.factories
 
 
@@ -98,7 +99,7 @@ async def test_subjects_get_enclaves_of_their_own(request_: Request, settings: S
     second = await get_enclave(request_, settings, UserInfo("user-b", "same"))
 
     assert first.home_dir != second.home_dir
-    assert first.running_jobs is not second.running_jobs
+    assert first.busy_recordings is not second.busy_recordings
     assert first.download_totp is not second.download_totp
 
 
@@ -153,16 +154,56 @@ async def test_looking_up_a_digest_makes_no_enclave(request_: Request):
     assert await get_enclave_by_user_digest(request_, digest_of("abc")) is None
 
 
-def test_the_snapshot_does_not_follow_later_changes(tmp_path: Path):
-    # the snapshot is handed to a scan of the filesystem in a worker thread, while jobs on
-    # the event loop keep adding and removing entries. A live view would be iterated
-    # mid-change; a copy cannot be.
+# --- refusing what a busy recording cannot take ------------------------------
+
+
+def test_an_idle_recording_is_not_busy(tmp_path: Path):
+    Enclave(tmp_path).assert_not_busy("GVS_2025")
+
+
+def test_a_rendering_recording_is_busy(tmp_path: Path):
     enclave = Enclave(tmp_path)
-    enclave.running_jobs.add(tmp_path / "foo")
+    enclave.busy_recordings.rendering.add(tmp_path / "GVS_2025")
 
-    snapshot = enclave.running_jobs_snapshot()
-    enclave.running_jobs.add(tmp_path / "bar")
-    enclave.running_jobs.discard(tmp_path / "foo")
+    with pytest.raises(HTTPException) as excinfo:
+        enclave.assert_not_busy("GVS_2025")
 
-    assert snapshot == frozenset({tmp_path / "foo"})
-    assert isinstance(snapshot, frozenset)
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail == "GVS_2025 is currently being rendered."
+
+
+def test_a_recording_being_purged_is_busy(tmp_path: Path):
+    enclave = Enclave(tmp_path)
+    enclave.busy_recordings.purging.add(tmp_path / "GVS_2025")
+
+    with pytest.raises(HTTPException) as excinfo:
+        enclave.assert_not_busy("GVS_2025")
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail == "GVS_2025 is currently being purged."
+
+
+def test_the_refusal_does_not_claim_to_be_about_uploads(tmp_path: Path):
+    # the purge endpoint refuses with it too, and the frontend shows the detail as it is
+    enclave = Enclave(tmp_path)
+    enclave.busy_recordings.rendering.add(tmp_path / "GVS_2025")
+
+    with pytest.raises(HTTPException) as excinfo:
+        enclave.assert_not_busy("GVS_2025")
+
+    assert "upload" not in str(excinfo.value.detail).lower()
+
+
+def test_another_recording_being_busy_does_not_count(tmp_path: Path):
+    enclave = Enclave(tmp_path)
+    enclave.busy_recordings.rendering.add(tmp_path / "BUSY_2025")
+    enclave.busy_recordings.purging.add(tmp_path / "GONE_2025")
+
+    enclave.assert_not_busy("GVS_2025")
+
+
+def test_another_enclaves_busy_recording_of_the_same_name_does_not_count(tmp_path: Path):
+    elsewhere = Enclave(tmp_path / "a")
+    elsewhere.busy_recordings.rendering.add(elsewhere.home_dir / "GVS_2025")
+
+    Enclave(tmp_path / "b").assert_not_busy("GVS_2025")

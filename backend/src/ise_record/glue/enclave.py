@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, Request, status
 from pydantic import Field
 
 from ise_record.core.auth import DownloadTotpAuthority, UserInfo
+from ise_record.core.recordings import BusyRecordings, RecordingState
 from ise_record.core.user_home import prepare_user_home_dir
 from ise_record.glue.auth import get_user_info
 from ise_record.settings import get_settings, Settings
@@ -21,15 +22,31 @@ from ise_record.settings import get_settings, Settings
 
 @dataclass
 class Enclave:
-    """Runtime state of an enclave: storage directory, currently running jobs, totp authorities"""
+    """
+    Runtime state of an enclave: storage directory, currently busy recordings, totp authorities
+    """
 
     home_dir: Path
-    running_jobs: set[Path] = field(default_factory=set[Path])
+    busy_recordings: BusyRecordings = field(default_factory=BusyRecordings)
     download_totp: DownloadTotpAuthority = field(default_factory=DownloadTotpAuthority)
 
-    def running_jobs_snapshot(self) -> frozenset[Path]:
-        """Snapshot of a user's running job, stable across awaits"""
-        return frozenset(self.running_jobs)
+    def assert_not_busy(self, recording: str) -> None:
+        """Raise a 409 exception if the recording in question is being rerendered or purged"""
+
+        recording_path = self.home_dir / recording
+
+        if (busy_state := self.busy_recordings.classify(recording_path)) is not None:
+            if busy_state == RecordingState.RENDERING:
+                description = "being rendered"
+            elif busy_state == RecordingState.PURGING:
+                description = "being purged"
+            else:
+                description = "busy"
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{recording_path.name} is currently {description}.",
+            )
 
 
 async def get_enclave(

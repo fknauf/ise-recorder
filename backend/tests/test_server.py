@@ -9,22 +9,34 @@
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
 
+import asyncio
 from collections.abc import Iterator
 import datetime
 import os
 from pathlib import Path
+import shutil
 from unittest.mock import ANY
 from urllib.parse import quote
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
-from ise_record.glue.jobs import postprocessing_task
-from ise_record.server import create_app
+from ise_record.core.recordings import (
+    BusyRecordings,
+    classify_recording,
+    recording_classes,
+    RecordingClasses,
+    RecordingInfo,
+)
+from ise_record.glue.enclave import Enclave
+from ise_record.glue.jobs import get_job_queue, postprocessing_task
+from ise_record.glue.models import PostProcessingJob
+from ise_record.server import create_app, schedule_job_endpoint
 from ise_record.settings import Settings
 
 from .harness import (
@@ -41,6 +53,7 @@ from .harness import (
     list_recordings,
     Provider,
     purge,
+    purging_of,
     running_jobs_of,
     upload,
     upload_chunk_path,
@@ -141,7 +154,8 @@ def test_schedule_postprocessing_error(
         json={"recording": "foo", "recipient": "foo@bar.de"},
     )
 
-    assert response.status_code == 400
+    # the recording is a resource of the caller's that is not there, not a malformed request
+    assert response.status_code == 404
     mock_isdir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_not_called()
 
@@ -693,7 +707,7 @@ def test_a_job_cannot_name_another_subjects_recording(
 
     response = schedule(auth_client, provider.mint(sub="user-b"))
 
-    assert response.status_code == 400
+    assert response.status_code == 404
     mock_postprocess.assert_not_called()
 
 
@@ -1549,6 +1563,403 @@ def test_a_failing_filesystem_is_reported_without_details(
     assert response.status_code == 500
     assert "/secret/path" not in response.text
     assert any(r.exc_info is not None and r.exc_info[0] is PermissionError for r in caplog.records)
+
+
+# --- what the job endpoint answers with ---------------------------------------
+
+
+def test_a_scheduled_job_answers_with_the_listing_that_shows_it_rendering(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the frontend will put this straight into its cache in place of its optimistic guess,
+    # so a listing taken before the job was registered would turn the card back
+    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    abandon_recording(home, "foo")
+    finish_recording(home, "DONE_2025")
+
+    data = schedule(auth_client, provider.mint()).json()
+
+    assert data["user"] == DEFAULT_SUBJECT_DIGEST
+    assert data["rendering"] == [{"name": "foo"}]
+    assert data["unprocessed"] == []
+    assert [r["name"] for r in data["completed"]] == ["DONE_2025"]
+
+
+def test_a_job_in_an_open_deployment_answers_with_nothing(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
+    # there is no listing to answer with: the endpoint for it is refused there
+    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    abandon_recording(settings.destdir, "foo")
+
+    response = client.post("/api/jobs", json={"recording": "foo"})
+
+    assert response.status_code == 202
+    assert response.json() is None
+
+
+def test_a_duplicate_job_is_accepted_without_starting_a_second_render(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the frontend retries a job it got no response to, so a duplicate arrives by accident
+    # rather than by malice. Refusing it would report a failure for a job that is running;
+    # starting it would have two renders write over each other's assembled tracks.
+    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    running_jobs_of(auth_client, home).add(abandon_recording(home, "foo"))
+
+    response = schedule(auth_client, provider.mint())
+
+    assert response.status_code == 202
+    assert response.json()["rendering"] == [{"name": "foo"}]
+    mock_postprocess.assert_not_called()
+    # still the first job's: the duplicate has no task that would release it
+    assert running_jobs_of(auth_client, home) == {home / "foo"}
+
+
+def test_a_listing_that_fails_does_not_cost_the_job(
+    mocker: MockerFixture, auth_settings: Settings, provider: Provider, tmp_path: Path
+):
+    # the job was accepted the moment it was registered; the listing is only a courtesy, so a
+    # failure there answers without one rather than refusing a job that would then never run
+    seen_while_running: list[set[Path]] = []
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+
+    mocker.patch("ise_record.server.user_recordings_list", side_effect=FileNotFoundError("gone"))
+    abandon_recording(home, "foo")
+
+    with TestClient(create_app(auth_settings)) as auth_client:
+
+        async def fake_postprocess(_recording_path: Path) -> Result:
+            seen_while_running.append(set(running_jobs_of(auth_client, home)))
+            return Result(output_file=None, reason=ResultReason.SUCCESS)
+
+        mocker.patch(
+            "ise_record.glue.jobs.postprocess_recording",
+            autospec=True,
+            side_effect=fake_postprocess,
+        )
+
+        response = schedule(auth_client, provider.mint())
+        registered_after = set(running_jobs_of(auth_client, home))
+
+    assert response.status_code == 202
+    # no body to mistake for a listing: the frontend fetches one itself
+    assert response.json() is None
+    assert seen_while_running == [{home / "foo"}]
+    # and released once it is done, like any other job
+    assert registered_after == set()
+
+
+def test_a_listing_that_fails_is_logged(
+    mocker: MockerFixture,
+    auth_client: TestClient,
+    provider: Provider,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    # the response no longer says what went wrong, so the log has to
+    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    mocker.patch("ise_record.server.user_recordings_list", side_effect=FileNotFoundError("gone"))
+    abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
+
+    with caplog.at_level("ERROR", logger="ise_record"):
+        schedule(auth_client, provider.mint())
+
+    assert any(
+        r.exc_info is not None and r.exc_info[0] is FileNotFoundError for r in caplog.records
+    )
+
+
+def test_a_listing_that_fails_for_a_duplicate_leaves_the_first_job_alone(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    mocker.patch("ise_record.server.user_recordings_list", side_effect=FileNotFoundError("gone"))
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    running_jobs_of(auth_client, home).add(abandon_recording(home, "foo"))
+
+    response = schedule(auth_client, provider.mint())
+
+    assert response.status_code == 202
+    assert response.json() is None
+    mock_postprocess.assert_not_called()
+    assert running_jobs_of(auth_client, home) == {home / "foo"}
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_listing_is_not_mistaken_for_a_failed_one(
+    mocker: MockerFixture, auth_settings: Settings, tmp_path: Path
+):
+    # Cancellation is how the server shuts a request down. Swallowing it like a failure would
+    # carry on with a request that was told to stop, and keep the server from shutting down.
+    # Called directly, because a TestClient has no way to cancel a request halfway through.
+    mocker.patch("ise_record.server.user_recordings_list", side_effect=asyncio.CancelledError())
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    abandon_recording(home, "foo")
+    enclave = Enclave(home)
+    request = Request(scope={"type": "http", "app": create_app(auth_settings)})
+
+    with pytest.raises(asyncio.CancelledError):
+        await schedule_job_endpoint(
+            PostProcessingJob(recording="foo"),
+            BackgroundTasks(),
+            auth_settings,
+            enclave,
+            await get_job_queue(request, enclave),
+        )
+
+
+# --- requests that arrive while another one is in flight -----------------------
+#
+# A TestClient serves one request at a time unless one of them waits on a worker thread, which
+# leaves the event loop free for the next. Each test below sends its second request from inside
+# such a thread -- the rmtree of a purge, or the scan of a listing -- so the two really overlap.
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_a_job_for_a_recording_being_purged_is_refused(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # it would render a directory while rmtree takes it apart
+    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "foo")
+    token = provider.mint()
+    during: list[Response] = []
+    real_rmtree = shutil.rmtree
+
+    def rmtree_with_a_job_arriving(path: Path) -> None:
+        during.append(schedule(auth_client, token))
+        real_rmtree(path)
+
+    mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_job_arriving)
+
+    assert purge(auth_client, token, "foo").status_code == 200
+
+    assert during[0].status_code == 409
+    assert "purged" in during[0].json()["detail"]
+    mock_postprocess.assert_not_called()
+    assert running_jobs_of(auth_client, home) == set()
+
+
+def test_a_chunk_for_a_recording_being_purged_is_refused(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # it would land in a directory rmtree has already been through, and either make the purge
+    # fail with a directory that is not empty or be deleted along with everything else
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "foo")
+    token = provider.mint()
+    during: list[Response] = []
+    real_rmtree = shutil.rmtree
+
+    def rmtree_with_a_chunk_arriving(path: Path) -> None:
+        during.append(upload(auth_client, token, index=7))
+        real_rmtree(path)
+
+    mocker.patch(
+        "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_chunk_arriving
+    )
+
+    assert purge(auth_client, token, "foo").status_code == 200
+
+    assert during[0].status_code == 409
+    assert not (home / "foo").exists()
+
+
+def test_a_second_purge_of_the_same_recording_is_refused_rather_than_failing(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # two tabs, or a double click: both would get as far as rmtree, and the second would find
+    # the directory gone and answer with a 500
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    token = provider.mint()
+    during: list[Response] = []
+    real_rmtree = shutil.rmtree
+
+    def rmtree_with_another_purge_arriving(path: Path) -> None:
+        during.append(purge(auth_client, token, "GVS_2025"))
+        real_rmtree(path)
+
+    mocker.patch(
+        "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_another_purge_arriving
+    )
+
+    assert purge(auth_client, token, "GVS_2025").status_code == 200
+
+    assert during[0].status_code == 409
+    assert "purged" in during[0].json()["detail"]
+
+
+def test_a_job_arriving_while_the_purge_classifies_is_refused(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the classification waits on a worker thread as well, and comes before rmtree; a job let
+    # in there would be rendering by the time rmtree starts
+    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "foo")
+    token = provider.mint()
+    during: list[Response] = []
+    real_classify = classify_recording
+
+    def classify_with_a_job_arriving(path: Path, busy: BusyRecordings) -> RecordingInfo:
+        during.append(schedule(auth_client, token))
+        return real_classify(path, busy)
+
+    mocker.patch(
+        "ise_record.glue.recordings.classify_recording", side_effect=classify_with_a_job_arriving
+    )
+
+    assert purge(auth_client, token, "foo").status_code == 200
+
+    assert during[0].status_code == 409
+    mock_postprocess.assert_not_called()
+    assert not (home / "foo").exists()
+
+
+def test_the_listing_leaves_out_a_recording_while_it_is_purged(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the frontend removed the card when the purge was confirmed; the minute poll, or another
+    # tab, must not bring it back half-deleted
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(home, "PSU_2026")
+    token = provider.mint()
+    during: list[Response] = []
+    real_rmtree = shutil.rmtree
+
+    def rmtree_with_a_listing_arriving(path: Path) -> None:
+        during.append(list_recordings(auth_client, token))
+        real_rmtree(path)
+
+    mocker.patch(
+        "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_listing_arriving
+    )
+
+    assert purge(auth_client, token, "GVS_2025").status_code == 200
+
+    data = during[0].json()
+    assert [r["name"] for r in data["completed"]] == ["PSU_2026"]
+    assert data["rendering"] == [] and data["unprocessed"] == []
+
+
+def test_another_recording_still_takes_a_job_while_one_is_purged(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
+    )
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    abandon_recording(home, "foo")
+    token = provider.mint()
+    during: list[Response] = []
+    real_rmtree = shutil.rmtree
+
+    def rmtree_with_a_job_for_another_arriving(path: Path) -> None:
+        during.append(schedule(auth_client, token, "foo"))
+        real_rmtree(path)
+
+    mocker.patch(
+        "ise_record.glue.recordings.shutil.rmtree",
+        side_effect=rmtree_with_a_job_for_another_arriving,
+    )
+
+    assert purge(auth_client, token, "GVS_2025").status_code == 200
+
+    assert during[0].status_code == 202
+
+
+def test_the_name_takes_uploads_again_once_the_purge_is_done(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the re-upload a lecturer starts right after purging the previous one
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "foo")
+    token = provider.mint()
+
+    assert purge(auth_client, token, "foo").status_code == 200
+    assert upload(auth_client, token).status_code == 201
+    assert purging_of(auth_client, home) == set()
+
+
+def test_a_duplicate_job_arriving_while_the_first_is_answered_starts_no_second_render(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the first job is registered before its listing is built, so a retry that comes in while
+    # that listing is being scanned finds it there
+    mock_postprocess = mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
+    )
+    abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
+    token = provider.mint()
+    during: list[Response] = []
+    real_scan = recording_classes
+
+    arrived = False
+
+    def scan_with_a_duplicate_arriving(home: Path, busy: BusyRecordings) -> RecordingClasses:
+        # only into the first scan: the duplicate builds a listing of its own
+        nonlocal arrived
+        if not arrived:
+            arrived = True
+            during.append(schedule(auth_client, token))
+        return real_scan(home, busy)
+
+    mocker.patch(
+        "ise_record.glue.recordings.recording_classes", side_effect=scan_with_a_duplicate_arriving
+    )
+
+    assert schedule(auth_client, token).status_code == 202
+
+    assert during[0].status_code == 202
+    mock_postprocess.assert_called_once()
+
+
+def test_a_purge_arriving_while_a_job_is_answered_is_refused(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
+    )
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "foo")
+    token = provider.mint()
+    during: list[Response] = []
+    real_scan = recording_classes
+
+    arrived = False
+
+    def scan_with_a_purge_arriving(user_home: Path, busy: BusyRecordings) -> RecordingClasses:
+        nonlocal arrived
+        if not arrived:
+            arrived = True
+            during.append(purge(auth_client, token, "foo"))
+        return real_scan(user_home, busy)
+
+    mocker.patch(
+        "ise_record.glue.recordings.recording_classes", side_effect=scan_with_a_purge_arriving
+    )
+
+    assert schedule(auth_client, token).status_code == 202
+
+    assert during[0].status_code == 409
+    assert "rendered" in during[0].json()["detail"]
+    assert (home / "foo" / "stream").is_dir()
 
 
 def test_cors_preflight_allows_purging(tmp_path: Path):

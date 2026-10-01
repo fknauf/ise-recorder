@@ -1,10 +1,10 @@
 """
-Postprocessing jobs: running one, reporting on it, the per-user record of which recordings
-have a job in flight -- which is what keeps a second job for the same recording from starting,
-and what the listing reads to show a recording as rendering -- and the limit on how many jobs
-render at once.
+Postprocessing jobs: running one, reporting on it, giving the recording back once it is done,
+and the limit on how many jobs render at once.
 
-How /jobs schedules these, and how the listing presents them, lives in test_server.py.
+/jobs registers a recording as rendering before it queues the task, so the task finds itself
+registered and only has to release the recording at the end. Registering it, turning away a
+duplicate and how the listing presents a job all live in test_server.py.
 """
 
 # pylint: disable=line-too-long
@@ -131,47 +131,33 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
 
 
 @pytest.mark.asyncio
-async def test_a_second_job_for_a_running_recording_is_dropped(mocker: MockerFixture):
-    # the frontend retries a job it got no response to, so a duplicate arrives by accident
-    # rather than by malice. Two renders would write over each other's assembled tracks.
-    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
-
-    await postprocessing_task(
-        Settings(auth="disabled").destdir / "foo", None, None, queue_for({Path("data/foo")})
-    )
-
-    mock_postprocess.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_a_job_for_a_different_recording_is_not_dropped(mocker: MockerFixture):
-    mock_postprocess = mocker.patch(
-        "ise_record.glue.jobs.postprocess_recording",
-        autospec=True,
-        return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
-    )
-
-    await postprocessing_task(
-        Settings(auth="disabled").destdir / "bar", None, None, queue_for({Path("data/foo")})
-    )
-
-    mock_postprocess.assert_called_once_with(Path("data/bar"))
-
-
-@pytest.mark.asyncio
 async def test_a_finished_job_releases_the_recording(mocker: MockerFixture):
     mocker.patch(
         "ise_record.glue.jobs.postprocess_recording",
         autospec=True,
         return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
     )
-    running_jobs: set[Path] = set()
+    running_jobs = {Path("data/foo")}
 
     await postprocessing_task(
         Settings(auth="disabled").destdir / "foo", None, None, queue_for(running_jobs)
     )
 
     assert running_jobs == set()
+
+
+@pytest.mark.asyncio
+async def test_a_finished_job_releases_only_its_own_recording(mocker: MockerFixture):
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(reason=ResultReason.SUCCESS, output_file=None),
+    )
+    running_jobs = {Path("data/foo"), Path("data/bar")}
+
+    await postprocessing_task(Path("data/foo"), None, None, queue_for(running_jobs))
+
+    assert running_jobs == {Path("data/bar")}
 
 
 @pytest.mark.asyncio
@@ -183,7 +169,7 @@ async def test_a_job_that_blows_up_still_releases_the_recording(mocker: MockerFi
         autospec=True,
         side_effect=RuntimeError("boom"),
     )
-    running_jobs: set[Path] = set()
+    running_jobs = {Path("data/foo")}
 
     with pytest.raises(RuntimeError):
         await postprocessing_task(
@@ -194,9 +180,9 @@ async def test_a_job_that_blows_up_still_releases_the_recording(mocker: MockerFi
 
 
 @pytest.mark.asyncio
-async def test_a_running_job_is_registered_while_it_runs(mocker: MockerFixture):
+async def test_a_running_job_stays_registered_while_it_runs(mocker: MockerFixture):
     # the listing shows a recording as rendering for exactly as long as it is in the set
-    running_jobs: set[Path] = set()
+    running_jobs = {Path("data/foo")}
     seen_while_running: list[set[Path]] = []
 
     async def fake_postprocess(_recording_path: Path) -> Result:
@@ -220,17 +206,18 @@ async def test_a_running_job_is_registered_while_it_runs(mocker: MockerFixture):
 
 
 @pytest.mark.asyncio
-async def test_the_queue_registers_jobs_in_the_enclave_it_was_built_for(
+async def test_the_queue_releases_jobs_in_the_enclave_it_was_built_for(
     mocker: MockerFixture, tmp_path: Path
 ):
-    # the enclave's set is what the listing, the upload check and the purge check read, so a
-    # queue that kept a set of its own would let all three miss a running job
+    # the enclave's set is what /jobs registers in and what the listing, the upload check and
+    # the purge check read, so a queue that kept a set of its own would never release the job
     request = request_for(Settings(destdir=tmp_path, auth="disabled"))
     enclave = Enclave(tmp_path)
+    enclave.busy_recordings.rendering.add(tmp_path / "foo")
     seen_while_running: list[set[Path]] = []
 
     async def fake_postprocess(_recording_path: Path) -> Result:
-        seen_while_running.append(set(enclave.running_jobs))
+        seen_while_running.append(set(enclave.busy_recordings.rendering))
         return Result(reason=ResultReason.SUCCESS, output_file=None)
 
     mocker.patch(
@@ -240,21 +227,22 @@ async def test_the_queue_registers_jobs_in_the_enclave_it_was_built_for(
     queue = await get_job_queue(request, enclave)
     await postprocessing_task(tmp_path / "foo", None, None, queue)
 
-    assert queue.running_jobs is enclave.running_jobs
+    assert queue.running_jobs is enclave.busy_recordings.rendering
     assert seen_while_running == [{tmp_path / "foo"}]
-    assert enclave.running_jobs == set()
+    assert enclave.busy_recordings.rendering == set()
 
 
 @pytest.mark.asyncio
-async def test_another_users_job_does_not_block_a_recording_of_the_same_name(
+async def test_a_job_leaves_another_users_recording_of_the_same_name_registered(
     mocker: MockerFixture, tmp_path: Path
 ):
-    # two lecturers naming a lecture alike is ordinary; only the same recording of the same
-    # user counts as a duplicate
+    # two lecturers naming a lecture alike is ordinary; one of them finishing must not make
+    # the other's look idle
     request = request_for(Settings(destdir=tmp_path, auth="disabled"))
     home_a, home_b = tmp_path / "a", tmp_path / "b"
     enclave_a, enclave_b = Enclave(home_a), Enclave(home_b)
-    enclave_a.running_jobs.add(home_a / "foo")
+    enclave_a.busy_recordings.rendering.add(home_a / "foo")
+    enclave_b.busy_recordings.rendering.add(home_b / "foo")
 
     mock_postprocess = mocker.patch(
         "ise_record.glue.jobs.postprocess_recording",
@@ -265,7 +253,8 @@ async def test_another_users_job_does_not_block_a_recording_of_the_same_name(
     await postprocessing_task(home_b / "foo", None, None, await get_job_queue(request, enclave_b))
 
     mock_postprocess.assert_called_once_with(home_b / "foo")
-    assert enclave_a.running_jobs == {home_a / "foo"}
+    assert enclave_a.busy_recordings.rendering == {home_a / "foo"}
+    assert enclave_b.busy_recordings.rendering == set()
 
 
 # --- the limit on jobs rendering at once -----------------------------------
@@ -365,7 +354,7 @@ async def test_a_waiting_job_already_counts_as_running(renders: GatedRenders):
     # and it cannot be purged -- all of which read the running set. A recording that dropped
     # out of it while queued could be purged, or have its chunks rewritten, just before its
     # render starts reading them.
-    running_jobs: set[Path] = set()
+    running_jobs = {Path("data/foo"), Path("data/bar")}
     queue = queue_for(running_jobs, slots=1)
     first = asyncio.create_task(postprocessing_task(Path("data/foo"), None, None, queue))
     second = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, queue))
@@ -378,23 +367,6 @@ async def test_a_waiting_job_already_counts_as_running(renders: GatedRenders):
     renders.release(Path("data/bar"))
     await asyncio.gather(first, second)
     assert running_jobs == set()
-
-
-@pytest.mark.asyncio
-async def test_a_second_job_for_a_waiting_recording_is_dropped(renders: GatedRenders):
-    queue = queue_for(slots=1)
-    first = asyncio.create_task(postprocessing_task(Path("data/foo"), None, None, queue))
-    waiting = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, queue))
-    await settle()
-
-    # a retried request for the job that is still waiting
-    await postprocessing_task(Path("data/bar"), None, None, queue)
-
-    renders.release(Path("data/foo"))
-    renders.release(Path("data/bar"))
-    await asyncio.gather(first, waiting)
-
-    assert renders.started == [Path("data/foo"), Path("data/bar")]
 
 
 @pytest.mark.asyncio

@@ -42,7 +42,7 @@ async def user_recordings_list(enclave: Enclave) -> RecordingsList:
         return DownloadableRecording(name=rec.path.name, size=rec.size, totp=totp)
 
     recordings = await asyncio.to_thread(
-        recording_classes, enclave.home_dir, enclave.running_jobs_snapshot()
+        recording_classes, enclave.home_dir, enclave.busy_recordings.snapshot()
     )
 
     return RecordingsList.model_construct(
@@ -75,30 +75,39 @@ async def purge_recording(recording: SafeRecording, enclave: Enclave, user_info:
     )
 
     recording_path = enclave.home_dir / recording
-    classified_recording = await asyncio.to_thread(
-        classify_recording, recording_path, enclave.running_jobs_snapshot()
-    )
 
-    if classified_recording.state == RecordingState.NONEXISTENT:
-        fail_purge(
-            logger.warning,
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Recording {recording} does not exist for this user",
-        )
-
-    if classified_recording.state not in {RecordingState.FINISHED, RecordingState.UNPROCESSED}:
-        fail_purge(
-            logger.warning,
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Recording {recording} is in use and currently not purgeable",
-        )
+    # classify once before marking, otherwise we'd classify ourselves as purging and not be able to
+    # figure out if we're actually purgeable
+    pre_purge_busy_recordings = enclave.busy_recordings.snapshot()
+    enclave.busy_recordings.purging.add(recording_path)
 
     try:
-        await asyncio.to_thread(shutil.rmtree, recording_path)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.exception("Filesystem error")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Filesystem error"
-        ) from exc
+        pre_purge_info = await asyncio.to_thread(
+            classify_recording, recording_path, pre_purge_busy_recordings
+        )
 
-    enclave.download_totp.forget(recording_path / OUTPUT_FILENAME)
+        if pre_purge_info.state == RecordingState.NONEXISTENT:
+            fail_purge(
+                logger.warning,
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Recording {recording} does not exist for this user",
+            )
+
+        if pre_purge_info.state not in {RecordingState.FINISHED, RecordingState.UNPROCESSED}:
+            fail_purge(
+                logger.warning,
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Recording {recording} is in use and currently not purgeable",
+            )
+
+        try:
+            await asyncio.to_thread(shutil.rmtree, recording_path)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.exception("Filesystem error")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Filesystem error"
+            ) from exc
+
+        enclave.download_totp.forget(recording_path / OUTPUT_FILENAME)
+    finally:
+        enclave.busy_recordings.purging.discard(recording_path)

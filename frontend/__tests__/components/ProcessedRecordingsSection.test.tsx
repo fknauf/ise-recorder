@@ -685,9 +685,23 @@ test("a failed recording can be purged the same way", async () => {
   expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(API_URL, "OLD_2024", getAccessToken);
 });
 
-test("the dialog stays open and locked while the purge is in flight", async () => {
-  // a second press would send a second DELETE, and Cancel would promise something it can
-  // no longer deliver once the first one is on its way
+test("the dialog closes as soon as the purge is confirmed", async () => {
+  // the card is gone the moment it is confirmed, so a dialog left up over a listing that has
+  // already changed would only be in the way; the outcome arrives as a toast
+  await renderSectionWithCache();
+
+  vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(purgeRecording).toHaveBeenCalledOnce();
+  expect(showSuccess).not.toHaveBeenCalled();
+  expect(showError).not.toHaveBeenCalled();
+});
+
+test("a purge that succeeds after the dialog closed still says so", async () => {
   let done: () => void = () => {};
 
   await renderSectionWithCache();
@@ -698,16 +712,71 @@ test("the dialog stays open and locked while the purge is in flight", async () =
 
   await userEvent.click(purgeButton(cards()[0]));
   await userEvent.click(confirmButton());
-
-  expect(confirmButton()).toBeDisabled();
-  expect(cancelButton()).toBeDisabled();
-
-  await userEvent.click(confirmButton());
-  expect(purgeRecording).toHaveBeenCalledOnce();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
   done();
 
+  await waitFor(() => expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Purged GVS_2025"));
+  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
+});
+
+test("a purge that is refused after the dialog closed puts the card back and says why", async () => {
+  let refuse: () => void = () => {};
+  const refusal = new Error("Failed to purge GVS_2025: GVS_2025 is currently being rendered.");
+
+  await renderSectionWithCache();
+  holdFurtherListings();
+
+  vi.mocked(purgeRecording).mockReturnValue(new Promise((_resolve, reject) => {
+    refuse = () => reject(refusal);
+  }));
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.click(confirmButton());
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
+
+  refuse();
+
+  await waitFor(() => expect(showError).toHaveBeenCalledExactlyOnceWith("Failed to purge GVS_2025", refusal));
+  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  expect(showSuccess).not.toHaveBeenCalled();
+});
+
+test("another recording can be purged while the first purge is still in flight", async () => {
+  // with the dialog gone at once, nothing holds the lecturer back from the next card
+  await renderSectionWithCache();
+
+  vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.click(confirmButton());
+  await waitFor(() => expect(names(cards())).toStrictEqual([ "PSU_2026" ]));
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(cards()).toHaveLength(0));
+  expect(vi.mocked(purgeRecording).mock.calls.map(([ , name ]) => name)).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+});
+
+test("a rerender while a purge is in flight does not bring the purged card back", async () => {
+  // each optimistic update has to start from what is on screen, not from the last listing
+  // the backend confirmed -- which still has the recording that is being purged
+  await renderSectionWithCache();
+  holdFurtherListings();
+
+  vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
+  vi.mocked(schedulePostprocessing).mockReturnValue(new Promise(() => {}));
+
+  await userEvent.click(purgeButton(cards()[0]));
+  await userEvent.click(confirmButton());
+  await waitFor(() => expect(names(cards())).toStrictEqual([ "PSU_2026" ]));
+
+  await userEvent.click(rerenderButton(cards()[0]));
+
+  await waitFor(() => expect(names(renderingCards())).toContain("PSU_2026"));
+  expect(names(cards())).toStrictEqual([]);
 });
 
 test("the purged card leaves the listing while the request is in flight, and only that one", async () => {

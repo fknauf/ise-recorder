@@ -33,7 +33,9 @@ export function useProcessedRecordings() {
       return undefined;
     }
 
-    const optimisticPurgeUpdate = (current: ProcessedRecordings | undefined) => {
+    const optimisticPurgeUpdate = (committed: ProcessedRecordings | undefined, displayed?: ProcessedRecordings) => {
+      const current = displayed ?? committed;
+
       if(current === undefined) {
         return undefined;
       }
@@ -57,7 +59,9 @@ export function useProcessedRecordings() {
   };
 
   const rerender = (recordingName: string) => {
-    const optimisticRerenderUpdate = (current: ProcessedRecordings | undefined) => {
+    const optimisticRerenderUpdate = (committed: ProcessedRecordings | undefined, displayed?: ProcessedRecordings) => {
+      const current = displayed ?? committed;
+
       if(current === undefined) {
         return undefined;
       }

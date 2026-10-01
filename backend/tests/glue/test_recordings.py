@@ -12,13 +12,20 @@ it -- status codes on the wire, authentication -- lives in test_server.py.
 # pylint: disable=redefined-outer-name
 
 from pathlib import Path
+import shutil
 
 from fastapi import HTTPException
 import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.auth import UserInfo
-from ise_record.core.recordings import RecordingClasses, RecordingInfo, RecordingState
+from ise_record.core.recordings import (
+    BusyRecordings,
+    classify_recording,
+    RecordingClasses,
+    RecordingInfo,
+    RecordingState,
+)
 from ise_record.glue.enclave import Enclave
 from ise_record.glue.models import DisplayableRecording, RecordingsList
 from ise_record.glue.recordings import purge_recording, user_recordings_list
@@ -53,7 +60,7 @@ async def test_the_listing_names_the_user_directory_and_every_recording(
 ):
     finish_recording(home, "DONE_2025", b"twelve bytes")
     abandon_recording(home, "FAILED_2025")
-    enclave.running_jobs.add(abandon_recording(home, "BUSY_2025"))
+    enclave.busy_recordings.rendering.add(abandon_recording(home, "BUSY_2025"))
 
     listing = await user_recordings_list(enclave)
 
@@ -72,7 +79,7 @@ async def test_the_listing_only_counts_the_enclaves_own_jobs(home: Path):
     # another enclave's job on a recording of the same name changes nothing here
     abandon_recording(home, "FAILED_2025")
     elsewhere = Enclave(home.parent / "elsewhere")
-    elsewhere.running_jobs.add(elsewhere.home_dir / "FAILED_2025")
+    elsewhere.busy_recordings.rendering.add(elsewhere.home_dir / "FAILED_2025")
 
     listing = await user_recordings_list(Enclave(home))
 
@@ -131,7 +138,7 @@ async def test_the_listing_does_not_go_back_to_the_disk(
 
 
 @pytest.mark.asyncio
-async def test_the_scan_is_handed_a_snapshot_of_the_running_jobs(
+async def test_the_scan_is_handed_a_snapshot_of_the_busy_recordings(
     mocker: MockerFixture, enclave: Enclave, home: Path
 ):
     # the scan runs in a worker thread while jobs on the event loop change the live set
@@ -139,19 +146,33 @@ async def test_the_scan_is_handed_a_snapshot_of_the_running_jobs(
         "ise_record.glue.recordings.recording_classes",
         return_value=RecordingClasses([], [], []),
     )
-    enclave.running_jobs.add(home / "BUSY_2025")
+    enclave.busy_recordings.rendering.add(home / "BUSY_2025")
+    enclave.busy_recordings.purging.add(home / "GONE_2025")
 
     await user_recordings_list(enclave)
 
-    (_, running_jobs), _ = scan.call_args
-    assert running_jobs == frozenset({home / "BUSY_2025"})
-    assert running_jobs is not enclave.running_jobs
+    (_, busy), _ = scan.call_args
+    assert busy == BusyRecordings(rendering={home / "BUSY_2025"}, purging={home / "GONE_2025"})
+    assert busy.rendering is not enclave.busy_recordings.rendering
+    assert busy.purging is not enclave.busy_recordings.purging
+
+
+@pytest.mark.asyncio
+async def test_a_recording_being_purged_is_left_out_of_the_listing(enclave: Enclave, home: Path):
+    finish_recording(home, "GONE_2025")
+    enclave.busy_recordings.purging.add(home / "GONE_2025")
+
+    listing = await user_recordings_list(enclave)
+
+    assert listing.completed == listing.rendering == listing.unprocessed == []
+    # and no OTP is handed out for a file that is on its way out
+    assert not enclave.download_totp.factories
 
 
 @pytest.mark.asyncio
 async def test_rendering_and_unprocessed_recordings_get_no_otp(enclave: Enclave, home: Path):
     abandon_recording(home, "FAILED_2025")
-    enclave.running_jobs.add(abandon_recording(home, "BUSY_2025"))
+    enclave.busy_recordings.rendering.add(abandon_recording(home, "BUSY_2025"))
 
     await user_recordings_list(enclave)
 
@@ -229,7 +250,7 @@ async def test_a_symlink_is_a_404_and_its_target_stays(
 @pytest.mark.asyncio
 async def test_a_recording_that_is_rendering_is_a_409_and_stays(enclave: Enclave, home: Path):
     # deleting it would pull the chunks out from under ffmpeg
-    enclave.running_jobs.add(abandon_recording(home, "BUSY_2025"))
+    enclave.busy_recordings.rendering.add(abandon_recording(home, "BUSY_2025"))
 
     assert await refusal(enclave, "BUSY_2025") == 409
     assert (home / "BUSY_2025").exists()
@@ -238,7 +259,7 @@ async def test_a_recording_that_is_rendering_is_a_409_and_stays(enclave: Enclave
 @pytest.mark.asyncio
 async def test_a_recording_that_is_being_rerendered_is_a_409(enclave: Enclave, home: Path):
     # finished by every other measure, since the previous output is still there
-    enclave.running_jobs.add(abandon_recording(home, "BUSY_2025"))
+    enclave.busy_recordings.rendering.add(abandon_recording(home, "BUSY_2025"))
     finish_recording(home, "BUSY_2025")
 
     assert await refusal(enclave, "BUSY_2025") == 409
@@ -248,7 +269,7 @@ async def test_a_recording_that_is_being_rerendered_is_a_409(enclave: Enclave, h
 async def test_another_enclaves_job_does_not_block_a_purge(home: Path, tmp_path: Path):
     abandon_recording(home, "FAILED_2025")
     elsewhere = Enclave(tmp_path / "elsewhere")
-    elsewhere.running_jobs.add(elsewhere.home_dir / "FAILED_2025")
+    elsewhere.busy_recordings.rendering.add(elsewhere.home_dir / "FAILED_2025")
 
     await purge_recording("FAILED_2025", Enclave(home), LECTURER)
 
@@ -307,3 +328,99 @@ async def test_a_purge_is_logged_with_the_user_who_asked(
     assert any(
         "lecturer-sub" in r.getMessage() and "DONE_2025" in r.getMessage() for r in caplog.records
     )
+
+
+# --- the purging mark --------------------------------------------------------
+#
+# While rmtree runs, the recording is marked as purging, which is what turns away uploads,
+# jobs and a second purge, and what keeps the listing from showing a half-deleted recording.
+
+
+@pytest.mark.asyncio
+async def test_the_recording_is_marked_as_purging_while_it_is_deleted(
+    mocker: MockerFixture, enclave: Enclave, home: Path
+):
+    finish_recording(home, "DONE_2025")
+    seen_while_deleting: list[BusyRecordings] = []
+    real_rmtree = shutil.rmtree
+
+    def watching_rmtree(path: Path) -> None:
+        seen_while_deleting.append(enclave.busy_recordings.snapshot())
+        real_rmtree(path)
+
+    mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=watching_rmtree)
+
+    await purge_recording("DONE_2025", enclave, LECTURER)
+
+    assert seen_while_deleting == [BusyRecordings(purging={home / "DONE_2025"})]
+
+
+@pytest.mark.asyncio
+async def test_the_mark_is_set_before_the_recording_is_classified(
+    mocker: MockerFixture, enclave: Enclave, home: Path
+):
+    # the classification runs in a worker thread, so a job or a second purge can come in
+    # while it does; the mark has to be up already by then
+    finish_recording(home, "DONE_2025")
+    seen_while_classifying: list[set[Path]] = []
+    real_classify = classify_recording
+
+    def watching_classify(path: Path, busy: BusyRecordings) -> RecordingInfo:
+        seen_while_classifying.append(set(enclave.busy_recordings.purging))
+        return real_classify(path, busy)
+
+    mocker.patch("ise_record.glue.recordings.classify_recording", side_effect=watching_classify)
+
+    await purge_recording("DONE_2025", enclave, LECTURER)
+
+    assert seen_while_classifying == [{home / "DONE_2025"}]
+
+
+@pytest.mark.asyncio
+async def test_the_mark_is_gone_once_the_purge_is_done(enclave: Enclave, home: Path):
+    finish_recording(home, "DONE_2025")
+
+    await purge_recording("DONE_2025", enclave, LECTURER)
+
+    # a recording made again under the same name can be uploaded straight away
+    assert enclave.busy_recordings == BusyRecordings()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setup", ["nonexistent", "streaming", "not-renderable"])
+async def test_the_mark_is_gone_after_a_refusal(setup: str, enclave: Enclave, home: Path):
+    # a refused purge must not leave the recording locked against uploads and jobs until the
+    # server restarts
+    if setup == "streaming":
+        write_chunks(home / "GVS_2025", [5])
+    elif setup == "not-renderable":
+        write_chunks(home / "GVS_2025", [30 * 60], track="overlay")
+
+    with pytest.raises(HTTPException):
+        await purge_recording("GVS_2025", enclave, LECTURER)
+
+    assert enclave.busy_recordings == BusyRecordings()
+
+
+@pytest.mark.asyncio
+async def test_the_mark_is_gone_after_a_filesystem_error(
+    mocker: MockerFixture, enclave: Enclave, home: Path
+):
+    finish_recording(home, "DONE_2025")
+    mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=OSError("busy"))
+
+    with pytest.raises(HTTPException):
+        await purge_recording("DONE_2025", enclave, LECTURER)
+
+    assert enclave.busy_recordings == BusyRecordings()
+
+
+@pytest.mark.asyncio
+async def test_another_recording_being_purged_does_not_block_a_purge(enclave: Enclave, home: Path):
+    finish_recording(home, "DONE_2025")
+    enclave.busy_recordings.purging.add(home / "GONE_2025")
+
+    await purge_recording("DONE_2025", enclave, LECTURER)
+
+    assert not (home / "DONE_2025").exists()
+    assert enclave.busy_recordings.purging == {home / "GONE_2025"}

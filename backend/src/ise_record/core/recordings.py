@@ -4,6 +4,7 @@ rendering, and unprocessed/failed-postprocessing recordings.
 """
 
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 from enum import auto, Enum
 from pathlib import Path
@@ -21,6 +22,7 @@ class RecordingState(Enum):
     FINISHED = auto()
     UNPROCESSED = auto()
     NOT_RENDERABLE = auto()
+    PURGING = auto()
 
 
 class RecordingInfo(NamedTuple):
@@ -29,6 +31,26 @@ class RecordingInfo(NamedTuple):
     path: Path
     state: RecordingState
     size: int | None = None
+
+
+@dataclass
+class BusyRecordings:
+    """Currently busy recordings"""
+
+    rendering: set[Path] = field(default_factory=set[Path])
+    purging: set[Path] = field(default_factory=set[Path])
+
+    def snapshot(self) -> BusyRecordings:
+        """Copy of self, stable across awaits"""
+        return BusyRecordings(rendering=self.rendering.copy(), purging=self.purging.copy())
+
+    def classify(self, recording_path: Path) -> RecordingState | None:
+        """Classify the way a recording path is busy: rendering, purging, or None"""
+        if recording_path in self.rendering:
+            return RecordingState.RENDERING
+        if recording_path in self.purging:
+            return RecordingState.PURGING
+        return None
 
 
 class RecordingClasses(NamedTuple):
@@ -60,12 +82,12 @@ def _unfinished_state(main_track_dir: Path) -> RecordingState:
     return RecordingState.STREAMING
 
 
-def _recording_state(recording_dir: Path, running_jobs: frozenset[Path]) -> RecordingState:
+def _recording_state(recording_dir: Path, busy_recordings: BusyRecordings) -> RecordingState:
     output_path = recording_dir / OUTPUT_FILENAME
     main_track_dir = recording_dir / MAIN_TRACK_NAME
 
-    if recording_dir in running_jobs:
-        return RecordingState.RENDERING
+    if (busy_state := busy_recordings.classify(recording_dir)) is not None:
+        return busy_state
     if not recording_dir.is_dir(follow_symlinks=False):
         return RecordingState.NONEXISTENT
     if output_path.is_file():
@@ -79,12 +101,12 @@ def _recording_state(recording_dir: Path, running_jobs: frozenset[Path]) -> Reco
     return _unfinished_state(main_track_dir)
 
 
-def classify_recording(recording_dir: Path, running_jobs: frozenset[Path]) -> RecordingInfo:
+def classify_recording(recording_dir: Path, busy_recordings: BusyRecordings) -> RecordingInfo:
     """
     Classifies a recording according to its state of processing, and attaches the size of the
     output for finished recordings.
     """
-    state = _recording_state(recording_dir, running_jobs)
+    state = _recording_state(recording_dir, busy_recordings)
 
     if state == RecordingState.FINISHED:
         output_path = recording_dir / OUTPUT_FILENAME
@@ -94,10 +116,10 @@ def classify_recording(recording_dir: Path, running_jobs: frozenset[Path]) -> Re
     return RecordingInfo(path=recording_dir, state=state)
 
 
-def recording_classes(user_home: Path, running_jobs: frozenset[Path]) -> RecordingClasses:
+def recording_classes(user_home: Path, busy_recordings: BusyRecordings) -> RecordingClasses:
     """Returns a user's recordings arranged in classes according to their state"""
 
-    recordings = [classify_recording(path, running_jobs) for path in sorted(user_home.iterdir())]
+    recordings = [classify_recording(path, busy_recordings) for path in sorted(user_home.iterdir())]
     bins = defaultdict[RecordingState, list[RecordingInfo]](list[RecordingInfo])
 
     for r in recordings:

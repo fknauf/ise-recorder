@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from ise_record.core.recordings import (
+    BusyRecordings,
     classify_recording,
     recording_classes,
     RecordingClasses,
@@ -32,7 +33,17 @@ from ..harness import (
     write_chunks,
 )
 
-NO_JOBS = frozenset[Path]()
+NO_JOBS = BusyRecordings()
+
+
+def rendering(*paths: Path) -> BusyRecordings:
+    """Recordings with a postprocessing job in flight, and none being purged."""
+    return BusyRecordings(rendering=set(paths))
+
+
+def purging(*paths: Path) -> BusyRecordings:
+    """Recordings being purged, and none being rendered."""
+    return BusyRecordings(purging=set(paths))
 
 
 @pytest.fixture
@@ -42,8 +53,8 @@ def home(tmp_path: Path) -> Path:
     return user_home
 
 
-def state_of(recording_dir: Path, running_jobs: frozenset[Path] = NO_JOBS) -> RecordingState:
-    return classify_recording(recording_dir, running_jobs).state
+def state_of(recording_dir: Path, busy: BusyRecordings = NO_JOBS) -> RecordingState:
+    return classify_recording(recording_dir, busy).state
 
 
 # --- finished --------------------------------------------------------------
@@ -73,7 +84,7 @@ def test_a_recording_with_a_job_in_flight_is_rendering(home: Path):
     # lecture ends; only the running job tells them apart
     recording_dir = abandon_recording(home, "GVS_2025")
 
-    assert state_of(recording_dir, frozenset({recording_dir})) == RecordingState.RENDERING
+    assert state_of(recording_dir, rendering(recording_dir)) == RecordingState.RENDERING
 
 
 def test_a_rerender_is_rendering_rather_than_finished(home: Path):
@@ -82,13 +93,75 @@ def test_a_rerender_is_rendering_rather_than_finished(home: Path):
     recording_dir = abandon_recording(home, "GVS_2025")
     finish_recording(home, "GVS_2025")
 
-    assert state_of(recording_dir, frozenset({recording_dir})) == RecordingState.RENDERING
+    assert state_of(recording_dir, rendering(recording_dir)) == RecordingState.RENDERING
 
 
 def test_a_job_on_another_recording_changes_nothing(home: Path):
     finish_recording(home, "DONE_2025")
 
-    assert state_of(home / "DONE_2025", frozenset({home / "BUSY_2025"})) == RecordingState.FINISHED
+    assert state_of(home / "DONE_2025", rendering(home / "BUSY_2025")) == RecordingState.FINISHED
+
+
+# --- being purged -----------------------------------------------------------
+
+
+def test_a_recording_being_purged_is_purging(home: Path):
+    # whatever is left on disk is on its way out, so what it looks like is beside the point
+    finish_recording(home, "DONE_2025")
+
+    assert state_of(home / "DONE_2025", purging(home / "DONE_2025")) == RecordingState.PURGING
+
+
+def test_a_recording_that_rmtree_has_already_taken_apart_is_still_purging(home: Path):
+    # the directory may be half gone, or gone entirely, while the purge is in flight; neither
+    # makes it nonexistent or unrenderable until the purge is done
+    write_chunks(home / "HALF_2025", [30 * MINUTE], track="overlay")
+
+    assert state_of(home / "HALF_2025", purging(home / "HALF_2025")) == RecordingState.PURGING
+    assert state_of(home / "GONE_2025", purging(home / "GONE_2025")) == RecordingState.PURGING
+
+
+def test_a_purge_of_another_recording_changes_nothing(home: Path):
+    finish_recording(home, "DONE_2025")
+
+    assert state_of(home / "DONE_2025", purging(home / "OTHER_2025")) == RecordingState.FINISHED
+
+
+def test_a_purging_recording_has_no_size(home: Path):
+    finish_recording(home, "DONE_2025")
+
+    assert classify_recording(home / "DONE_2025", purging(home / "DONE_2025")).size is None
+
+
+# --- the record of busy recordings -------------------------------------------
+
+
+def test_nothing_is_busy_by_default(home: Path):
+    assert BusyRecordings().classify(home / "DONE_2025") is None
+
+
+def test_the_busy_record_names_the_kind_of_business(home: Path):
+    busy = BusyRecordings(rendering={home / "BUSY_2025"}, purging={home / "GONE_2025"})
+
+    assert busy.classify(home / "BUSY_2025") == RecordingState.RENDERING
+    assert busy.classify(home / "GONE_2025") == RecordingState.PURGING
+    assert busy.classify(home / "DONE_2025") is None
+
+
+def test_the_snapshot_does_not_follow_later_changes(home: Path):
+    # the snapshot is handed to a scan of the filesystem in a worker thread, while jobs and
+    # purges on the event loop keep adding and removing entries. A live view would be
+    # iterated mid-change; a copy cannot be.
+    busy = BusyRecordings(rendering={home / "foo"}, purging={home / "bar"})
+
+    snapshot = busy.snapshot()
+    busy.rendering.add(home / "baz")
+    busy.rendering.discard(home / "foo")
+    busy.purging.discard(home / "bar")
+
+    assert snapshot == BusyRecordings(rendering={home / "foo"}, purging={home / "bar"})
+    assert snapshot.rendering is not busy.rendering
+    assert snapshot.purging is not busy.purging
 
 
 # --- streaming or given up on ----------------------------------------------
@@ -238,7 +311,7 @@ def test_each_recording_lands_in_the_list_for_its_state(home: Path):
     abandon_recording(home, "FAILED_2025")
     busy = abandon_recording(home, "BUSY_2025")
 
-    classes = recording_classes(home, frozenset({busy}))
+    classes = recording_classes(home, rendering(busy))
 
     assert names(classes.finished) == ["DONE_2025"]
     assert names(classes.rendering) == ["BUSY_2025"]
@@ -254,6 +327,21 @@ def test_a_finished_recording_keeps_its_size_in_the_list(home: Path):
 def test_an_empty_home_directory_gives_three_empty_lists(home: Path):
     # every list is looked up whether or not anything landed in it
     assert recording_classes(home, NO_JOBS) == RecordingClasses([], [], [])
+
+
+def test_a_recording_being_purged_is_left_out(home: Path):
+    # the frontend removed its card the moment the purge was confirmed; listing it again,
+    # under any heading, would bring the card back until the purge is done
+    finish_recording(home, "DONE_2025")
+    finish_recording(home, "KEPT_2025")
+
+    classes = recording_classes(home, purging(home / "DONE_2025"))
+
+    assert classes == RecordingClasses(
+        finished=[RecordingInfo(home / "KEPT_2025", RecordingState.FINISHED, len(b"video"))],
+        rendering=[],
+        unprocessed=[],
+    )
 
 
 def test_recordings_the_frontend_has_no_card_for_are_left_out(home: Path, tmp_path: Path):

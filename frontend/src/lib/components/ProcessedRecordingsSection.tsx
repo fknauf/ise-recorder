@@ -42,22 +42,19 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
   const { purge } = useProcessedRecordings();
 
   const { dismiss } = useDialogContainer();
-  const [ busy, setBusy ] = useState(false);
 
   if(apiUrl === undefined) {
     return null;
   }
 
   const initiatePurge = async () => {
-    setBusy(true);
+    dismiss();
     try {
       await purge(recordingName);
       showSuccess(`Purged ${recordingName}`);
     } catch(e) {
       showError(`Failed to purge ${recordingName}`, e);
     }
-    setBusy(false);
-    dismiss();
   };
 
   return (
@@ -70,9 +67,8 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
         <Text>You are about to permanently delete the recording <strong>{recordingName}</strong> from the server. This cannot be undone. Are you sure?</Text>
       </Content>
       <ButtonGroup>
-        <Button isDisabled={busy} variant="secondary" onPress={dismiss} autoFocus data-testid="pd-btn-cancel">Cancel</Button>
+        <Button variant="secondary" onPress={dismiss} autoFocus data-testid="pd-btn-cancel">Cancel</Button>
         <Button
-          isDisabled={busy}
           variant="negative"
           onPress={initiatePurge}
           data-testid="pd-btn-purge"
