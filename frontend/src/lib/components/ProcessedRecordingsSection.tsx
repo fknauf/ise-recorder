@@ -67,7 +67,14 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
         <Text>You are about to permanently delete the recording <strong>{recordingName}</strong> from the server. This cannot be undone. Are you sure?</Text>
       </Content>
       <ButtonGroup>
-        <Button variant="secondary" onPress={dismiss} autoFocus data-testid="pd-btn-cancel">Cancel</Button>
+        <Button
+          variant="secondary"
+          onPress={dismiss}
+          autoFocus
+          data-testid="pd-btn-cancel"
+        >
+          Cancel
+        </Button>
         <Button
           variant="negative"
           onPress={initiatePurge}

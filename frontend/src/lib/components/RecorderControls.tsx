@@ -154,7 +154,7 @@ export function RecorderControls() {
   };
 
   return (
-    <Flex direction="row" justifyContent="center" gap="size-100" marginTop="size-100" wrap>
+    <Flex direction="row" gap="size-100" marginTop="size-100" wrap>
       {
         authRequired &&
         <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" marginEnd="size-100">
@@ -162,27 +162,31 @@ export function RecorderControls() {
         </Flex>
       }
 
-      <TextField
-        label="Lecture Title"
-        value={lectureTitle}
-        isReadOnly={hasDisabledTrackControls}
-        isDisabled={hasDisabledTrackControls}
-        validate={validateLectureTitle}
-        onChange={setLectureTitle}
-        autoFocus
-      />
-
-      {
-        isBackendConfigured &&
+      <View height="size-900">
+        <Flex direction="row" gap="size-100">
           <TextField
-            label="e-Mail"
-            value={lecturerEmail}
+            label="Lecture Title"
+            value={lectureTitle}
             isReadOnly={hasDisabledTrackControls}
             isDisabled={hasDisabledTrackControls}
-            validate={validateEmail}
-            onChange={setLecturerEmail}
+            validate={validateLectureTitle}
+            onChange={setLectureTitle}
+            autoFocus
           />
-      }
+
+          {
+            isBackendConfigured &&
+              <TextField
+                label="e-Mail"
+                value={lecturerEmail}
+                isReadOnly={hasDisabledTrackControls}
+                isDisabled={hasDisabledTrackControls}
+                validate={validateEmail}
+                onChange={setLecturerEmail}
+              />
+          }
+        </Flex>
+      </View>
 
       <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
