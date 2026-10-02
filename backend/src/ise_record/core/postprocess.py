@@ -8,11 +8,10 @@ import asyncio
 from enum import Enum
 import json
 import logging
-from pathlib import Path
 from subprocess import CalledProcessError
 from typing import NamedTuple
 
-import aiofiles
+from anyio import Path
 
 MAIN_TRACK_NAME = "stream"
 OVERLAY_TRACK_NAME = "overlay"
@@ -202,11 +201,11 @@ async def concat_chunks(track_path: Path) -> ConcatenatedFile:
     incomplete = False
 
     try:
-        async with aiofiles.open(target_path, "wb") as dest:
+        async with await target_path.open("wb") as dest:
             last_extension = None
             expected_ext_value = 0
 
-            for src_path in sorted(track_path.glob("chunk.*")):
+            for src_path in sorted([p async for p in track_path.glob("chunk.*")]):
                 src_ext = src_path.suffix[1:]
 
                 if (
@@ -220,11 +219,11 @@ async def concat_chunks(track_path: Path) -> ConcatenatedFile:
                 last_extension = src_ext
                 expected_ext_value = expected_ext_value + 1
 
-                async with aiofiles.open(src_path, "rb") as src:
+                async with await src_path.open("rb") as src:
                     while content := await src.read(512 * 1024):
                         await dest.write(content)
     except:
-        target_path.unlink(missing_ok=True)
+        await target_path.unlink(missing_ok=True)
         raise
 
     return ConcatenatedFile(path=target_path, incomplete=incomplete)
@@ -356,7 +355,7 @@ async def postprocess_tracks(
 
     inputs: list[ConcatenatedFile] = []
 
-    has_overlay = overlay_dir.is_dir()
+    has_overlay = await overlay_dir.is_dir()
     logger.debug("Recording %s an overlay track", "has" if has_overlay else "doesn't have")
 
     try:
@@ -392,9 +391,9 @@ async def postprocess_tracks(
         # in case the server crashed and there's another ffmpeg running that's writing to
         # intermediate_path: unlink here, so the other ffmpeg writes to a nameless file descriptor
         # instead of competing with the ffmpeg we're about to start.
-        intermediate_path.unlink(missing_ok=True)
+        await intermediate_path.unlink(missing_ok=True)
         await _run_command(render_command)
-        intermediate_path.rename(output_path)
+        await intermediate_path.rename(output_path)
 
         logger.info("Render completed")
 
@@ -418,7 +417,7 @@ async def postprocess_tracks(
     finally:
         # unlink temporaries to save disk space and limit the number of expected states
         for p in inputs:
-            p.path.unlink(missing_ok=True)
+            await p.path.unlink(missing_ok=True)
         # intermediate intentionally not unlinked because it's harder to recreate. Admin/user may
         # want to inspect the abortive results. A rerender will overwrite it anyway.
 
@@ -431,16 +430,19 @@ async def postprocess_recording(recording_path: Path) -> Result:
     :returns whether postprocessing succeeded and path of the result file
     """
 
-    if not recording_path.is_dir():
+    if not await recording_path.is_dir():
         logger.warning("Scheduled postprocessing for non-existent recording %s", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 
     stream_dir = recording_path / MAIN_TRACK_NAME
     overlay_dir = recording_path / OVERLAY_TRACK_NAME
-    audio_dirs = sorted(recording_path.glob(AUDIO_TRACK_GLOB), key=lambda p: (len(p.name), p.name))
+    audio_dirs = sorted(
+        [p async for p in recording_path.glob(AUDIO_TRACK_GLOB)],
+        key=lambda p: (len(p.name), p.name),
+    )
     output_path = recording_path / OUTPUT_FILENAME
 
-    if not stream_dir.is_dir():
+    if not await stream_dir.is_dir():
         logger.info("%s has no main display stream, nothing to do.", recording_path)
         return Result(output_file=None, reason=ResultReason.MAIN_STREAM_MISSING)
 

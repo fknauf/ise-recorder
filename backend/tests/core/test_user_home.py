@@ -14,10 +14,13 @@ app caches the result per subject is in glue/test_user_home.py.
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
+from pytest_mock import MockerFixture
 
 from ise_record.core.auth import UserInfo
 from ise_record.core.user_home import _fs_safe_user_name, prepare_user_home_dir
@@ -42,19 +45,19 @@ def user_for(username: Any) -> UserInfo:
     return UserInfo(sub="abc", preferred_username=username)
 
 
-async def home_dir_for(tmp_path: Path, username: Any) -> Path:
+async def home_dir_for(tmp_path: Path, username: Any) -> anyio.Path:
     """The directory name derived for a username, with the subject held fixed."""
-    return await prepare_user_home_dir(user_for(username), tmp_path)
+    return await prepare_user_home_dir(user_for(username), anyio.Path(tmp_path))
 
 
 @pytest.mark.asyncio
 async def test_a_destination_directory_that_does_not_exist_yet_is_created(tmp_path: Path):
     base_dir = tmp_path / "not" / "there" / "yet"
 
-    home = await prepare_user_home_dir(user_for("lecturer"), base_dir)
+    home = await prepare_user_home_dir(user_for("lecturer"), anyio.Path(base_dir))
 
     assert home == base_dir / SUBJECT_DIGEST
-    assert home.is_dir()
+    assert await home.is_dir()
 
 
 @pytest.mark.parametrize(
@@ -84,7 +87,7 @@ async def test_readable_username_becomes_the_directory_alias(
     expected_alias = tmp_path / f"{expected_prefix}{SUBJECT_DIGEST[:12]}"
 
     assert home == tmp_path / SUBJECT_DIGEST
-    assert home.is_dir()
+    assert await home.is_dir()
 
     assert expected_alias.readlink() == Path(SUBJECT_DIGEST)
     assert home_entries(tmp_path) == {SUBJECT_DIGEST, expected_alias.name}
@@ -212,10 +215,10 @@ async def test_the_home_directory_survives_a_change_of_username(tmp_path: Path):
     # the point of naming the directory after the subject: whether the IdP renames someone,
     # or merely answers a UserInfo query today that it failed to answer yesterday, the
     # recordings already on disk have to stay where the service will look for them
-    before = await prepare_user_home_dir(user_for("lecturer"), tmp_path)
+    before = await prepare_user_home_dir(user_for("lecturer"), anyio.Path(tmp_path))
 
     # an empty cache is a restart: nothing is being read back from the first call
-    after = await prepare_user_home_dir(user_for("dozentin"), tmp_path)
+    after = await prepare_user_home_dir(user_for("dozentin"), anyio.Path(tmp_path))
 
     assert before == after == tmp_path / SUBJECT_DIGEST
 
@@ -230,6 +233,33 @@ async def test_the_home_directory_survives_a_change_of_username(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_two_preparations_at_once_both_get_the_home_directory(
+    mocker: MockerFixture, tmp_path: Path
+):
+    # A lecturer's first requests arrive together -- the listing and the first chunk -- and
+    # each prepares the home directory. Both can find the alias missing before either has
+    # made it; the one that comes second must not fail the request over a link it wanted
+    # anyway. The barrier holds each preparation after its look until the other has looked.
+    real_exists = anyio.Path.exists
+    both_looked = asyncio.Barrier(2)
+
+    async def exists_then_wait(self: anyio.Path, *args: Any, **kwargs: Any) -> bool:
+        found = await real_exists(self, *args, **kwargs)
+        await both_looked.wait()
+        return found
+
+    mocker.patch.object(anyio.Path, "exists", autospec=True, side_effect=exists_then_wait)
+
+    first, second = await asyncio.wait_for(
+        asyncio.gather(home_dir_for(tmp_path, "lecturer"), home_dir_for(tmp_path, "lecturer")),
+        timeout=5,
+    )
+
+    assert first == second == tmp_path / SUBJECT_DIGEST
+    assert home_entries(tmp_path) == {SUBJECT_DIGEST, alias_of("lecturer", SUBJECT_DIGEST)}
+
+
+@pytest.mark.asyncio
 async def test_an_alias_name_that_is_already_taken_is_left_alone(tmp_path: Path):
     # the name the alias wants is exactly what the release before this one used for the
     # real home directory, so on the first start after an upgrade it is occupied. The
@@ -237,7 +267,7 @@ async def test_an_alias_name_that_is_already_taken_is_left_alone(tmp_path: Path)
     occupied = tmp_path / alias_of("lecturer", SUBJECT_DIGEST)
     (occupied / "old-recording").mkdir(parents=True)
 
-    home = await prepare_user_home_dir(user_for("lecturer"), tmp_path)
+    home = await prepare_user_home_dir(user_for("lecturer"), anyio.Path(tmp_path))
 
     assert home == tmp_path / SUBJECT_DIGEST
     assert not occupied.is_symlink()
@@ -248,9 +278,11 @@ async def test_an_alias_name_that_is_already_taken_is_left_alone(tmp_path: Path)
 async def test_username_collisions_are_separated_by_the_digest(tmp_path: Path):
     # pathvalidate maps several usernames onto one string -- "DOMAIN\\user" and "DOMAINuser"
     # both come out as the latter -- so the digest is the only thing keeping them apart
-    first = await prepare_user_home_dir(UserInfo(sub="user-a", preferred_username="same"), tmp_path)
+    first = await prepare_user_home_dir(
+        UserInfo(sub="user-a", preferred_username="same"), anyio.Path(tmp_path)
+    )
     second = await prepare_user_home_dir(
-        UserInfo(sub="user-b", preferred_username="same"), tmp_path
+        UserInfo(sub="user-b", preferred_username="same"), anyio.Path(tmp_path)
     )
 
     assert first != second

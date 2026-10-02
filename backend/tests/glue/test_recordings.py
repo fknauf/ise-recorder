@@ -14,6 +14,7 @@ it -- status codes on the wire, authentication -- lives in test_server.py.
 from pathlib import Path
 import shutil
 
+import anyio
 from fastapi import HTTPException
 import pytest
 from pytest_mock import MockerFixture
@@ -48,7 +49,7 @@ def home(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def enclave(home: Path) -> Enclave:
-    return Enclave(home)
+    return Enclave(anyio.Path(home))
 
 
 # --- the listing's response ------------------------------------------------
@@ -78,10 +79,10 @@ async def test_the_listing_names_the_user_directory_and_every_recording(
 async def test_the_listing_only_counts_the_enclaves_own_jobs(home: Path):
     # another enclave's job on a recording of the same name changes nothing here
     abandon_recording(home, "FAILED_2025")
-    elsewhere = Enclave(home.parent / "elsewhere")
+    elsewhere = Enclave(anyio.Path(home.parent / "elsewhere"))
     elsewhere.busy_recordings.rendering.add(elsewhere.home_dir / "FAILED_2025")
 
-    listing = await user_recordings_list(Enclave(home))
+    listing = await user_recordings_list(Enclave(anyio.Path(home)))
 
     assert listing.rendering == []
     assert listing.unprocessed == [DisplayableRecording(name="FAILED_2025")]
@@ -107,7 +108,7 @@ async def test_the_otps_come_from_the_enclaves_own_authority(enclave: Enclave, h
     # the download route looks the authority up by the digest in the link, so an OTP issued
     # anywhere else would never verify
     finish_recording(home, "GVS_2025")
-    elsewhere = Enclave(home)
+    elsewhere = Enclave(anyio.Path(home))
 
     listing = await user_recordings_list(enclave)
 
@@ -141,7 +142,8 @@ async def test_the_listing_does_not_go_back_to_the_disk(
 async def test_the_scan_is_handed_a_snapshot_of_the_busy_recordings(
     mocker: MockerFixture, enclave: Enclave, home: Path
 ):
-    # the scan runs in a worker thread while jobs on the event loop change the live set
+    # the scan awaits the filesystem for every recording, and jobs and purges change the live
+    # set in between
     scan = mocker.patch(
         "ise_record.glue.recordings.recording_classes",
         return_value=RecordingClasses([], [], []),
@@ -268,10 +270,10 @@ async def test_a_recording_that_is_being_rerendered_is_a_409(enclave: Enclave, h
 @pytest.mark.asyncio
 async def test_another_enclaves_job_does_not_block_a_purge(home: Path, tmp_path: Path):
     abandon_recording(home, "FAILED_2025")
-    elsewhere = Enclave(tmp_path / "elsewhere")
+    elsewhere = Enclave(anyio.Path(tmp_path / "elsewhere"))
     elsewhere.busy_recordings.rendering.add(elsewhere.home_dir / "FAILED_2025")
 
-    await purge_recording("FAILED_2025", Enclave(home), LECTURER)
+    await purge_recording("FAILED_2025", Enclave(anyio.Path(home)), LECTURER)
 
     assert not (home / "FAILED_2025").exists()
 
@@ -359,15 +361,15 @@ async def test_the_recording_is_marked_as_purging_while_it_is_deleted(
 async def test_the_mark_is_set_before_the_recording_is_classified(
     mocker: MockerFixture, enclave: Enclave, home: Path
 ):
-    # the classification runs in a worker thread, so a job or a second purge can come in
-    # while it does; the mark has to be up already by then
+    # the classification awaits the filesystem, so a job or a second purge can come in while
+    # it does; the mark has to be up already by then
     finish_recording(home, "DONE_2025")
     seen_while_classifying: list[set[Path]] = []
     real_classify = classify_recording
 
-    def watching_classify(path: Path, busy: BusyRecordings) -> RecordingInfo:
+    async def watching_classify(path: anyio.Path, busy: BusyRecordings) -> RecordingInfo:
         seen_while_classifying.append(set(enclave.busy_recordings.purging))
-        return real_classify(path, busy)
+        return await real_classify(path, busy)
 
     mocker.patch("ise_record.glue.recordings.classify_recording", side_effect=watching_classify)
 

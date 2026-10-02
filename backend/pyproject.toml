@@ -4,7 +4,7 @@ version = "1.2.0"
 requires-python = "~=3.14"
 
 dependencies = [
-    "aiofiles~=25.1",
+    "anyio~=4.15",
     "aiosmtplib~=5.1",
     "email-validator~=2.3",
     "fastapi~=0.141",
@@ -41,6 +41,13 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+]
+filterwarnings = [
+    # An anyio.Path method called without await hands back a coroutine, which is truthy, so an
+    # `if not path.exists()` or an `assert path.is_file()` just goes on as if it held. Python only
+    # warns once the coroutine is collected, and pytest reports that as an unraisable exception.
+    "error:coroutine .* was never awaited:RuntimeWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.pyright]

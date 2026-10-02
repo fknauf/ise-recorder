@@ -4,8 +4,8 @@ background job implementation + accessor for the job-slot semaphore
 
 import asyncio
 import logging
-from pathlib import Path
 
+from anyio import Path
 from fastapi import Request
 
 from ise_record.core.postprocess import postprocess_recording

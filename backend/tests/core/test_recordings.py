@@ -16,6 +16,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
 
+import anyio
 import pytest
 
 from ise_record.core.recordings import (
@@ -55,8 +56,18 @@ def home(tmp_path: Path) -> Path:
     return user_home
 
 
+def classify(recording_dir: Path, busy: BusyRecordings = NO_JOBS) -> RecordingInfo:
+    """classify_recording run to completion, on the kind of path the server hands it"""
+    return anyio.run(classify_recording, anyio.Path(recording_dir), busy)
+
+
+def classes_of(user_home: Path, busy: BusyRecordings = NO_JOBS) -> RecordingClasses:
+    """recording_classes run to completion, on the kind of path the server hands it"""
+    return anyio.run(recording_classes, anyio.Path(user_home), busy)
+
+
 def state_of(recording_dir: Path, busy: BusyRecordings = NO_JOBS) -> RecordingState:
-    return classify_recording(recording_dir, busy).state
+    return classify(recording_dir, busy).state
 
 
 # --- finished --------------------------------------------------------------
@@ -67,7 +78,7 @@ def test_a_rendered_recording_is_finished_with_the_size_of_its_video(home: Path)
     # recording directory that holds it
     finish_recording(home, "GVS_2025", b"x" * 12345)
 
-    assert classify_recording(home / "GVS_2025", NO_JOBS) == RecordingInfo(
+    assert classify(home / "GVS_2025", NO_JOBS) == RecordingInfo(
         path=home / "GVS_2025", state=RecordingState.FINISHED, size=12345
     )
 
@@ -75,7 +86,7 @@ def test_a_rendered_recording_is_finished_with_the_size_of_its_video(home: Path)
 def test_only_a_finished_recording_carries_a_size(home: Path):
     abandon_recording(home, "GVS_2025")
 
-    assert classify_recording(home / "GVS_2025", NO_JOBS).size is None
+    assert classify(home / "GVS_2025", NO_JOBS).size is None
 
 
 # --- rendering -------------------------------------------------------------
@@ -132,7 +143,7 @@ def test_a_purge_of_another_recording_changes_nothing(home: Path):
 def test_a_purging_recording_has_no_size(home: Path):
     finish_recording(home, "DONE_2025")
 
-    assert classify_recording(home / "DONE_2025", purging(home / "DONE_2025")).size is None
+    assert classify(home / "DONE_2025", purging(home / "DONE_2025")).size is None
 
 
 # --- the record of busy recordings -------------------------------------------
@@ -357,7 +368,7 @@ def test_each_recording_lands_in_the_list_for_its_state(home: Path):
     abandon_recording(home, "FAILED_2025")
     busy = abandon_recording(home, "BUSY_2025")
 
-    classes = recording_classes(home, rendering(busy))
+    classes = classes_of(home, rendering(busy))
 
     assert names(classes.finished) == ["DONE_2025"]
     assert names(classes.rendering) == ["BUSY_2025"]
@@ -367,12 +378,12 @@ def test_each_recording_lands_in_the_list_for_its_state(home: Path):
 def test_a_finished_recording_keeps_its_size_in_the_list(home: Path):
     finish_recording(home, "DONE_2025", b"twelve bytes")
 
-    assert [r.size for r in recording_classes(home, NO_JOBS).finished] == [12]
+    assert [r.size for r in classes_of(home, NO_JOBS).finished] == [12]
 
 
 def test_an_empty_home_directory_gives_three_empty_lists(home: Path):
     # every list is looked up whether or not anything landed in it
-    assert recording_classes(home, NO_JOBS) == RecordingClasses([], [], [])
+    assert classes_of(home, NO_JOBS) == RecordingClasses([], [], [])
 
 
 def test_a_recording_being_purged_is_left_out(home: Path):
@@ -381,7 +392,7 @@ def test_a_recording_being_purged_is_left_out(home: Path):
     finish_recording(home, "DONE_2025")
     finish_recording(home, "KEPT_2025")
 
-    classes = recording_classes(home, purging(home / "DONE_2025"))
+    classes = classes_of(home, purging(home / "DONE_2025"))
 
     assert classes == RecordingClasses(
         finished=[RecordingInfo(home / "KEPT_2025", RecordingState.FINISHED, len(b"video"))],
@@ -397,7 +408,7 @@ def test_recordings_the_frontend_has_no_card_for_are_left_out(home: Path, tmp_pa
     finish_recording(tmp_path, "victim")
     (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
 
-    assert recording_classes(home, NO_JOBS) == RecordingClasses([], [], [])
+    assert classes_of(home, NO_JOBS) == RecordingClasses([], [], [])
 
 
 def test_each_list_keeps_the_name_order(home: Path):
@@ -407,7 +418,7 @@ def test_each_list_keeps_the_name_order(home: Path):
         finish_recording(home, name)
         abandon_recording(home, f"FAILED_{name}")
 
-    classes = recording_classes(home, NO_JOBS)
+    classes = classes_of(home, NO_JOBS)
 
     assert names(classes.finished) == ["ABC_2026", "GVS_2025", "MMM_2025", "PSU_2026", "XYZ_2024"]
     assert names(classes.unprocessed) == [

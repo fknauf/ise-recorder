@@ -9,8 +9,9 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 from enum import auto, Enum
-from pathlib import Path
 from typing import NamedTuple
+
+from anyio import Path
 
 from ise_record.core.postprocess import MAIN_TRACK_NAME, OUTPUT_FILENAME
 
@@ -85,8 +86,8 @@ class RecordingClasses(NamedTuple):
     unprocessed: list[RecordingInfo]
 
 
-def _unfinished_state(main_track_dir: Path) -> RecordingState:
-    chunks = sorted(main_track_dir.glob("chunk.*"), reverse=True)
+async def _unfinished_state(main_track_dir: Path) -> RecordingState:
+    chunks = [p async for p in main_track_dir.glob("chunk.*")]
 
     # no chunks in main track -> not renderable
     #
@@ -98,56 +99,59 @@ def _unfinished_state(main_track_dir: Path) -> RecordingState:
 
     # if the newest chunk is older than 5 minutes, the recording isn't still being streamed.
     cutoff = datetime.now(UTC) - timedelta(minutes=5)
-    latest = chunks[0]
+    latest = max(chunks)
 
-    if latest.stat().st_mtime < cutoff.timestamp():
+    if (await latest.stat()).st_mtime < cutoff.timestamp():
         return RecordingState.UNPROCESSED
 
     return RecordingState.STREAMING
 
 
-def _recording_state(recording_dir: Path, busy_recordings: BusyRecordings) -> RecordingState:
+async def _recording_state(recording_dir: Path, busy_recordings: BusyRecordings) -> RecordingState:
     output_path = recording_dir / OUTPUT_FILENAME
     main_track_dir = recording_dir / MAIN_TRACK_NAME
 
     if (busy_state := busy_recordings.classify(recording_dir)) is not None:
         return busy_state
-    if not recording_dir.is_dir(follow_symlinks=False):
+    if not await recording_dir.is_dir(follow_symlinks=False):
         return RecordingState.NONEXISTENT
-    if output_path.is_file():
+    if await output_path.is_file():
         return RecordingState.FINISHED
-    if not main_track_dir.is_dir() or output_path.exists():
+    if not await main_track_dir.is_dir() or await output_path.exists():
         # TODO: this also captures non-renderable recordings that are still streaming. For now
         # those just don't show up in the UI, but at some point I'll have to decide on a better
         # way to handle them. Should be rare though, so it's not urgent.
         return RecordingState.NOT_RENDERABLE
 
-    return _unfinished_state(main_track_dir)
+    return await _unfinished_state(main_track_dir)
 
 
-def classify_recording(recording_dir: Path, busy_recordings: BusyRecordings) -> RecordingInfo:
+async def classify_recording(recording_dir: Path, busy_recordings: BusyRecordings) -> RecordingInfo:
     """
     Classifies a recording according to its state of processing, and attaches the size of the
     output for finished recordings.
     """
-    state = _recording_state(recording_dir, busy_recordings)
+    state = await _recording_state(recording_dir, busy_recordings)
 
     if state == RecordingState.FINISHED:
         output_path = recording_dir / OUTPUT_FILENAME
-        size = output_path.stat().st_size
+        size = (await output_path.stat()).st_size
         return RecordingInfo(path=recording_dir, state=state, size=size)
 
     return RecordingInfo(path=recording_dir, state=state)
 
 
-def recording_classes(user_home: Path, busy_recordings: BusyRecordings) -> RecordingClasses:
+async def recording_classes(user_home: Path, busy_recordings: BusyRecordings) -> RecordingClasses:
     """Returns a user's recordings arranged in classes according to their state"""
 
-    recordings = [classify_recording(path, busy_recordings) for path in sorted(user_home.iterdir())]
     bins = defaultdict[RecordingState, list[RecordingInfo]](list[RecordingInfo])
 
-    for r in recordings:
+    async for path in user_home.iterdir():
+        r = await classify_recording(path, busy_recordings)
         bins[r.state].append(r)
+
+    for b in bins.values():
+        b.sort(key=lambda r: r.path)
 
     return RecordingClasses(
         finished=bins[RecordingState.FINISHED],

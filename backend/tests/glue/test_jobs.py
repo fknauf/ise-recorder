@@ -52,7 +52,7 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
         settings.destdir / "foo", "lecturer@example.de", settings.smtp, asyncio.Semaphore(1)
     )
 
-    mock_postprocess.assert_called_once_with(Path("data/foo"))
+    mock_postprocess.assert_called_once_with(settings.destdir / "foo")
     mock_send.assert_called_once_with(
         ANY,
         hostname="localhost",
@@ -97,7 +97,7 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
 
     await postprocessing_task(settings.destdir / "foo", None, settings.smtp, asyncio.Semaphore(1))
 
-    mock_postprocess.assert_called_once_with(Path("data/foo"))
+    mock_postprocess.assert_called_once_with(settings.destdir / "foo")
     mock_send.assert_not_called()
 
 
@@ -110,11 +110,13 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
     )
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
+    settings = Settings(auth="disabled")
+
     await postprocessing_task(
-        Settings(auth="disabled").destdir / "foo", "lecturer@example.de", None, asyncio.Semaphore(1)
+        settings.destdir / "foo", "lecturer@example.de", None, asyncio.Semaphore(1)
     )
 
-    mock_postprocess.assert_called_once_with(Path("data/foo"))
+    mock_postprocess.assert_called_once_with(settings.destdir / "foo")
     mock_send.assert_not_called()
 
 

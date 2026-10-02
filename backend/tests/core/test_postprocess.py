@@ -10,8 +10,10 @@ from pathlib import Path
 import shutil
 from subprocess import CalledProcessError
 import tempfile
+from typing import Any
 from unittest.mock import AsyncMock, call
 
+import anyio
 import pytest
 from pytest_mock import MockerFixture
 
@@ -119,7 +121,7 @@ async def test_concat_chunks():
         (temp_path / "chunk.0000").write_bytes(first_data)
         (temp_path / "chunk.0001").write_bytes(second_data)
 
-        await concat_chunks(temp_path)
+        await concat_chunks(anyio.Path(temp_path))
 
         assert os.path.isfile(temp_path / "full.webm")
         assert (temp_path / "full.webm").read_bytes() == first_data + second_data
@@ -140,9 +142,9 @@ async def concat_names(names: list[str]) -> tuple[bool, str]:
     """Concatenate a track made of the given files; report completeness and the result."""
     with tempfile.TemporaryDirectory() as tempdir:
         track_path = make_track(tempdir, names)
-        result = await concat_chunks(track_path)
+        result = await concat_chunks(anyio.Path(track_path))
 
-        return result.incomplete, result.path.read_bytes().decode()
+        return result.incomplete, Path(result.path).read_bytes().decode()
 
 
 @pytest.mark.asyncio
@@ -206,14 +208,24 @@ async def test_concat_chunks_orders_numerically_past_the_padding_width():
 @pytest.mark.asyncio
 async def test_concat_chunks_removes_the_partial_output_when_writing_fails(mocker: MockerFixture):
     # a half-written full.webm left behind would be picked up by a later run as though it
-    # were a finished concatenation
-    mocker.patch("aiofiles.open", side_effect=OSError("disk full"))
+    # were a finished concatenation. The first chunk is already in it when the second one
+    # fails to open, so there is something on disk to clean up.
+    real_open = anyio.Path.open
+
+    async def open_failing_on_the_second_chunk(self: anyio.Path, *args: Any, **kwargs: Any):
+        if self.name == "chunk.0001":
+            raise OSError("I/O error")
+        return await real_open(self, *args, **kwargs)
+
+    mocker.patch.object(
+        anyio.Path, "open", autospec=True, side_effect=open_failing_on_the_second_chunk
+    )
 
     with tempfile.TemporaryDirectory() as tempdir:
-        track_path = make_track(tempdir, ["chunk.0000"])
+        track_path = make_track(tempdir, ["chunk.0000", "chunk.0001"])
 
         with pytest.raises(OSError):
-            await concat_chunks(track_path)
+            await concat_chunks(anyio.Path(track_path))
 
         assert not os.path.exists(track_path / "full.webm")
 
@@ -224,7 +236,7 @@ async def test_postprocess_tracks_reports_an_incomplete_track_as_partial_success
 ):
     # the flag has to survive the whole pipeline: it is computed per track, but the
     # lecturer only ever sees the recording-level result
-    async def mock_concat(p: Path):
+    async def mock_concat(p: anyio.Path):
         return ConcatenatedFile(path=p / "full.webm", incomplete=p == Path("foo/overlay"))
 
     stream_props = VideoProperties(
@@ -236,12 +248,12 @@ async def test_postprocess_tracks_reports_an_incomplete_track_as_partial_success
     mocker.patch(
         "ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props)
     )
-    mocker.patch("pathlib.Path.unlink", autospec=True)
-    mocker.patch("pathlib.Path.is_dir", return_value=True)
-    mocker.patch("pathlib.Path.rename")
+    mocker.patch("anyio.Path.unlink", autospec=True)
+    mocker.patch("anyio.Path.is_dir", autospec=True, return_value=True)
+    mocker.patch("anyio.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
-        Path("foo/stream"), Path("foo/overlay"), [], Path("foo/presentation.webm")
+        anyio.Path("foo/stream"), anyio.Path("foo/overlay"), [], anyio.Path("foo/presentation.webm")
     )
 
     assert result.reason == ResultReason.PARTIAL_SUCCESS
@@ -251,7 +263,7 @@ async def test_postprocess_tracks_reports_an_incomplete_track_as_partial_success
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_reports_failure_over_incompleteness(mocker: MockerFixture):
-    async def mock_concat(p: Path):
+    async def mock_concat(p: anyio.Path):
         return ConcatenatedFile(path=p / "full.webm", incomplete=True)
 
     stream_props = VideoProperties(
@@ -266,11 +278,11 @@ async def test_postprocess_tracks_reports_failure_over_incompleteness(mocker: Mo
     mocker.patch(
         "ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props)
     )
-    mocker.patch("pathlib.Path.unlink", autospec=True)
-    mocker.patch("pathlib.Path.is_dir", return_value=True)
+    mocker.patch("anyio.Path.unlink", autospec=True)
+    mocker.patch("anyio.Path.is_dir", autospec=True, return_value=True)
 
     result = await postprocess_tracks(
-        Path("foo/stream"), Path("foo/overlay"), [], Path("foo/presentation.webm")
+        anyio.Path("foo/stream"), anyio.Path("foo/overlay"), [], anyio.Path("foo/presentation.webm")
     )
 
     # there is no file to inspect, so "incomplete" would be misleading advice
@@ -358,7 +370,7 @@ def test_generate_ffmpeg_filter():
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks(mocker: MockerFixture):
-    async def mock_concat(p: Path):
+    async def mock_concat(p: anyio.Path):
         return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
     stream_props = VideoProperties(
@@ -372,12 +384,12 @@ async def test_postprocess_tracks(mocker: MockerFixture):
     mocker.patch(
         "ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props)
     )
-    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
-    mocker.patch("pathlib.Path.is_dir", return_value=True)
-    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
+    mock_unlink = mocker.patch("anyio.Path.unlink", autospec=True)
+    mocker.patch("anyio.Path.is_dir", autospec=True, return_value=True)
+    mock_rename = mocker.patch("anyio.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
-        Path("foo/stream"), Path("foo/overlay"), [], Path("foo/presentation.webm")
+        anyio.Path("foo/stream"), anyio.Path("foo/overlay"), [], anyio.Path("foo/presentation.webm")
     )
 
     assert result.reason == ResultReason.SUCCESS
@@ -415,11 +427,11 @@ async def test_postprocess_tracks(mocker: MockerFixture):
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
-    async def mock_concat(p: Path):
+    async def mock_concat(p: anyio.Path):
         return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
-    def mock_isdir(self: Path):
-        return self == Path("foo/stream")
+    def mock_isdir(path: anyio.Path) -> bool:
+        return path == Path("foo/stream")
 
     stream_props = VideoProperties(
         width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080)
@@ -432,12 +444,12 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
     mocker.patch(
         "ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props)
     )
-    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
-    mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
-    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
+    mock_unlink = mocker.patch("anyio.Path.unlink", autospec=True)
+    mocker.patch("anyio.Path.is_dir", autospec=True, side_effect=mock_isdir)
+    mock_rename = mocker.patch("anyio.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
-        Path("foo/stream"), Path("foo/overlay"), [], Path("foo/presentation.webm")
+        anyio.Path("foo/stream"), anyio.Path("foo/overlay"), [], anyio.Path("foo/presentation.webm")
     )
 
     assert result.reason == ResultReason.SUCCESS
@@ -472,7 +484,7 @@ async def test_postprocess_tracks_no_overlay(mocker: MockerFixture):
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
-    async def mock_concat(p: Path):
+    async def mock_concat(p: anyio.Path):
         return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
     stream_props = VideoProperties(
@@ -486,19 +498,19 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
     mocker.patch(
         "ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props)
     )
-    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
-    mocker.patch("pathlib.Path.is_dir", return_value=True)
-    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
+    mock_unlink = mocker.patch("anyio.Path.unlink", autospec=True)
+    mocker.patch("anyio.Path.is_dir", autospec=True, return_value=True)
+    mock_rename = mocker.patch("anyio.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
-        Path("foo/stream"),
-        Path("foo/overlay"),
+        anyio.Path("foo/stream"),
+        anyio.Path("foo/overlay"),
         [
-            Path("foo/audio-0"),
-            Path("foo/audio-1"),
-            Path("foo/audio-2"),
+            anyio.Path("foo/audio-0"),
+            anyio.Path("foo/audio-1"),
+            anyio.Path("foo/audio-2"),
         ],
-        Path("foo/presentation.webm"),
+        anyio.Path("foo/presentation.webm"),
     )
 
     assert result.reason == ResultReason.SUCCESS
@@ -559,11 +571,11 @@ async def test_postprocess_tracks_multi_audio(mocker: MockerFixture):
 
 @pytest.mark.asyncio
 async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
-    async def mock_concat(p: Path):
+    async def mock_concat(p: anyio.Path):
         return ConcatenatedFile(path=p / "full.webm", incomplete=False)
 
-    def mock_isdir(self: Path):
-        return self != Path("foo/overlay")
+    def mock_isdir(path: anyio.Path) -> bool:
+        return path != Path("foo/overlay")
 
     stream_props = VideoProperties(
         width=1920, height=1080, crop=Rectangle(left=0, top=0, width=1920, height=1080)
@@ -576,19 +588,19 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
     mocker.patch(
         "ise_record.core.postprocess.video_properties", AsyncMock(return_value=stream_props)
     )
-    mock_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
-    mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
-    mock_rename = mocker.patch("pathlib.Path.rename", autospec=True)
+    mock_unlink = mocker.patch("anyio.Path.unlink", autospec=True)
+    mocker.patch("anyio.Path.is_dir", autospec=True, side_effect=mock_isdir)
+    mock_rename = mocker.patch("anyio.Path.rename", autospec=True)
 
     result = await postprocess_tracks(
-        Path("foo/stream"),
-        Path("foo/overlay"),
+        anyio.Path("foo/stream"),
+        anyio.Path("foo/overlay"),
         [
-            Path("foo/audio-0"),
-            Path("foo/audio-1"),
-            Path("foo/audio-2"),
+            anyio.Path("foo/audio-0"),
+            anyio.Path("foo/audio-1"),
+            anyio.Path("foo/audio-2"),
         ],
-        Path("foo/presentation.webm"),
+        anyio.Path("foo/presentation.webm"),
     )
 
     assert result.reason == ResultReason.SUCCESS
@@ -643,7 +655,7 @@ async def test_postprocess_tracks_multi_audio_no_overlay(mocker: MockerFixture):
     )
 
 
-# The tests above mock Path.rename, so they pin the arguments ffmpeg is handed and nothing
+# The tests above mock anyio.Path.rename, so they pin the arguments ffmpeg is handed and nothing
 # else. These two run the same code against a real directory, because the reason for the
 # intermediate name is a property of the directory afterwards: presentation.webm is what a
 # lecturer downloads and what the completed-recordings listing offers, so it must never be
@@ -654,12 +666,12 @@ STREAM_PROPS = VideoProperties(
 )
 
 
-async def fake_concat(track_path: Path) -> ConcatenatedFile:
+async def fake_concat(track_path: anyio.Path) -> ConcatenatedFile:
     """A concatenation that leaves a real (empty) file where postprocess_tracks expects one."""
-    full = track_path / "full.webm"
+    full = Path(track_path) / "full.webm"
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_bytes(b"")
-    return ConcatenatedFile(path=full, incomplete=False)
+    return ConcatenatedFile(path=anyio.Path(full), incomplete=False)
 
 
 def render_target(command: list[str]) -> Path:
@@ -685,7 +697,12 @@ async def test_the_rendered_file_gets_its_final_name_only_once_it_is_complete(
     )
     mocker.patch("ise_record.core.postprocess._run_command", wraps=fake_render)
 
-    result = await postprocess_tracks(tmp_path / "stream", tmp_path / "overlay", [], output_path)
+    result = await postprocess_tracks(
+        anyio.Path(tmp_path / "stream"),
+        anyio.Path(tmp_path / "overlay"),
+        [],
+        anyio.Path(output_path),
+    )
 
     assert result == Result(output_file=output_path, reason=ResultReason.SUCCESS)
     # ffmpeg wrote somewhere else, and the finished file arrived under its final name by
@@ -712,81 +729,82 @@ async def test_a_failed_render_leaves_nothing_under_the_final_name(
     )
     mocker.patch("ise_record.core.postprocess._run_command", wraps=fake_render)
 
-    result = await postprocess_tracks(tmp_path / "stream", tmp_path / "overlay", [], output_path)
+    result = await postprocess_tracks(
+        anyio.Path(tmp_path / "stream"),
+        anyio.Path(tmp_path / "overlay"),
+        [],
+        anyio.Path(output_path),
+    )
 
     assert result == Result(output_file=None, reason=ResultReason.FAILURE)
     assert not output_path.exists()
 
 
+# These run against a real directory: which tracks a recording has is read off the disk, and
+# mocking the calls that read it would pin how it is read rather than what comes of it.
+
+
 @pytest.mark.asyncio
-async def test_postprocess_recordings(mocker: MockerFixture):
-    rec_path = Path("foo")
-    audio_paths = [Path("foo/audio-0"), Path("foo/audio-1")]
+async def test_postprocess_recordings(mocker: MockerFixture, tmp_path: Path):
+    rec_path = tmp_path / "foo"
+    # the stray directory is not an audio track, and must not be handed on as one
+    for track in ["stream", "audio-0", "audio-1", "screenshots"]:
+        (rec_path / track).mkdir(parents=True)
 
-    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
+    expected_result = Result(
+        reason=ResultReason.SUCCESS, output_file=rec_path / "presentation.webm"
+    )
 
-    mock_is_dir = mocker.patch("pathlib.Path.is_dir", return_value=True, autospec=True)
-    mock_glob = mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
     mock_postprocess_tracks = mocker.patch(
         "ise_record.core.postprocess.postprocess_tracks",
         return_value=expected_result,
         autospec=True,
     )
 
-    result = await postprocess_recording(rec_path)
+    result = await postprocess_recording(anyio.Path(rec_path))
 
     assert result == expected_result
 
     mock_postprocess_tracks.assert_called_once_with(
-        rec_path / "stream", rec_path / "overlay", audio_paths, expected_result.output_file
+        rec_path / "stream",
+        rec_path / "overlay",
+        [rec_path / "audio-0", rec_path / "audio-1"],
+        rec_path / "presentation.webm",
     )
-
-    mock_is_dir.assert_has_calls([call(rec_path), call(rec_path / "stream")])
-
-    mock_glob.assert_called_once_with(rec_path, "audio-*")
 
 
 @pytest.mark.asyncio
-async def test_postprocess_recordings_nonexistent(mocker: MockerFixture):
-    rec_path = Path("foo")
+async def test_postprocess_recordings_nonexistent(mocker: MockerFixture, tmp_path: Path):
     expected_result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
 
-    mock_is_dir = mocker.patch("pathlib.Path.is_dir", return_value=False, autospec=True)
-    mocker.patch("pathlib.Path.glob", return_value=[], autospec=True)
     mock_postprocess_tracks = mocker.patch(
         "ise_record.core.postprocess.postprocess_tracks", autospec=True
     )
 
-    result = await postprocess_recording(rec_path)
+    result = await postprocess_recording(anyio.Path(tmp_path / "foo"))
 
     assert result == expected_result
 
     mock_postprocess_tracks.assert_not_called()
-    mock_is_dir.assert_called_once_with(rec_path)
 
 
 @pytest.mark.asyncio
-async def test_postprocess_recordings_missing_main(mocker: MockerFixture):
-    rec_path = Path("foo")
-    audio_paths = [Path("foo/audio-0"), Path("foo/audio-1")]
+async def test_postprocess_recordings_missing_main(mocker: MockerFixture, tmp_path: Path):
+    rec_path = tmp_path / "foo"
+    for track in ["audio-0", "audio-1"]:
+        (rec_path / track).mkdir(parents=True)
 
     expected_result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
 
-    def mock_isdir(p: Path) -> bool:
-        return p == rec_path
-
-    mock_is_dir = mocker.patch("pathlib.Path.is_dir", wraps=mock_isdir, autospec=True)
-    mocker.patch("pathlib.Path.glob", return_value=audio_paths, autospec=True)
     mock_postprocess_tracks = mocker.patch(
         "ise_record.core.postprocess.postprocess_tracks", autospec=True
     )
 
-    result = await postprocess_recording(rec_path)
+    result = await postprocess_recording(anyio.Path(rec_path))
 
     assert result == expected_result
 
     mock_postprocess_tracks.assert_not_called()
-    mock_is_dir.assert_has_calls([call(rec_path), call(rec_path / "stream")])
 
 
 @pytest.mark.asyncio
@@ -809,7 +827,7 @@ async def test_audio_tracks_are_ordered_by_number_not_by_name(
     for d in audio_dirs:
         (recording_path / d).mkdir()
 
-    await postprocess_recording(recording_path)
+    await postprocess_recording(anyio.Path(recording_path))
     audio_args = [path.name for path in mock_tracks.call_args.args[2]]
 
     assert audio_args == audio_dirs

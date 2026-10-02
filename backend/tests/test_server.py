@@ -19,6 +19,7 @@ import shutil
 from unittest.mock import ANY
 from urllib.parse import quote
 
+import anyio
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -27,13 +28,6 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
-from ise_record.core.recordings import (
-    BusyRecordings,
-    classify_recording,
-    recording_classes,
-    RecordingClasses,
-    RecordingInfo,
-)
 from ise_record.glue.enclave import Enclave
 from ise_record.glue.jobs import get_jobs_semaphore, postprocessing_task
 from ise_record.glue.models import PostProcessingJob
@@ -98,7 +92,7 @@ def prefixed_client(prefixed_settings: Settings) -> Iterator[TestClient]:
 
 
 def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, settings: Settings):
-    mock_isdir = mocker.patch("os.path.isdir", return_value=True)
+    mock_is_dir = mocker.patch("anyio.Path.is_dir", autospec=True, return_value=True)
     registered_when_queued: list[set[Path]] = []
     mock_add_task = mocker.patch(
         "fastapi.BackgroundTasks.add_task",
@@ -114,7 +108,7 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
     )
 
     assert response.status_code == 202
-    mock_isdir.assert_called_once_with(settings.destdir / "foo")
+    mock_is_dir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
         postprocessing_task, settings.destdir / "foo", "foo@bar.de", settings.smtp, ANY
     )
@@ -128,7 +122,7 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
 def test_schedule_postprocessing_recipient_omitted(
     mocker: MockerFixture, client: TestClient, settings: Settings
 ):
-    mock_isdir = mocker.patch("os.path.isdir", return_value=True)
+    mock_is_dir = mocker.patch("anyio.Path.is_dir", autospec=True, return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
@@ -136,7 +130,7 @@ def test_schedule_postprocessing_recipient_omitted(
     )
 
     assert response.status_code == 202
-    mock_isdir.assert_called_once_with(settings.destdir / "foo")
+    mock_is_dir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
         postprocessing_task, settings.destdir / "foo", None, settings.smtp, ANY
     )
@@ -147,7 +141,7 @@ def test_schedule_postprocessing_recipient_omitted(
 def test_schedule_postprocessing_error(
     mocker: MockerFixture, client: TestClient, settings: Settings
 ):
-    mock_isdir = mocker.patch("os.path.isdir", return_value=False)
+    mock_is_dir = mocker.patch("anyio.Path.is_dir", autospec=True, return_value=False)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
@@ -158,7 +152,7 @@ def test_schedule_postprocessing_error(
 
     # the recording is a resource of the caller's that is not there, not a malformed request
     assert response.status_code == 404
-    mock_isdir.assert_called_once_with(settings.destdir / "foo")
+    mock_is_dir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_not_called()
 
 
@@ -178,7 +172,7 @@ def test_schedule_postprocessing_input_validation(mocker: MockerFixture, client:
 def test_schedule_postprocessing_broken_recipient_still_starts_post(
     mocker: MockerFixture, client: TestClient, settings: Settings
 ):
-    mock_isdir = mocker.patch("os.path.isdir", return_value=True)
+    mock_is_dir = mocker.patch("anyio.Path.is_dir", autospec=True, return_value=True)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(
@@ -188,7 +182,7 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(
     )
 
     assert response.status_code == 202
-    mock_isdir.assert_called_once_with(settings.destdir / "foo")
+    mock_is_dir.assert_called_once_with(settings.destdir / "foo")
     mock_add_task.assert_called_once_with(
         postprocessing_task, settings.destdir / "foo", "I made a lot of typos", settings.smtp, ANY
     )
@@ -239,7 +233,7 @@ def test_chunk_upload_stores_a_non_latin_recording_name(
         )
 
     assert response.status_code == 201
-    assert (settings.destdir / recording / "stream" / "chunk.0000").is_file()
+    assert (Path(settings.destdir) / recording / "stream" / "chunk.0000").is_file()
 
 
 def test_chunk_upload_stores_a_decomposed_name_under_one_directory(
@@ -260,11 +254,11 @@ def test_chunk_upload_stores_a_decomposed_name_under_one_directory(
 
         assert response.status_code == 201
 
-    composed = settings.destdir / "\u00dcbung_2025" / "stream"
+    composed = Path(settings.destdir) / "\u00dcbung_2025" / "stream"
 
     assert (composed / "chunk.0000").is_file()
     assert (composed / "chunk.0001").is_file()
-    assert sorted(p.name for p in settings.destdir.iterdir()) == ["\u00dcbung_2025"]
+    assert sorted(p.name for p in Path(settings.destdir).iterdir()) == ["\u00dcbung_2025"]
 
 
 def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, settings: Settings):
@@ -282,7 +276,7 @@ def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, s
 
     assert response.status_code == 201
 
-    stored = list(settings.destdir.iterdir())
+    stored = list(Path(settings.destdir).iterdir())
 
     assert len(stored) == 1
     assert len(stored[0].name.encode("utf-8")) <= NAME_MAX_BYTES
@@ -430,7 +424,7 @@ def test_other_recordings_still_take_chunks_while_one_is_rendering(
     running_jobs_of(client, settings.destdir).add(settings.destdir / "bar")
 
     assert upload(client, None).status_code == 201
-    assert (settings.destdir / "foo" / "stream" / "chunk.0000").is_file()
+    assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0000").is_file()
 
 
 def test_cors_preflight_jobs_unconfigured(client: TestClient):
@@ -496,8 +490,7 @@ def test_cors_preflight_jobs_forbidden(tmp_path: Path):
 def test_the_recordings_listing_is_forbidden_without_authentication(
     client: TestClient, settings: Settings
 ):
-    (settings.destdir / "GVS_2025").mkdir(parents=True)
-    (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
+    finish_recording(settings.destdir, "GVS_2025")
 
     response = client.get("/api/recordings")
 
@@ -505,8 +498,7 @@ def test_the_recordings_listing_is_forbidden_without_authentication(
 
 
 def test_downloading_is_refused_without_user(client: TestClient, settings: Settings):
-    (settings.destdir / "GVS_2025").mkdir(parents=True)
-    (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
+    finish_recording(settings.destdir, "GVS_2025")
 
     response = client.get("/api/recordings/GVS_2025")
 
@@ -1158,8 +1150,7 @@ def test_a_user_directory_that_is_not_a_digest_is_refused(
 def test_downloading_is_forbidden_without_authentication(client: TestClient, settings: Settings):
     # the counterpart of the listing test above, on the route that actually serves bytes:
     # an unauthenticated deployment has one shared destdir and nobody to own a recording
-    (settings.destdir / "GVS_2025").mkdir(parents=True)
-    (settings.destdir / "GVS_2025" / "presentation.webm").write_bytes(b"video")
+    finish_recording(settings.destdir, "GVS_2025")
 
     response = client.get("/api/recordings/deadbeef/GVS_2025", params={"totp": "0000000000"})
 
@@ -1318,8 +1309,9 @@ def test_a_totp_from_the_previous_interval_is_accepted_by_the_endpoint(
 # business, in glue/test_recording_lists.py; these pin what the endpoint does with the answer.
 
 
-def snapshot(root: Path) -> dict[str, bytes]:
+def snapshot(root: Path | anyio.Path) -> dict[str, bytes]:
     """Every file under root with its content, following no symlinks."""
+    root = Path(root)
     return {
         str(p.relative_to(root)): p.read_bytes()
         for p in sorted(root.rglob("*"))
@@ -1327,9 +1319,9 @@ def snapshot(root: Path) -> dict[str, bytes]:
     }
 
 
-def rendered_recording(home: Path, name: str) -> Path:
+def rendered_recording(home: Path | anyio.Path, name: str) -> Path:
     """A recording as it looks after a successful render: chunks, output, leftovers."""
-    recording_dir = home / name
+    recording_dir = Path(home) / name
     write_chunks(recording_dir, [30 * 60, 29 * 60])
     write_chunks(recording_dir, [30 * 60], track="overlay")
     (recording_dir / "presentation.webm").write_bytes(b"the rendered lecture")
@@ -1774,7 +1766,7 @@ async def test_a_cancelled_listing_is_not_mistaken_for_a_failed_one(
     mocker.patch("ise_record.server.user_recordings_list", side_effect=asyncio.CancelledError())
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     abandon_recording(home, "foo")
-    enclave = Enclave(home)
+    enclave = Enclave(anyio.Path(home))
     request = Request(scope={"type": "http", "app": create_app(auth_settings)})
 
     with pytest.raises(asyncio.CancelledError):
@@ -1792,11 +1784,37 @@ async def test_a_cancelled_listing_is_not_mistaken_for_a_failed_one(
 #
 # A TestClient serves one request at a time unless one of them waits on a worker thread, which
 # leaves the event loop free for the next. Each test below sends its second request from inside
-# such a thread -- the rmtree of a purge, or the scan of a listing -- so the two really overlap.
+# such a thread, so the two really overlap: the rmtree of a purge, or one of the filesystem calls
+# that anyio.Path hands to a worker thread while a classification or a listing awaits it.
 
 
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def arriving_during(
+    mocker: MockerFixture, method: str, path: Path, request: Callable[[], Response]
+) -> list[Response]:
+    """
+    Send `request` from inside the first call of pathlib.Path.<method> on `path`.
+
+    anyio.Path runs its pathlib counterpart in a worker thread, so that call is a point where
+    the request under test is suspended on the filesystem. The response lands in the list.
+    """
+    real = getattr(Path, method)
+    during: list[Response] = []
+    arrived = False
+
+    def arriving(self: Path, *args: object, **kwargs: object) -> object:
+        # only once: the second request may well make the same call on the same path
+        nonlocal arrived
+        if not arrived and self == path:
+            arrived = True
+            during.append(request())
+        return real(self, *args, **kwargs)
+
+    mocker.patch.object(Path, method, autospec=True, side_effect=arriving)
+    return during
 
 
 def test_a_job_for_a_recording_being_purged_is_refused(
@@ -1877,22 +1895,14 @@ def test_a_second_purge_of_the_same_recording_is_refused_rather_than_failing(
 def test_a_job_arriving_while_the_purge_classifies_is_refused(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    # the classification waits on a worker thread as well, and comes before rmtree; a job let
-    # in there would be rendering by the time rmtree starts
+    # the classification awaits the filesystem as well, and comes before rmtree; a job let in
+    # there would be rendering by the time rmtree starts. Its first look is whether the
+    # recording is a directory.
     mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "foo")
     token = provider.mint()
-    during: list[Response] = []
-    real_classify = classify_recording
-
-    def classify_with_a_job_arriving(path: Path, busy: BusyRecordings) -> RecordingInfo:
-        during.append(schedule(auth_client, token))
-        return real_classify(path, busy)
-
-    mocker.patch(
-        "ise_record.glue.recordings.classify_recording", side_effect=classify_with_a_job_arriving
-    )
+    during = arriving_during(mocker, "is_dir", home / "foo", lambda: schedule(auth_client, token))
 
     assert purge(auth_client, token, "foo").status_code == 200
 
@@ -1980,24 +1990,12 @@ def test_a_duplicate_job_arriving_while_the_first_is_answered_starts_no_second_r
         autospec=True,
         return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
     )
-    abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    abandon_recording(home, "foo")
     token = provider.mint()
-    during: list[Response] = []
-    real_scan = recording_classes
-
-    arrived = False
-
-    def scan_with_a_duplicate_arriving(home: Path, busy: BusyRecordings) -> RecordingClasses:
-        # only into the first scan: the duplicate builds a listing of its own
-        nonlocal arrived
-        if not arrived:
-            arrived = True
-            during.append(schedule(auth_client, token))
-        return real_scan(home, busy)
-
-    mocker.patch(
-        "ise_record.glue.recordings.recording_classes", side_effect=scan_with_a_duplicate_arriving
-    )
+    # into the first listing's scan of the home directory; the duplicate builds a listing of
+    # its own, and that one goes ahead undisturbed
+    during = arriving_during(mocker, "iterdir", home, lambda: schedule(auth_client, token))
 
     assert schedule(auth_client, token).status_code == 202
 
@@ -2016,21 +2014,7 @@ def test_a_purge_arriving_while_a_job_is_answered_is_refused(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "foo")
     token = provider.mint()
-    during: list[Response] = []
-    real_scan = recording_classes
-
-    arrived = False
-
-    def scan_with_a_purge_arriving(user_home: Path, busy: BusyRecordings) -> RecordingClasses:
-        nonlocal arrived
-        if not arrived:
-            arrived = True
-            during.append(purge(auth_client, token, "foo"))
-        return real_scan(user_home, busy)
-
-    mocker.patch(
-        "ise_record.glue.recordings.recording_classes", side_effect=scan_with_a_purge_arriving
-    )
+    during = arriving_during(mocker, "iterdir", home, lambda: purge(auth_client, token, "foo"))
 
     assert schedule(auth_client, token).status_code == 202
 

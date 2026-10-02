@@ -8,10 +8,10 @@ preferred_username claim suffixed with the first few characters of the hash so i
 if preferred usernames overlap.
 """
 
-from pathlib import Path
 import re
 import unicodedata
 
+from anyio import Path
 from pathvalidate import sanitize_filename
 
 from ise_record.core.auth import UserInfo
@@ -49,7 +49,7 @@ async def prepare_user_home_dir(user_info: UserInfo, base_dir: Path) -> Path:
     # Infer the stable directory name from the token subject
     digest = user_info.stable_digest()
     stable_home = base_dir / digest
-    stable_home.mkdir(exist_ok=True, parents=True)
+    await stable_home.mkdir(exist_ok=True, parents=True)
 
     prefix = _fs_safe_user_name(user_info.preferred_username)
 
@@ -57,7 +57,9 @@ async def prepare_user_home_dir(user_info: UserInfo, base_dir: Path) -> Path:
     # unique, then make it a symlink to the stable directory name.
     if prefix is not None:
         human_readable_home = base_dir / f"{prefix}-{digest[:12]}"
-        if not human_readable_home.exists(follow_symlinks=False):
-            human_readable_home.symlink_to(stable_home.name, target_is_directory=True)
+        try:
+            await human_readable_home.symlink_to(stable_home.name, target_is_directory=True)
+        except FileExistsError:
+            pass
 
     return stable_home

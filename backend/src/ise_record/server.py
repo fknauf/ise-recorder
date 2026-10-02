@@ -8,10 +8,8 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, ExitStack
 import logging
-import os
 from typing import Annotated
 
-import aiofiles
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Form, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -76,9 +74,9 @@ async def upload_chunk_endpoint(
     filepath = track_path / filename
     logger.debug("saving %s", filepath)
 
-    os.makedirs(track_path, exist_ok=True)
+    await track_path.mkdir(parents=True, exist_ok=True)
 
-    async with aiofiles.open(filepath, "wb") as out:
+    async with await filepath.open("wb") as out:
         while content := await upload.chunk.read(128 * 1024):
             await out.write(content)
 
@@ -103,7 +101,7 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
 
     recording_path = enclave.home_dir / job.recording
 
-    if not await asyncio.to_thread(recording_path.is_dir):
+    if not await recording_path.is_dir():
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -168,7 +166,7 @@ async def download_endpoint(
     if not enclave.download_totp.verify(totp, file_path):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
-    if not file_path.exists():
+    if not await file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     return FileResponse(file_path, filename=f"{recording}.webm")

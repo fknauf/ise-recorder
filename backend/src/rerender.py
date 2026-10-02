@@ -7,7 +7,8 @@ Program to rerender a recording from chunks on the ise-recorder backend server
 from argparse import ArgumentParser
 import asyncio
 import logging
-from pathlib import Path
+
+from anyio import Path
 
 from ise_record.core.postprocess import postprocess_recording
 

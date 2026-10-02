@@ -41,9 +41,7 @@ async def user_recordings_list(enclave: Enclave) -> RecordingsList:
 
         return DownloadableRecording(name=rec.path.name, size=rec.size, totp=totp)
 
-    recordings = await asyncio.to_thread(
-        recording_classes, enclave.home_dir, enclave.busy_recordings.snapshot()
-    )
+    recordings = await recording_classes(enclave.home_dir, enclave.busy_recordings.snapshot())
 
     return RecordingsList.model_construct(
         user=enclave.home_dir.name,
@@ -81,9 +79,7 @@ async def purge_recording(recording: SafeRecording, enclave: Enclave, user_info:
     pre_purge_busy_recordings = enclave.busy_recordings.snapshot()
 
     with enclave.busy_recordings.mark_purging(recording_path):
-        pre_purge_info = await asyncio.to_thread(
-            classify_recording, recording_path, pre_purge_busy_recordings
-        )
+        pre_purge_info = await classify_recording(recording_path, pre_purge_busy_recordings)
 
         if pre_purge_info.state == RecordingState.NONEXISTENT:
             fail_purge(

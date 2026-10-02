@@ -2,13 +2,31 @@
 
 from enum import StrEnum
 from functools import lru_cache
-from pathlib import Path
+from os import PathLike
+import pathlib
 from typing import Annotated
 
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator, ValidationInfo
+from anyio import Path
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+    ValidationInfo,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_PREFIX = "ise_record_"
+
+
+def _absolute_path(value) -> Path:
+    if not isinstance(value, str | PathLike):
+        # ruff: ignore[TRY004] - pydantic needs ValueError
+        raise ValueError(f"{value!s} is not a valid path")
+
+    return Path(pathlib.Path(value).absolute())
 
 
 class AuthBackend(StrEnum):
@@ -72,7 +90,7 @@ class Settings(BaseSettings):
     )
 
     route_prefix: Annotated[str, Field(pattern=r"\A(/.*[^/])?\z")] = ""
-    destdir: Path = Path("./data")
+    destdir: Annotated[Path, BeforeValidator(_absolute_path)] = Path("./data")
     chunk_file_digits: Annotated[int, Field(ge=3, lt=10)] = 4
     cors_origins: tuple[str, ...] = ()
     max_parallel_jobs: Annotated[int, Field(ge=1)] = 1

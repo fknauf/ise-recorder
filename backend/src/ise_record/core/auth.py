@@ -18,9 +18,9 @@ import asyncio
 from dataclasses import dataclass
 import hashlib
 import logging
-from pathlib import Path
 from typing import Any, NamedTuple
 
+from anyio import Path
 import httpx2
 import jwt
 from pydantic import BaseModel, ValidationError
@@ -180,7 +180,7 @@ class DownloadTotpAuthority:
 
     @classmethod
     def _recording_key(cls, file_path: Path) -> str:
-        return f"{file_path.absolute()!s}"
+        return str(file_path)
 
     def generate(self, file_path: Path) -> str:
         """Generate a TOTP that authorizes the download of a specific processed recording"""

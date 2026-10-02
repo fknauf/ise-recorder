@@ -9,6 +9,10 @@ recomputing it.
 The naming helpers deliberately restate core/user_home.py's scheme rather than importing it: a test
 that derived the expected directory name from the code under test would agree with any
 change to it, including the ones that would move a lecturer's recordings.
+
+The app works on anyio.Path, whose filesystem methods are coroutines. The helpers here set up
+and inspect the filesystem synchronously, so they take either kind of path and convert it to
+a pathlib.Path first; a sync call on an anyio.Path would only make a coroutine and not run it.
 """
 
 # pylint: disable=line-too-long
@@ -27,6 +31,7 @@ import time
 from typing import Any
 from urllib.parse import quote
 
+import anyio
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -198,10 +203,13 @@ def upload_chunk_path(base_dir: Path, user_segment: str, index: int = 0) -> Path
     return base_dir / user_segment / "foo" / "stream" / f"chunk.{index:04d}"
 
 
-def finish_recording(user_home: Path, recording: str, content: bytes = b"video") -> None:
+def finish_recording(
+    user_home: Path | anyio.Path, recording: str, content: bytes = b"video"
+) -> None:
     """A recording whose postprocessing ran to completion."""
-    (user_home / recording).mkdir(parents=True, exist_ok=True)
-    (user_home / recording / "presentation.webm").write_bytes(content)
+    recording_dir = Path(user_home) / recording
+    recording_dir.mkdir(parents=True, exist_ok=True)
+    (recording_dir / "presentation.webm").write_bytes(content)
 
 
 MINUTE = 60
@@ -213,9 +221,11 @@ def age(path: Path, seconds: float) -> None:
     os.utime(path, (then, then))
 
 
-def write_chunks(recording_dir: Path, ages: list[float], track: str = "stream") -> None:
+def write_chunks(
+    recording_dir: Path | anyio.Path, ages: list[float], track: str = "stream"
+) -> None:
     """One chunk per entry, chunk.0000 first, each last written `age` seconds ago."""
-    track_dir = recording_dir / track
+    track_dir = Path(recording_dir) / track
     track_dir.mkdir(parents=True, exist_ok=True)
 
     for index, seconds in enumerate(ages):
@@ -224,9 +234,9 @@ def write_chunks(recording_dir: Path, ages: list[float], track: str = "stream") 
         age(chunk, seconds)
 
 
-def abandon_recording(user_home: Path, recording: str, minutes: float = 30) -> Path:
+def abandon_recording(user_home: Path | anyio.Path, recording: str, minutes: float = 30) -> Path:
     """A recording whose last chunk arrived long enough ago that nobody is streaming it."""
-    recording_dir = user_home / recording
+    recording_dir = Path(user_home) / recording
     write_chunks(recording_dir, [(minutes + 2) * MINUTE, (minutes + 1) * MINUTE, minutes * MINUTE])
     return recording_dir
 
@@ -256,7 +266,7 @@ def enclave_of(client: TestClient, user_home: Path) -> Enclave:
     key = user_home.name if settings.auth_required else None
     enclaves: dict[str | None, Enclave] = app.state.enclaves
 
-    return enclaves.setdefault(key, Enclave(user_home))
+    return enclaves.setdefault(key, Enclave(anyio.Path(user_home)))
 
 
 def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
@@ -304,7 +314,7 @@ def alias_of(username: str, subject_digest: str) -> str:
     return f"{username}-{subject_digest[:12]}"
 
 
-def home_entries(base_dir: Path) -> set[str]:
+def home_entries(base_dir: Path | anyio.Path) -> set[str]:
     """
     Everything user_home.py has put in the destination root.
 
@@ -312,7 +322,7 @@ def home_entries(base_dir: Path) -> set[str]:
     a name derived from an untrustworthy username is what these tests are about -- so this
     looks at the whole directory rather than at one expected path.
     """
-    return {entry.name for entry in base_dir.iterdir()}
+    return {entry.name for entry in Path(base_dir).iterdir()}
 
 
 DEFAULT_SUBJECT_DIGEST = digest_of(DEFAULT_SUBJECT)

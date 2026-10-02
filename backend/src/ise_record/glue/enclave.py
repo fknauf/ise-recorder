@@ -7,9 +7,9 @@ In this module, that state is defined and exported as a fastapi dependable.
 """
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Annotated
 
+from anyio import Path
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import Field
 
