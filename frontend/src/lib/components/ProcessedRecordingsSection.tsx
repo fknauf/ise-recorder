@@ -136,7 +136,13 @@ const RenderingRecordingCard = (
   { recording }: Readonly<{ recording: RenderingRecording }>
 ) =>
   <RecordingCard title={recording.name} testid="rendering-card">
-    <Flex direction="row" gap="size-100" alignItems="center" justifyContent="center" marginTop="size-100">
+    <Flex
+      direction="row"
+      gap="size-100"
+      alignItems="center"
+      justifyContent="center"
+      marginTop="size-100"
+    >
       <ProgressCircle size="S" aria-label="Rendering" isIndeterminate/>
       <Text>Rendering...</Text>
     </Flex>
@@ -150,25 +156,25 @@ function UnprocessedRecordingCard(
 
   return (
     <RecordingCard title={recording.name} testid="unprocessed-card">
-      <Text>Postprocessing failed.</Text>
-      <ActionButton
-        width="100%"
-        onPress={onRerenderHandler(recording.name, rerender, setBusy)}
-        isDisabled={busy}
-        data-testid="prec-btn-rerender"
-      >
-        <Refresh/>
-        <Text>Rerender</Text>
-      </ActionButton>
-      <ActionButton
-        width="100%"
-        onPress={onPurge}
-        isDisabled={busy}
-        data-testid="prec-btn-purge"
-      >
-        <Delete/>
-        <Text>Purge</Text>
-      </ActionButton>
+      <Text marginTop="size-50">Postprocessing failed.</Text>
+      <Flex direction="column" gap="size-100" width="100%">
+        <ActionButton
+          onPress={onRerenderHandler(recording.name, rerender, setBusy)}
+          isDisabled={busy}
+          data-testid="prec-btn-rerender"
+        >
+          <Refresh/>
+          <Text>Rerender</Text>
+        </ActionButton>
+        <ActionButton
+          onPress={onPurge}
+          isDisabled={busy}
+          data-testid="prec-btn-purge"
+        >
+          <Delete/>
+          <Text>Purge</Text>
+        </ActionButton>
+      </Flex>
     </RecordingCard>
   );
 }

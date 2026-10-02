@@ -21,9 +21,23 @@ export const RecordingCard = ({ title, testid, children }: Readonly<RecordingCar
     padding="size-100"
     data-testid={testid}
   >
-    <Flex direction="column" gap="size-100" height="100%" alignItems="center">
+    <Flex
+      direction="column"
+      gap="size-100"
+      height="100%"
+      alignItems="center"
+    >
       <Text>{title}</Text>
-      { children }
+      <Flex
+        direction="column"
+        gap="size-100"
+        width="100%"
+        height="100%"
+        justifyContent="space-between"
+        alignItems="center"
+      >
+        { children }
+      </Flex>
     </Flex>
   </View>;
 
