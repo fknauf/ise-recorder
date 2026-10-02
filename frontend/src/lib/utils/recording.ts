@@ -236,7 +236,7 @@ export async function recordLecture(
   const sanitizedTitle = sanitizeLectureTitle(lectureTitle);
   const lecturePrefix = sanitizedTitle !== "" ? `${sanitizedTitle}_` : "";
   const now = new Date();
-  const timestamp = now.toISOString().replaceAll(":", "");
+  const timestamp = now.toISOString().replaceAll(":", ".");
   const recordingName = `${lecturePrefix}${timestamp}`;
 
   const videoOptions: MediaRecorderOptions = { mimeType: "video/webm" };
