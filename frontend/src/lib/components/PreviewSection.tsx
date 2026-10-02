@@ -33,18 +33,16 @@ const PreviewCard = (
     <Flex direction="column" justifyContent="start" gap="size-100" height="100%">
       <Flex direction="row" justifyContent="space-between" alignItems="center" maxWidth={canvasWidth}>
         <Text>{label}</Text>
-        {
-          !hasDisabledButtons &&
-            <ActionButton
-              isQuiet
-              onPress={onRemove}
-              alignSelf="start"
-              aria-label="Close"
-              data-testid="ps-btn-remove"
-            >
-              <Close/>
-            </ActionButton>
-        }
+        <ActionButton
+          isQuiet
+          onPress={onRemove}
+          alignSelf="start"
+          aria-label="Close"
+          data-testid="ps-btn-remove"
+          isDisabled={hasDisabledButtons}
+        >
+          <Close/>
+        </ActionButton>
       </Flex>
       {children}
     </Flex>

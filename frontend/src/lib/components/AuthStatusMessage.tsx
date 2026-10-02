@@ -25,7 +25,7 @@ export function AuthStatusMessage() {
     return null;
   }
 
-  if(isLoading) {
+  if(isLoading && !isAuthenticated) {
     return (
       <InlineAlert variant="info">
         <Heading>Authentication Loading</Heading>
