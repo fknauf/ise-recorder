@@ -1,6 +1,6 @@
 "use client";
 
-import { ActionButton, Flex, ProgressCircle, Text } from "@adobe/react-spectrum";
+import { ActionButton, ActionGroup, Flex, Item, ProgressCircle, Text } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
 import DataUpload from "@spectrum-icons/workflow/DataUpload";
@@ -29,6 +29,9 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
   const { authRequired, isAuthenticated } = useAppSession();
 
   const isRecording = recording.name === activeRecording.name;
+
+  const uploadDisabled = isRecording || isUploading || (authRequired && !isAuthenticated);
+  const deleteDisabled = isRecording || isUploading;
 
   return (
     <RecordingCard
@@ -67,27 +70,33 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
               <ProgressCircle size="M" value={progress} aria-label="Uploading"/>
               <Text>Uploading...</Text>
             </Flex>
-          : <Flex direction="column" gap="size-100" width="100%">
+          : <ActionGroup
+              isJustified={true}
+              disabledKeys={[
+                ...uploadDisabled ? [ "upload" ] : [],
+                ...deleteDisabled ? [ "delete" ] : []
+              ]}
+              onAction={key => {
+                if(key === "upload") {
+                  reupload();
+                } else if(key === "delete") {
+                  removeSavedRecording(recording.name);
+                }
+              }}
+            >
               {
-                apiUrl !== undefined &&
-                  <ActionButton
-                    isDisabled={isRecording || isUploading || (authRequired && !isAuthenticated)}
-                    onPress={reupload}
-                    data-testid="sr-btn-reupload"
-                  >
-                    <DataUpload/>
-                    <Text>Re-upload</Text>
-                  </ActionButton>
+                apiUrl !== undefined
+                  ? <Item key="upload" data-testid="sr-btn-reupload">
+                      <DataUpload/>
+                      <Text>Re-upload</Text>
+                    </Item>
+                  : null
               }
-              <ActionButton
-                isDisabled={isRecording || isUploading}
-                onPress={() => removeSavedRecording(recording.name)}
-                data-testid="sr-btn-remove"
-              >
+              <Item key="delete" data-testid="sr-btn-remove">
                 <Delete/>
                 <Text>Delete</Text>
-              </ActionButton>
-            </Flex>
+              </Item>
+            </ActionGroup>
       }
     </RecordingCard>
   );

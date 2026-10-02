@@ -34,7 +34,7 @@ export const RecordingCard = ({ title, testid, children }: Readonly<RecordingCar
         width="100%"
         height="100%"
         justifyContent="space-between"
-        alignItems="center"
+        alignItems="stretch"
       >
         { children }
       </Flex>
