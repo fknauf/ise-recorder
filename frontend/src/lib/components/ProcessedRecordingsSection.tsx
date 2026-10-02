@@ -103,7 +103,7 @@ function ProcessedRecordingCard(
         width="100%"
         target="_blank"
       >
-        <ActionButton width="100%">
+        <ActionButton width="100%" isQuiet>
           <Download/>
           <Text>Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)</Text>
         </ActionButton>

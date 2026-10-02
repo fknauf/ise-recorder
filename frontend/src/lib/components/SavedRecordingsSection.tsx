@@ -35,54 +35,67 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
       title={recording.name}
       testid="sr-card"
     >
-      {
-        recording.files.map(({ name, size }) =>
-          <ActionButton
-            key={`download-${name}`}
-            isDisabled={isRecording}
-            onPress={() => downloadFile(recording.name, name)}
-            data-testid="sr-btn-download"
-          >
-            <Download/>
-            <Text>Download {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
-          </ActionButton>
-        )
-      }
-      {
-        isUploading
-          ? <Flex
-              direction="row"
-              gap="size-100"
-              justifyContent="center"
-              alignItems="center"
-              height="size-900"
-              data-testid="sr-ind-uploading"
-            >
-              <ProgressCircle size="M" value={progress} aria-label="Uploading"/>
-              <Text>Uploading...</Text>
-            </Flex>
-          : <>
+      <Flex
+        direction="column"
+        gap="size-100"
+        height="100%"
+        justifyContent="space-between"
+      >
+        <Flex
+          direction="column"
+          gap="size-100"
+        >
+          {
+            recording.files.map(({ name, size }) =>
               <ActionButton
-                isDisabled={isRecording || isUploading}
-                onPress={() => removeSavedRecording(recording.name)}
-                data-testid="sr-btn-remove"
+                key={`download-${name}`}
+                isDisabled={isRecording}
+                onPress={() => downloadFile(recording.name, name)}
+                data-testid="sr-btn-download"
+                isQuiet
               >
-                <Delete/>
-                <Text>Remove</Text>
+                <Download/>
+                <Text>Download {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
               </ActionButton>
-              {
-                apiUrl !== undefined &&
-                  <ActionButton
-                    isDisabled={isRecording || isUploading || (authRequired && !isAuthenticated)}
-                    onPress={reupload}
-                    data-testid="sr-btn-reupload"
-                  >
-                    <DataUpload/>
-                    <Text>Re-upload</Text>
-                  </ActionButton>
-              }
-            </>
-      }
+            )
+          }
+        </Flex>
+        {
+          isUploading
+            ? <Flex
+                direction="row"
+                gap="size-100"
+                justifyContent="center"
+                alignItems="center"
+                height="size-900"
+                data-testid="sr-ind-uploading"
+              >
+                <ProgressCircle size="M" value={progress} aria-label="Uploading"/>
+                <Text>Uploading...</Text>
+              </Flex>
+            : <Flex direction="column" gap="size-100">
+                {
+                  apiUrl !== undefined &&
+                    <ActionButton
+                      isDisabled={isRecording || isUploading || (authRequired && !isAuthenticated)}
+                      onPress={reupload}
+                      data-testid="sr-btn-reupload"
+                    >
+                      <DataUpload/>
+                      <Text>Re-upload</Text>
+                    </ActionButton>
+                }
+                <ActionButton
+                  isDisabled={isRecording || isUploading}
+                  onPress={() => removeSavedRecording(recording.name)}
+                  data-testid="sr-btn-remove"
+                >
+                  <Delete/>
+                  <Text>Delete</Text>
+                </ActionButton>
+              </Flex>
+        }
+      </Flex>
     </RecordingCard>
   );
 }
