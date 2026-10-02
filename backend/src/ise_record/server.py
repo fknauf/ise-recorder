@@ -6,7 +6,7 @@ This module defines the HTTP API endpoints and validates inputs.
 
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, ExitStack
 import logging
 import os
 from typing import Annotated
@@ -24,13 +24,16 @@ from ise_record.core.recordings import RecordingState
 from ise_record.glue.auth import get_user_info, load_oidc_client, OidcServerState
 from ise_record.glue.enclave import Enclave, get_enclave, get_enclave_by_user_digest
 from ise_record.glue.jobs import (
-    get_job_queue,
-    JobQueue,
+    get_jobs_semaphore,
     postprocessing_task,
 )
 from ise_record.glue.models import ChunkUpload, PostProcessingJob, RecordingsList, SafeRecording
 from ise_record.glue.recordings import purge_recording, user_recordings_list
 from ise_record.settings import get_settings, Settings
+
+setup_logging()
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api")
 
 
 def _require_auth_configured(settings: Annotated[Settings, Depends(get_settings)]) -> None:
@@ -41,9 +44,9 @@ def _require_auth_configured(settings: Annotated[Settings, Depends(get_settings)
         )
 
 
-setup_logging()
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api")
+async def _get_request_exit_stack() -> AsyncGenerator[ExitStack]:
+    with ExitStack() as stack:
+        yield stack
 
 
 @router.post("/chunks", status_code=status.HTTP_201_CREATED)
@@ -88,12 +91,13 @@ async def upload_chunk_endpoint(
 
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
-async def schedule_job_endpoint(
+async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     job: PostProcessingJob,
     background_tasks: BackgroundTasks,
+    exit_stack: Annotated[ExitStack, Depends(_get_request_exit_stack)],
     settings: Annotated[Settings, Depends(get_settings)],
     enclave: Annotated[Enclave, Depends(get_enclave)],
-    job_queue: Annotated[JobQueue, Depends(get_job_queue)],
+    jobs_semaphore: Annotated[asyncio.Semaphore, Depends(get_jobs_semaphore)],
 ):
     """Endpoint for the scheduling of postprocessing jobs"""
 
@@ -115,10 +119,9 @@ async def schedule_job_endpoint(
         )
 
     if busy_state is None:
-        enclave.busy_recordings.rendering.add(recording_path)
-
+        exit_stack.enter_context(enclave.busy_recordings.mark_rendering(recording_path))
         background_tasks.add_task(
-            postprocessing_task, recording_path, job.recipient, settings.smtp, job_queue
+            postprocessing_task, recording_path, job.recipient, settings.smtp, jobs_semaphore
         )
 
     if settings.auth_required:

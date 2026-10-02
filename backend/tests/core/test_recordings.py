@@ -12,6 +12,8 @@ purge is allowed to delete.
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 import pytest
@@ -162,6 +164,50 @@ def test_the_snapshot_does_not_follow_later_changes(home: Path):
     assert snapshot == BusyRecordings(rendering={home / "foo"}, purging={home / "bar"})
     assert snapshot.rendering is not busy.rendering
     assert snapshot.purging is not busy.purging
+
+
+Mark = Callable[[BusyRecordings, Path], AbstractContextManager[None]]
+
+MARKS = [
+    pytest.param(BusyRecordings.mark_rendering, RecordingState.RENDERING, id="rendering"),
+    pytest.param(BusyRecordings.mark_purging, RecordingState.PURGING, id="purging"),
+]
+
+
+@pytest.mark.parametrize("mark, state", MARKS)
+def test_a_mark_holds_the_recording_for_as_long_as_it_is_entered(
+    home: Path, mark: Mark, state: RecordingState
+):
+    busy = BusyRecordings()
+
+    with mark(busy, home / "foo"):
+        assert busy.classify(home / "foo") == state
+
+    assert busy.classify(home / "foo") is None
+
+
+@pytest.mark.parametrize("mark, state", MARKS)
+def test_a_mark_is_released_when_its_work_blows_up(home: Path, mark: Mark, state: RecordingState):
+    # otherwise one unexpected failure locks that recording out until the server is restarted:
+    # a render that never ends as far as the listing can tell, or a purge that never lets go
+    busy = BusyRecordings()
+
+    with pytest.raises(RuntimeError), mark(busy, home / "foo"):
+        assert busy.classify(home / "foo") == state
+        raise RuntimeError("boom")
+
+    assert busy.classify(home / "foo") is None
+
+
+@pytest.mark.parametrize("mark, state", MARKS)
+def test_a_mark_releases_only_its_own_recording(home: Path, mark: Mark, state: RecordingState):
+    busy = BusyRecordings()
+
+    with mark(busy, home / "bar"):
+        with mark(busy, home / "foo"):
+            pass
+
+        assert busy.classify(home / "bar") == state
 
 
 # --- streaming or given up on ----------------------------------------------

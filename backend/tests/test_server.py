@@ -10,7 +10,8 @@
 # pylint: disable=redefined-outer-name
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack
 import datetime
 import os
 from pathlib import Path
@@ -34,7 +35,7 @@ from ise_record.core.recordings import (
     RecordingInfo,
 )
 from ise_record.glue.enclave import Enclave
-from ise_record.glue.jobs import get_job_queue, postprocessing_task
+from ise_record.glue.jobs import get_jobs_semaphore, postprocessing_task
 from ise_record.glue.models import PostProcessingJob
 from ise_record.server import create_app, schedule_job_endpoint
 from ise_record.settings import Settings
@@ -98,7 +99,13 @@ def prefixed_client(prefixed_settings: Settings) -> Iterator[TestClient]:
 
 def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, settings: Settings):
     mock_isdir = mocker.patch("os.path.isdir", return_value=True)
-    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
+    registered_when_queued: list[set[Path]] = []
+    mock_add_task = mocker.patch(
+        "fastapi.BackgroundTasks.add_task",
+        side_effect=lambda *_args: registered_when_queued.append(
+            set(running_jobs_of(client, settings.destdir))
+        ),
+    )
 
     response = client.post(
         "/api/jobs",
@@ -111,12 +118,11 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
     mock_add_task.assert_called_once_with(
         postprocessing_task, settings.destdir / "foo", "foo@bar.de", settings.smtp, ANY
     )
-    # the very set the listing reads, not merely an equal one: every empty set is equal to
-    # every other, so only identity shows the job is registered where it will be looked for
-    job_queue = mock_add_task.call_args.args[4]
-    assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
-    # and the app's one semaphore, which is what makes the limit apply across all jobs
-    assert job_queue.semaphore is app_of(client).state.jobs_semaphore
+    # in the very set the listing reads by the time the task is queued, so no request that
+    # comes in before it starts can take the recording for a purge or a second render
+    assert registered_when_queued == [{settings.destdir / "foo"}]
+    # the app's one semaphore, which is what makes the limit apply across all jobs and users
+    assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
 
 
 def test_schedule_postprocessing_recipient_omitted(
@@ -134,12 +140,8 @@ def test_schedule_postprocessing_recipient_omitted(
     mock_add_task.assert_called_once_with(
         postprocessing_task, settings.destdir / "foo", None, settings.smtp, ANY
     )
-    # the very set the listing reads, not merely an equal one: every empty set is equal to
-    # every other, so only identity shows the job is registered where it will be looked for
-    job_queue = mock_add_task.call_args.args[4]
-    assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
-    # and the app's one semaphore, which is what makes the limit apply across all jobs
-    assert job_queue.semaphore is app_of(client).state.jobs_semaphore
+    # the app's one semaphore, which is what makes the limit apply across all jobs and users
+    assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
 
 
 def test_schedule_postprocessing_error(
@@ -190,12 +192,8 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(
     mock_add_task.assert_called_once_with(
         postprocessing_task, settings.destdir / "foo", "I made a lot of typos", settings.smtp, ANY
     )
-    # the very set the listing reads, not merely an equal one: every empty set is equal to
-    # every other, so only identity shows the job is registered where it will be looked for
-    job_queue = mock_add_task.call_args.args[4]
-    assert job_queue.running_jobs is running_jobs_of(client, settings.destdir)
-    # and the app's one semaphore, which is what makes the limit apply across all jobs
-    assert job_queue.semaphore is app_of(client).state.jobs_semaphore
+    # the app's one semaphore, which is what makes the limit apply across all jobs and users
+    assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
 
 
 def test_chunk_upload(client: TestClient, settings: Settings):
@@ -822,8 +820,9 @@ def test_the_listing_only_shows_the_callers_own_recordings(
 
 # The listing also names the recordings that are still being postprocessed, so the frontend
 # can show that a lecture is on its way rather than missing. What it reads is the per-user
-# set of running jobs that _postprocessing_task maintains; a TestClient runs background tasks
-# to completion before it returns, so the set is seeded by hand to catch a job mid-flight.
+# set of running jobs that /jobs marks a recording in for as long as its job lasts; a
+# TestClient runs background tasks to completion before it returns, so the set is seeded by
+# hand to catch a job mid-flight.
 
 
 def test_the_listing_reports_nothing_rendering_when_no_job_is_running(
@@ -928,6 +927,83 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
     assert seen_while_running == [{home / "foo"}]
     # and gone again once it finished, or the card would spin forever
     assert list_recordings(auth_client, token).json()["rendering"] == []
+
+
+def test_a_job_that_blows_up_still_releases_the_recording(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # otherwise one unexpected failure locks that recording out of postprocessing and purging
+    # until the server is restarted, and rerender.py is the only way back
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        side_effect=RuntimeError("boom"),
+    )
+    token = provider.mint()
+    assert upload(auth_client, token).status_code == 201
+
+    # the 202 is already out by then; a TestClient hands what the task raised on to the test
+    with pytest.raises(RuntimeError):
+        schedule(auth_client, token)
+
+    assert running_jobs_of(auth_client, tmp_path / DEFAULT_SUBJECT_DIGEST) == set()
+
+
+class WatchedSlots:
+    """Stands in for the app's semaphore and notes what is rendering when a job asks for a slot."""
+
+    def __init__(self, look: Callable[[], set[Path]]) -> None:
+        self._look = look
+        self.seen_when_asked: list[set[Path]] = []
+
+    async def __aenter__(self) -> None:
+        self.seen_when_asked.append(set(self._look()))
+
+    async def __aexit__(self, *_exc_info: object) -> None:
+        return None
+
+
+def test_a_job_waiting_for_a_slot_already_counts_as_rendering(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # While it waits, the listing shows it as rendering, uploads to it are refused and it
+    # cannot be purged -- all of which read the running set. A recording that was only marked
+    # once it got its slot could be purged, or have its chunks rewritten, just before its render
+    # starts reading them.
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
+    )
+    slots = WatchedSlots(lambda: running_jobs_of(auth_client, home))
+    app_of(auth_client).state.jobs_semaphore = slots
+
+    token = provider.mint()
+    assert upload(auth_client, token).status_code == 201
+    assert schedule(auth_client, token).status_code == 202
+
+    assert slots.seen_when_asked == [{home / "foo"}]
+
+
+def test_a_finished_job_leaves_another_users_recording_of_the_same_name_rendering(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # two lecturers naming a lecture alike is ordinary; one of them finishing must not make
+    # the other's look idle
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
+    )
+    home_a, home_b = tmp_path / digest_of("user-a"), tmp_path / digest_of("user-b")
+    running_jobs_of(auth_client, home_a).add(abandon_recording(home_a, "foo"))
+    abandon_recording(home_b, "foo")
+
+    assert schedule(auth_client, provider.mint(sub="user-b")).status_code == 202
+
+    assert running_jobs_of(auth_client, home_a) == {home_a / "foo"}
+    assert running_jobs_of(auth_client, home_b) == set()
 
 
 # The listing's third list: recordings whose postprocessing never produced anything. Which
@@ -1705,9 +1781,10 @@ async def test_a_cancelled_listing_is_not_mistaken_for_a_failed_one(
         await schedule_job_endpoint(
             PostProcessingJob(recording="foo"),
             BackgroundTasks(),
+            ExitStack(),
             auth_settings,
             enclave,
-            await get_job_queue(request, enclave),
+            await get_jobs_semaphore(request),
         )
 
 

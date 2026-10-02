@@ -79,9 +79,8 @@ async def purge_recording(recording: SafeRecording, enclave: Enclave, user_info:
     # classify once before marking, otherwise we'd classify ourselves as purging and not be able to
     # figure out if we're actually purgeable
     pre_purge_busy_recordings = enclave.busy_recordings.snapshot()
-    enclave.busy_recordings.purging.add(recording_path)
 
-    try:
+    with enclave.busy_recordings.mark_purging(recording_path):
         pre_purge_info = await asyncio.to_thread(
             classify_recording, recording_path, pre_purge_busy_recordings
         )
@@ -109,5 +108,3 @@ async def purge_recording(recording: SafeRecording, enclave: Enclave, user_info:
             ) from exc
 
         enclave.download_totp.forget(recording_path / OUTPUT_FILENAME)
-    finally:
-        enclave.busy_recordings.purging.discard(recording_path)

@@ -4,6 +4,8 @@ rendering, and unprocessed/failed-postprocessing recordings.
 """
 
 from collections import defaultdict
+from collections.abc import Generator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 from enum import auto, Enum
@@ -43,6 +45,28 @@ class BusyRecordings:
     def snapshot(self) -> BusyRecordings:
         """Copy of self, stable across awaits"""
         return BusyRecordings(rendering=self.rendering.copy(), purging=self.purging.copy())
+
+    @contextmanager
+    def _mark(self, busy_set: set[Path], recording_path: Path) -> Generator[None]:
+        busy_set.add(recording_path)
+        try:
+            yield
+        finally:
+            busy_set.discard(recording_path)
+
+    def mark_rendering(self, recording_path: Path) -> AbstractContextManager[None]:
+        """
+        Context manager that marks a recording as rendering while it's rendering so other requests
+        will see it's rendering and not start rendering again or purging it.
+        """
+        return self._mark(self.rendering, recording_path)
+
+    def mark_purging(self, recording_path: Path) -> AbstractContextManager[None]:
+        """
+        Context manager that marks a recording as being purged while it's being purged so other
+        requests will see it's being purged and not start purging it again or rendering it.
+        """
+        return self._mark(self.purging, recording_path)
 
     def classify(self, recording_path: Path) -> RecordingState | None:
         """Classify the way a recording path is busy: rendering, purging, or None"""
