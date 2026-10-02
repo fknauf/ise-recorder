@@ -1,6 +1,6 @@
 "use client";
 
-import { ActionButton, ActionGroup, Flex, Item, ProgressCircle, Text } from "@adobe/react-spectrum";
+import { ActionButton, ActionGroup, Button, ButtonGroup, Content, Dialog, DialogContainer, Divider, Flex, Heading, Item, ProgressCircle, Text, useDialogContainer } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Download from "@spectrum-icons/workflow/Download";
 import DataUpload from "@spectrum-icons/workflow/DataUpload";
@@ -11,6 +11,8 @@ import { useActiveRecording } from "../hooks/useActiveRecording";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { useAppSession } from "./SessionProvider";
+import { useState } from "react";
+import { useAppStore } from "../hooks/useAppStore";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -21,10 +23,46 @@ const mibFormatter = new Intl.NumberFormat(
   }
 );
 
-function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileList }>) {
+function DeleteDialog({ recordingName }: Readonly<{ recordingName: string }>) {
+  const { dismiss } = useDialogContainer();
+  const { removeSavedRecording } = useBrowserStorage();
+
+  return (
+    <Dialog size="L">
+      <Heading>
+        Confirm Delete
+      </Heading>
+      <Divider/>
+      <Content>
+        <Text>You are about to delete the raw recording <strong>{recordingName}</strong> from your browser. This recording has not been uploaded to the backend. Are you sure?</Text>
+      </Content>
+      <ButtonGroup>
+        <Button
+          variant="secondary"
+          onPress={dismiss}
+          autoFocus
+          data-testid="sr-dd-btn-cancel"
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="negative"
+          onPress={() => {
+            dismiss();
+            removeSavedRecording(recordingName)
+          }}
+          data-testid="sr-dd-btn-delete"
+        >
+          Delete
+        </Button>
+      </ButtonGroup>
+    </Dialog>
+  );
+}
+
+function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: RecordingFileList; onDelete: (recordingName: string) => void }>) {
   const { apiUrl } = useServerEnv();
   const activeRecording = useActiveRecording();
-  const { removeSavedRecording } = useBrowserStorage();
   const { isUploading, progress, reupload } = useReupload(recording.name);
   const { authRequired, isAuthenticated } = useAppSession();
 
@@ -80,7 +118,7 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
                 if(key === "upload") {
                   reupload();
                 } else if(key === "delete") {
-                  removeSavedRecording(recording.name);
+                  onDelete(recording.name);
                 }
               }}
             >
@@ -109,19 +147,33 @@ function SavedRecordingCard({ recording }: Readonly<{ recording: RecordingFileLi
  * Buttons are disabled for the currently active recording.
  */
 export function SavedRecordingsSection({ id }: Readonly<{ id: string }>) {
-  const { savedRecordings } = useBrowserStorage();
+  const { removeSavedRecording, savedRecordings } = useBrowserStorage();
+  const [ deleteCandidate, setDeleteCandidate ] = useState<string | null>(null);
+  const unstreamedRecordings = useAppStore(state => state.unstreamedRecordings);
 
   if(savedRecordings.length === 0) {
     return null;
   }
 
+  const onDelete = (recordingName: string) => {
+    if(unstreamedRecordings.includes(recordingName)) {
+      setDeleteCandidate(recordingName);
+    } else {
+      removeSavedRecording(recordingName);
+    }
+  };
+
   return (
     <RecordingCardSection id={id} title="Browser-Local Raw Recordings">
+      <DialogContainer onDismiss={() => setDeleteCandidate(null)}>
+        { deleteCandidate !== null && <DeleteDialog recordingName={deleteCandidate}/> }
+      </DialogContainer>
       {
         savedRecordings.map(rec =>
           <SavedRecordingCard
             key={`saved-recording-${rec.name}`}
             recording={rec}
+            onDelete={onDelete}
           />
         )
       }

@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
 import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
@@ -7,8 +7,11 @@ import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { useActiveRecording } from "@/lib/hooks/useActiveRecording";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 import { useReupload } from "@/lib/hooks/useReupload";
-import { downloadFile } from "@/lib/utils/browserStorage";
+import { downloadFile, gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { ServerEnv } from "@/lib/utils/serverEnv";
+import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
+import { AppStoreState } from "@/lib/store/store";
+import { useEffect } from "react";
 import { ExpandedSection, SECTION_ID } from "./ExpandedSection";
 
 vi.mock("@/lib/hooks/useActiveRecording");
@@ -42,7 +45,57 @@ const reuploadButton = (card: HTMLElement) => within(card).getByTestId("sr-btn-r
 const uploadingIndicator = (card: HTMLElement) => within(card).getByTestId("sr-ind-uploading");
 const downloadButtons = (card: HTMLElement) => within(card).getAllByTestId("sr-btn-download");
 
+let store: AppStoreState;
+
+/**
+ * Hands the store out so a test can mark recordings as unstreamed. Published from an effect
+ * rather than during render: assigning to a variable outside the component is a side effect,
+ * and doing it in the render body is a lint error.
+ */
+function StoreHandle() {
+  const state = useAppStore(s => s);
+
+  useEffect(() => {
+    store = state;
+  }, [ state ]);
+
+  return null;
+}
+
+/**
+ * Render the section open, the way the home page's accordion holds it, under a real store.
+ *
+ * The store is where the section learns which recordings never made it to the backend.
+ * Everything else comes from the hooks mocked above, so the store's serverEnv is never read.
+ *
+ * The provider looks at browser storage when it mounts, and the answer reaches the store
+ * after render has returned. Waiting for it here keeps that update out of the tests, which
+ * would otherwise see it land at some random point, outside act.
+ */
+async function renderSection(scale: "medium" | "large" = "medium") {
+  render(
+    <Provider theme={defaultTheme} scale={scale}>
+      <AppStoreProvider serverEnv={{}}>
+        <StoreHandle/>
+        <ExpandedSection>
+          <SavedRecordingsSection id={SECTION_ID}/>
+        </ExpandedSection>
+      </AppStoreProvider>
+    </Provider>
+  );
+
+  // the quota comes from the same look at storage, and is undefined until it has landed
+  await waitFor(() => expect(store.quota).toBeDefined());
+}
+
 beforeEach(() => {
+  // the list of unstreamed recordings is persisted
+  localStorage.clear();
+  // the provider looks at browser storage when it mounts. The store keeps only unstreamed
+  // recordings that are still in the browser, so a test that marks some has to list them here.
+  navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 0 });
+  vi.mocked(gatherRecordingsList).mockResolvedValue([]);
+
   // no backend by default: the tests below that predate the re-upload count buttons, and
   // a deployment without a server offers nothing to upload to
   mockServerEnv.mockReturnValue({});
@@ -104,13 +157,7 @@ test("SavedRecordingsSection displays recordings and reacts to clicks", async ()
 
   const user = userEvent.setup();
 
-  render(
-    <Provider theme={defaultTheme}>
-      <ExpandedSection>
-        <SavedRecordingsSection id={SECTION_ID}/>
-      </ExpandedSection>
-    </Provider>
-  );
+  await renderSection();
 
   const srCards = await screen.findAllByTestId("sr-card");
 
@@ -159,13 +206,7 @@ test("SavedRecordingsSection is empty when there are no recordings", async () =>
     removeSavedRecording: vi.fn()
   });
 
-  render(
-    <Provider theme={defaultTheme}>
-      <ExpandedSection>
-        <SavedRecordingsSection id={SECTION_ID}/>
-      </ExpandedSection>
-    </Provider>
-  );
+  await renderSection();
 
   const srCards = await screen.queryAllByTestId("sr-card");
 
@@ -222,13 +263,7 @@ test("SavedRecordingsSection disables buttons for the active recording", async (
 
   const user = userEvent.setup();
 
-  render(
-    <Provider theme={defaultTheme}>
-      <ExpandedSection>
-        <SavedRecordingsSection id={SECTION_ID}/>
-      </ExpandedSection>
-    </Provider>
-  );
+  await renderSection();
 
   const srCards = await screen.findAllByTestId("sr-card");
 
@@ -276,7 +311,7 @@ const TWO_RECORDINGS: RecordingFileList[] = [
   { name: "BAR_2025-12-11T214230.418Z", files: [ { name: "stream.webm", size: 2 ** 20 } ] }
 ];
 
-function renderWithBackend(
+async function renderWithBackend(
   activeRecording: ReturnType<typeof useActiveRecording> = { state: "idle" },
   removeSavedRecording: (name: string) => Promise<void> = vi.fn(),
   scale: "medium" | "large" = "medium"
@@ -289,20 +324,15 @@ function renderWithBackend(
     savedRecordings: TWO_RECORDINGS,
     removeSavedRecording
   });
+  vi.mocked(gatherRecordingsList).mockResolvedValue(TWO_RECORDINGS);
 
-  render(
-    <Provider theme={defaultTheme} scale={scale}>
-      <ExpandedSection>
-        <SavedRecordingsSection id={SECTION_ID}/>
-      </ExpandedSection>
-    </Provider>
-  );
+  await renderSection(scale);
 
   return screen.getAllByTestId("sr-card");
 }
 
 test("with a backend, every saved recording can be re-uploaded", async () => {
-  const cards = renderWithBackend();
+  const cards = await renderWithBackend();
 
   await userEvent.click(reuploadButton(cards[1]));
 
@@ -319,20 +349,14 @@ test("without a backend, nothing is offered for re-upload", async () => {
     removeSavedRecording: vi.fn()
   });
 
-  render(
-    <Provider theme={defaultTheme}>
-      <ExpandedSection>
-        <SavedRecordingsSection id={SECTION_ID}/>
-      </ExpandedSection>
-    </Provider>
-  );
+  await renderSection();
 
   expect(screen.queryByTestId("sr-btn-reupload")).toBeNull();
 });
 
-test("the recording that is being made cannot be re-uploaded", () => {
+test("the recording that is being made cannot be re-uploaded", async () => {
   // its files are still being written, so the upload would send half a recording
-  const cards = renderWithBackend({ state: "recording", name: "BAR_2025-12-11T214230.418Z", stop: vi.fn() });
+  const cards = await renderWithBackend({ state: "recording", name: "BAR_2025-12-11T214230.418Z", stop: vi.fn() });
 
   expect(reuploadButton(cards[1])).toBeDisabled();
   expect(reuploadButton(cards[0])).toBeEnabled();
@@ -342,7 +366,7 @@ test("nothing can be re-uploaded while signed out of a deployment that requires 
   // the server would turn every chunk away, so the button could only lead to an error
   mockSession.mockReturnValue({ authRequired: true, isAuthenticated: false });
 
-  const cards = renderWithBackend();
+  const cards = await renderWithBackend();
 
   for(const card of cards) {
     expect(reuploadButton(card)).toBeDisabled();
@@ -354,7 +378,7 @@ test("nothing can be re-uploaded while signed out of a deployment that requires 
 test("a signed-in user can re-upload in a deployment that requires sign-in", async () => {
   mockSession.mockReturnValue({ authRequired: true, isAuthenticated: true });
 
-  const cards = renderWithBackend();
+  const cards = await renderWithBackend();
 
   await userEvent.click(reuploadButton(cards[0]));
   expect(reupload).toHaveBeenCalledExactlyOnceWith("FOO_2025-12-11T213822.748Z");
@@ -368,7 +392,7 @@ test("a recording cannot be re-uploaded again while its re-upload is running", a
   // schedule a second job for it
   reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 0 ] ]);
 
-  const cards = renderWithBackend();
+  const cards = await renderWithBackend();
 
   expect(within(cards[1]).queryByTestId("sr-btn-reupload")).toBeNull();
   expect(uploadingIndicator(cards[1])).toBeVisible();
@@ -378,10 +402,10 @@ test("a recording cannot be re-uploaded again while its re-upload is running", a
   expect(reupload).toHaveBeenCalledExactlyOnceWith("FOO_2025-12-11T213822.748Z");
 });
 
-test("a running re-upload shows how far it has got", () => {
+test("a running re-upload shows how far it has got", async () => {
   reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
 
-  const cards = renderWithBackend();
+  const cards = await renderWithBackend();
 
   expect(within(uploadingIndicator(cards[1])).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
   expect(within(cards[0]).queryByTestId("sr-ind-uploading")).toBeNull();
@@ -392,7 +416,7 @@ test("a recording cannot be removed while its re-upload is running", async () =>
   reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
   const onRemove = vi.fn();
 
-  const cards = renderWithBackend({ state: "idle" }, onRemove);
+  const cards = await renderWithBackend({ state: "idle" }, onRemove);
 
   expect(within(cards[1]).queryByTestId("sr-btn-remove")).toBeNull();
 
@@ -405,7 +429,7 @@ test("the downloads stay available while a re-upload is running", async () => {
   // they read the same local files the upload does, which is harmless
   reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
 
-  const cards = renderWithBackend();
+  const cards = await renderWithBackend();
 
   const [ download ] = downloadButtons(cards[1]);
   expect(download).toBeEnabled();
@@ -413,16 +437,116 @@ test("the downloads stay available while a re-upload is running", async () => {
   expect(downloadFile).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "stream.webm");
 });
 
-test.each([ "medium", "large" ] as const)("a card keeps its height while its re-upload runs (%s scale)", scale => {
+test.each([ "medium", "large" ] as const)("a card keeps its height while its re-upload runs (%s scale)", async scale => {
   // the progress takes the place of two buttons, and a card that shrank and grew around it
   // would shift every card after it in the row. The two recordings have one file each and
   // names of the same length, so the only difference between the cards is the upload.
   reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
 
-  const [ idle, uploading ] = renderWithBackend({ state: "idle" }, vi.fn(), scale);
+  const [ idle, uploading ] = await renderWithBackend({ state: "idle" }, vi.fn(), scale);
 
   // the card's content rather than the card: the section lays cards out in a row that
   // stretches each to the tallest, which would make any two cards side by side agree
   const contentHeight = (card: HTMLElement) => (card.firstElementChild as HTMLElement).getBoundingClientRect().height;
   expect(contentHeight(uploading)).toBe(contentHeight(idle));
+});
+
+// --- deleting a recording that never reached the backend -------------------
+//
+// When a recording's live upload broke off, the copy in the browser may be the only one, and
+// deleting it loses the lecture. The section asks first for those recordings, and only for
+// those: deleting a recording that did reach the backend goes through without a question, as
+// in the tests above.
+
+const dialog = () => screen.getByRole("dialog");
+const confirmButton = () => within(dialog()).getByTestId("sr-dd-btn-delete");
+const cancelButton = () => within(dialog()).getByTestId("sr-dd-btn-cancel");
+
+/** renderWithBackend, with these recordings marked as not streamed to the backend. */
+async function renderWithUnstreamed(unstreamed: string[], removeSavedRecording = vi.fn()) {
+  const cards = await renderWithBackend({ state: "idle" }, removeSavedRecording);
+
+  act(() => {
+    for(const name of unstreamed) {
+      store.markUnstreamed(name);
+    }
+  });
+
+  return cards;
+}
+
+test("deleting a recording that never reached the backend asks first and deletes nothing", async () => {
+  const onRemove = vi.fn();
+  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+
+  await userEvent.click(removeButton(cards[1]));
+
+  // the dialog names the recording, so the lecturer can tell which one they are about to lose
+  expect(within(dialog()).getByText(/BAR_2025-12-11T214230.418Z/)).toBeInTheDocument();
+  expect(onRemove).not.toHaveBeenCalled();
+});
+
+test("confirming deletes that one recording and closes the dialog", async () => {
+  const onRemove = vi.fn();
+  const cards = await renderWithUnstreamed([ "FOO_2025-12-11T213822.748Z", "BAR_2025-12-11T214230.418Z" ], onRemove);
+
+  await userEvent.click(removeButton(cards[1]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(onRemove).toHaveBeenCalledExactlyOnceWith("BAR_2025-12-11T214230.418Z");
+});
+
+test("the dialog starts on Cancel, so a stray Enter keeps the recording", async () => {
+  const onRemove = vi.fn();
+  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+
+  await userEvent.click(removeButton(cards[1]));
+  await waitFor(() => expect(cancelButton()).toHaveFocus());
+  await userEvent.keyboard("{Enter}");
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(onRemove).not.toHaveBeenCalled();
+});
+
+test.each([
+  [ "cancelling", () => userEvent.click(cancelButton()) ],
+  [ "escape", () => userEvent.keyboard("{Escape}") ]
+])("%s closes the dialog, deletes nothing, and the next delete asks again", async (_, backOut) => {
+  const onRemove = vi.fn();
+  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+
+  await userEvent.click(removeButton(cards[1]));
+  await backOut();
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(onRemove).not.toHaveBeenCalled();
+
+  // backing out once is not an answer for next time
+  await userEvent.click(removeButton(cards[1]));
+  expect(within(dialog()).getByText(/BAR_2025-12-11T214230.418Z/)).toBeInTheDocument();
+  expect(onRemove).not.toHaveBeenCalled();
+});
+
+test("recordings that did reach the backend are still deleted without a question", async () => {
+  // the question is about that one recording, not about every card next to it
+  const onRemove = vi.fn();
+  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+
+  await userEvent.click(removeButton(cards[0]));
+
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(onRemove).toHaveBeenCalledExactlyOnceWith("FOO_2025-12-11T213822.748Z");
+});
+
+test("a recording that has since been re-uploaded is deleted without a question", async () => {
+  // the backend has it now, so the browser's copy is no longer the only one
+  const onRemove = vi.fn();
+  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+
+  act(() => store.signalManualUploadFinished("BAR_2025-12-11T214230.418Z", "ok"));
+  await userEvent.click(removeButton(cards[1]));
+
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(onRemove).toHaveBeenCalledExactlyOnceWith("BAR_2025-12-11T214230.418Z");
 });
