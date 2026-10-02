@@ -220,7 +220,7 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
   await user.type(tree.getByLabelText("e-Mail"), "speaker@example.com");
 
   vi.setSystemTime("2025-12-21T12:34:56.789Z");
-  const recordingName = `${lectureTitle}_2025-12-21T123456.789Z`;
+  const recordingName = `${lectureTitle}_2025-12-21T12.34.56.789Z`;
 
   await user.click(tree.getByText("Start Recording"));
 

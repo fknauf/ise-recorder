@@ -100,7 +100,7 @@ async function nameFor(lectureTitle: string): Promise<string> {
   return recordingName;
 }
 
-const STAMP = "2025-12-21T123456.789Z";
+const STAMP = "2025-12-21T12.34.56.789Z";
 
 /**
  * Titles worth carrying through every property below. The non-Latin entries are the point of
@@ -252,7 +252,7 @@ test("the timestamp keeps its millisecond dot", async () => {
   // only the colons are unsafe in an ISO timestamp. Sanitising the assembled name rather
   // than the title alone has twice cost the ".789" here, and it is load-bearing in the
   // examples in both doc READMEs and in server.py.
-  expect(await nameFor("GVS")).toMatch(/T\d{6}\.\d{3}Z$/);
+  expect(await nameFor("GVS")).toMatch(/T\d{2}\.\d{2}\.\d{2}\.\d{3}Z$/);
 });
 
 test("the timestamp is appended after sanitising, not put through it", async () => {
