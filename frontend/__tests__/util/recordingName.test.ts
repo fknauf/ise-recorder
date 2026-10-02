@@ -168,7 +168,7 @@ test("a zero-width or bidi control character never survives", () => {
 
 test("the preview is independent of the composition the keyboard happens to send", () => {
   // Spelled with an escape rather than a literal: the two forms are indistinguishable on
-  // screen, so an editor or a git filter normalising this file would quietly turn the
+  // screen, so an editor or a git filter normalizing this file would quietly turn the
   // interesting half of this test into a copy of the other half.
   const decomposed = "U\u0308bung"; // as macOS input methods and some IMEs send it
   const composed = "\u00dcbung";
@@ -249,13 +249,13 @@ test("a title with nothing usable in it also leaves just the timestamp", async (
 });
 
 test("the timestamp keeps its millisecond dot", async () => {
-  // only the colons are unsafe in an ISO timestamp. Sanitising the assembled name rather
+  // only the colons are unsafe in an ISO timestamp. Sanitizing the assembled name rather
   // than the title alone has twice cost the ".789" here, and it is load-bearing in the
   // examples in both doc READMEs and in server.py.
   expect(await nameFor("GVS")).toMatch(/T\d{2}\.\d{2}\.\d{2}\.\d{3}Z$/);
 });
 
-test("the timestamp is appended after sanitising, not put through it", async () => {
+test("the timestamp is appended after sanitizing, not put through it", async () => {
   // it is the only thing making two recordings of the same lecture distinguishable, so it
   // must not be reachable by anything the title does -- including truncation, which would
   // otherwise cut the disambiguator off the end and merge two lectures into one directory
@@ -293,7 +293,7 @@ test.each([
 
 /**
  * A title or name as it should appear in a failure: short enough not to crowd out its
- * neighbours, long enough to still show the whole of a realistic one. The corpus holds a
+ * neighbors, long enough to still show the whole of a realistic one. The corpus holds a
  * 400-character title deliberately, and printed whole it buries the other 26; the cutoff sits
  * above title-plus-timestamp so that everything short of that deliberate case reads in full.
  */
