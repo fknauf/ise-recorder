@@ -18,7 +18,9 @@ from pydantic import Field
 from ise_record.core.auth import UserInfo
 from ise_record.core.logconfig import setup_logging
 from ise_record.core.postprocess import OUTPUT_FILENAME
-from ise_record.core.recordings import RecordingState
+from ise_record.core.recordings import (
+    RecordingDiskState,
+)
 from ise_record.glue.auth import get_user_info, load_oidc_client, OidcServerState
 from ise_record.glue.enclave import Enclave, get_enclave, get_enclave_by_user_digest
 from ise_record.glue.jobs import (
@@ -66,19 +68,22 @@ async def upload_chunk_endpoint(
             ),
         )
 
-    enclave.assert_not_busy(upload.recording)
+    with enclave.claim_upload(upload.recording):
+        filename = f"chunk.{upload.index:0{settings.chunk_file_digits}d}"
+        partname = f"part.{filename}"
 
-    filename = f"chunk.{upload.index:0{settings.chunk_file_digits}d}"
+        track_path = enclave.recording_dir(upload.recording) / upload.track
+        partpath = track_path / partname
+        filepath = track_path / filename
+        logger.debug("saving %s", filepath)
 
-    track_path = enclave.home_dir / upload.recording / upload.track
-    filepath = track_path / filename
-    logger.debug("saving %s", filepath)
+        await track_path.mkdir(parents=True, exist_ok=True)
 
-    await track_path.mkdir(parents=True, exist_ok=True)
+        async with await partpath.open("wb") as out:
+            while content := await upload.chunk.read(128 * 1024):
+                await out.write(content)
 
-    async with await filepath.open("wb") as out:
-        while content := await upload.chunk.read(128 * 1024):
-            await out.write(content)
+        await partpath.replace(filepath)
 
     return {
         "recording": upload.recording,
@@ -99,28 +104,27 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
 ):
     """Endpoint for the scheduling of postprocessing jobs"""
 
-    recording_path = enclave.home_dir / job.recording
+    exit_stack.enter_context(enclave.claim_rendering(job.recording))
+    disk_state = await enclave.disk_state(job.recording)
 
-    if not await recording_path.is_dir():
+    recording_path = enclave.recording_dir(job.recording)
+
+    if disk_state == RecordingDiskState.NONEXISTENT:
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Recording {job.recording} does not exist",
         )
 
-    busy_state = enclave.busy_recordings.classify(recording_path)
-
-    if busy_state == RecordingState.PURGING:
+    if disk_state == RecordingDiskState.NOT_RENDERABLE:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Recording {job.recording} is being purged",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Recording {job.recording} is not renderable",
         )
 
-    if busy_state is None:
-        exit_stack.enter_context(enclave.busy_recordings.mark_rendering(recording_path))
-        background_tasks.add_task(
-            postprocessing_task, recording_path, job.recipient, settings.smtp, jobs_semaphore
-        )
+    background_tasks.add_task(
+        postprocessing_task, recording_path, job.recipient, settings.smtp, jobs_semaphore
+    )
 
     if settings.auth_required:
         try:
@@ -157,15 +161,10 @@ async def download_endpoint(
     enclave: Annotated[Enclave | None, Depends(get_enclave_by_user_digest)],
 ) -> FileResponse:
     """Endpoint for downloading a completed recording that the active user owns"""
-
-    if enclave is None:
+    if enclave is None or not enclave.verify_totp(totp, recording):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
-    file_path = enclave.home_dir / recording / OUTPUT_FILENAME
-
-    if not enclave.download_totp.verify(totp, file_path):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-
+    file_path = enclave.recording_dir(recording) / OUTPUT_FILENAME
     if not await file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
@@ -179,8 +178,6 @@ async def purge_endpoint(
     user_info: Annotated[UserInfo | None, Depends(get_user_info)],
 ) -> RecordingsList:
     """Endpoint to purge a recording directory"""
-    enclave.assert_not_busy(recording)
-
     await purge_recording(recording, enclave, user_info)
     return await user_recordings_list(enclave)
 

@@ -20,7 +20,6 @@ import hashlib
 import logging
 from typing import Any, NamedTuple
 
-from anyio import Path
 import httpx2
 import jwt
 from pydantic import BaseModel, ValidationError
@@ -178,14 +177,8 @@ class DownloadTotpAuthority:
     def __init__(self):
         self.factories = dict[str, pyotp.TOTP]()
 
-    @classmethod
-    def _recording_key(cls, file_path: Path) -> str:
-        return str(file_path)
-
-    def generate(self, file_path: Path) -> str:
+    def generate(self, key: str) -> str:
         """Generate a TOTP that authorizes the download of a specific processed recording"""
-        key = self._recording_key(file_path)
-
         # Cache a TOTP factory the first time an OTP is generated for the file
         if key in self.factories:
             totp = self.factories[key]
@@ -197,18 +190,13 @@ class DownloadTotpAuthority:
 
         return totp.now()
 
-    def verify(self, totp: str, file_path: Path) -> bool:
+    def verify(self, totp: str, key: str) -> bool:
         """Verify that a TOTP is valid for the download of the specified file"""
-
-        key = self._recording_key(file_path)
-
         if key not in self.factories:
             return False
 
         return self.factories[key].verify(totp, valid_window=1)
 
-    def forget(self, file_path: Path):
+    def forget(self, key: str):
         """Remove a TOTP factory from the authority. Used when a recording is purged."""
-
-        key = self._recording_key(file_path)
         self.factories.pop(key, None)

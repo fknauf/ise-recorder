@@ -1,9 +1,12 @@
 """
-The dependables that hand an endpoint the caller's enclave: the home directory, the running
-jobs and the download OTPs that belong to one user, or to everyone in an open deployment.
+The enclave: everything that belongs to one user's recordings, or to everyone's in an open
+deployment -- where they are kept, what is happening to them, and the OTPs for downloading
+them -- behind one facade that the endpoints talk to by recording name. And the dependables
+that hand an endpoint the caller's enclave.
 
 What the directory is called, and the alias beside it, is prepare_user_home_dir's business
-and lives in core/test_user_home.py; these cover when it is asked, and what is kept.
+and lives in core/test_user_home.py; what the claims allow alongside each other is the
+tracker's, in core/test_recordings.py. These cover what the facade makes of them.
 """
 
 # pylint: disable=missing-function-docstring
@@ -11,18 +14,20 @@ and lives in core/test_user_home.py; these cover when it is asked, and what is k
 
 import asyncio
 from pathlib import Path
+import shutil
 
+import anyio
 from fastapi import HTTPException, Request
 import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.auth import UserInfo
-from ise_record.core.recordings import BusyRecordings
+from ise_record.core.recordings import RecordingActivity, RecordingDiskState
 from ise_record.core.user_home import prepare_user_home_dir
 from ise_record.glue.enclave import Enclave, get_enclave, get_enclave_by_user_digest
 from ise_record.settings import Settings
 
-from ..harness import alias_of, digest_of, home_entries
+from ..harness import abandon_recording, alias_of, digest_of, finish_recording, home_entries
 from .conftest import request_for
 
 
@@ -32,7 +37,7 @@ async def test_the_home_directory_is_prepared_under_destdir(
 ):
     enclave = await get_enclave(request_, settings, UserInfo("abc", "lecturer"))
 
-    assert enclave.home_dir == tmp_path / digest_of("abc")
+    assert enclave.recording_dir("GVS_2025") == tmp_path / digest_of("abc") / "GVS_2025"
     assert home_entries(tmp_path) == {digest_of("abc"), alias_of("lecturer", digest_of("abc"))}
 
 
@@ -40,15 +45,16 @@ async def test_the_home_directory_is_prepared_under_destdir(
 async def test_a_new_enclave_has_nothing_running(request_: Request, settings: Settings):
     enclave = await get_enclave(request_, settings, UserInfo("abc", "lecturer"))
 
-    assert enclave.busy_recordings == BusyRecordings()
-    assert not enclave.download_totp.factories
+    assert enclave.activity("GVS_2025") == RecordingActivity.NONE
+    assert not enclave.verify_totp("0000000000", "GVS_2025")
 
 
 @pytest.mark.asyncio
 async def test_an_open_deployment_shares_destdir(open_settings: Settings, tmp_path: Path):
     enclave = await get_enclave(request_for(open_settings), open_settings, None)
 
-    assert enclave.home_dir == tmp_path
+    assert enclave.recording_dir("GVS_2025") == tmp_path / "GVS_2025"
+    assert enclave.user_digest() is None
     assert home_entries(tmp_path) == set()
 
 
@@ -98,9 +104,12 @@ async def test_subjects_get_enclaves_of_their_own(request_: Request, settings: S
     first = await get_enclave(request_, settings, UserInfo("user-a", "same"))
     second = await get_enclave(request_, settings, UserInfo("user-b", "same"))
 
-    assert first.home_dir != second.home_dir
-    assert first.busy_recordings is not second.busy_recordings
-    assert first.download_totp is not second.download_totp
+    assert first.recording_dir("foo") != second.recording_dir("foo")
+
+    with first.claim_rendering("foo"):
+        assert second.activity("foo") == RecordingActivity.NONE
+
+    assert not second.verify_totp(first.generate_totp("foo"), "foo")
 
 
 @pytest.mark.asyncio
@@ -134,7 +143,8 @@ async def test_the_enclave_is_found_again_by_the_digest_its_download_links_name(
     # there is to find the authority that issued its OTP
     enclave = await get_enclave(request_, settings, UserInfo("abc", "lecturer"))
 
-    assert await get_enclave_by_user_digest(request_, enclave.home_dir.name) is enclave
+    assert enclave.user_digest() == digest_of("abc")
+    assert await get_enclave_by_user_digest(request_, digest_of("abc")) is enclave
 
 
 @pytest.mark.asyncio
@@ -154,56 +164,116 @@ async def test_looking_up_a_digest_makes_no_enclave(request_: Request):
     assert await get_enclave_by_user_digest(request_, digest_of("abc")) is None
 
 
-# --- refusing what a busy recording cannot take ------------------------------
+# --- the facade -------------------------------------------------------------
+#
+# The endpoints only ever name a recording; the facade turns the name into a path in the
+# enclave's home directory and hands it to the tracker, the disk and the OTP authority.
 
 
-def test_an_idle_recording_is_not_busy(tmp_path: Path):
-    Enclave(tmp_path).assert_not_busy("GVS_2025")
+@pytest.fixture
+def enclave(tmp_path: Path) -> Enclave:
+    return Enclave(digest_of("abc"), anyio.Path(tmp_path))
 
 
-def test_a_rendering_recording_is_busy(tmp_path: Path):
-    enclave = Enclave(tmp_path)
-    enclave.busy_recordings.rendering.add(tmp_path / "GVS_2025")
+def test_a_refused_claim_answers_with_a_conflict(enclave: Enclave):
+    # the endpoints let the HTTPException through as it is, so a busy recording is a 409
+    # rather than a 500 from an exception nobody caught
+    with enclave.claim_rendering("GVS_2025"):
+        for claim in [enclave.claim_rendering, enclave.claim_purging]:
+            with pytest.raises(HTTPException) as excinfo, claim("GVS_2025"):
+                pytest.fail("claimed a recording that is being rendered")
 
-    with pytest.raises(HTTPException) as excinfo:
-        enclave.assert_not_busy("GVS_2025")
+            assert excinfo.value.status_code == 409
 
-    assert excinfo.value.status_code == 409
-    assert excinfo.value.detail == "GVS_2025 is currently being rendered."
+    with enclave.claim_purging("GVS_2025"):
+        with pytest.raises(HTTPException) as excinfo, enclave.claim_upload("GVS_2025"):
+            pytest.fail("uploaded into a recording being purged")
 
-
-def test_a_recording_being_purged_is_busy(tmp_path: Path):
-    enclave = Enclave(tmp_path)
-    enclave.busy_recordings.purging.add(tmp_path / "GVS_2025")
-
-    with pytest.raises(HTTPException) as excinfo:
-        enclave.assert_not_busy("GVS_2025")
-
-    assert excinfo.value.status_code == 409
-    assert excinfo.value.detail == "GVS_2025 is currently being purged."
+        assert excinfo.value.status_code == 409
 
 
-def test_the_refusal_does_not_claim_to_be_about_uploads(tmp_path: Path):
-    # the purge endpoint refuses with it too, and the frontend shows the detail as it is
-    enclave = Enclave(tmp_path)
-    enclave.busy_recordings.rendering.add(tmp_path / "GVS_2025")
+def test_a_refused_claim_leaves_the_claim_in_the_way_alone(enclave: Enclave):
+    with enclave.claim_rendering("GVS_2025"):
+        with pytest.raises(HTTPException), enclave.claim_purging("GVS_2025"):
+            pass
 
-    with pytest.raises(HTTPException) as excinfo:
-        enclave.assert_not_busy("GVS_2025")
-
-    assert "upload" not in str(excinfo.value.detail).lower()
+        assert enclave.activity("GVS_2025") == RecordingActivity.RENDERING
 
 
-def test_another_recording_being_busy_does_not_count(tmp_path: Path):
-    enclave = Enclave(tmp_path)
-    enclave.busy_recordings.rendering.add(tmp_path / "BUSY_2025")
-    enclave.busy_recordings.purging.add(tmp_path / "GONE_2025")
+def test_an_upload_is_accepted_while_the_recording_renders(enclave: Enclave):
+    with enclave.claim_rendering("GVS_2025"), enclave.claim_upload("GVS_2025"):
+        pass
 
-    enclave.assert_not_busy("GVS_2025")
+
+def test_a_claim_reaches_only_the_recording_it_names(enclave: Enclave):
+    with enclave.claim_rendering("BUSY_2025"), enclave.claim_purging("GONE_2025"):
+        assert enclave.activity("GVS_2025") == RecordingActivity.NONE
+
+        with enclave.claim_purging("GVS_2025"):
+            pass
 
 
 def test_another_enclaves_busy_recording_of_the_same_name_does_not_count(tmp_path: Path):
-    elsewhere = Enclave(tmp_path / "a")
-    elsewhere.busy_recordings.rendering.add(elsewhere.home_dir / "GVS_2025")
+    elsewhere = Enclave(digest_of("a"), anyio.Path(tmp_path / "a"))
+    here = Enclave(digest_of("b"), anyio.Path(tmp_path / "b"))
 
-    Enclave(tmp_path / "b").assert_not_busy("GVS_2025")
+    with elsewhere.claim_rendering("GVS_2025"), here.claim_purging("GVS_2025"):
+        pass
+
+
+def test_an_upload_through_the_facade_makes_the_recording_live(enclave: Enclave, tmp_path: Path):
+    # the tracker keys what it knows by path; the facade has to hand it the same path for
+    # the upload as for the question, or the upload is filed where nobody looks
+    abandon_recording(tmp_path, "GVS_2025")
+
+    with enclave.claim_upload("GVS_2025"):
+        pass
+
+    assert anyio.run(enclave.streaming, "GVS_2025")
+
+
+def test_the_disk_state_is_read_from_the_home_directory(enclave: Enclave, tmp_path: Path):
+    finish_recording(tmp_path, "DONE_2025")
+    abandon_recording(tmp_path, "FAILED_2025")
+
+    assert anyio.run(enclave.disk_state, "DONE_2025") == RecordingDiskState.FINISHED
+    assert anyio.run(enclave.disk_state, "FAILED_2025") == RecordingDiskState.UNPROCESSED
+    assert anyio.run(enclave.disk_state, "NEVER_2025") == RecordingDiskState.NONEXISTENT
+
+
+def test_the_listing_covers_the_home_directory(enclave: Enclave, tmp_path: Path):
+    finish_recording(tmp_path, "DONE_2025")
+    finish_recording(tmp_path / "elsewhere", "OTHER_2025")
+
+    classes = anyio.run(enclave.recording_classes)
+
+    assert [r.path.name for r in classes.finished] == ["DONE_2025"]
+
+
+def test_an_otp_is_for_the_recording_it_was_issued_for(enclave: Enclave):
+    otp = enclave.generate_totp("GVS_2025")
+
+    assert enclave.verify_totp(otp, "GVS_2025")
+    assert not enclave.verify_totp(otp, "PSU_2026")
+
+
+def test_a_purge_forgets_the_recordings_otp(enclave: Enclave, tmp_path: Path):
+    # a link from an old listing must not download a new recording of the same name
+    finish_recording(tmp_path, "GVS_2025")
+    otp = enclave.generate_totp("GVS_2025")
+
+    with enclave.claim_purging("GVS_2025"):
+        shutil.rmtree(tmp_path / "GVS_2025")
+
+    assert not enclave.verify_totp(otp, "GVS_2025")
+
+
+def test_a_purge_that_fails_keeps_the_recordings_otp(enclave: Enclave, tmp_path: Path):
+    # the recording is still there, and the link in the listing still has to work
+    finish_recording(tmp_path, "GVS_2025")
+    otp = enclave.generate_totp("GVS_2025")
+
+    with pytest.raises(OSError), enclave.claim_purging("GVS_2025"):
+        raise OSError("busy")
+
+    assert enclave.verify_totp(otp, "GVS_2025")

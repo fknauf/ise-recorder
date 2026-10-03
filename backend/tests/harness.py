@@ -20,6 +20,7 @@ a pathlib.Path first; a sync call on an anyio.Path would only make a coroutine a
 # pylint: disable=missing-function-docstring
 # pylint: disable=too-many-instance-attributes
 
+from contextlib import AbstractContextManager
 from datetime import datetime, timedelta, UTC
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -36,8 +37,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import jwt
+import pyotp
 
-from ise_record.core.auth import DownloadTotpAuthority
+from ise_record.core.recordings import RecordingActivity
 from ise_record.glue.enclave import Enclave
 from ise_record.settings import get_settings, Settings
 
@@ -266,27 +268,42 @@ def enclave_of(client: TestClient, user_home: Path) -> Enclave:
     key = user_home.name if settings.auth_required else None
     enclaves: dict[str | None, Enclave] = app.state.enclaves
 
-    return enclaves.setdefault(key, Enclave(anyio.Path(user_home)))
+    return enclaves.setdefault(key, Enclave(key, anyio.Path(user_home)))
 
 
-def running_jobs_of(client: TestClient, user_home: Path) -> set[Path]:
+def activity_of(client: TestClient, user_home: Path, recording: str) -> RecordingActivity:
+    """What, if anything, has claimed one of `user_home`'s recordings right now."""
+    return enclave_of(client, user_home).activity(recording)
+
+
+def job_in_flight(
+    client: TestClient, user_home: Path, recording: str
+) -> AbstractContextManager[None]:
     """
-    The set of recordings `user_home` has a postprocessing job in flight for.
+    Hold a render claim on one of `user_home`'s recordings, as a job in flight does.
 
     A TestClient runs background tasks to completion before it returns, so a test that wants
-    to catch a job mid-flight seeds this set by hand.
+    to catch a job mid-flight holds the claim itself for as long as the `with` lasts.
     """
-    return enclave_of(client, user_home).busy_recordings.rendering
+    return enclave_of(client, user_home).claim_rendering(recording)
 
 
-def purging_of(client: TestClient, user_home: Path) -> set[Path]:
-    """The set of recordings of `user_home` that a purge is deleting right now."""
-    return enclave_of(client, user_home).busy_recordings.purging
+def purge_in_flight(
+    client: TestClient, user_home: Path, recording: str
+) -> AbstractContextManager[None]:
+    """Hold a purge claim on one of `user_home`'s recordings, as a purge in flight does."""
+    return enclave_of(client, user_home).claim_purging(recording)
 
 
-def download_totp_of(client: TestClient, user_home: Path) -> DownloadTotpAuthority:
-    """The authority that issued the OTPs in the listings of `user_home`'s owner."""
-    return enclave_of(client, user_home).download_totp
+def otp_generator_of(client: TestClient, user_home: Path, recording: str) -> pyotp.TOTP:
+    """
+    The generator behind the OTPs in a recording's download links.
+
+    The one place the tests reach into an enclave: an OTP from another interval than the
+    current one is what the interval tests need, and nothing public hands one out.
+    """
+    enclave = enclave_of(client, user_home)
+    return enclave._download_totp.factories[recording]  # pyright: ignore[reportPrivateUsage]  # pylint: disable=protected-access
 
 
 def purge(client: TestClient, token: str | None, recording: str):

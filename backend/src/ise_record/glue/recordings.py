@@ -12,12 +12,9 @@ from typing import NoReturn
 from fastapi import HTTPException, status
 
 from ise_record.core.auth import UserInfo
-from ise_record.core.postprocess import OUTPUT_FILENAME
 from ise_record.core.recordings import (
-    classify_recording,
-    recording_classes,
+    RecordingDiskState,
     RecordingInfo,
-    RecordingState,
 )
 from ise_record.glue.enclave import Enclave
 from ise_record.glue.models import (
@@ -34,17 +31,15 @@ async def user_recordings_list(enclave: Enclave) -> RecordingsList:
     """List of a user's recordings. Only available when auth is configured."""
 
     def downloadable(rec: RecordingInfo) -> DownloadableRecording:
-        output_path = rec.path / OUTPUT_FILENAME
-        totp = enclave.download_totp.generate(output_path)
-
         assert rec.size is not None
 
+        totp = enclave.generate_totp(rec.path.name)
         return DownloadableRecording(name=rec.path.name, size=rec.size, totp=totp)
 
-    recordings = await recording_classes(enclave.home_dir, enclave.busy_recordings.snapshot())
+    recordings = await enclave.recording_classes()
 
     return RecordingsList.model_construct(
-        user=enclave.home_dir.name,
+        user=enclave.user_digest(),
         completed=[downloadable(rec) for rec in recordings.finished],
         rendering=[DisplayableRecording(name=rec.path.name) for rec in recordings.rendering],
         unprocessed=[DisplayableRecording(name=rec.path.name) for rec in recordings.unprocessed],
@@ -72,35 +67,27 @@ async def purge_recording(recording: SafeRecording, enclave: Enclave, user_info:
         "User %s (sub = %s) is purging %s", user_info.preferred_username, user_info.sub, recording
     )
 
-    recording_path = enclave.home_dir / recording
+    with enclave.claim_purging(recording):
+        disk_state = await enclave.disk_state(recording)
 
-    # classify once before marking, otherwise we'd classify ourselves as purging and not be able to
-    # figure out if we're actually purgeable
-    pre_purge_busy_recordings = enclave.busy_recordings.snapshot()
-
-    with enclave.busy_recordings.mark_purging(recording_path):
-        pre_purge_info = await classify_recording(recording_path, pre_purge_busy_recordings)
-
-        if pre_purge_info.state == RecordingState.NONEXISTENT:
+        if disk_state == RecordingDiskState.NONEXISTENT:
             fail_purge(
                 logger.warning,
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Recording {recording} does not exist for this user",
             )
 
-        if pre_purge_info.state not in {RecordingState.FINISHED, RecordingState.UNPROCESSED}:
+        if await enclave.streaming(recording):
             fail_purge(
                 logger.warning,
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Recording {recording} is in use and currently not purgeable",
+                detail=f"Refusing to purge {recording}: it is still being streamed",
             )
 
         try:
-            await asyncio.to_thread(shutil.rmtree, recording_path)
+            await asyncio.to_thread(shutil.rmtree, enclave.recording_dir(recording))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.exception("Filesystem error")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Filesystem error"
             ) from exc
-
-        enclave.download_totp.forget(recording_path / OUTPUT_FILENAME)
