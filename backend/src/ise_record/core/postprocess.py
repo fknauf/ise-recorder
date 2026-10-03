@@ -16,6 +16,7 @@ from anyio import Path
 MAIN_TRACK_NAME = "stream"
 OVERLAY_TRACK_NAME = "overlay"
 AUDIO_TRACK_GLOB = "audio-*"
+INTERMEDIATE_FILENAME = "presentation.part.webm"
 OUTPUT_FILENAME = "presentation.webm"
 
 logger = logging.getLogger(__name__)
@@ -376,7 +377,7 @@ async def postprocess_tracks(
             ffmpeg_maps.extend(["-map", f"{len(inputs)}:a"])
             inputs.append(await concat_chunks(audio_dir))
 
-        intermediate_path = output_path.with_suffix(".part.webm")
+        intermediate_path = output_path.with_name(INTERMEDIATE_FILENAME)
 
         render_command = (
             ["ffmpeg"]

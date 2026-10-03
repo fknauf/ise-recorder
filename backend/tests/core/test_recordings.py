@@ -559,6 +559,70 @@ def test_a_look_at_the_disk_does_not_overwrite_an_upload_that_finished_meanwhile
     assert is_streaming(tracker, home / "GVS_2025")
 
 
+# After a restart the render time is gone from memory as well. Without it, a recording whose
+# job ran just before the restart would count as live for the rest of the grace period, since
+# its chunks are as fresh as a lecture's in progress. What ffmpeg left on disk stands in for
+# it: the output, or the intermediate file a render that broke off had started writing.
+
+
+def test_after_a_restart_a_recording_rendered_since_its_last_chunk_is_not_live(home: Path):
+    write_chunks(home / "GVS_2025", [30, 20])
+    finish_recording(home, "GVS_2025")
+
+    assert not is_streaming(RecordingTracker(), home / "GVS_2025")
+
+
+def test_after_a_restart_a_render_that_broke_off_counts_as_the_end_of_the_stream(home: Path):
+    # the job was requested, so the lecture was over; ffmpeg had got as far as writing
+    write_chunks(home / "GVS_2025", [30, 20])
+    (home / "GVS_2025" / "presentation.part.webm").write_bytes(b"half a video")
+
+    assert not is_streaming(RecordingTracker(), home / "GVS_2025")
+
+
+def test_after_a_restart_a_render_that_left_nothing_on_disk_does_not_end_the_stream(home: Path):
+    # the accepted gap: a job that broke off before ffmpeg wrote anything leaves no trace, so
+    # the recording counts as live until the grace period is over
+    write_chunks(home / "GVS_2025", [30, 20])
+
+    assert is_streaming(RecordingTracker(), home / "GVS_2025")
+
+
+def test_after_a_restart_chunks_newer_than_the_last_render_are_live(home: Path):
+    # a lecture streamed again under the name of an old one, whose output is still there
+    finish_recording(home, "GVS_2025")
+    age(home / "GVS_2025" / "presentation.webm", 60 * MINUTE)
+    write_chunks(home / "GVS_2025", [5])
+
+    assert is_streaming(RecordingTracker(), home / "GVS_2025")
+
+
+def test_a_look_at_the_disk_does_not_overwrite_a_job_requested_meanwhile(
+    mocker: MockerFixture, home: Path
+):
+    # the same race as for the upload: the estimate awaits the disk, and a job requested in
+    # the middle of it is newer than anything the estimate can find
+    finish_recording(home, "GVS_2025")
+    age(home / "GVS_2025" / "presentation.webm", 60 * MINUTE)
+    write_chunks(home / "GVS_2025", [5])
+    tracker = RecordingTracker()
+    real_estimate = recordings._estimate_render_time_from_disk  # pyright: ignore[reportPrivateUsage]  # pylint: disable=protected-access
+
+    async def estimate_while_a_job_arrives(recording_path: anyio.Path) -> datetime | None:
+        found = await real_estimate(recording_path)
+        with tracker.claim_rendering(recording_path):
+            pass
+        return found
+
+    mocker.patch(
+        "ise_record.core.recordings._estimate_render_time_from_disk",
+        side_effect=estimate_while_a_job_arrives,
+    )
+
+    assert not is_streaming(tracker, home / "GVS_2025")
+    assert not is_streaming(tracker, home / "GVS_2025")
+
+
 # A purge forgets what the tracker knew about the recording, so that a new recording of the
 # same name starts from nothing rather than inheriting the old one's timestamps.
 

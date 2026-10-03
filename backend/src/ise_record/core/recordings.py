@@ -16,7 +16,7 @@ from typing import NamedTuple
 
 from anyio import Path
 
-from ise_record.core.postprocess import MAIN_TRACK_NAME, OUTPUT_FILENAME
+from ise_record.core.postprocess import INTERMEDIATE_FILENAME, MAIN_TRACK_NAME, OUTPUT_FILENAME
 
 STREAMING_GRACE_PERIOD = timedelta(minutes=2)
 
@@ -98,6 +98,15 @@ async def _last_chunk_time_in_recording(recording_path: Path) -> datetime | None
     return None
 
 
+async def _estimate_render_time_from_disk(recording_path: Path) -> datetime | None:
+    for fname in [OUTPUT_FILENAME, INTERMEDIATE_FILENAME]:
+        file_path = recording_path / fname
+        if await file_path.is_file():
+            file_stat = await file_path.stat()
+            return datetime.fromtimestamp(file_stat.st_mtime, UTC)
+
+    return None
+
 class RecordingBusy(Exception):
     def __init__(self, state: RecordingActivity):
         super().__init__(state)
@@ -122,7 +131,9 @@ class RecordingTracker:
     last_upload_time: dict[Path, datetime | None] = field(
         default_factory=dict[Path, datetime | None]
     )
-    last_render_time: dict[Path, datetime] = field(default_factory=dict[Path, datetime])
+    last_render_time: dict[Path, datetime | None] = field(
+        default_factory=dict[Path, datetime | None]
+    )
 
     def activity(self, recording_path: Path) -> RecordingActivity:
         """Returns whether a recording is currently performing an activity"""
@@ -148,7 +159,18 @@ class RecordingTracker:
             last_upload = await _last_chunk_time_in_recording(recording_path)
             last_upload = self.last_upload_time.setdefault(recording_path, last_upload)
 
-        last_render = self.last_render_time.get(recording_path)
+        if recording_path in self.last_render_time:
+            last_render = self.last_render_time[recording_path]
+        else:
+            # If the backend is restarted shortly after a job has been scheduled for a recording,
+            # we don't have the render time in the cache, so estimate from disk. This covers a few
+            # edge cases where otherwise a just-finished recording would be classified as streaming
+            # until the end of the grace period. Doesn't cover cases where the rendering job got
+            # interrupted before the main ffmpeg call that writes the intermediate file, that's an
+            # accepted limitation.
+            last_render = await _estimate_render_time_from_disk(recording_path)
+            last_render = self.last_render_time.setdefault(recording_path, last_render)
+
         cutoff = datetime.now(UTC) - STREAMING_GRACE_PERIOD
 
         return (
