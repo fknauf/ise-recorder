@@ -159,6 +159,10 @@ async def get_enclave_by_user_digest(
     """Get the enclave associated with the user_digest request parameter"""
 
     enclaves = request.app.state.enclaves
+
+    # A valid user_digest may not be in enclaves here if a download link is clicked before the
+    # frontend requested a listing of downloads (which populates enclaves[user_digest]). In that
+    # case it'll not have a valid TOTP anyway, so this is fine.
     if user_digest not in enclaves:
         return None
 

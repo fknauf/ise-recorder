@@ -105,9 +105,8 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
     """Endpoint for the scheduling of postprocessing jobs"""
 
     exit_stack.enter_context(enclave.claim_rendering(job.recording))
-    disk_state = await enclave.disk_state(job.recording)
 
-    recording_path = enclave.recording_dir(job.recording)
+    disk_state = await enclave.disk_state(job.recording)
 
     if disk_state == RecordingDiskState.NONEXISTENT:
         logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
@@ -123,7 +122,11 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
         )
 
     background_tasks.add_task(
-        postprocessing_task, recording_path, job.recipient, settings.smtp, jobs_semaphore
+        postprocessing_task,
+        enclave.recording_dir(job.recording),
+        job.recipient,
+        settings.smtp,
+        jobs_semaphore,
     )
 
     if settings.auth_required:
