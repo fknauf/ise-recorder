@@ -50,6 +50,11 @@ class RecordingInfo(NamedTuple):
 
 
 async def classify_disk_state(recording_path: Path) -> tuple[RecordingDiskState, int | None]:
+    """
+    on-disk state of a recording: does it exist, has it or has it not been post-processed yet, and
+    is it renderable at all?
+    """
+
     if not await recording_path.is_dir(follow_symlinks=False):
         return RecordingDiskState.NONEXISTENT, None
 
@@ -107,7 +112,13 @@ async def _estimate_render_time_from_disk(recording_path: Path) -> datetime | No
 
     return None
 
+
 class RecordingBusy(Exception):
+    """
+    Exception thrown when an action is attempted that the current activity state of a recording
+    doesn't permit, e.g. purging it while it's rendering or accepting an upload
+    """
+
     def __init__(self, state: RecordingActivity):
         super().__init__(state)
         self.state = state

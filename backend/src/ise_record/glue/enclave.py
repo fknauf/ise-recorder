@@ -41,9 +41,11 @@ class Enclave:
         self._download_totp = DownloadTotpAuthority()
 
     def user_digest(self) -> str | None:
+        """stable identifier for a user. None in unauthenticated deployments"""
         return self._user_digest
 
     def recording_dir(self, recording: str) -> Path:
+        """The path where a recording is stored in this enclave"""
         return self._home_dir / recording
 
     @contextmanager
@@ -60,37 +62,64 @@ class Enclave:
             ) from exc
 
     def claim_rendering(self, recording: str) -> AbstractContextManager[None]:
+        """
+        context manager that marks a recording as rendering. Will throw 409 if the recording is
+        in an incompatible state.
+        """
         return self._claim(self._tracker.claim_rendering, recording, "renderable")
 
     @contextmanager
     def claim_purging(self, recording: str) -> Generator[None]:
+        """
+        context manager that marks a recording as being purged. Will throw 409 if the recording is
+        in an incompatible state.
+        """
         with self._claim(self._tracker.claim_purging, recording, "purgeable"):
             yield
             self._download_totp.forget(recording)
 
     def claim_upload(self, recording: str) -> AbstractContextManager[None]:
+        """
+        context manager that marks a recording as accepting an upload. Will throw 409 if the
+        recording is in an incompatible state.
+        """
         return self._claim(self._tracker.claim_uploading, recording, "accepting uploads")
 
     async def disk_state(self, recording: str) -> RecordingDiskState:
+        """Determine the on-disk state of a recording"""
         state, _ = await classify_disk_state(self.recording_dir(recording))
         return state
 
     def activity(self, recording: str) -> RecordingActivity:
+        """
+        Determine the activity (if any) that's currently performed on the recording (is it being
+        rendered, purged, or accepting a chunk upload?)
+        """
         return self._tracker.activity(self.recording_dir(recording))
 
     async def streaming(self, recording: str) -> bool:
+        """
+        Determine whether the recording is currently being streamed to the backend, i.e. whether
+        we should expect that more chunks could arrive. Heuristic.
+        """
         return await self._tracker.streaming(self.recording_dir(recording))
 
     async def classify(self, recording: str) -> RecordingInfo:
+        """
+        Collect disk state, activity, streaming state, and size for a recording.
+        """
         return await self._tracker.classify(self.recording_dir(recording))
 
     async def recording_classes(self) -> RecordingClasses:
+        """Classify all recordings in this enclave for display/download in the frontend"""
         return await self._tracker.recording_classes(self._home_dir)
 
     def generate_totp(self, recording: str) -> str:
+        """Generate a TOTP for the download of a finished recording"""
         return self._download_totp.generate(recording)
 
     def verify_totp(self, totp: str, recording: str) -> bool:
+        """Verify a TOTP allows for the download of the specified recording"""
         return self._download_totp.verify(totp, recording)
 
 
