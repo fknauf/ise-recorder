@@ -13,7 +13,6 @@ dependencies = [
     "pydantic-settings~=2.15",
     "PyJWT[crypto]~=2.15",
     "PyOTP~=2.10",
-    "python-multipart~=0.0",
     "uvicorn~=0.54",
 ]
 
