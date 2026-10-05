@@ -10,7 +10,16 @@ from contextlib import asynccontextmanager, ExitStack
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Form, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Path,
+    Request,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import Field
@@ -27,7 +36,13 @@ from ise_record.glue.jobs import (
     get_jobs_semaphore,
     postprocessing_task,
 )
-from ise_record.glue.models import ChunkUpload, PostProcessingJob, RecordingsList, SafeRecording
+from ise_record.glue.models import (
+    ChunkLocation,
+    RecordingResponse,
+    RenderRequest,
+    SafeRecording,
+    UnfinishedRecording,
+)
 from ise_record.glue.recordings import purge_recording, user_recordings_list
 from ise_record.settings import get_settings, Settings
 
@@ -49,30 +64,33 @@ async def _get_request_exit_stack() -> AsyncGenerator[ExitStack]:
         yield stack
 
 
-@router.post("/chunks", status_code=status.HTTP_201_CREATED)
+@router.put(
+    "/recordings/{recording}/tracks/{track}/chunks/{index}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def upload_chunk_endpoint(
-    upload: Annotated[ChunkUpload, Form()],
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     enclave: Annotated[Enclave, Depends(get_enclave)],
-) -> dict[str, str | int]:
+    location: Annotated[ChunkLocation, Path()],
+) -> None:
     """
-    POST endpoint for the upload of chunk files.
+    Endpoint for the upload of chunk files.
     """
     index_limit = 10**settings.chunk_file_digits
-    if upload.index >= index_limit:
+    if location.index >= index_limit:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Lecture has been going on too long. "
-                f"Attempted to store {upload.index} chunks (max = {index_limit})"
+                f"Attempted to store {location.index} chunks (max = {index_limit})"
             ),
         )
 
-    with enclave.claim_upload(upload.recording):
-        filename = f"chunk.{upload.index:0{settings.chunk_file_digits}d}"
+    with enclave.claim_upload(location.recording):
+        filename = f"chunk.{location.index:0{settings.chunk_file_digits}d}"
         partname = f"part.{filename}"
 
-        track_path = enclave.recording_dir(upload.recording) / upload.track
+        track_path = enclave.recording_dir(location.recording) / location.track
         partpath = track_path / partname
         filepath = track_path / filename
         logger.debug("saving %s", filepath)
@@ -80,88 +98,81 @@ async def upload_chunk_endpoint(
         await track_path.mkdir(parents=True, exist_ok=True)
 
         async with await partpath.open("wb") as out:
-            while content := await upload.chunk.read(128 * 1024):
+            async for content in request.stream():
                 await out.write(content)
 
         await partpath.replace(filepath)
 
-    return {
-        "recording": upload.recording,
-        "track": upload.track,
-        "index": upload.index,
-        "filename": filename,
-    }
 
-
-@router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/recordings/{recording}/render", status_code=status.HTTP_202_ACCEPTED)
 async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-    job: PostProcessingJob,
     background_tasks: BackgroundTasks,
     exit_stack: Annotated[ExitStack, Depends(_get_request_exit_stack)],
     settings: Annotated[Settings, Depends(get_settings)],
     enclave: Annotated[Enclave, Depends(get_enclave)],
     jobs_semaphore: Annotated[asyncio.Semaphore, Depends(get_jobs_semaphore)],
-):
+    recording: SafeRecording,
+    render: RenderRequest,
+) -> RecordingResponse:
     """Endpoint for the scheduling of postprocessing jobs"""
 
-    exit_stack.enter_context(enclave.claim_rendering(job.recording))
+    exit_stack.enter_context(enclave.claim_rendering(recording))
 
-    disk_state = await enclave.disk_state(job.recording)
+    disk_state = await enclave.disk_state(recording)
 
     if disk_state == RecordingDiskState.NONEXISTENT:
-        logger.warning("Bad postprocessing request: Recording %s does not exist", job.recording)
+        logger.warning("Bad postprocessing request: Recording %s does not exist", recording)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Recording {job.recording} does not exist",
+            detail=f"Recording {recording} does not exist",
         )
 
     if disk_state == RecordingDiskState.NOT_RENDERABLE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Recording {job.recording} is not renderable",
+            detail=f"Recording {recording} is not renderable",
         )
 
     background_tasks.add_task(
         postprocessing_task,
-        enclave.recording_dir(job.recording),
-        job.recipient,
+        enclave.recording_dir(recording),
+        render.recipient,
         settings.smtp,
         jobs_semaphore,
     )
 
-    if settings.auth_required:
-        try:
-            return await user_recordings_list(enclave)
-        except Exception:  # pylint: disable=broad-exception-caught
-            # swallow exception so the background job still starts. Just respond with an empty
-            # body, frontend will handle that case.
-            logger.exception("Failed to retrieve recordings list for %s", job.recording)
-
-    return None
-
-
-@router.get("/health")
-def health_check_endpoint():
-    """Endpoint for container health checks"""
-    logger.debug("health check requested")
-    return {"status": "healthy"}
+    return UnfinishedRecording.model_construct(state="rendering", name=recording)
 
 
 @router.get("/recordings", dependencies=[Depends(_require_auth_configured)])
 async def recordings_list_endpoint(
     enclave: Annotated[Enclave, Depends(get_enclave)],
-) -> RecordingsList:
+) -> list[RecordingResponse]:
     """Endpoint to obtain a list of completed and rendering recordings for the active user"""
     return await user_recordings_list(enclave)
 
 
+@router.delete(
+    "/recordings/{recording}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_require_auth_configured)],
+)
+async def purge_endpoint(
+    enclave: Annotated[Enclave, Depends(get_enclave)],
+    user_info: Annotated[UserInfo | None, Depends(get_user_info)],
+    recording: SafeRecording,
+) -> None:
+    """Endpoint to purge a recording directory"""
+    await purge_recording(recording, enclave, user_info)
+
+
 @router.get(
-    "/recordings/{user_digest}/{recording}", dependencies=[Depends(_require_auth_configured)]
+    "/downloads/{user_digest}/{recording}", dependencies=[Depends(_require_auth_configured)]
 )
 async def download_endpoint(
+    enclave: Annotated[Enclave | None, Depends(get_enclave_by_user_digest)],
     recording: SafeRecording,
     totp: Annotated[str, Field(pattern=r"[0-9]+")],
-    enclave: Annotated[Enclave | None, Depends(get_enclave_by_user_digest)],
 ) -> FileResponse:
     """Endpoint for downloading a completed recording that the active user owns"""
     if enclave is None or not enclave.verify_totp(totp, recording):
@@ -174,15 +185,11 @@ async def download_endpoint(
     return FileResponse(file_path, filename=f"{recording}.webm")
 
 
-@router.delete("/recordings/{recording}", dependencies=[Depends(_require_auth_configured)])
-async def purge_endpoint(
-    recording: SafeRecording,
-    enclave: Annotated[Enclave, Depends(get_enclave)],
-    user_info: Annotated[UserInfo | None, Depends(get_user_info)],
-) -> RecordingsList:
-    """Endpoint to purge a recording directory"""
-    await purge_recording(recording, enclave, user_info)
-    return await user_recordings_list(enclave)
+@router.get("/health")
+def health_check_endpoint():
+    """Endpoint for container health checks"""
+    logger.debug("health check requested")
+    return {"status": "healthy"}
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -214,7 +221,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=settings.cors_origins,
             allow_credentials=False,
-            allow_methods=["GET", "POST", "DELETE"],
+            allow_methods=["GET", "POST", "PUT", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
     application.include_router(router, prefix=settings.route_prefix)

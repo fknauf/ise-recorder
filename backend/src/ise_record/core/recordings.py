@@ -48,6 +48,11 @@ class RecordingInfo(NamedTuple):
     streaming: bool
     size: int | None = None
 
+    @property
+    def name(self) -> str:
+        """Name of the recording as used in the API"""
+        return self.path.name
+
 
 async def classify_disk_state(recording_path: Path) -> tuple[RecordingDiskState, int | None]:
     """
@@ -124,14 +129,6 @@ class RecordingBusy(Exception):
         self.state = state
 
 
-class RecordingClasses(NamedTuple):
-    """Recordings sorted into classes depending on their current state of processing"""
-
-    finished: list[RecordingInfo]
-    rendering: list[RecordingInfo]
-    unprocessed: list[RecordingInfo]
-
-
 @dataclass
 class RecordingTracker:
     """Tracks activity/disk state/liveness of recordings"""
@@ -203,36 +200,6 @@ class RecordingTracker:
             disk_state=disk_state,
             streaming=streaming,
             size=size,
-        )
-
-    async def recording_classes(self, user_home: Path) -> RecordingClasses:
-        """Returns a user's recordings arranged in classes according to their state"""
-
-        finished: list[RecordingInfo] = []
-        rendering: list[RecordingInfo] = []
-        unprocessed: list[RecordingInfo] = []
-
-        async for path in user_home.iterdir():
-            r = await self.classify(path)
-
-            if r.activity == RecordingActivity.RENDERING:
-                rendering.append(r)
-            elif (
-                r.disk_state == RecordingDiskState.FINISHED
-                and r.activity != RecordingActivity.PURGING
-            ):
-                finished.append(r)
-            elif (
-                r.disk_state == RecordingDiskState.UNPROCESSED
-                and r.activity == RecordingActivity.NONE
-                and not r.streaming
-            ):
-                unprocessed.append(r)
-
-        return RecordingClasses(
-            finished=sorted(finished, key=lambda info: info.path.name),
-            rendering=sorted(rendering, key=lambda info: info.path.name),
-            unprocessed=sorted(unprocessed, key=lambda info: info.path.name),
         )
 
     @contextmanager

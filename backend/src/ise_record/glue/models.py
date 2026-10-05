@@ -2,12 +2,12 @@
 Pydantic models for fastapi request parameters and return values
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 import unicodedata
 
-from fastapi import UploadFile
 from pathvalidate import sanitize_filename
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
 def _normalize_for_filesystem(value: str) -> str:
@@ -26,8 +26,30 @@ SafeRecording = Annotated[
 ]
 
 
-class ChunkUpload(BaseModel):
-    """An uploaded chunk with metadata"""
+class ApiModel(BaseModel):
+    """Base for request and response bodies: snake_case in Python, camelCase on the wire"""
+
+    model_config = ConfigDict(alias_generator=to_camel, validate_by_name=True, serialize_by_alias=True)
+
+
+class RenderRequest(ApiModel):
+    """Metadata sent with a render request, such as the recipient of the completion report"""
+
+    # backend will validate before sending email. We want the postprocessing to work even if
+    # someone has a typo in the mail address or doesn't specify a recipient, so we don't reject
+    # a malformed recipient here (we just don't send mail later)
+    recipient: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Recipient of the completion notification",
+            examples=["mustermann@vss.uni-hannover.de", None],
+        ),
+    ]
+
+
+class ChunkLocation(ApiModel):
+    """chunk upload metadata"""
 
     recording: SafeRecording
     track: Annotated[
@@ -44,43 +66,24 @@ class ChunkUpload(BaseModel):
             ge=0, description="Running number of the chunk in the track. Start at 0.", examples=[0]
         ),
     ]
-    chunk: Annotated[UploadFile, Field(description="video/audio blob to store, as file")]
 
 
-class PostProcessingJob(BaseModel):
-    """DTO for a postprocessing job the client wants to schedule"""
-
-    recording: SafeRecording
-    # backend will validate before sending email. We want the postprocessing to work even if
-    # someone has a typo in the mail address or doesn't specify a recipient, so we don't reject
-    # a malformed recipient here (we just don't send mail later)
-    recipient: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Recipient of the completion notification",
-            examples=["mustermann@vss.uni-hannover.de", None],
-        ),
-    ]
-
-
-class DisplayableRecording(BaseModel):
+class UnfinishedRecording(ApiModel):
     """Information needed to display a recording in the UI"""
 
+    state: Literal["rendering", "unprocessed"]
     name: str
 
 
-class DownloadableRecording(DisplayableRecording):
+class DownloadableRecording(ApiModel):
     """Per-downloadable-file information for the frontend"""
 
+    state: Literal["completed"]
+    name: str
     size: int
-    totp: str
+    download_url: str
 
 
-class RecordingsList(BaseModel):
-    """List of recordings as returned by the recordings-list endpoint"""
-
-    user: str
-    completed: list[DownloadableRecording]
-    rendering: list[DisplayableRecording]
-    unprocessed: list[DisplayableRecording]
+RecordingResponse = Annotated[
+    UnfinishedRecording | DownloadableRecording, Field(discriminator="state")
+]

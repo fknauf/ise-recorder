@@ -9,9 +9,7 @@
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
 
-import asyncio
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack
 import datetime
 import os
 from pathlib import Path
@@ -20,19 +18,18 @@ from unittest.mock import ANY
 from urllib.parse import quote
 
 import anyio
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
+from starlette.types import Message, Scope
 
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.core.recordings import RecordingActivity
-from ise_record.glue.enclave import Enclave
-from ise_record.glue.jobs import get_jobs_semaphore, postprocessing_task
-from ise_record.glue.models import PostProcessingJob
-from ise_record.server import create_app, schedule_job_endpoint
+from ise_record.glue.jobs import postprocessing_task
+from ise_record.server import create_app
 from ise_record.settings import Settings
 
 from .harness import (
@@ -40,15 +37,20 @@ from .harness import (
     activity_of,
     alias_of,
     app_of,
+    chunk_url,
     DEFAULT_SUBJECT,
     DEFAULT_SUBJECT_DIGEST,
     digest_of,
     download_completed,
+    download_parts,
     enclave_of,
+    entries,
     finish_recording,
+    follow_download,
     home_entries,
     job_in_flight,
     list_recordings,
+    names,
     otp_generator_of,
     Provider,
     purge,
@@ -94,6 +96,10 @@ def prefixed_client(prefixed_settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 
+def render_url(recording: str) -> str:
+    return f"/api/recordings/{quote(recording, safe='')}/render"
+
+
 def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, settings: Settings):
     abandon_recording(settings.destdir, "foo")
     claimed_when_queued: list[RecordingActivity] = []
@@ -104,11 +110,7 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
         ),
     )
 
-    response = client.post(
-        "/api/jobs",
-        headers={"Content-Type": "application/json"},
-        json={"recording": "foo", "recipient": "foo@bar.de"},
-    )
+    response = client.post(render_url("foo"), json={"recipient": "foo@bar.de"})
 
     assert response.status_code == 202
     mock_add_task.assert_called_once_with(
@@ -121,15 +123,40 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
     assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
 
 
+def test_a_render_answers_with_the_recording_now_rendering(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
+    # the frontend puts it into its copy of the listing straight away, rather than wait for the
+    # next poll to turn the card into a spinner
+    abandon_recording(settings.destdir, "foo")
+    mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    response = client.post(render_url("foo"), json={})
+
+    assert response.json() == {"state": "rendering", "name": "foo"}
+
+
+def test_a_render_answers_with_the_name_the_recording_is_stored_under(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
+    # a decomposed name is the composed recording, and the answer has to name it the way the
+    # listing does, or the frontend would not find the card to update
+    abandon_recording(settings.destdir, "\u00dcbung_2025")
+    mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    response = client.post(render_url("U\u0308bung_2025"), json={})
+
+    assert response.status_code == 202
+    assert response.json() == {"state": "rendering", "name": "\u00dcbung_2025"}
+
+
 def test_schedule_postprocessing_recipient_omitted(
     mocker: MockerFixture, client: TestClient, settings: Settings
 ):
     abandon_recording(settings.destdir, "foo")
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    response = client.post(
-        "/api/jobs", headers={"Content-Type": "application/json"}, json={"recording": "foo"}
-    )
+    response = client.post(render_url("foo"), json={})
 
     assert response.status_code == 202
     mock_add_task.assert_called_once_with(
@@ -139,16 +166,24 @@ def test_schedule_postprocessing_recipient_omitted(
     assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
 
 
+def test_the_recipient_is_not_taken_from_the_url(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
+    # an address in the query string would end up in every access log on the way
+    abandon_recording(settings.destdir, "foo")
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    client.post(render_url("foo"), params={"recipient": "foo@bar.de"}, json={})
+
+    assert mock_add_task.call_args.args[2] is None
+
+
 def test_schedule_postprocessing_error(
     mocker: MockerFixture, client: TestClient, settings: Settings
 ):
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    response = client.post(
-        "/api/jobs",
-        headers={"Content-Type": "application/json"},
-        json={"recording": "foo", "recipient": "foo@bar.de"},
-    )
+    response = client.post(render_url("foo"), json={"recipient": "foo@bar.de"})
 
     # the recording is a resource of the caller's that is not there, not a malformed request
     assert response.status_code == 404
@@ -169,7 +204,7 @@ def test_a_job_for_a_recording_that_cannot_be_rendered_is_refused(
         write_chunks(settings.destdir / "foo", [30 * 60], track=track)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    response = client.post("/api/jobs", json={"recording": "foo"})
+    response = client.post(render_url("foo"), json={})
 
     assert response.status_code == 422
     mock_add_task.assert_not_called()
@@ -179,13 +214,24 @@ def test_a_job_for_a_recording_that_cannot_be_rendered_is_refused(
 def test_schedule_postprocessing_input_validation(mocker: MockerFixture, client: TestClient):
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    response = client.post(
-        "/api/jobs",
-        headers={"Content-Type": "application/json"},
-        json={"recording": "AND 0 == 0; DROP TABLE important_data; --", "recipient": "foo@bar.de"},
-    )
+    for recording in ["AND 0 == 0; DROP TABLE important_data; --", ".hidden"]:
+        response = client.post(render_url(recording), json={"recipient": "foo@bar.de"})
 
-    assert response.status_code == 422
+        assert response.status_code == 422
+
+    # and dot segments, sent encoded as a browser would: the URL resolution that removes them
+    # from a literal path never sees them
+    assert client.post("/api/recordings/%2E%2E/render", json={}).status_code == 422
+    mock_add_task.assert_not_called()
+
+
+def test_a_render_request_needs_a_body(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
+    abandon_recording(settings.destdir, "foo")
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
+
+    assert client.post(render_url("foo")).status_code == 422
     mock_add_task.assert_not_called()
 
 
@@ -195,11 +241,7 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(
     abandon_recording(settings.destdir, "foo")
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    response = client.post(
-        "/api/jobs",
-        headers={"Content-Type": "application/json"},
-        json={"recording": "foo", "recipient": "I made a lot of typos"},
-    )
+    response = client.post(render_url("foo"), json={"recipient": "I made a lot of typos"})
 
     assert response.status_code == 202
     mock_add_task.assert_called_once_with(
@@ -209,23 +251,81 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(
     assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
 
 
+SAMPLE = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+
+
 def test_chunk_upload(client: TestClient, settings: Settings):
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
-    sample_size = os.stat(sample_path).st_size
+    sample = SAMPLE.read_bytes()
 
     for ix, fname in [(0, "chunk.0000"), (42, "chunk.0042"), (9999, "chunk.9999")]:
-        with open(sample_path, "rb") as sample:
-            response = client.post(
-                "/api/chunks",
-                data={"recording": "foo", "track": "stream", "index": str(ix)},
-                files={"chunk": sample},
-            )
+        response = upload(client, None, index=ix, content=sample)
 
-        target_path = settings.destdir / "foo" / "stream" / fname
+        target_path = Path(settings.destdir) / "foo" / "stream" / fname
 
-        assert response.status_code == 201
-        assert os.path.isfile(target_path)
-        assert os.stat(target_path).st_size == sample_size
+        # nothing to say back: the client knows what it sent, and where
+        assert response.status_code == 204
+        assert response.content == b""
+        assert target_path.read_bytes() == sample
+
+
+def test_a_chunk_uploaded_again_replaces_the_first_copy(client: TestClient, settings: Settings):
+    # a retry after an answer that never arrived sends the same chunk again; storing it under
+    # the same name is what makes that safe
+    assert upload(client, None, index=3, content=b"first try").status_code == 204
+    assert upload(client, None, index=3, content=b"second try").status_code == 204
+
+    track = Path(settings.destdir) / "foo" / "stream"
+    assert sorted(p.name for p in track.iterdir()) == ["chunk.0003"]
+    assert (track / "chunk.0003").read_bytes() == b"second try"
+
+
+def test_a_chunk_larger_than_one_read_arrives_whole(client: TestClient, settings: Settings):
+    # the body is written piece by piece as the server hands it over
+    big = bytes(range(256)) * 4096
+
+    assert upload(client, None, content=big).status_code == 204
+    assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0000").read_bytes() == big
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_that_arrives_in_pieces_is_stored_whole(app: FastAPI, settings: Settings):
+    # A real server hands the body over piece by piece as it comes off the socket, and the
+    # endpoint has to write every piece. A TestClient hands it over in one go, so this talks
+    # ASGI to the app directly to deliver it in three.
+    pieces = [b"first ", b"second ", b"third"]
+    incoming: list[Message] = [
+        {"type": "http.request", "body": piece, "more_body": True} for piece in pieces
+    ] + [{"type": "http.request", "body": b"", "more_body": False}]
+    outgoing: list[Message] = []
+
+    async def receive() -> Message:
+        return incoming.pop(0) if incoming else {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        outgoing.append(message)
+
+    path = chunk_url("foo", "stream", 0)
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "PUT",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(b"host", b"testserver")],
+        "client": ("127.0.0.1", 50000),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+
+    await app(scope, receive, send)
+
+    assert outgoing[0]["status"] == 204
+    chunk = Path(settings.destdir) / "foo" / "stream" / "chunk.0000"
+    assert chunk.read_bytes() == b"first second third"
 
 
 @pytest.mark.parametrize(
@@ -240,18 +340,12 @@ def test_chunk_upload(client: TestClient, settings: Settings):
 def test_chunk_upload_stores_a_non_latin_recording_name(
     recording: str, client: TestClient, settings: Settings
 ):
-    # the endpoint has to accept what the frontend derives and then actually create the
-    # directory: os.makedirs is where a name that passed validation can still fail
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+    # the endpoint has to accept what the frontend derives, percent-encoded in the path, and
+    # then actually create the directory: mkdir is where a name that passed validation can
+    # still fail
+    response = upload(client, None, recording=recording, content=SAMPLE.read_bytes())
 
-    with open(sample_path, "rb") as sample:
-        response = client.post(
-            "/api/chunks",
-            data={"recording": recording, "track": "stream", "index": "0"},
-            files={"chunk": sample},
-        )
-
-    assert response.status_code == 201
+    assert response.status_code == 204
     assert (Path(settings.destdir) / recording / "stream" / "chunk.0000").is_file()
 
 
@@ -261,17 +355,10 @@ def test_chunk_upload_stores_a_decomposed_name_under_one_directory(
     # macOS and several IMEs send NFD, so the same lecture can arrive spelled two ways that
     # are identical on screen. Both have to land in the composed directory, or the chunks of
     # one recording end up split across two and the postprocessing job finds half of them.
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
-
     for index, recording in enumerate(["U\u0308bung_2025", "\u00dcbung_2025"]):
-        with open(sample_path, "rb") as sample:
-            response = client.post(
-                "/api/chunks",
-                data={"recording": recording, "track": "stream", "index": str(index)},
-                files={"chunk": sample},
-            )
+        response = upload(client, None, index=index, recording=recording)
 
-        assert response.status_code == 201
+        assert response.status_code == 204
 
     composed = Path(settings.destdir) / "\u00dcbung_2025" / "stream"
 
@@ -282,18 +369,12 @@ def test_chunk_upload_stores_a_decomposed_name_under_one_directory(
 
 def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, settings: Settings):
     # a client that ignores the frontend's cap must not get a permanent 422 for the length of
-    # a lecture, nor an OSError out of os.makedirs. The name is cut to the byte budget instead
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+    # a lecture, nor an OSError out of mkdir. The name is cut to the byte budget instead
     recording = "\u673a" * 200
 
-    with open(sample_path, "rb") as sample:
-        response = client.post(
-            "/api/chunks",
-            data={"recording": recording, "track": "stream", "index": "0"},
-            files={"chunk": sample},
-        )
+    response = upload(client, None, recording=recording)
 
-    assert response.status_code == 201
+    assert response.status_code == 204
 
     stored = list(Path(settings.destdir).iterdir())
 
@@ -303,120 +384,49 @@ def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, s
     assert (stored[0] / "stream" / "chunk.0000").is_file()
 
 
-def test_chunk_upload_input_validation(client: TestClient):
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+@pytest.mark.parametrize(
+    "url",
+    [
+        chunk_url("AND 0 == 0; DROP TABLE important_data; --", "stream", 42),
+        chunk_url("foo", "AND 0 == 0; DROP TABLE important_data; --", 42),
+        chunk_url("foo", "stream", -1),
+        chunk_url("foo", "stream", 10000),
+        chunk_url("foo", "stream", "forty-two"),
+        # dot segments, sent encoded as a browser would: the URL resolution that removes them
+        # from a literal path never sees them
+        "/api/recordings/%2E%2E/tracks/stream/chunks/42",
+        "/api/recordings/foo/tracks/%2E%2E/chunks/42",
+    ],
+)
+def test_chunk_upload_input_validation(client: TestClient, settings: Settings, url: str):
+    response = client.put(url, content=SAMPLE.read_bytes())
 
-    with open(sample_path, "rb") as sample:
-        response = client.post(
-            "/api/chunks",
-            data={
-                "recording": "AND 0 == 0; DROP TABLE important_data; --",
-                "track": "stream",
-                "index": "42",
-            },
-            files={"chunk": sample},
-        )
-
-        assert response.status_code == 422
-
-        response = client.post(
-            "/api/chunks",
-            data={
-                "recording": "foo",
-                "track": "AND 0 == 0; DROP TABLE important_data; --",
-                "index": "42",
-            },
-            files={"chunk": sample},
-        )
-
-        assert response.status_code == 422
-
-        response = client.post(
-            "/api/chunks",
-            data={"recording": "foo", "track": "stream", "index": "-1"},
-            files={"chunk": sample},
-        )
-
-        assert response.status_code == 422
-
-        response = client.post(
-            "/api/chunks",
-            data={"recording": "foo", "track": "stream", "index": "10000"},
-            files={"chunk": sample},
-        )
-
-        assert response.status_code == 422
-
-        response = client.post(
-            "/api/chunks", data={"recording": "foo", "track": "stream", "index": "42"}
-        )
-
-        assert response.status_code == 422
-
-        response = client.post(
-            "/api/chunks",
-            data={
-                "recording": "AND 0 == 0; DROP TABLE important_data; --",
-                "track": "stream",
-                "index": "42",
-                "nonsense": "poppycock",
-            },
-            files={"chunk": sample},
-        )
-
-        assert response.status_code == 422
-
-        response = client.post(
-            "/api/chunks",
-            data={
-                "recording": "AND 0 == 0; DROP TABLE important_data; --",
-                "track": "stream",
-                "index": "42",
-            },
-            files={"chunk": sample, "nonsense": sample},
-        )
-
-        assert response.status_code == 422
-
-        response = client.post(
-            "/api/chunks",
-            data={"recording": "..", "track": "..", "index": "42"},
-            files={"chunk": sample},
-        )
-
-        assert response.status_code == 422
+    assert response.status_code == 422
+    assert not list(Path(settings.destdir).iterdir())
 
 
 def test_chunk_upload_with_more_digits(tmp_path: Path):
     # chunk_file_digits is not the default, so this builds its own app rather than taking
     # the shared fixture
     settings = Settings(destdir=tmp_path, auth="disabled", chunk_file_digits=5)
-    sample_path = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
-    sample_size = os.stat(sample_path).st_size
+    sample = SAMPLE.read_bytes()
 
     cases: list[tuple[int, int, str | None]] = [
-        (0, 201, "chunk.00000"),
-        (42, 201, "chunk.00042"),
-        (12345, 201, "chunk.12345"),
-        (99999, 201, "chunk.99999"),
+        (0, 204, "chunk.00000"),
+        (42, 204, "chunk.00042"),
+        (12345, 204, "chunk.12345"),
+        (99999, 204, "chunk.99999"),
         (100000, 422, None),
     ]
 
     with TestClient(create_app(settings)) as client:
         for ix, status_code, fname in cases:
-            with open(sample_path, "rb") as sample:
-                response = client.post(
-                    "/api/chunks",
-                    data={"recording": "foo", "track": "stream", "index": str(ix)},
-                    files={"chunk": sample},
-                )
+            response = upload(client, None, index=ix, content=sample)
 
             assert response.status_code == status_code
 
             if fname is not None:
-                target_path = settings.destdir / "foo" / "stream" / fname
-                assert os.path.isfile(target_path)
-                assert os.stat(target_path).st_size == sample_size
+                assert (tmp_path / "foo" / "stream" / fname).read_bytes() == sample
 
 
 def test_a_chunk_for_a_recording_that_is_rendering_is_kept(client: TestClient, settings: Settings):
@@ -427,7 +437,7 @@ def test_a_chunk_for_a_recording_that_is_rendering_is_kept(client: TestClient, s
     with job_in_flight(client, settings.destdir, "foo"):
         response = upload(client, None, index=1)
 
-        assert response.status_code == 201
+        assert response.status_code == 204
         assert activity_of(client, settings.destdir, "foo") == RecordingActivity.RENDERING
 
     assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0001").read_bytes() == b"payload"
@@ -438,7 +448,7 @@ def test_a_chunk_appears_under_its_name_only_once_it_is_complete(
 ):
     # a render running alongside reads every chunk.* it finds, so a chunk being written is
     # kept under another name until the last byte is in
-    assert upload(client, None, index=3).status_code == 201
+    assert upload(client, None, index=3).status_code == 204
 
     track = Path(settings.destdir) / "foo" / "stream"
     assert sorted(p.name for p in track.iterdir()) == ["chunk.0003"]
@@ -468,13 +478,13 @@ def test_other_recordings_still_take_chunks_while_one_is_rendering(
     abandon_recording(settings.destdir, "bar")
 
     with job_in_flight(client, settings.destdir, "bar"):
-        assert upload(client, None).status_code == 201
+        assert upload(client, None).status_code == 204
     assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0000").is_file()
 
 
 def test_cors_preflight_jobs_unconfigured(client: TestClient):
     response = client.options(
-        "/api/jobs",
+        render_url("foo"),
         headers={
             "Origin": "http://example.com",
             "Access-Control-Request-Method": "POST",
@@ -494,7 +504,7 @@ def test_cors_preflight_jobs(tmp_path: Path):
 
     with TestClient(create_app(cors_settings)) as cors_client:
         response = cors_client.options(
-            "/api/jobs",
+            render_url("foo"),
             headers={
                 "Origin": "http://allowed.example.com",
                 "Access-Control-Request-Method": "POST",
@@ -515,7 +525,7 @@ def test_cors_preflight_jobs_forbidden(tmp_path: Path):
 
     with TestClient(create_app(cors_settings)) as cors_client:
         response = cors_client.options(
-            "/api/jobs",
+            render_url("foo"),
             headers={
                 "Origin": "http://example.com",
                 "Access-Control-Request-Method": "POST",
@@ -545,12 +555,13 @@ def test_the_recordings_listing_is_forbidden_without_authentication(
 def test_downloading_is_refused_without_user(client: TestClient, settings: Settings):
     finish_recording(settings.destdir, "GVS_2025")
 
-    response = client.get("/api/recordings/GVS_2025")
+    for path in ["/api/recordings/GVS_2025", "/api/downloads/GVS_2025"]:
+        response = client.get(path)
 
-    # the path is the purge route's, so this is 405 rather than 404 -- either way, a
-    # recording is not served without the user directory in front of it
-    assert response.status_code in (404, 405)
-    assert b"video" not in response.content
+        # either path is some other route's or none at all -- either way, a recording is not
+        # served without the user digest in front of it
+        assert response.status_code in (404, 405)
+        assert b"video" not in response.content
 
 
 def test_two_apps_share_no_state(tmp_path: Path):
@@ -583,9 +594,9 @@ def test_requests_do_not_replace_the_app_state(client: TestClient, app: FastAPI)
     enclaves = app.state.enclaves
     semaphore = app.state.jobs_semaphore
 
-    client.post("/api/jobs", json={"recording": "missing"})
+    client.post(render_url("missing"), json={})
     enclave = enclaves[None]
-    client.post("/api/jobs", json={"recording": "missing"})
+    client.post(render_url("missing"), json={})
     client.get("/api/recordings")
 
     assert app.state.enclaves is enclaves
@@ -600,14 +611,28 @@ def test_health_endpoint(client: TestClient):
     assert response.json()["status"] == "healthy"
 
 
-@pytest.mark.parametrize("endpoint", ["/api/chunks", "/api/jobs", "/api/health", "/api/recordings"])
-def test_every_endpoint_moves_under_the_prefix(prefixed_client: TestClient, endpoint: str):
-    assert prefixed_client.get(f"{ROUTE_PREFIX}{endpoint}").status_code != 404
+ENDPOINTS = [
+    ("PUT", chunk_url("foo", "stream", 0)),
+    ("POST", "/api/recordings/foo/render"),
+    ("GET", "/api/health"),
+    ("GET", "/api/recordings"),
+    ("DELETE", "/api/recordings/foo"),
+    ("GET", f"/api/downloads/{digest_of('abc')}/foo"),
+]
 
 
-@pytest.mark.parametrize("endpoint", ["/api/chunks", "/api/jobs", "/api/health", "/api/recordings"])
-def test_nothing_is_left_behind_at_the_unprefixed_path(prefixed_client: TestClient, endpoint: str):
-    assert prefixed_client.get(endpoint).status_code == 404
+@pytest.mark.parametrize("method, endpoint", ENDPOINTS)
+def test_every_endpoint_moves_under_the_prefix(
+    prefixed_client: TestClient, method: str, endpoint: str
+):
+    assert prefixed_client.request(method, f"{ROUTE_PREFIX}{endpoint}").status_code != 404
+
+
+@pytest.mark.parametrize("method, endpoint", ENDPOINTS)
+def test_nothing_is_left_behind_at_the_unprefixed_path(
+    prefixed_client: TestClient, method: str, endpoint: str
+):
+    assert prefixed_client.request(method, endpoint).status_code == 404
 
 
 @pytest.mark.parametrize("prefix", ["foo", "/foo/", "/", " /foo"])
@@ -640,7 +665,7 @@ def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str
 def test_a_chunk_lands_in_the_callers_home_directory(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    assert upload(auth_client, provider.mint()).status_code == 201
+    assert upload(auth_client, provider.mint()).status_code == 204
 
     # the chunk lives under the subject digest, and is reachable through the readable
     # alias as well -- a shell user finding "lecturer-..." has to land on the real data
@@ -652,8 +677,8 @@ def test_a_chunk_lands_in_the_callers_home_directory(
 def test_different_subjects_get_different_directories(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    assert upload(auth_client, provider.mint(sub="user-a"), index=0).status_code == 201
-    assert upload(auth_client, provider.mint(sub="user-b"), index=1).status_code == 201
+    assert upload(auth_client, provider.mint(sub="user-a"), index=0).status_code == 204
+    assert upload(auth_client, provider.mint(sub="user-b"), index=1).status_code == 204
 
     assert upload_chunk_path(tmp_path, digest_of("user-a"), index=0).is_file()
     assert upload_chunk_path(tmp_path, digest_of("user-b"), index=1).is_file()
@@ -664,7 +689,7 @@ def test_a_username_from_userinfo_names_the_alias(
 ):
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="dozentin")
 
-    assert upload(auth_client, provider.mint(preferred_username=None)).status_code == 201
+    assert upload(auth_client, provider.mint(preferred_username=None)).status_code == 204
 
     assert home_entries(tmp_path) == {
         DEFAULT_SUBJECT_DIGEST,
@@ -698,7 +723,7 @@ def test_an_unreachable_provider_is_reported_as_unavailable(
 
 def schedule(auth_client: TestClient, token: str | None, recording: str = "foo"):
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    return auth_client.post("/api/jobs", headers=headers, json={"recording": recording})
+    return auth_client.post(render_url(recording), headers=headers, json={})
 
 
 def test_scheduling_a_job_without_a_token_is_rejected(auth_client: TestClient):
@@ -718,7 +743,7 @@ def test_a_job_runs_against_the_callers_own_recording(
     )
 
     token = provider.mint()
-    assert upload(auth_client, token).status_code == 201
+    assert upload(auth_client, token).status_code == 204
 
     assert schedule(auth_client, token).status_code == 202
 
@@ -733,7 +758,7 @@ def test_a_job_cannot_name_another_subjects_recording(
     # name is resolved under the caller's own home and nowhere else.
     mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
 
-    assert upload(auth_client, provider.mint(sub="user-a")).status_code == 201
+    assert upload(auth_client, provider.mint(sub="user-a")).status_code == 204
 
     # a decoy at the destination root, so that this is the home directory being honored
     # rather than the recording merely being absent everywhere: an implementation that
@@ -766,7 +791,7 @@ def test_another_subjects_purge_does_not_block_a_recording_of_the_same_name(
     abandon_recording(home_a, "foo")
 
     with purge_in_flight(auth_client, home_a, "foo"):
-        assert upload(auth_client, provider.mint(sub="user-b")).status_code == 201
+        assert upload(auth_client, provider.mint(sub="user-b")).status_code == 204
     assert upload_chunk_path(tmp_path, digest_of("user-b")).is_file()
 
 
@@ -789,7 +814,7 @@ def test_downloading_without_a_totp_is_rejected(auth_client: TestClient):
     assert download_completed(auth_client, "deadbeef", "foo", None).status_code == 422
 
 
-def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
+def test_the_listing_returns_the_recordings_with_size_and_a_download_link(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
@@ -799,24 +824,23 @@ def test_the_listing_returns_the_recordings_with_size_and_valid_totp(
     response = list_recordings(auth_client, provider.mint())
 
     assert response.status_code == 200
-    # the names the auth_client has to send back to /api/recordings/{recording}, not the name of
+    # the names the client has to send back to /api/recordings/{recording}, not the name of
     # the file inside each of them -- which is "presentation.webm" for every recording
     data = response.json()
+    assert [(r["state"], r["name"], r["size"]) for r in data] == [
+        ("completed", "GVS_2025", 5),
+        ("completed", "PSU_2026", 5),
+    ]
+    # exactly the keys the frontend's schema expects, in its camelCase
+    assert {frozenset(entry) for entry in data} == {
+        frozenset({"state", "name", "size", "downloadUrl"})
+    }
+    # every link leads to its own recording, in the caller's enclave
     enclave = enclave_of(auth_client, home)
-
-    assert isinstance(data, dict)
-    assert "user" in data
-    assert "completed" in data
-    assert isinstance(data["completed"], list)
-    assert len(data["completed"]) == 2  # type: ignore
-
-    assert data["completed"][0]["name"] == "GVS_2025"
-    assert data["completed"][0]["size"] == 5
-    assert enclave.verify_totp(data["completed"][0]["totp"], "GVS_2025")  # type: ignore
-
-    assert data["completed"][1]["name"] == "PSU_2026"
-    assert data["completed"][1]["size"] == 5
-    assert enclave.verify_totp(data["completed"][1]["totp"], "PSU_2026")  # type: ignore
+    for entry in data:
+        user_digest, recording, totp = download_parts(entry)
+        assert (user_digest, recording) == (DEFAULT_SUBJECT_DIGEST, entry["name"])
+        assert enclave.verify_totp(totp, entry["name"])
 
 
 def test_the_listing_leaves_out_recordings_that_are_not_rendered(
@@ -832,7 +856,7 @@ def test_the_listing_leaves_out_recordings_that_are_not_rendered(
 
     response = list_recordings(auth_client, provider.mint())
 
-    assert [r["name"] for r in response.json()["completed"]] == ["rendered"]
+    assert names(response.json(), "completed") == ["rendered"]
 
 
 def test_the_listing_only_shows_the_callers_own_recordings(
@@ -843,11 +867,15 @@ def test_the_listing_only_shows_the_callers_own_recordings(
 
     assert [
         r["name"]
-        for r in list_recordings(auth_client, provider.mint(sub="user-a")).json()["completed"]
+        for r in entries(
+            list_recordings(auth_client, provider.mint(sub="user-a")).json(), "completed"
+        )
     ] == ["mine"]
     assert [
         r["name"]
-        for r in list_recordings(auth_client, provider.mint(sub="user-b")).json()["completed"]
+        for r in entries(
+            list_recordings(auth_client, provider.mint(sub="user-b")).json(), "completed"
+        )
     ] == ["theirs"]
 
 
@@ -866,7 +894,7 @@ def test_the_listing_reports_nothing_rendering_when_no_job_is_running(
     data = list_recordings(auth_client, provider.mint()).json()
 
     # present and empty rather than absent, because the frontend schema requires the field
-    assert data["rendering"] == []
+    assert names(data, "rendering") == []
 
 
 def test_a_recording_in_postprocessing_is_listed_as_rendering(
@@ -884,9 +912,9 @@ def test_a_recording_in_postprocessing_is_listed_as_rendering(
 
     # the frontend renders the list as it comes, so the cards would shuffle between polls
     # without the sort
-    assert data["rendering"] == [{"name": "ABC_2026"}, {"name": "PSU_2026"}]
+    assert names(data, "rendering") == ["ABC_2026", "PSU_2026"]
     # only the name: there is no file to size and nothing to download yet
-    assert [r["name"] for r in data["completed"]] == ["GVS_2025"]
+    assert names(data, "completed") == ["GVS_2025"]
 
 
 def test_a_recording_being_rerendered_is_only_listed_as_rendering(
@@ -901,8 +929,8 @@ def test_a_recording_being_rerendered_is_only_listed_as_rendering(
     with job_in_flight(auth_client, home, "PSU_2026"):
         data = list_recordings(auth_client, provider.mint()).json()
 
-    assert [r["name"] for r in data["completed"]] == ["GVS_2025"]
-    assert data["rendering"] == [{"name": "PSU_2026"}]
+    assert names(data, "completed") == ["GVS_2025"]
+    assert names(data, "rendering") == ["PSU_2026"]
 
 
 def test_a_rerendered_recording_is_offered_for_download_again_once_the_job_is_done(
@@ -915,12 +943,12 @@ def test_a_rerendered_recording_is_offered_for_download_again_once_the_job_is_do
     token = provider.mint()
 
     with job_in_flight(auth_client, home, "GVS_2025"):
-        assert list_recordings(auth_client, token).json()["completed"] == []
+        assert names(list_recordings(auth_client, token).json(), "completed") == []
 
     data = list_recordings(auth_client, token).json()
 
-    assert [r["name"] for r in data["completed"]] == ["GVS_2025"]
-    assert data["rendering"] == []
+    assert names(data, "completed") == ["GVS_2025"]
+    assert names(data, "rendering") == []
 
 
 def test_the_listing_only_shows_the_callers_own_rendering_jobs(
@@ -930,10 +958,13 @@ def test_the_listing_only_shows_the_callers_own_rendering_jobs(
     abandon_recording(home_a, "mine")
 
     with job_in_flight(auth_client, home_a, "mine"):
-        assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["rendering"] == [
-            {"name": "mine"}
-        ]
-        assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["rendering"] == []
+        assert names(
+            list_recordings(auth_client, provider.mint(sub="user-a")).json(), "rendering"
+        ) == ["mine"]
+        assert (
+            names(list_recordings(auth_client, provider.mint(sub="user-b")).json(), "rendering")
+            == []
+        )
 
 
 def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
@@ -953,12 +984,12 @@ def test_a_scheduled_job_is_rendering_where_the_listing_looks_for_it(
     )
 
     token = provider.mint()
-    assert upload(auth_client, token).status_code == 201
+    assert upload(auth_client, token).status_code == 204
     assert schedule(auth_client, token).status_code == 202
 
     assert seen_while_running == [RecordingActivity.RENDERING]
     # and gone again once it finished, or the card would spin forever
-    assert list_recordings(auth_client, token).json()["rendering"] == []
+    assert names(list_recordings(auth_client, token).json(), "rendering") == []
 
 
 def test_a_job_that_blows_up_still_releases_the_recording(
@@ -972,7 +1003,7 @@ def test_a_job_that_blows_up_still_releases_the_recording(
         side_effect=RuntimeError("boom"),
     )
     token = provider.mint()
-    assert upload(auth_client, token).status_code == 201
+    assert upload(auth_client, token).status_code == 204
 
     # the 202 is already out by then; a TestClient hands what the task raised on to the test
     with pytest.raises(RuntimeError):
@@ -1012,7 +1043,7 @@ def test_a_job_waiting_for_a_slot_already_counts_as_rendering(
     app_of(auth_client).state.jobs_semaphore = slots
 
     token = provider.mint()
-    assert upload(auth_client, token).status_code == 201
+    assert upload(auth_client, token).status_code == 204
     assert schedule(auth_client, token).status_code == 202
 
     assert slots.seen_when_asked == [RecordingActivity.RENDERING]
@@ -1054,9 +1085,9 @@ def test_the_listing_reports_unprocessed_recordings_by_name(
     data = list_recordings(auth_client, provider.mint()).json()
 
     # only the name: there is nothing to download, and the Rerender button needs no more
-    assert data["unprocessed"] == [{"name": "GVS_2025"}]
-    assert [r["name"] for r in data["completed"]] == ["DONE_2025"]
-    assert data["rendering"] == []
+    assert names(data, "unprocessed") == ["GVS_2025"]
+    assert names(data, "completed") == ["DONE_2025"]
+    assert names(data, "rendering") == []
 
 
 def test_the_listing_reports_no_unprocessed_recordings_when_there_are_none(
@@ -1065,7 +1096,7 @@ def test_the_listing_reports_no_unprocessed_recordings_when_there_are_none(
     finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "DONE_2025")
 
     # present and empty rather than absent, because the frontend schema requires the field
-    assert list_recordings(auth_client, provider.mint()).json()["unprocessed"] == []
+    assert names(list_recordings(auth_client, provider.mint()).json(), "unprocessed") == []
 
 
 def test_the_listing_only_shows_the_callers_own_unprocessed_recordings(
@@ -1074,12 +1105,12 @@ def test_the_listing_only_shows_the_callers_own_unprocessed_recordings(
     abandon_recording(tmp_path / digest_of("user-a"), "mine")
     abandon_recording(tmp_path / digest_of("user-b"), "theirs")
 
-    assert list_recordings(auth_client, provider.mint(sub="user-a")).json()["unprocessed"] == [
-        {"name": "mine"}
-    ]
-    assert list_recordings(auth_client, provider.mint(sub="user-b")).json()["unprocessed"] == [
-        {"name": "theirs"}
-    ]
+    assert names(
+        list_recordings(auth_client, provider.mint(sub="user-a")).json(), "unprocessed"
+    ) == ["mine"]
+    assert names(
+        list_recordings(auth_client, provider.mint(sub="user-b")).json(), "unprocessed"
+    ) == ["theirs"]
 
 
 def test_a_rerendered_recording_moves_from_unprocessed_to_rendering(
@@ -1091,13 +1122,13 @@ def test_a_rerendered_recording_moves_from_unprocessed_to_rendering(
     recording_dir = abandon_recording(home, "GVS_2025")
     token = provider.mint()
 
-    assert list_recordings(auth_client, token).json()["unprocessed"] == [{"name": "GVS_2025"}]
+    assert names(list_recordings(auth_client, token).json(), "unprocessed") == ["GVS_2025"]
 
     with job_in_flight(auth_client, home, recording_dir.name):
         data = list_recordings(auth_client, token).json()
 
-    assert data["unprocessed"] == []
-    assert data["rendering"] == [{"name": "GVS_2025"}]
+    assert names(data, "unprocessed") == []
+    assert names(data, "rendering") == ["GVS_2025"]
 
 
 def test_a_completed_recording_can_be_downloaded(
@@ -1107,9 +1138,7 @@ def test_a_completed_recording_can_be_downloaded(
 
     server_list = list_recordings(auth_client, provider.mint()).json()
 
-    response = download_completed(
-        auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"]
-    )
+    response = follow_download(auth_client, entries(server_list, "completed")[0])
 
     assert response.status_code == 200
     assert response.content == b"the rendered lecture"
@@ -1130,7 +1159,7 @@ def test_a_completed_recording_can_be_downloaded(
 def test_a_recording_name_survives_the_round_trip_through_the_url(
     recording: str, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    # the name is percent-encoded on the way out and decoded on the way back in, and
+    # the name is percent-encoded in the link and decoded on the way back in, and
     # SafeRecording runs over it a second time -- a stored name has to be a fixed point of
     # that validator or the listing offers links that 404
     finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, recording)
@@ -1138,11 +1167,9 @@ def test_a_recording_name_survives_the_round_trip_through_the_url(
 
     server_list = list_recordings(auth_client, token).json()
 
-    assert server_list["completed"][0]["name"] == recording
+    assert entries(server_list, "completed")[0]["name"] == recording
 
-    response = download_completed(
-        auth_client, server_list["user"], recording, server_list["completed"][0]["totp"]
-    )
+    response = follow_download(auth_client, entries(server_list, "completed")[0])
 
     assert response.status_code == 200
     assert response.content == b"video"
@@ -1161,9 +1188,8 @@ def test_a_decomposed_name_downloads_the_composed_recording(
 
     server_list = list_recordings(auth_client, provider.mint()).json()
 
-    response = download_completed(
-        auth_client, server_list["user"], "U\u0308bung_2025", server_list["completed"][0]["totp"]
-    )
+    user_digest, _, totp = download_parts(entries(server_list, "completed")[0])
+    response = download_completed(auth_client, user_digest, "U\u0308bung_2025", totp)
 
     assert response.status_code == 200
     assert response.content == b"video"
@@ -1180,9 +1206,8 @@ def test_a_user_directory_that_is_not_a_digest_is_refused(
 
     # the segment is joined onto destdir, so anything but a lowercase hex digest has to be
     # refused before it reaches the filesystem
-    response = download_completed(
-        auth_client, user_digest, "GVS_2025", server_list["completed"][0]["totp"]
-    )
+    _, _, totp = download_parts(entries(server_list, "completed")[0])
+    response = download_completed(auth_client, user_digest, "GVS_2025", totp)
 
     assert response.status_code in (404, 422)
     assert b"video" not in response.content
@@ -1193,7 +1218,7 @@ def test_downloading_is_forbidden_without_authentication(client: TestClient, set
     # an unauthenticated deployment has one shared destdir and nobody to own a recording
     finish_recording(settings.destdir, "GVS_2025")
 
-    response = client.get("/api/recordings/deadbeef/GVS_2025", params={"totp": "0000000000"})
+    response = client.get("/api/downloads/deadbeef/GVS_2025", params={"totp": "0000000000"})
 
     assert response.status_code == 403
     assert b"video" not in response.content
@@ -1201,9 +1226,9 @@ def test_downloading_is_forbidden_without_authentication(client: TestClient, set
 
 # --- download OTPs through the endpoints -----------------------------------
 
-# The properties from core/test_download_totp.py, restated over a real request, because
-# what the download route actually verifies against is a path it assembles from two
-# segments the caller supplies.
+# The properties from core/test_auth_download.py, restated over a real request, because what
+# the download route verifies against is put together from two segments the caller supplies:
+# the digest picks the enclave, whose authority checks the OTP against the recording name.
 
 
 def test_a_totp_is_scoped_to_the_one_recording_it_was_issued_for(
@@ -1214,9 +1239,10 @@ def test_a_totp_is_scoped_to_the_one_recording_it_was_issued_for(
     finish_recording(home, "PSU_2026", b"the other lecture")
 
     server_list = list_recordings(auth_client, provider.mint()).json()
-    by_name = {rec["name"]: rec["totp"] for rec in server_list["completed"]}
+    by_name = {rec["name"]: download_parts(rec) for rec in entries(server_list, "completed")}
+    user_digest, _, gvs_totp = by_name["GVS_2025"]
 
-    response = download_completed(auth_client, server_list["user"], "PSU_2026", by_name["GVS_2025"])
+    response = download_completed(auth_client, user_digest, "PSU_2026", gvs_totp)
 
     assert response.status_code == 401
     assert b"the other lecture" not in response.content
@@ -1230,11 +1256,10 @@ def test_a_totp_does_not_open_another_subjects_recording(
 
     server_list = list_recordings(auth_client, provider.mint(sub="user-a")).json()
 
-    # the user directory is a path segment the caller supplies, so the OTP has to be tied
-    # to the full path rather than to the recording name both of them happen to use
-    response = download_completed(
-        auth_client, digest_of("user-b"), "shared_name", server_list["completed"][0]["totp"]
-    )
+    # the digest is a path segment the caller supplies, so the OTP has to be tied to the
+    # enclave it names rather than to the recording name both of them happen to use
+    _, _, totp = download_parts(entries(server_list, "completed")[0])
+    response = download_completed(auth_client, digest_of("user-b"), "shared_name", totp)
 
     assert response.status_code == 401
     assert b"not yours" not in response.content
@@ -1251,9 +1276,8 @@ def test_a_totp_does_not_open_the_recording_of_another_subject_who_has_listed_th
     server_list = list_recordings(auth_client, provider.mint(sub="user-a")).json()
     list_recordings(auth_client, provider.mint(sub="user-b"))
 
-    response = download_completed(
-        auth_client, digest_of("user-b"), "shared_name", server_list["completed"][0]["totp"]
-    )
+    _, _, totp = download_parts(entries(server_list, "completed")[0])
+    response = download_completed(auth_client, digest_of("user-b"), "shared_name", totp)
 
     assert response.status_code == 401
     assert b"not yours" not in response.content
@@ -1293,9 +1317,8 @@ def test_a_recording_that_was_never_listed_cannot_be_downloaded(
     # only one of them is ever listed, so the other never gets a generator
     server_list = list_recordings(auth_client, provider.mint()).json()
 
-    response = download_completed(
-        auth_client, server_list["user"], "never_listed", server_list["completed"][0]["totp"]
-    )
+    user_digest, _, totp = download_parts(entries(server_list, "completed")[0])
+    response = download_completed(auth_client, user_digest, "never_listed", totp)
 
     assert response.status_code == 401
     assert b"secret lecture" not in response.content
@@ -1307,14 +1330,14 @@ def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     finish_recording(home, "GVS_2025")
 
-    server_list = list_recordings(auth_client, provider.mint()).json()
+    list_recordings(auth_client, provider.mint())
 
     generator = otp_generator_of(auth_client, home, "GVS_2025")
     three_intervals = datetime.timedelta(seconds=3 * generator.interval)
     three_intervals_ago = datetime.datetime.now(datetime.UTC) - three_intervals
     stale = generator.at(three_intervals_ago)
 
-    response = download_completed(auth_client, server_list["user"], "GVS_2025", stale)
+    response = download_completed(auth_client, DEFAULT_SUBJECT_DIGEST, "GVS_2025", stale)
 
     assert response.status_code == 401
     assert b"video" not in response.content
@@ -1328,14 +1351,14 @@ def test_a_totp_from_the_previous_interval_is_accepted_by_the_endpoint(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     finish_recording(home, "GVS_2025")
 
-    server_list = list_recordings(auth_client, provider.mint()).json()
+    list_recordings(auth_client, provider.mint())
 
     generator = otp_generator_of(auth_client, home, "GVS_2025")
     one_interval = datetime.timedelta(seconds=generator.interval)
     one_interval_ago = datetime.datetime.now(datetime.UTC) - one_interval
     previous = generator.at(one_interval_ago)
 
-    response = download_completed(auth_client, server_list["user"], "GVS_2025", previous)
+    response = download_completed(auth_client, DEFAULT_SUBJECT_DIGEST, "GVS_2025", previous)
 
     assert response.status_code == 200
 
@@ -1374,7 +1397,7 @@ def test_a_purge_deletes_the_whole_recording(
 
     response = purge(auth_client, provider.mint(), "GVS_2025")
 
-    assert response.status_code == 200
+    assert response.status_code == 204
     assert not recording_dir.exists()
 
 
@@ -1390,7 +1413,7 @@ def test_a_purge_leaves_everything_else_alone(
     rendered_recording(tmp_path, "GVS_2025")
 
     before = snapshot(tmp_path)
-    assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 200
+    assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 204
 
     expected = {
         k: v for k, v in before.items() if not k.startswith(f"{DEFAULT_SUBJECT_DIGEST}/GVS_2025/")
@@ -1404,67 +1427,25 @@ def test_a_purged_recording_leaves_the_listing(
     rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
     token = provider.mint()
 
-    assert [r["name"] for r in list_recordings(auth_client, token).json()["completed"]] == [
-        "GVS_2025"
-    ]
-    assert purge(auth_client, token, "GVS_2025").status_code == 200
+    assert names(list_recordings(auth_client, token).json(), "completed") == ["GVS_2025"]
+    assert purge(auth_client, token, "GVS_2025").status_code == 204
 
-    data = list_recordings(auth_client, token).json()
-    assert data["completed"] == [] and data["rendering"] == [] and data["unprocessed"] == []
+    assert list_recordings(auth_client, token).json() == []
 
 
-def test_a_purge_answers_with_the_listing_as_it_is_now(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    # the frontend puts this straight into its cache instead of asking for the listing again,
-    # so it has to be the whole listing, in the same shape, without the purged recording
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    rendered_recording(home, "GVS_2025")
-    rendered_recording(home, "PSU_2026")
-    abandon_recording(home, "FAILED_2025")
-    token = provider.mint()
-
-    data = purge(auth_client, token, "GVS_2025").json()
-
-    assert data["user"] == DEFAULT_SUBJECT_DIGEST
-    assert [r["name"] for r in data["completed"]] == ["PSU_2026"]
-    assert data["rendering"] == []
-    assert data["unprocessed"] == [{"name": "FAILED_2025"}]
-    assert data == list_recordings(auth_client, token).json() | {"completed": ANY}
-
-
-def test_the_download_links_in_a_purges_answer_work(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
+def test_a_purge_answers_with_nothing(auth_client: TestClient, provider: Provider, tmp_path: Path):
+    # the frontend drops the card from its copy of the listing, and the next poll agrees
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "GVS_2025")
     rendered_recording(home, "PSU_2026")
 
-    data = purge(auth_client, provider.mint(), "GVS_2025").json()
-    response = download_completed(
-        auth_client, data["user"], "PSU_2026", data["completed"][0]["totp"]
-    )
+    response = purge(auth_client, provider.mint(), "GVS_2025")
 
-    assert response.status_code == 200
-    assert response.content == b"the rendered lecture"
+    assert response.status_code == 204
+    assert response.content == b""
 
 
-def test_a_purge_that_empties_the_home_answers_with_an_empty_listing(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
-
-    data = purge(auth_client, provider.mint(), "GVS_2025").json()
-
-    assert data == {
-        "user": DEFAULT_SUBJECT_DIGEST,
-        "completed": [],
-        "rendering": [],
-        "unprocessed": [],
-    }
-
-
-def test_a_refused_purge_answers_with_the_reason_rather_than_a_listing(
+def test_a_refused_purge_answers_with_the_reason(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     # the frontend rolls its optimistic removal back on this, and shows the detail
@@ -1486,14 +1467,12 @@ def test_a_purged_recording_takes_its_download_otp_with_it(
     token = provider.mint()
     server_list = list_recordings(auth_client, token).json()
 
-    assert purge(auth_client, token, "GVS_2025").status_code == 200
+    assert purge(auth_client, token, "GVS_2025").status_code == 204
 
     # a lecture recorded again under the same name must not be downloadable with a link
     # that was handed out for the one that was purged
     rendered_recording(home, "GVS_2025")
-    response = download_completed(
-        auth_client, server_list["user"], "GVS_2025", server_list["completed"][0]["totp"]
-    )
+    response = follow_download(auth_client, entries(server_list, "completed")[0])
 
     assert response.status_code == 401
 
@@ -1505,7 +1484,7 @@ def test_an_unprocessed_recording_can_be_purged(
     recording_dir = abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
     (recording_dir / "presentation.part.webm").write_bytes(b"half")
 
-    assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 200
+    assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 204
     assert not recording_dir.exists()
 
 
@@ -1516,7 +1495,7 @@ def test_a_decomposed_name_purges_the_composed_recording(
     # lecturer saw rather than 404ing on a macOS client
     recording_dir = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "\u00dcbung_2025")
 
-    assert purge(auth_client, provider.mint(), "U\u0308bung_2025").status_code == 200
+    assert purge(auth_client, provider.mint(), "U\u0308bung_2025").status_code == 204
     assert not recording_dir.exists()
 
 
@@ -1527,7 +1506,7 @@ def test_a_purge_is_logged_with_the_user_who_asked(
     rendered_recording(tmp_path / digest_of("user-a"), "GVS_2025")
 
     with caplog.at_level("INFO", logger="ise_record"):
-        assert purge(auth_client, provider.mint(sub="user-a"), "GVS_2025").status_code == 200
+        assert purge(auth_client, provider.mint(sub="user-a"), "GVS_2025").status_code == 204
 
     assert any("user-a" in r.getMessage() and "GVS_2025" in r.getMessage() for r in caplog.records)
 
@@ -1672,35 +1651,32 @@ def test_a_failing_filesystem_is_reported_without_details(
 # --- what the job endpoint answers with ---------------------------------------
 
 
-def test_a_scheduled_job_answers_with_the_listing_that_shows_it_rendering(
+def test_a_scheduled_job_answers_with_the_recording_now_rendering(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    # the frontend will put this straight into its cache in place of its optimistic guess,
-    # so a listing taken before the job was registered would turn the card back
+    # the frontend puts this straight into its copy of the listing in place of the card it had
     mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    abandon_recording(home, "foo")
-    finish_recording(home, "DONE_2025")
+    abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
 
-    data = schedule(auth_client, provider.mint()).json()
+    response = schedule(auth_client, provider.mint())
 
-    assert data["user"] == DEFAULT_SUBJECT_DIGEST
-    assert data["rendering"] == [{"name": "foo"}]
-    assert data["unprocessed"] == []
-    assert [r["name"] for r in data["completed"]] == ["DONE_2025"]
+    assert response.status_code == 202
+    assert response.json() == {"state": "rendering", "name": "foo"}
 
 
-def test_a_job_in_an_open_deployment_answers_with_nothing(
+def test_a_job_in_an_open_deployment_answers_like_anywhere_else(
     mocker: MockerFixture, client: TestClient, settings: Settings
 ):
-    # there is no listing to answer with: the endpoint for it is refused there
+    # the answer says nothing the caller did not know: the name is theirs, and that it is
+    # rendering is what the 202 means. So there is no reason to withhold it where the listing
+    # is refused.
     mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
     abandon_recording(settings.destdir, "foo")
 
-    response = client.post("/api/jobs", json={"recording": "foo"})
+    response = client.post(render_url("foo"), json={})
 
     assert response.status_code == 202
-    assert response.json() is None
+    assert response.json() == {"state": "rendering", "name": "foo"}
 
 
 def test_a_duplicate_job_is_refused_without_disturbing_the_first(
@@ -1719,84 +1695,6 @@ def test_a_duplicate_job_is_refused_without_disturbing_the_first(
         mock_postprocess.assert_not_called()
         # still the first job's: the refusal does not let go of a claim it never had
         assert activity_of(auth_client, home, "foo") == RecordingActivity.RENDERING
-
-
-def test_a_listing_that_fails_does_not_cost_the_job(
-    mocker: MockerFixture, auth_settings: Settings, provider: Provider, tmp_path: Path
-):
-    # the job was accepted the moment it was registered; the listing is only a courtesy, so a
-    # failure there answers without one rather than refusing a job that would then never run
-    seen_while_running: list[RecordingActivity] = []
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-
-    mocker.patch("ise_record.server.user_recordings_list", side_effect=FileNotFoundError("gone"))
-    abandon_recording(home, "foo")
-
-    with TestClient(create_app(auth_settings)) as auth_client:
-
-        async def fake_postprocess(_recording_path: Path) -> Result:
-            seen_while_running.append(activity_of(auth_client, home, "foo"))
-            return Result(output_file=None, reason=ResultReason.SUCCESS)
-
-        mocker.patch(
-            "ise_record.glue.jobs.postprocess_recording",
-            autospec=True,
-            side_effect=fake_postprocess,
-        )
-
-        response = schedule(auth_client, provider.mint())
-        claimed_after = activity_of(auth_client, home, "foo")
-
-    assert response.status_code == 202
-    # no body to mistake for a listing: the frontend fetches one itself
-    assert response.json() is None
-    assert seen_while_running == [RecordingActivity.RENDERING]
-    # and released once it is done, like any other job
-    assert claimed_after == RecordingActivity.NONE
-
-
-def test_a_listing_that_fails_is_logged(
-    mocker: MockerFixture,
-    auth_client: TestClient,
-    provider: Provider,
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-):
-    # the response no longer says what went wrong, so the log has to
-    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
-    mocker.patch("ise_record.server.user_recordings_list", side_effect=FileNotFoundError("gone"))
-    abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
-
-    with caplog.at_level("ERROR", logger="ise_record"):
-        schedule(auth_client, provider.mint())
-
-    assert any(
-        r.exc_info is not None and r.exc_info[0] is FileNotFoundError for r in caplog.records
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_cancelled_listing_is_not_mistaken_for_a_failed_one(
-    mocker: MockerFixture, auth_settings: Settings, tmp_path: Path
-):
-    # Cancellation is how the server shuts a request down. Swallowing it like a failure would
-    # carry on with a request that was told to stop, and keep the server from shutting down.
-    # Called directly, because a TestClient has no way to cancel a request halfway through.
-    mocker.patch("ise_record.server.user_recordings_list", side_effect=asyncio.CancelledError())
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    abandon_recording(home, "foo")
-    enclave = Enclave(DEFAULT_SUBJECT_DIGEST, anyio.Path(home))
-    request = Request(scope={"type": "http", "app": create_app(auth_settings)})
-
-    with pytest.raises(asyncio.CancelledError):
-        await schedule_job_endpoint(
-            PostProcessingJob(recording="foo"),
-            BackgroundTasks(),
-            ExitStack(),
-            auth_settings,
-            enclave,
-            await get_jobs_semaphore(request),
-        )
 
 
 # --- requests that arrive while another one is in flight -----------------------
@@ -1853,7 +1751,7 @@ def test_a_job_for_a_recording_being_purged_is_refused(
 
     mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_job_arriving)
 
-    assert purge(auth_client, token, "foo").status_code == 200
+    assert purge(auth_client, token, "foo").status_code == 204
 
     assert during[0].status_code == 409
     mock_postprocess.assert_not_called()
@@ -1879,7 +1777,7 @@ def test_a_chunk_for_a_recording_being_purged_is_refused(
         "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_chunk_arriving
     )
 
-    assert purge(auth_client, token, "foo").status_code == 200
+    assert purge(auth_client, token, "foo").status_code == 204
 
     assert during[0].status_code == 409
     assert not (home / "foo").exists()
@@ -1904,7 +1802,7 @@ def test_a_second_purge_of_the_same_recording_is_refused_rather_than_failing(
         "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_another_purge_arriving
     )
 
-    assert purge(auth_client, token, "GVS_2025").status_code == 200
+    assert purge(auth_client, token, "GVS_2025").status_code == 204
 
     assert during[0].status_code == 409
 
@@ -1921,7 +1819,7 @@ def test_a_job_arriving_while_the_purge_classifies_is_refused(
     token = provider.mint()
     during = arriving_during(mocker, "is_dir", home / "foo", lambda: schedule(auth_client, token))
 
-    assert purge(auth_client, token, "foo").status_code == 200
+    assert purge(auth_client, token, "foo").status_code == 204
 
     assert during[0].status_code == 409
     mock_postprocess.assert_not_called()
@@ -1972,11 +1870,11 @@ def test_the_listing_leaves_out_a_recording_while_it_is_purged(
         "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_listing_arriving
     )
 
-    assert purge(auth_client, token, "GVS_2025").status_code == 200
+    assert purge(auth_client, token, "GVS_2025").status_code == 204
 
     data = during[0].json()
-    assert [r["name"] for r in data["completed"]] == ["PSU_2026"]
-    assert data["rendering"] == [] and data["unprocessed"] == []
+    assert names(data, "completed") == ["PSU_2026"]
+    assert names(data, "rendering") == [] and names(data, "unprocessed") == []
 
 
 def test_another_recording_still_takes_a_job_while_one_is_purged(
@@ -2003,7 +1901,7 @@ def test_another_recording_still_takes_a_job_while_one_is_purged(
         side_effect=rmtree_with_a_job_for_another_arriving,
     )
 
-    assert purge(auth_client, token, "GVS_2025").status_code == 200
+    assert purge(auth_client, token, "GVS_2025").status_code == 204
 
     assert during[0].status_code == 202
 
@@ -2016,16 +1914,16 @@ def test_the_name_takes_uploads_again_once_the_purge_is_done(
     rendered_recording(home, "foo")
     token = provider.mint()
 
-    assert purge(auth_client, token, "foo").status_code == 200
-    assert upload(auth_client, token).status_code == 201
+    assert purge(auth_client, token, "foo").status_code == 204
+    assert upload(auth_client, token).status_code == 204
     assert activity_of(auth_client, home, "foo") == RecordingActivity.NONE
 
 
-def test_a_duplicate_job_arriving_while_the_first_is_answered_starts_no_second_render(
+def test_a_duplicate_job_arriving_while_the_first_looks_at_the_recording_starts_no_second_render(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    # the first job claims the recording before its listing is built, so a retry that comes in
-    # while that listing is being scanned finds it claimed
+    # the first job claims the recording before it looks at the disk, so a retry that comes in
+    # while it looks finds the recording claimed
     mock_postprocess = mocker.patch(
         "ise_record.glue.jobs.postprocess_recording",
         autospec=True,
@@ -2034,9 +1932,9 @@ def test_a_duplicate_job_arriving_while_the_first_is_answered_starts_no_second_r
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     abandon_recording(home, "foo")
     token = provider.mint()
-    # into the first listing's scan of the home directory; the duplicate builds a listing of
-    # its own, and that one goes ahead undisturbed
-    during = arriving_during(mocker, "iterdir", home, lambda: schedule(auth_client, token))
+    # into the first job's look at whether the recording is a directory; the duplicate looks
+    # too, and that one goes ahead undisturbed
+    during = arriving_during(mocker, "is_dir", home / "foo", lambda: schedule(auth_client, token))
 
     assert schedule(auth_client, token).status_code == 202
 
@@ -2044,23 +1942,26 @@ def test_a_duplicate_job_arriving_while_the_first_is_answered_starts_no_second_r
     mock_postprocess.assert_called_once()
 
 
-def test_a_purge_arriving_while_a_job_is_answered_is_refused(
-    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    mocker.patch(
-        "ise_record.glue.jobs.postprocess_recording",
-        autospec=True,
-        return_value=Result(output_file=None, reason=ResultReason.SUCCESS),
+def test_cors_preflight_allows_uploading(tmp_path: Path):
+    # without PUT here the browser refuses every chunk upload before it is sent, whenever the
+    # frontend is served from another origin than the backend
+    cors_settings = Settings(
+        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
     )
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    rendered_recording(home, "foo")
-    token = provider.mint()
-    during = arriving_during(mocker, "iterdir", home, lambda: purge(auth_client, token, "foo"))
 
-    assert schedule(auth_client, token).status_code == 202
+    with TestClient(create_app(cors_settings)) as cors_client:
+        response = cors_client.options(
+            chunk_url("GVS_2025", "stream", 0),
+            headers={
+                "Origin": "http://allowed.example.com",
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "Authorization, Content-Type",
+            },
+        )
 
-    assert during[0].status_code == 409
-    assert (home / "foo" / "stream").is_dir()
+    assert response.status_code == 200
+    assert "PUT" in response.headers["Access-Control-Allow-Methods"]
+    assert "content-type" in response.headers["Access-Control-Allow-Headers"].lower()
 
 
 def test_cors_preflight_allows_purging(tmp_path: Path):

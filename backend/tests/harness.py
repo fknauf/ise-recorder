@@ -30,7 +30,7 @@ from pathlib import Path
 import threading
 import time
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit
 
 import anyio
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -189,15 +189,24 @@ class Provider:
 # --- driving the endpoints -------------------------------------------------
 
 
-def upload(client: TestClient, token: str | None, index: int = 0):
-    """Upload one chunk of the recording "foo", with or without a token."""
-    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    return client.post(
-        "/api/chunks",
-        headers=headers,
-        data={"recording": "foo", "track": "stream", "index": str(index)},
-        files={"chunk": b"payload"},
+def chunk_url(recording: str, track: str = "stream", index: int | str = 0) -> str:
+    """Where a chunk is uploaded to, with the names percent-encoded the way the frontend does."""
+    return (
+        f"/api/recordings/{quote(recording, safe='')}"
+        f"/tracks/{quote(track, safe='')}/chunks/{quote(str(index), safe='')}"
     )
+
+
+def upload(
+    client: TestClient,
+    token: str | None,
+    index: int = 0,
+    recording: str = "foo",
+    content: bytes = b"payload",
+):
+    """Upload one chunk of a recording ("foo" unless told otherwise), with or without a token."""
+    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
+    return client.put(chunk_url(recording, "stream", index), headers=headers, content=content)
 
 
 def upload_chunk_path(base_dir: Path, user_segment: str, index: int = 0) -> Path:
@@ -244,9 +253,36 @@ def abandon_recording(user_home: Path | anyio.Path, recording: str, minutes: flo
 
 
 def list_recordings(client: TestClient, token: str | None):
-    """Ask for the caller's completed and rendering recordings, with or without a token."""
+    """Ask for the caller's recordings, with or without a token."""
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return client.get("/api/recordings", headers=headers)
+
+
+def entries(listing: list[dict[str, Any]], state: str) -> list[dict[str, Any]]:
+    """The recordings of a listing in one state, in the order the server sent them."""
+    return [entry for entry in listing if entry["state"] == state]
+
+
+def names(listing: list[dict[str, Any]], state: str) -> list[str]:
+    """The names of a listing's recordings in one state, in the order the server sent them."""
+    return [entry["name"] for entry in entries(listing, state)]
+
+
+def download_parts(entry: dict[str, Any]) -> tuple[str, str, str]:
+    """The user digest, recording name and OTP a listed download link carries, decoded."""
+    link = urlsplit(entry["downloadUrl"])
+    _downloads, user_digest, recording = (unquote(part) for part in link.path.split("/"))
+    return user_digest, recording, parse_qs(link.query)["totp"][0]
+
+
+def follow_download(client: TestClient, entry: dict[str, Any]):
+    """
+    Follow a listed recording's download link, as the browser does when the lecturer clicks it.
+
+    The link is relative to the API root, and the frontend resolves it against the API base it
+    already knows; so does this.
+    """
+    return client.get(urljoin("/api/", entry["downloadUrl"]))
 
 
 def app_of(client: TestClient) -> FastAPI:
@@ -313,9 +349,9 @@ def purge(client: TestClient, token: str | None, recording: str):
 
 
 def download_completed(client: TestClient, user_digest: str, recording: str, totp: str | None):
-    """Follow a download link, as the browser would when the lecturer clicks one."""
+    """Follow a download link put together by hand, for the links no listing hands out."""
     params = {"totp": totp} if totp is not None else None
-    return client.get(f"/api/recordings/{user_digest}/{quote(recording)}", params=params)
+    return client.get(f"/api/downloads/{user_digest}/{quote(recording, safe='')}", params=params)
 
 
 # --- the directory scheme, restated ----------------------------------------

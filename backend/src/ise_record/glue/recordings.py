@@ -8,42 +8,64 @@ from collections.abc import Callable
 import logging
 import shutil
 from typing import NoReturn
+from urllib.parse import quote
 
 from fastapi import HTTPException, status
 
 from ise_record.core.auth import UserInfo
 from ise_record.core.recordings import (
+    RecordingActivity,
     RecordingDiskState,
     RecordingInfo,
 )
 from ise_record.glue.enclave import Enclave
 from ise_record.glue.models import (
-    DisplayableRecording,
     DownloadableRecording,
-    RecordingsList,
+    RecordingResponse,
     SafeRecording,
+    UnfinishedRecording,
 )
 
 logger = logging.getLogger(__name__)
 
 
-async def user_recordings_list(enclave: Enclave) -> RecordingsList:
+def _build_recording_response(info: RecordingInfo, enclave: Enclave) -> RecordingResponse | None:
+    if enclave.user_digest() is None:
+        return None
+
+    if info.activity == RecordingActivity.RENDERING:
+        return UnfinishedRecording.model_construct(state="rendering", name=info.name)
+
+    if (
+        info.disk_state == RecordingDiskState.FINISHED
+        and info.activity != RecordingActivity.PURGING
+    ):
+        totp = enclave.generate_totp(info.name)
+        download_url = f"downloads/{enclave.user_digest()}/{quote(info.name, safe='')}?totp={totp}"
+
+        return DownloadableRecording.model_construct(
+            state="completed",
+            name=info.name,
+            size=info.size,
+            download_url=download_url,
+        )
+
+    if (
+        info.disk_state == RecordingDiskState.UNPROCESSED
+        and info.activity == RecordingActivity.NONE
+        and not info.streaming
+    ):
+        return UnfinishedRecording.model_construct(state="unprocessed", name=info.name)
+
+    return None
+
+
+async def user_recordings_list(enclave: Enclave) -> list[RecordingResponse]:
     """List of a user's recordings. Only available when auth is configured."""
+    infos = await enclave.classify_all()
+    infos.sort(key=lambda info: info.name)
 
-    def downloadable(rec: RecordingInfo) -> DownloadableRecording:
-        assert rec.size is not None
-
-        totp = enclave.generate_totp(rec.path.name)
-        return DownloadableRecording(name=rec.path.name, size=rec.size, totp=totp)
-
-    recordings = await enclave.recording_classes()
-
-    return RecordingsList.model_construct(
-        user=enclave.user_digest(),
-        completed=[downloadable(rec) for rec in recordings.finished],
-        rendering=[DisplayableRecording(name=rec.path.name) for rec in recordings.rendering],
-        unprocessed=[DisplayableRecording(name=rec.path.name) for rec in recordings.unprocessed],
-    )
+    return [rsp for info in infos if (rsp := _build_recording_response(info, enclave)) is not None]
 
 
 async def purge_recording(recording: SafeRecording, enclave: Enclave, user_info: UserInfo | None):

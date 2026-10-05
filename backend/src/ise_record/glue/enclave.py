@@ -19,7 +19,6 @@ from ise_record.core.recordings import (
     classify_disk_state,
     RecordingActivity,
     RecordingBusy,
-    RecordingClasses,
     RecordingDiskState,
     RecordingInfo,
     RecordingTracker,
@@ -110,9 +109,13 @@ class Enclave:
         """
         return await self._tracker.classify(self.recording_dir(recording))
 
-    async def recording_classes(self) -> RecordingClasses:
+    async def classify_all(self) -> list[RecordingInfo]:
         """Classify all recordings in this enclave for display/download in the frontend"""
-        return await self._tracker.recording_classes(self._home_dir)
+        return [
+            await self._tracker.classify(rec_dir)
+            async for rec_dir in self._home_dir.iterdir()
+            if await rec_dir.is_dir(follow_symlinks=False)
+        ]
 
     def generate_totp(self, recording: str) -> str:
         """Generate a TOTP for the download of a finished recording"""

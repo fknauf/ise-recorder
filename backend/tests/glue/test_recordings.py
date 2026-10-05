@@ -2,10 +2,11 @@
 The glue between the enclave and the endpoints: turning an enclave's recordings into the
 listing's response, and purging a recording once it is safe to.
 
-Which list a recording lands in, and what the claims allow alongside each other, is
-core.recordings' business, in tests/core/test_recordings.py; these pin what the glue does with
-it. What the endpoints make of it -- status codes on the wire, authentication -- lives in
-test_server.py.
+What the claims allow alongside each other, and how a recording's disk state, activity and
+liveness are found out, is core.recordings' business, in tests/core/test_recordings.py. The
+listing projects the three onto the one state the frontend shows for each recording, and that
+projection is pinned here. What the endpoints make of it -- status codes on the wire,
+authentication -- lives in test_server.py.
 """
 
 # pylint: disable=line-too-long
@@ -14,6 +15,7 @@ test_server.py.
 
 from pathlib import Path
 import shutil
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import anyio
 from fastapi import HTTPException
@@ -23,18 +25,18 @@ from pytest_mock import MockerFixture
 from ise_record.core.auth import UserInfo
 from ise_record.core.recordings import (
     RecordingActivity,
-    RecordingClasses,
     RecordingDiskState,
     RecordingInfo,
 )
 from ise_record.glue.enclave import Enclave
-from ise_record.glue.models import DisplayableRecording, RecordingsList
+from ise_record.glue.models import DownloadableRecording, RecordingResponse
 from ise_record.glue.recordings import purge_recording, user_recordings_list
 
 from ..harness import (
     abandon_recording,
     digest_of,
     finish_recording,
+    MINUTE,
     write_chunks,
 )
 
@@ -54,11 +56,25 @@ def enclave(home: Path) -> Enclave:
     return Enclave(DIGEST, anyio.Path(home))
 
 
+def states(listing: list[RecordingResponse]) -> list[tuple[str, str]]:
+    return [(r.state, r.name) for r in listing]
+
+
+def completed(listing: list[RecordingResponse]) -> list[DownloadableRecording]:
+    return [r for r in listing if isinstance(r, DownloadableRecording)]
+
+
+def link_parts(download_url: str) -> tuple[list[str], str]:
+    """The path segments of a download link, decoded, and the OTP it carries."""
+    link = urlsplit(download_url)
+    return [unquote(segment) for segment in link.path.split("/")], parse_qs(link.query)["totp"][0]
+
+
 # --- the listing's response ------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_the_listing_names_the_user_and_every_recording(enclave: Enclave, home: Path):
+async def test_every_recording_is_listed_with_its_state(enclave: Enclave, home: Path):
     finish_recording(home, "DONE_2025", b"twelve bytes")
     abandon_recording(home, "FAILED_2025")
     abandon_recording(home, "BUSY_2025")
@@ -66,14 +82,34 @@ async def test_the_listing_names_the_user_and_every_recording(enclave: Enclave, 
     with enclave.claim_rendering("BUSY_2025"):
         listing = await user_recordings_list(enclave)
 
-    assert isinstance(listing, RecordingsList)
-    # the user's digest is what the download links have to name -- not the display name,
-    # and not the path on the server
-    assert listing.user == DIGEST
-    assert [(r.name, r.size) for r in listing.completed] == [("DONE_2025", 12)]
-    # only the name: nothing to size or download yet, and the Rerender button needs no more
-    assert listing.rendering == [DisplayableRecording(name="BUSY_2025")]
-    assert listing.unprocessed == [DisplayableRecording(name="FAILED_2025")]
+    assert states(listing) == [
+        ("rendering", "BUSY_2025"),
+        ("completed", "DONE_2025"),
+        ("unprocessed", "FAILED_2025"),
+    ]
+    assert [r.size for r in completed(listing)] == [12]
+    # only the name for the others: nothing to size or download yet, and the Rerender button
+    # needs no more
+    assert {
+        r.name: set(r.model_dump()) for r in listing if not isinstance(r, DownloadableRecording)
+    } == {"BUSY_2025": {"state", "name"}, "FAILED_2025": {"state", "name"}}
+
+
+@pytest.mark.asyncio
+async def test_an_empty_home_directory_lists_nothing(enclave: Enclave):
+    assert await user_recordings_list(enclave) == []
+
+
+@pytest.mark.asyncio
+async def test_the_listing_is_in_name_order(enclave: Enclave, home: Path):
+    # the frontend renders the cards as they come, so without the sort they would appear in
+    # whatever order the filesystem hands them out
+    for name in ["PSU_2026", "ABC_2026", "XYZ_2024", "GVS_2025", "MMM_2025"]:
+        finish_recording(home, name)
+
+    listing = await user_recordings_list(enclave)
+
+    assert [r.name for r in listing] == ["ABC_2026", "GVS_2025", "MMM_2025", "PSU_2026", "XYZ_2024"]
 
 
 @pytest.mark.asyncio
@@ -85,21 +121,125 @@ async def test_the_listing_only_counts_the_enclaves_own_jobs(home: Path, tmp_pat
     with elsewhere.claim_rendering("FAILED_2025"):
         listing = await user_recordings_list(Enclave(DIGEST, anyio.Path(home)))
 
-    assert listing.rendering == []
-    assert listing.unprocessed == [DisplayableRecording(name="FAILED_2025")]
+    assert states(listing) == [("unprocessed", "FAILED_2025")]
+
+
+# --- which state a recording is shown in --------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_every_finished_recording_gets_an_otp_for_itself(enclave: Enclave, home: Path):
+async def test_a_rerender_is_listed_as_rendering_rather_than_completed(
+    enclave: Enclave, home: Path
+):
+    # the previous output stays on disk until the new one replaces it. Listed as completed,
+    # it would be offered for download and for purging while ffmpeg works on it.
+    abandon_recording(home, "GVS_2025")
+    finish_recording(home, "GVS_2025")
+
+    with enclave.claim_rendering("GVS_2025"):
+        listing = await user_recordings_list(enclave)
+
+    assert states(listing) == [("rendering", "GVS_2025")]
+
+
+@pytest.mark.asyncio
+async def test_a_recording_being_purged_is_left_out(
+    mocker: MockerFixture, enclave: Enclave, home: Path
+):
+    # the frontend removed its card the moment the purge was confirmed; listing it again
+    # would bring the card back until the purge is done
+    finish_recording(home, "GONE_2025")
+    abandon_recording(home, "FAILED_2025")
+    finish_recording(home, "KEPT_2025")
+    issued = mocker.spy(enclave, "generate_totp")
+
+    with enclave.claim_purging("GONE_2025"), enclave.claim_purging("FAILED_2025"):
+        listing = await user_recordings_list(enclave)
+
+    assert states(listing) == [("completed", "KEPT_2025")]
+    # and no OTP is handed out for a file that is on its way out
+    assert [call.args for call in issued.call_args_list] == [("KEPT_2025",)]
+
+
+@pytest.mark.asyncio
+async def test_a_recording_that_is_still_streamed_is_not_offered_for_rerendering(
+    enclave: Enclave, home: Path
+):
+    # Rerender and Purge on a lecture that is still going would be the wrong buttons
+    write_chunks(home / "LIVE_2026", [5])
+
+    assert await user_recordings_list(enclave) == []
+
+
+@pytest.mark.asyncio
+async def test_a_recording_receiving_a_chunk_right_now_is_not_offered_for_rerendering(
+    enclave: Enclave, home: Path
+):
+    abandon_recording(home, "GVS_2025")
+
+    with enclave.claim_upload("GVS_2025"):
+        listing = await user_recordings_list(enclave)
+
+    assert listing == []
+
+
+@pytest.mark.asyncio
+async def test_recordings_the_frontend_has_no_card_for_are_left_out(
+    enclave: Enclave, home: Path, tmp_path: Path
+):
+    write_chunks(home / "NO_MAIN_2025", [30 * MINUTE], track="overlay")
+    (home / "notes.txt").write_text("not a recording")
+    finish_recording(tmp_path, "victim")
+    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+
+    assert await user_recordings_list(enclave) == []
+
+
+@pytest.mark.asyncio
+async def test_an_open_deployment_lists_nothing(home: Path):
+    # there is nobody to hand a download link to, and a link naming no user would lead nowhere;
+    # the endpoint refuses the listing there anyway
+    finish_recording(home, "DONE_2025")
+    abandon_recording(home, "FAILED_2025")
+
+    assert await user_recordings_list(Enclave(None, anyio.Path(home))) == []
+
+
+# --- the download links -------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_every_completed_recording_gets_a_link_with_an_otp_for_itself(
+    enclave: Enclave, home: Path
+):
     finish_recording(home, "GVS_2025")
     finish_recording(home, "PSU_2026")
 
-    listing = await user_recordings_list(enclave)
+    links = [link_parts(r.download_url) for r in completed(await user_recordings_list(enclave))]
 
-    # the download route checks the OTP against the recording named in the link
-    assert enclave.verify_totp(listing.completed[0].totp, "GVS_2025")
-    assert enclave.verify_totp(listing.completed[1].totp, "PSU_2026")
-    assert not enclave.verify_totp(listing.completed[0].totp, "PSU_2026")
+    # relative to the API root, so the server need not know where it is reachable; the digest
+    # is how the download route finds the enclave without a token, and the OTP is checked
+    # against the recording named next to it
+    assert [segments for segments, _ in links] == [
+        ["downloads", DIGEST, "GVS_2025"],
+        ["downloads", DIGEST, "PSU_2026"],
+    ]
+    (_, gvs_otp), (_, psu_otp) = links
+    assert enclave.verify_totp(gvs_otp, "GVS_2025")
+    assert enclave.verify_totp(psu_otp, "PSU_2026")
+    assert not enclave.verify_totp(gvs_otp, "PSU_2026")
+
+
+@pytest.mark.asyncio
+async def test_a_name_that_is_special_in_a_url_is_encoded_in_the_link(enclave: Enclave, home: Path):
+    # left as it is, the # would cut the link short, and the ? would start the query early
+    finish_recording(home, "Übung #3?_2025")
+
+    (recording,) = completed(await user_recordings_list(enclave))
+
+    segments, otp = link_parts(recording.download_url)
+    assert segments == ["downloads", DIGEST, "Übung #3?_2025"]
+    assert enclave.verify_totp(otp, "Übung #3?_2025")
 
 
 @pytest.mark.asyncio
@@ -109,10 +249,11 @@ async def test_the_otps_come_from_the_enclaves_own_authority(enclave: Enclave, h
     finish_recording(home, "GVS_2025")
     elsewhere = Enclave(digest_of("someone-else"), anyio.Path(home))
 
-    listing = await user_recordings_list(enclave)
+    (recording,) = completed(await user_recordings_list(enclave))
 
-    assert enclave.verify_totp(listing.completed[0].totp, "GVS_2025")
-    assert not elsewhere.verify_totp(listing.completed[0].totp, "GVS_2025")
+    _, otp = link_parts(recording.download_url)
+    assert enclave.verify_totp(otp, "GVS_2025")
+    assert not elsewhere.verify_totp(otp, "GVS_2025")
 
 
 @pytest.mark.asyncio
@@ -123,40 +264,21 @@ async def test_the_listing_does_not_go_back_to_the_disk(
     # that another tab purged since -- turning the whole listing into a 500.
     mocker.patch.object(
         enclave,
-        "recording_classes",
-        return_value=RecordingClasses(
-            finished=[
-                RecordingInfo(
-                    path=anyio.Path(home / "PURGED_2025"),
-                    activity=RecordingActivity.NONE,
-                    disk_state=RecordingDiskState.FINISHED,
-                    streaming=False,
-                    size=12345,
-                )
-            ],
-            rendering=[],
-            unprocessed=[],
-        ),
+        "classify_all",
+        return_value=[
+            RecordingInfo(
+                path=anyio.Path(home / "PURGED_2025"),
+                activity=RecordingActivity.NONE,
+                disk_state=RecordingDiskState.FINISHED,
+                streaming=False,
+                size=12345,
+            )
+        ],
     )
 
     listing = await user_recordings_list(enclave)
 
-    assert [(r.name, r.size) for r in listing.completed] == [("PURGED_2025", 12345)]
-
-
-@pytest.mark.asyncio
-async def test_a_recording_being_purged_is_left_out_of_the_listing(
-    mocker: MockerFixture, enclave: Enclave, home: Path
-):
-    finish_recording(home, "GONE_2025")
-    issued = mocker.spy(enclave, "generate_totp")
-
-    with enclave.claim_purging("GONE_2025"):
-        listing = await user_recordings_list(enclave)
-
-    assert listing.completed == listing.rendering == listing.unprocessed == []
-    # and no OTP is handed out for a file that is on its way out
-    issued.assert_not_called()
+    assert [(r.name, r.size) for r in completed(listing)] == [("PURGED_2025", 12345)]
 
 
 @pytest.mark.asyncio

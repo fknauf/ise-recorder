@@ -9,8 +9,8 @@ What the server knows about a recording, along three separate lines:
 - its liveness: whether it still looks like it is being streamed -- a guess from when its last
   chunk arrived, since nothing tells the server that a lecture has ended.
 
-The listing projects the three onto the lists the frontend shows; the endpoints ask the line
-they care about directly. The endpoints' side of it is in glue/test_recordings.py and
+The listing projects the three onto the state the frontend shows for each recording; the
+endpoints ask the line they care about directly. Both are in glue/test_recordings.py and
 test_server.py.
 """
 
@@ -19,7 +19,7 @@ test_server.py.
 # pylint: disable=redefined-outer-name
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager, ExitStack
+from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 from pathlib import Path
 import shutil
@@ -33,7 +33,6 @@ from ise_record.core.recordings import (
     classify_disk_state,
     RecordingActivity,
     RecordingBusy,
-    RecordingClasses,
     RecordingDiskState,
     RecordingInfo,
     RecordingTracker,
@@ -68,10 +67,6 @@ def disk_state_of(recording_dir: Path) -> RecordingDiskState:
 
 def is_streaming(tracker: RecordingTracker, recording_dir: Path) -> bool:
     return anyio.run(tracker.streaming, anyio.Path(recording_dir))
-
-
-def classes_of(tracker: RecordingTracker, user_home: Path) -> RecordingClasses:
-    return anyio.run(tracker.recording_classes, anyio.Path(user_home))
 
 
 class Clock:  # pylint: disable=too-few-public-methods
@@ -694,116 +689,3 @@ def test_classify_reports_all_three_lines(home: Path):
         streaming=False,
         size=12345,
     )
-
-
-# --- every recording at once, sorted into the lists the frontend shows -------
-
-
-def names(infos: list[RecordingInfo]) -> list[str]:
-    return [r.path.name for r in infos]
-
-
-def test_each_recording_lands_in_the_list_for_its_state(home: Path):
-    finish_recording(home, "DONE_2025")
-    abandon_recording(home, "FAILED_2025")
-    abandon_recording(home, "BUSY_2025")
-    tracker = RecordingTracker()
-
-    with tracker.claim_rendering(recording(home, "BUSY_2025")):
-        classes = classes_of(tracker, home)
-
-    assert names(classes.finished) == ["DONE_2025"]
-    assert names(classes.rendering) == ["BUSY_2025"]
-    assert names(classes.unprocessed) == ["FAILED_2025"]
-
-
-def test_a_finished_recording_keeps_its_size_in_the_list(home: Path):
-    finish_recording(home, "DONE_2025", b"twelve bytes")
-
-    assert [r.size for r in classes_of(RecordingTracker(), home).finished] == [12]
-
-
-def test_an_empty_home_directory_gives_three_empty_lists(home: Path):
-    # every list is looked up whether or not anything landed in it
-    assert classes_of(RecordingTracker(), home) == RecordingClasses([], [], [])
-
-
-def test_a_rerender_is_listed_as_rendering_rather_than_finished(home: Path):
-    # the previous output stays on disk until the new one replaces it. Listed as finished,
-    # it would be offered for download and for purging while ffmpeg works on it.
-    abandon_recording(home, "GVS_2025")
-    finish_recording(home, "GVS_2025")
-    tracker = RecordingTracker()
-
-    with tracker.claim_rendering(recording(home, "GVS_2025")):
-        classes = classes_of(tracker, home)
-
-    assert names(classes.rendering) == ["GVS_2025"]
-    assert classes.finished == []
-
-
-def test_a_recording_being_purged_is_left_out(home: Path):
-    # the frontend removed its card the moment the purge was confirmed; listing it again,
-    # under any heading, would bring the card back until the purge is done
-    finish_recording(home, "DONE_2025")
-    finish_recording(home, "KEPT_2025")
-    abandon_recording(home, "FAILED_2025")
-    tracker = RecordingTracker()
-
-    with (
-        tracker.claim_purging(recording(home, "DONE_2025")),
-        tracker.claim_purging(recording(home, "FAILED_2025")),
-    ):
-        classes = classes_of(tracker, home)
-
-    assert names(classes.finished) == ["KEPT_2025"]
-    assert classes.rendering == classes.unprocessed == []
-
-
-def test_a_recording_that_is_still_streamed_is_not_offered_for_rerendering(home: Path):
-    # Rerender and Purge on a lecture that is still going would be the wrong buttons
-    write_chunks(home / "LIVE_2026", [5])
-
-    assert classes_of(RecordingTracker(), home) == RecordingClasses([], [], [])
-
-
-def test_a_recording_receiving_a_chunk_right_now_is_not_offered_for_rerendering(home: Path):
-    abandon_recording(home, "GVS_2025")
-    tracker = RecordingTracker()
-
-    with tracker.claim_uploading(recording(home, "GVS_2025")):
-        classes = classes_of(tracker, home)
-
-    assert classes.unprocessed == []
-
-
-def test_recordings_the_frontend_has_no_card_for_are_left_out(home: Path, tmp_path: Path):
-    write_chunks(home / "NO_MAIN_2025", [30 * MINUTE], track="overlay")
-    (home / "notes.txt").write_text("not a recording")
-    finish_recording(tmp_path, "victim")
-    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
-
-    assert classes_of(RecordingTracker(), home) == RecordingClasses([], [], [])
-
-
-def test_each_list_keeps_the_name_order(home: Path):
-    # the listing renders them as they come, so without the sort the cards would appear in
-    # whatever order the filesystem hands them out
-    unsorted = ["PSU_2026", "ABC_2026", "XYZ_2024", "GVS_2025", "MMM_2025"]
-    in_order = ["ABC_2026", "GVS_2025", "MMM_2025", "PSU_2026", "XYZ_2024"]
-    tracker = RecordingTracker()
-
-    for name in unsorted:
-        finish_recording(home, f"DONE_{name}")
-        abandon_recording(home, f"FAILED_{name}")
-        abandon_recording(home, f"BUSY_{name}")
-
-    with ExitStack() as jobs:
-        for name in unsorted:
-            jobs.enter_context(tracker.claim_rendering(recording(home, f"BUSY_{name}")))
-
-        classes = classes_of(tracker, home)
-
-    assert names(classes.finished) == [f"DONE_{name}" for name in in_order]
-    assert names(classes.rendering) == [f"BUSY_{name}" for name in in_order]
-    assert names(classes.unprocessed) == [f"FAILED_{name}" for name in in_order]

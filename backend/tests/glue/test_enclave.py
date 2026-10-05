@@ -241,13 +241,24 @@ def test_the_disk_state_is_read_from_the_home_directory(enclave: Enclave, tmp_pa
     assert anyio.run(enclave.disk_state, "NEVER_2025") == RecordingDiskState.NONEXISTENT
 
 
-def test_the_listing_covers_the_home_directory(enclave: Enclave, tmp_path: Path):
-    finish_recording(tmp_path, "DONE_2025")
+def test_every_recording_in_the_home_directory_is_classified(tmp_path: Path):
+    # and nothing else: a stray file is not a recording, and a symlink is not followed out of
+    # the home directory
+    home = tmp_path / "home"
+    finish_recording(home, "DONE_2025")
+    abandon_recording(home, "FAILED_2025")
+    (home / "notes.txt").write_text("not a recording")
+    finish_recording(tmp_path, "victim")
+    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
     finish_recording(tmp_path / "elsewhere", "OTHER_2025")
+    enclave = Enclave(digest_of("abc"), anyio.Path(home))
 
-    classes = anyio.run(enclave.recording_classes)
+    infos = anyio.run(enclave.classify_all)
 
-    assert [r.path.name for r in classes.finished] == ["DONE_2025"]
+    assert sorted((info.name, info.disk_state) for info in infos) == [
+        ("DONE_2025", RecordingDiskState.FINISHED),
+        ("FAILED_2025", RecordingDiskState.UNPROCESSED),
+    ]
 
 
 def test_an_otp_is_for_the_recording_it_was_issued_for(enclave: Enclave):
