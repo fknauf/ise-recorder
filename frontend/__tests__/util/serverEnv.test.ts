@@ -62,27 +62,29 @@ afterEach(() => {
 
 test("a plain http backend URL is accepted", async () => {
   expect((await envFor({ ISE_RECORD_API_URL: "http://localhost:8000" })).apiUrl)
-    .toBe("http://localhost:8000");
+    .toBe("http://localhost:8000/");
 });
 
 test("https and a path are accepted", async () => {
   expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api" })).apiUrl)
-    .toBe("https://recorder.example.com/api");
+    .toBe("https://recorder.example.com/api/");
 });
 
-test("a trailing slash is dropped, so the API paths joined onto the URL do not double it", async () => {
-  // "http://localhost:8000/" + "/api/chunks" would ask the backend for //api/chunks, which
-  // it does not know, and every upload would be turned away as a permanent failure
+test("the URL always ends in exactly one slash, so API paths resolve beneath it", async () => {
+  // API paths are resolved relative to the URL. Without the slash, "api/recordings" against
+  // https://recorder.example.com/prefix would replace "prefix" instead of going beneath it
+  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/prefix" })).apiUrl)
+    .toBe("https://recorder.example.com/prefix/");
   expect((await envFor({ ISE_RECORD_API_URL: "http://localhost:8000/" })).apiUrl)
-    .toBe("http://localhost:8000");
-  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api/" })).apiUrl)
-    .toBe("https://recorder.example.com/api");
+    .toBe("http://localhost:8000/");
+  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api//" })).apiUrl)
+    .toBe("https://recorder.example.com/api/");
 });
 
 test("a hostname without a TLD is accepted, for intranet deployments", async () => {
   // require_tld is off deliberately: localhost and short intranet names must work
   expect((await envFor({ ISE_RECORD_API_URL: "http://ise-recorder:8000" })).apiUrl)
-    .toBe("http://ise-recorder:8000");
+    .toBe("http://ise-recorder:8000/");
 });
 
 // --- rejected URLs ---------------------------------------------------------
@@ -268,8 +270,8 @@ test("the environment is read once and then cached", async () => {
   process.env.ISE_RECORD_API_URL = "http://second.example.com";
   const second = await getServerEnv();
 
-  expect(first.apiUrl).toBe("http://first.example.com");
+  expect(first.apiUrl).toBe("http://first.example.com/");
   // a later change to the environment must not be picked up mid-process
-  expect(second.apiUrl).toBe("http://first.example.com");
+  expect(second.apiUrl).toBe("http://first.example.com/");
   expect(second).toBe(first);
 });

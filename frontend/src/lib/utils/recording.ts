@@ -2,7 +2,8 @@
 
 import { openRecordingFileStream } from "./browserStorage";
 import { showError, showMessage, showSuccess } from "./notifications";
-import { RetryPolicy, schedulePostprocessing, sendChunkToServer, ServerStorageDestination } from "./serverStorage";
+import { ApiDestination, withRetries, RetryPolicy, defaultRetryPolicy } from "./apiFetch";
+import { schedulePostprocessing, uploadChunk } from "./serverStorage";
 import { graphemeAwareTruncateToBytes } from "./stringAux";
 
 // used to remove characters from the recording name that could trip up ffmpeg in post
@@ -31,7 +32,10 @@ export function sanitizeLectureTitle(lectureTitle: string) {
   return graphemeAwareTruncateToBytes(sanitizedLongTitle, 192);
 }
 
-export type RecordingDestination = ServerStorageDestination & { impeded: boolean };
+export type RecordingDestination = Omit<ApiDestination, "apiUrl"> & {
+  apiUrl: string | undefined
+  impeded: boolean
+};
 
 export interface RecordingTrackBundle {
   displayTracks: readonly MediaStreamTrack[]
@@ -254,13 +258,19 @@ export async function recordLecture(
     streamingAbort.abort("impeded");
   }
 
+  const apiDest: ApiDestination | undefined = destination.apiUrl
+    ? { apiUrl: destination.apiUrl, getAccessToken: destination.getAccessToken }
+    : undefined;
+
   const chunkRetryPolicy: RetryPolicy = {
+    ...defaultRetryPolicy,
     retries: 6,
     initialWaitMillis: 2000,
     abortSignal: streamingAbort.signal
   };
 
   const postRetryPolicy: RetryPolicy = {
+    ...defaultRetryPolicy,
     retries: 3,
     initialWaitMillis: 1000,
     abortSignal: streamingAbort.signal
@@ -279,36 +289,29 @@ export async function recordLecture(
   };
 
   const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
-    const uploadChunk = async () => {
-      if(streamingAbort.signal.aborted) {
+    const doUploadChunk = async () => {
+      if(apiDest === undefined || streamingAbort.signal.aborted) {
         return;
       }
 
-      const result = await sendChunkToServer(destination, chunk, recordingName, trackTitle, chunkIndex, chunkRetryPolicy);
-
-      if(stopTimer !== undefined && result.status === "ok") {
-        // User has already clicked "stop recording", and uploads are slow and succeeding. So reset
-        // the stop timer whenever a chunk succeeds because that means we're not timing out. It's
-        // just going at a relaxed pace.
-        rearmStopTimer();
-      }
-
-      if(result.status === "failed" && !streamingAbort.signal.aborted) {
-        streamingAbort.abort("chunk");
-        showError(`Streaming aborted: failed to upload chunk ${chunkIndex} of track ${trackTitle}: ${result.message ?? "unknown error"}`);
+      try {
+        await withRetries(() => uploadChunk(apiDest, chunk, recordingName, trackTitle, chunkIndex, chunkRetryPolicy.abortSignal), chunkRetryPolicy);
+        if(stopTimer !== undefined) {
+          // User has already clicked "stop recording", and uploads are slow and succeeding. So reset
+          // the stop timer whenever a chunk succeeds because that means we're not timing out. It's
+          // just going at a relaxed pace.
+          rearmStopTimer();
+        }
+      } catch(e) {
+        if(!streamingAbort.signal.aborted) {
+          streamingAbort.abort("chunk");
+          showError(`Streaming aborted: failed to upload chunk ${chunkIndex} of track ${trackTitle}`, e);
+        }
       }
     };
 
     // No need to await: we support sending chunks to server out of order and/or concurrently.
-    const backgroundPromise = uploadChunk().catch(e => {
-      // purely defensive: uploadChunk should not be able to throw. Guard against signal.aborted because in that
-      // case a toast has already been shown. It's a .catch instead of a try-catch in uploadChunk because reactCompiler
-      // bails with "&&/|| in try-except" otherwise. That'll probably become unnecessary at some point.
-      if(!streamingAbort.signal.aborted) {
-        streamingAbort.abort("chunk");
-        showError(`Streaming aborted: unexpected error when uploading chunk ${chunkIndex} of track ${trackTitle}`, e);
-      }
-    });
+    const backgroundPromise = doUploadChunk();
 
     // For local file storage on the other hand, it's important that chunks to the same file
     // are not written concurrently and that filesystem state updates are correctly ordered.
@@ -372,15 +375,17 @@ export async function recordLecture(
       await Promise.allSettled(jobs.map(job => job.finished));
       clearTimeout(stopTimer);
 
-      if(destination.apiUrl !== undefined) {
-        const postResult = await schedulePostprocessing(destination, recordingName, lecturerEmail, postRetryPolicy);
-
-        if(postResult.status === "ok") {
+      if(apiDest !== undefined) {
+        try {
+          await withRetries(() => schedulePostprocessing(apiDest, recordingName, lecturerEmail, postRetryPolicy.abortSignal), postRetryPolicy);
           showSuccess(`Scheduled postprocessing for recording "${recordingName}"`);
-        } else if(postResult.status === "aborted") {
-          showMessage("Post-processing could not be scheduled because streaming was impeded.");
-        } else {
-          showError(`Failed to schedule postprocessing: ${postResult.message}. The recording was streamed to backend and will be available for re-rendering within five minutes.`);
+        } catch(e) {
+          if(streamingAbort.signal.aborted) {
+            showMessage("Post-processing could not be scheduled because streaming was impeded.");
+          } else {
+            const message = e instanceof Error ? e.message : "unknown error";
+            showError(`Failed to schedule postprocessing: ${message}. The recording was streamed to backend and will be available for re-rendering soon.`);
+          }
         }
       }
     } catch(e) {

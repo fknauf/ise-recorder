@@ -5,7 +5,6 @@ import { persist } from "zustand/middleware";
 import { ServerEnv } from "../utils/serverEnv";
 import { gatherRecordingsList, RecordingFileList } from "../utils/browserStorage";
 import { StateCreator } from "zustand";
-import { UploadStatus } from "../utils/serverStorage";
 
 export type ActiveRecording = {
   state: "idle" | "preparing"
@@ -120,7 +119,7 @@ export interface AppStoreState {
   overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) => void
   resetFileSizeOverrides: () => void
   signalManualUploadProgress: (recordingName: string, percentage: number) => void
-  signalManualUploadFinished: (recordingName: string, status: UploadStatus) => void
+  signalManualUploadFinished: (recordingName: string, completed: boolean) => void
   markUnstreamed: (recordingName: string) => void
   updateBrowserStorage: () => Promise<void>
   updateQuotaInformation: () => Promise<void>
@@ -252,13 +251,13 @@ const createRawAppStore = (
       reuploadProgress: new Map(state.reuploadProgress).set(recordingName, percentage)
     })),
 
-  signalManualUploadFinished: (recordingName: string, status: UploadStatus) =>
+  signalManualUploadFinished: (recordingName: string, completed: boolean) =>
     set(state => {
       const newProgress = new Map(state.reuploadProgress);
       newProgress.delete(recordingName);
       return {
         reuploadProgress: newProgress,
-        unstreamedRecordings: status === "ok" ? state.unstreamedRecordings.filter(name => name !== recordingName) : state.unstreamedRecordings
+        unstreamedRecordings: completed ? state.unstreamedRecordings.filter(name => name !== recordingName) : state.unstreamedRecordings
       };
     }),
 

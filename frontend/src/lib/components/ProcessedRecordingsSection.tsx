@@ -9,9 +9,10 @@ import Delete from "@spectrum-icons/workflow/Delete";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
 import { useProcessedRecordings } from "../hooks/useProcessedRecordings";
 import * as z from "zod";
-import { DownloadableRecording, assembleDownloadUrl, RenderingRecording, UnprocessedRecording } from "../utils/serverStorage";
+import { DownloadableRecording, downloadHref, ServerStorageRecording, UnfinishedRecording } from "../utils/serverStorage";
 import { ReactNode, useState } from "react";
 import { showError, showSuccess } from "../utils/notifications";
+import { ApiError } from "../utils/apiFetch";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -21,6 +22,18 @@ const mibFormatter = new Intl.NumberFormat(
     useGrouping: false
   }
 );
+
+function prettifyError(error: unknown) {
+  if(error instanceof ApiError && error.cause instanceof z.ZodError) {
+    return z.prettifyError(error.cause);
+  }
+
+  if(error instanceof Error) {
+    return error.message;
+  }
+
+  return "unknown error";
+}
 
 function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
   const { apiUrl } = useServerEnv();
@@ -89,11 +102,7 @@ function ActionableRecordingCard(
     return null;
   }
 
-  const onRerender = async (
-    recordingName: string,
-    rerender: (recordingName: string) => Promise<unknown>,
-    setBusy: (busy: boolean) => void
-  ) => {
+  const onRerender = async () => {
     setBusy(true);
     try {
       await rerender(recordingName);
@@ -103,7 +112,6 @@ function ActionableRecordingCard(
     }
     setBusy(false);
   };
-
 
   return (
     <RecordingCard title={recordingName} testid={testid}>
@@ -115,7 +123,7 @@ function ActionableRecordingCard(
         disabledKeys={busy ? [ "rerender", "purge" ] : []}
         onAction={key => {
           if(key === "rerender") {
-            onRerender(recordingName, rerender, setBusy);
+            onRerender();
           } else if(key === "purge") {
             onPurge(recordingName);
           }
@@ -136,8 +144,7 @@ function ActionableRecordingCard(
 }
 
 function ProcessedRecordingCard(
-  { user, recording, onPurge }: Readonly<{
-    user: string
+  { recording, onPurge }: Readonly<{
     recording: DownloadableRecording
     onPurge: (recordingName: string) => void
   }>
@@ -148,7 +155,7 @@ function ProcessedRecordingCard(
     return null;
   }
 
-  const url = assembleDownloadUrl(apiUrl, user, recording.name, recording.totp);
+  const url = downloadHref(apiUrl, recording);
 
   return (
     <ActionableRecordingCard
@@ -174,7 +181,7 @@ function ProcessedRecordingCard(
 }
 
 const RenderingRecordingCard = (
-  { recording }: Readonly<{ recording: RenderingRecording }>
+  { recording }: Readonly<{ recording: UnfinishedRecording }>
 ) =>
   <RecordingCard title={recording.name} testid="rendering-card">
     <Flex
@@ -190,7 +197,7 @@ const RenderingRecordingCard = (
   </RecordingCard>;
 
 function UnprocessedRecordingCard(
-  { recording, onPurge }: Readonly<{ recording: UnprocessedRecording; onPurge: (recordingName: string) => void }>
+  { recording, onPurge }: Readonly<{ recording: UnfinishedRecording; onPurge: (recordingName: string) => void }>
 ) {
   return (
     <ActionableRecordingCard
@@ -203,16 +210,22 @@ function UnprocessedRecordingCard(
   );
 }
 
-function prettifyError(error: unknown) {
-  if(error instanceof z.ZodError) {
-    return z.prettifyError(error);
+function AnyRecordingCard(
+  { recording, onPurge }:
+  Readonly<{
+    recording: ServerStorageRecording
+    onPurge: (recordingName: string) => void
+  }>
+) {
+  if(recording.state === "completed") {
+    return <ProcessedRecordingCard recording={recording} onPurge={onPurge}/>;
+  } else if(recording.state === "rendering") {
+    return <RenderingRecordingCard recording={recording}/>;
+  } else if(recording.state === "unprocessed") {
+    return <UnprocessedRecordingCard recording={recording} onPurge={onPurge}/>;
   }
 
-  if(error instanceof Error) {
-    return error.message;
-  }
-
-  return "Unknown error";
+  return null;
 }
 
 function ProcessedRecordingsSectionImpl({ id }: Readonly<{ id: string }>) {
@@ -235,7 +248,7 @@ function ProcessedRecordingsSectionImpl({ id }: Readonly<{ id: string }>) {
     );
   }
 
-  if(data === undefined || data.completed.length + data.rendering.length + data.unprocessed.length === 0) {
+  if(data === undefined || data.length === 0) {
     return null;
   }
 
@@ -245,28 +258,7 @@ function ProcessedRecordingsSectionImpl({ id }: Readonly<{ id: string }>) {
         { purgeCandidate !== null && <PurgeDialog recordingName={purgeCandidate}/> }
       </DialogContainer>
       {
-        data.completed.map(rec =>
-          <ProcessedRecordingCard
-            key={rec.name}
-            user={data.user}
-            recording={rec}
-            onPurge={setPurgeCandidate}
-          />
-        )
-      }
-      {
-        data.rendering.map(rec =>
-          <RenderingRecordingCard key={rec.name} recording={rec}/>
-        )
-      }
-      {
-        data.unprocessed.map(rec =>
-          <UnprocessedRecordingCard
-            key={rec.name}
-            recording={rec}
-            onPurge={setPurgeCandidate}
-          />
-        )
+        data.map(rec => <AnyRecordingCard key={rec.name} recording={rec} onPurge={setPurgeCandidate}/>)
       }
     </RecordingCardSection>
   );

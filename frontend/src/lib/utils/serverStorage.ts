@@ -3,10 +3,13 @@
 import { ApiDestination, apiFetchData, apiFetchVoid, RetryPolicy, withRetries } from "./apiFetch";
 import * as z from "zod";
 
-export type ServerStorageRecording = UnfinishedRecording | DownloadableRecording;
+const RenderingRecordingSchema = z.object({
+  state: z.literal(["rendering"]),
+  name: z.string()
+});
 
-const UnfinishedRecordingSchema = z.object({
-  state: z.literal(["rendering", "unprocessed"]),
+const UnprocessedRecordingSchema = z.object({
+  state: z.literal(["unprocessed"]),
   name: z.string()
 });
 
@@ -20,14 +23,19 @@ const DownloadableRecordingSchema = z.object({
 const ServerStorageRecordingSchema = z.discriminatedUnion(
   "state",
   [
-    UnfinishedRecordingSchema,
+    RenderingRecordingSchema,
+    UnprocessedRecordingSchema,
     DownloadableRecordingSchema
   ]);
 
 const ServerStorageRecordingListSchema = z.array(ServerStorageRecordingSchema);
 
-export type UnfinishedRecording = z.infer<typeof UnfinishedRecordingSchema>;
+type UnprocessedRecording = z.infer<typeof UnprocessedRecordingSchema>;
+type RenderingRecording = z.infer<typeof RenderingRecordingSchema>;
+
+export type UnfinishedRecording = UnprocessedRecording | RenderingRecording;
 export type DownloadableRecording = z.infer<typeof DownloadableRecordingSchema>;
+export type ServerStorageRecording = UnfinishedRecording | DownloadableRecording;
 
 export async function uploadChunk(
   destination: ApiDestination,
@@ -35,7 +43,7 @@ export async function uploadChunk(
   recording: string,
   track: string,
   index: number,
-  abortSignal?: AbortSignal
+  abortSignal: AbortSignal | undefined
 ): Promise<void> {
   abortSignal?.throwIfAborted();
 
@@ -54,8 +62,8 @@ export async function schedulePostprocessing(
   destination: ApiDestination,
   recording: string,
   recipient: string | undefined,
-  abortSignal?: AbortSignal
-): Promise<UnfinishedRecording | undefined> {
+  abortSignal: AbortSignal | undefined
+): Promise<UnfinishedRecording> {
   abortSignal?.throwIfAborted();
 
   const urlPath = `api/recordings/${encodeURIComponent(recording)}/render`;
@@ -73,7 +81,7 @@ export async function schedulePostprocessing(
     signal: abortSignal
   };
 
-  return await apiFetchData(destination, urlPath, request, UnfinishedRecordingSchema);
+  return await apiFetchData(destination, urlPath, request, RenderingRecordingSchema);
 }
 
 export async function fetchProcessedRecordings(

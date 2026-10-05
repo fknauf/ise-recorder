@@ -94,13 +94,41 @@ beforeEach(async () => {
 
 afterAll(cleanupBetweenTests);
 
+/**
+ * Stands in for the backend: answers each request the way server.py does for its URL and
+ * method. Every answer is a fresh Response, since a body can only be read once. A recording
+ * whose render was requested shows up in the listing as rendering from then on.
+ */
+function fakeBackend() {
+  const rendering: string[] = [];
+  const recordingPath = /^\/api\/recordings\/([^/]+)/;
+
+  return vi.fn(async (request: Request) => {
+    const { pathname } = new URL(request.url);
+    const recording = decodeURIComponent(recordingPath.exec(pathname)?.[1] ?? "");
+
+    if(request.method === "PUT" && (/^\/api\/recordings\/[^/]+\/tracks\/[^/]+\/chunks\/\d+$/).test(pathname)) {
+      return new Response(null, { status: 204 });
+    } else if(request.method === "POST" && (/^\/api\/recordings\/[^/]+\/render$/).test(pathname)) {
+      rendering.push(recording);
+      return Response.json({ state: "rendering", name: recording }, { status: 202 });
+    } else if(request.method === "GET" && pathname === "/api/recordings") {
+      return Response.json(rendering.map(name => ({ state: "rendering", name })));
+    } else if(request.method === "DELETE" && (/^\/api\/recordings\/[^/]+$/).test(pathname)) {
+      return new Response(null, { status: 204 });
+    }
+
+    return Response.json({ detail: "Not Found" }, { status: 404 });
+  });
+}
+
 /** Just the page, for the tests that only care about what it decides to render. */
 function renderHome(tokenSource: AccessTokenSource) {
   mockUseAppSession.mockReturnValue(tokenSource);
 
   render(
     <Provider theme={defaultTheme}>
-      <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
+      <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
         <Home/>
       </AppStoreProvider>
     </Provider>
@@ -114,7 +142,7 @@ function renderHome(tokenSource: AccessTokenSource) {
  * for one behind an OpenID provider.
  */
 async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: string) {
-  window.fetch = vi.fn().mockResolvedValue(Response.json({ user: "deadbeef", completed: [], rendering: [] }, { status: 201 }));
+  window.fetch = fakeBackend() as unknown as typeof window.fetch;
 
   let x = 0;
 
@@ -148,7 +176,7 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
   const tree = render(
     <>
       <Provider theme={defaultTheme}>
-        <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
+        <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
           <Home/>
         </AppStoreProvider>
       </Provider>
@@ -262,88 +290,77 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
   return recordingName;
 }
 
+/** Every request the page sent, in order. apiFetch sends each as a single Request. */
+const requests = () =>
+  vi.mocked(window.fetch).mock.calls.map(([ request ]) => request as Request);
+
 /**
  * How many requests went to one endpoint. Counted per endpoint rather than in total: how many
  * chunks a recording is sent in depends on how long it ran, which a busy machine stretches.
+ * Each chunk has a URL of its own, so those are matched by pattern.
  */
-const requestsTo = (url: string) =>
-  vi.mocked(window.fetch).mock.calls.filter(([ calledUrl ]) => calledUrl === url).length;
+const requestsTo = (url: string | RegExp) =>
+  requests().filter(request => (typeof url === "string" ? request.url === url : url.test(request.url))).length;
+
+const chunkUrl = (recordingName: string) =>
+  new RegExp(`^http://localhost:5000/api/recordings/${RegExp.escape(recordingName)}/tracks/[^/]+/chunks/\\d+$`);
+
+const renderUrl = (recordingName: string) => `http://localhost:5000/api/recordings/${recordingName}/render`;
 
 test("e2e recording a stream works", async () => {
   const recordingName = await recordAStream(anonymousTokenSource, "FOO_101");
 
   // one job for one recording; a second would render it twice
-  expect(requestsTo("http://localhost:5000/api/jobs")).toBe(1);
-  expect(requestsTo("http://localhost:5000/api/chunks")).toBeGreaterThan(0);
+  expect(requestsTo(renderUrl(recordingName))).toBe(1);
+  expect(requestsTo(chunkUrl(recordingName))).toBeGreaterThan(0);
   // not signed in, so there is no listing to fetch
   expect(requestsTo("http://localhost:5000/api/recordings")).toBe(0);
-  // chunk and job requests also carry the recording's abort signal, which is not what this is about
-  expect(window.fetch).toHaveBeenCalledWith("http://localhost:5000/api/chunks", expect.objectContaining({ method: "POST", body: expect.anything() }));
-  expect(window.fetch).toHaveBeenCalledWith(
-    "http://localhost:5000/api/jobs",
-    expect.objectContaining({
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        recording: recordingName,
-        recipient: "speaker@example.com"
-      })
-    })
-  );
+
+  const chunks = requests().filter(request => chunkUrl(recordingName).test(request.url));
+  expect(chunks.every(chunk => chunk.method === "PUT")).toBe(true);
+  // between them rather than each: a track's last chunk, or all of stream.webm on chromium
+  // (see recordAStream), can be empty
+  expect((await Promise.all(chunks.map(chunk => chunk.blob()))).reduce((acc, blob) => acc + blob.size, 0)).toBeGreaterThan(0);
+
+  // the recording is named by the URL; the body only says who gets the report
+  const job = requests().find(request => request.url === renderUrl(recordingName))!;
+  expect(job.method).toBe("POST");
+  expect(job.headers.get("Content-Type")).toBe("application/json");
+  expect(await job.json()).toStrictEqual({ recipient: "speaker@example.com" });
 });
 
 test("e2e recording a stream sends the access token to the server", async () => {
   const recordingName = await recordAStream(authenticatedTokenSource, "BAR_202");
 
-  expect(requestsTo("http://localhost:5000/api/jobs")).toBe(1);
-  expect(requestsTo("http://localhost:5000/api/chunks")).toBeGreaterThan(0);
+  expect(requestsTo(renderUrl(recordingName))).toBe(1);
+  expect(requestsTo(chunkUrl(recordingName))).toBeGreaterThan(0);
 
   // the listing is fetched once when the section mounts and once more when the recording
   // finishes, so the new lecture shows up as rendering without waiting for the minute poll.
   // At least twice rather than exactly: SWR also refetches when the window regains focus.
   expect(requestsTo("http://localhost:5000/api/recordings")).toBeGreaterThanOrEqual(2);
 
-  const urls = vi.mocked(window.fetch).mock.calls.map(([ url ]) => url);
+  const urls = requests().map(request => request.url);
 
   // after the job, not merely somewhere: a refresh before it would find nothing rendering
   expect(urls.lastIndexOf("http://localhost:5000/api/recordings"))
-    .toBeGreaterThan(urls.indexOf("http://localhost:5000/api/jobs"));
-  expect(window.fetch).toHaveBeenCalledWith(
-    "http://localhost:5000/api/recordings",
-    {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: "Bearer test-token"
-      }
-    }
-  );
-  expect(window.fetch).toHaveBeenCalledWith(
-    "http://localhost:5000/api/chunks",
-    expect.objectContaining({
-      method: "POST",
-      headers: {
-        Authorization: "Bearer test-token"
-      },
-      body: expect.anything()
-    })
-  );
-  expect(window.fetch).toHaveBeenCalledWith(
-    "http://localhost:5000/api/jobs",
-    expect.objectContaining({
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer test-token"
-      },
-      body: JSON.stringify({
-        recording: recordingName,
-        recipient: "speaker@example.com"
-      })
-    })
-  );
+    .toBeGreaterThan(urls.indexOf(renderUrl(recordingName)));
+
+  const listing = requests().find(request => request.url === "http://localhost:5000/api/recordings")!;
+  expect(listing.method).toBe("GET");
+  expect(listing.headers.get("Accept")).toBe("application/json");
+  expect(listing.headers.get("Authorization")).toBe("Bearer test-token");
+
+  const chunks = requests().filter(request => chunkUrl(recordingName).test(request.url));
+  expect(chunks.every(chunk => chunk.method === "PUT")).toBe(true);
+  expect(chunks.every(chunk => chunk.headers.get("Authorization") === "Bearer test-token")).toBe(true);
+  expect((await Promise.all(chunks.map(chunk => chunk.blob()))).reduce((acc, blob) => acc + blob.size, 0)).toBeGreaterThan(0);
+
+  const job = requests().find(request => request.url === renderUrl(recordingName))!;
+  expect(job.method).toBe("POST");
+  expect(job.headers.get("Content-Type")).toBe("application/json");
+  expect(job.headers.get("Authorization")).toBe("Bearer test-token");
+  expect(await job.json()).toStrictEqual({ recipient: "speaker@example.com" });
 });
 
 // --- the auto sign-in gate -------------------------------------------------

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
-import { schedulePostprocessing, sendChunkToServer } from "@/lib/utils/serverStorage";
+import { schedulePostprocessing, uploadChunk } from "@/lib/utils/serverStorage";
 
 /**
  * What happens when a MediaRecorder refuses to start, e.g. with a NotSupportedError for a
@@ -105,10 +105,10 @@ async function recordBriefly(
 }
 
 beforeEach(() => {
-  // the real ones always return a promise, and recordLecture reads the status of each
-  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
+  // stand-ins for a backend that accepts everything
+  vi.mocked(uploadChunk).mockResolvedValue();
   vi.mocked(schedulePostprocessing).mockReset();
-  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => ({ state: "rendering", name: recording }));
   vi.mocked(showError).mockClear();
 
   streams = new Map();

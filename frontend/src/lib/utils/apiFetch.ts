@@ -13,6 +13,7 @@ export class ApiError extends Error {
 
   get transient(): boolean {
     return this.kind === "network" ||
+      this.status === 401 || // treat 401 as transient to work in case of auth server brownout
       this.status === 408 ||
       this.status === 429 ||
       (this.status !== undefined && this.status >= 500);
@@ -96,7 +97,7 @@ export async function apiFetchData<T>(
       throw e;
     }
 
-    const message = e instanceof Error ? e.message : "unknown error;";
+    const message = e instanceof Error ? e.message : "unknown error";
     throw new ApiError(message, "invalid-response", response.status, undefined, { cause: e });
   }
 }

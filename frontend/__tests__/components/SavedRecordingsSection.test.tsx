@@ -544,7 +544,7 @@ test("a recording that has since been re-uploaded is deleted without a question"
   const onRemove = vi.fn();
   const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
 
-  act(() => store.signalManualUploadFinished("BAR_2025-12-11T214230.418Z", "ok"));
+  act(() => store.signalManualUploadFinished("BAR_2025-12-11T214230.418Z", true));
   await userEvent.click(removeButton(cards[1]));
 
   expect(screen.queryByRole("dialog")).toBeNull();

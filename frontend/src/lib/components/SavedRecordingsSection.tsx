@@ -49,7 +49,7 @@ function DeleteDialog({ recordingName }: Readonly<{ recordingName: string }>) {
           variant="negative"
           onPress={() => {
             dismiss();
-            removeSavedRecording(recordingName)
+            removeSavedRecording(recordingName);
           }}
           data-testid="sr-dd-btn-delete"
         >

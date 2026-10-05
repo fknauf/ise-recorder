@@ -344,12 +344,12 @@ test("the recording being made is not dropped before its files exist", async () 
   expect(store.getState().unstreamedRecordings).toStrictEqual([ "LIVE" ]);
 });
 
-test.each([ "failed", "aborted" ] as const)("a re-upload that ended %s leaves the recording listed", status => {
+test("a re-upload that did not complete leaves the recording listed", () => {
   const store = createAppStore({});
 
   store.getState().markUnstreamed("GVS_1");
   store.getState().signalManualUploadProgress("GVS_1", 50);
-  store.getState().signalManualUploadFinished("GVS_1", status);
+  store.getState().signalManualUploadFinished("GVS_1", false);
 
   expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_1" ]);
   // the upload itself is over either way, so the card gets its buttons back
@@ -361,7 +361,7 @@ test("a successful re-upload takes only its own recording off the list", () => {
 
   store.getState().markUnstreamed("GVS_1");
   store.getState().markUnstreamed("GVS_2");
-  store.getState().signalManualUploadFinished("GVS_1", "ok");
+  store.getState().signalManualUploadFinished("GVS_1", true);
 
   expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_2" ]);
 });

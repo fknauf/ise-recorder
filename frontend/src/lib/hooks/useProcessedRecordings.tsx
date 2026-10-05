@@ -1,7 +1,7 @@
 import useSWR, { useSWRConfig } from "swr";
 import { useAppSession } from "../components/SessionProvider";
 import { useServerEnv } from "./useServerEnv";
-import { fetchProcessedRecordings, ProcessedRecordings, purgeRecording, schedulePostprocessing } from "../utils/serverStorage";
+import { fetchProcessedRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording, UnfinishedRecording } from "../utils/serverStorage";
 import { useLecture } from "./useLecture";
 
 const RECORDINGS_KEY = "/api/recordings";
@@ -15,7 +15,7 @@ export function useProcessedRecordings() {
 
   const { data, mutate, error, isLoading, isValidating } = useSWR(
     canFetch ? RECORDINGS_KEY : null,
-    () => fetchProcessedRecordings(apiUrl, getAccessToken),
+    () => (apiUrl !== undefined ? fetchProcessedRecordings({ apiUrl, getAccessToken }) : []),
     {
       fallbackData: undefined,
       refreshInterval: 60000,
@@ -33,63 +33,46 @@ export function useProcessedRecordings() {
       return undefined;
     }
 
-    const optimisticPurgeUpdate = (committed: ProcessedRecordings | undefined, displayed?: ProcessedRecordings) => {
-      const current = displayed ?? committed;
-
-      if(current === undefined) {
-        return undefined;
-      }
-
-      return {
-        ...current,
-        completed: current.completed.filter(rec => rec.name !== recordingName),
-        unprocessed: current.unprocessed.filter(rec => rec.name !== recordingName),
-        rendering: current.rendering.filter(rec => rec.name !== recordingName)
-      };
+    const optimisticPurgeUpdate = (committed: ServerStorageRecording[] | undefined, displayed?: ServerStorageRecording[]) => {
+      const current = displayed ?? committed ?? [];
+      return current.filter(value => value.name !== recordingName);
     };
 
     return await mutate(
-      () => purgeRecording(apiUrl, recordingName, getAccessToken),
+      async () => {
+        await purgeRecording({ apiUrl, getAccessToken }, recordingName);
+      },
       {
         optimisticData: optimisticPurgeUpdate,
-        rollbackOnError: true,
-        revalidate: false
+        populateCache: false,
+        revalidate: true,
+        rollbackOnError: true
       }
     );
   };
 
   const rerender = (recordingName: string) => {
-    const optimisticRerenderUpdate = (committed: ProcessedRecordings | undefined, displayed?: ProcessedRecordings) => {
-      const current = displayed ?? committed;
+    if(apiUrl === undefined) {
+      return undefined;
+    }
 
-      if(current === undefined) {
-        return undefined;
-      }
-
-      return {
-        ...current,
-        completed: current.completed.filter(rec => rec.name !== recordingName),
-        unprocessed: current.unprocessed.filter(rec => rec.name !== recordingName),
-        rendering: [ ...current.rendering, { name: recordingName } ].toSorted((a, b) => a.name.localeCompare(b.name))
+    const optimisticRerenderUpdate = (committed: ServerStorageRecording[] | undefined, displayed?: ServerStorageRecording[]) => {
+      const current = displayed ?? committed ?? [];
+      const replacement: UnfinishedRecording = {
+        state: "rendering",
+        name: recordingName
       };
+      return current.map(value => (value.name === recordingName ? replacement : value));
     };
 
     return mutate(async () => {
-      const result = await schedulePostprocessing(
-        { apiUrl, getAccessToken },
-        recordingName,
-        lecturerEmail,
-        { retries: 0, initialWaitMillis: 5000 }
-      );
-
-      if(result.status !== "ok") {
-        throw new Error(result.message);
-      }
-    }, {
+      await schedulePostprocessing({ apiUrl, getAccessToken }, recordingName, lecturerEmail, undefined);
+    },
+    {
       optimisticData: optimisticRerenderUpdate,
+      populateCache: false,
       rollbackOnError: true,
-      revalidate: true,
-      populateCache: false
+      revalidate: true
     });
   };
 

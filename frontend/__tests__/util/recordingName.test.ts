@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { normalizeLectureTitle, RecordingDestination, RecordingTrackBundle, recordLecture, sanitizeLectureTitle } from "@/lib/utils/recording";
-import { schedulePostprocessing, sendChunkToServer } from "@/lib/utils/serverStorage";
 
 /**
  * Covers the two halves of the lecture-title rule: what the text box shows the user, and
@@ -25,15 +24,6 @@ import { schedulePostprocessing, sendChunkToServer } from "@/lib/utils/serverSto
  */
 
 vi.mock("@/lib/utils/serverStorage");
-
-// The automock's sendChunkToServer resolves with undefined, which recordLecture reads the status of.
-// That used to go unnoticed: the TypeError ended the track's chunk loop, and recordLecture swallows
-// a failed track. Now the upload runs in the background and the TypeError surfaces as an unhandled
-// rejection. Nothing here is about the upload, so it simply succeeds.
-beforeEach(() => {
-  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
-  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
-});
 
 /**
  * Transcribed from the SafeRecording pattern in backend/src/ise_record/server.py, which is

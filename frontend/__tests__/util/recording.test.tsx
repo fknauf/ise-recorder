@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { render, screen } from "@testing-library/react";
-import { sendChunkToServer, schedulePostprocessing } from "@/lib/utils/serverStorage";
+import { uploadChunk, schedulePostprocessing } from "@/lib/utils/serverStorage";
 
 vi.mock("@/lib/utils/serverStorage");
 vi.mock("@/lib/utils/notifications", () => ({
@@ -13,9 +13,9 @@ vi.mock("@/lib/utils/notifications", () => ({
 }));
 
 beforeEach(() => {
-  // the real ones always return a promise, and recordLecture reads the status of each
-  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
-  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
+  // stand-ins for a backend that accepts everything
+  vi.mocked(uploadChunk).mockResolvedValue();
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => ({ state: "rendering", name: recording }));
 });
 
 const accessToken = async () => "test-token";
@@ -165,12 +165,15 @@ test("recordLecture records lectures", async () => {
   expect(recordings[0].files[0].name).toBe("overlay.webm");
   expect(recordings[0].files[1].name).toBe("stream.webm");
 
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledTimes(4);
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "stream", 0, expect.anything());
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "stream", 1, expect.anything());
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "overlay", 0, expect.anything());
-  expect(vi.mocked(sendChunkToServer)).toHaveBeenCalledWith(destination, expect.anything(), recordingName, "overlay", 1, expect.anything());
-  expect(vi.mocked(schedulePostprocessing)).toHaveBeenCalledWith(destination, recordingName, "lecturer@example.com", expect.anything());
+  // the backend is addressed without the impeded flag, which only concerns recordLecture itself
+  const apiDestination = { apiUrl: destination.apiUrl, getAccessToken: accessToken };
+
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledTimes(4);
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "stream", 0, expect.any(AbortSignal));
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "stream", 1, expect.any(AbortSignal));
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "overlay", 0, expect.any(AbortSignal));
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "overlay", 1, expect.any(AbortSignal));
+  expect(vi.mocked(schedulePostprocessing)).toHaveBeenCalledWith(apiDestination, recordingName, "lecturer@example.com", expect.any(AbortSignal));
   // every chunk arrived, so there is nothing to re-upload
   expect(onStreamingFailed).not.toHaveBeenCalled();
 });

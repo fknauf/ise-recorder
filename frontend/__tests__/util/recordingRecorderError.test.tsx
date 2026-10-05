@@ -2,7 +2,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
-import { schedulePostprocessing, sendChunkToServer } from "@/lib/utils/serverStorage";
 
 /**
  * What happens when a MediaRecorder fails part way through a lecture, e.g. because its
@@ -143,9 +142,6 @@ async function recordWithFailingOverlay(): Promise<Outcome> {
 }
 
 beforeEach(() => {
-  // the real ones always return a promise, and recordLecture reads the status of each
-  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
-  vi.mocked(schedulePostprocessing).mockResolvedValue({ status: "ok" });
   vi.mocked(showError).mockClear();
 
   FakeMediaRecorder.instances = [];

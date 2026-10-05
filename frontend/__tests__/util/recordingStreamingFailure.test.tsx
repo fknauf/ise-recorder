@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
-import { RetryPolicy, sendChunkToServer, UploadStatus } from "@/lib/utils/serverStorage";
+import { uploadChunk } from "@/lib/utils/serverStorage";
+import { ApiError } from "@/lib/utils/apiFetch";
 
 /**
  * What a live recording does when its stream to the backend breaks.
@@ -14,13 +15,14 @@ import { RetryPolicy, sendChunkToServer, UploadStatus } from "@/lib/utils/server
  * recording for re-upload, and no postprocessing is requested for it.
  *
  * The chunk uploads are faked so each test decides when and how every one of them answers;
- * how an upload retries and notices the abort is serverStorage.test.ts's business. Job
- * scheduling is the real thing, so whether a job was requested shows up as a fetch.
+ * the retrying around them is the real one, and how a single upload notices the abort is
+ * serverStorage.test.ts's business. Job scheduling is the real thing, so whether a job was
+ * requested shows up as a fetch.
  */
 
 vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/utils/serverStorage")>(),
-  sendChunkToServer: vi.fn()
+  uploadChunk: vi.fn()
 }));
 vi.mock("@/lib/utils/browserStorage");
 vi.mock("@/lib/utils/notifications", () => ({
@@ -98,41 +100,68 @@ const videoTrack = () => {
 const API = "http://record.example.com";
 const backend: RecordingDestination = { apiUrl: API, impeded: false, getAccessToken: async () => "test-token" };
 
-/** A chunk upload that has been handed to the (fake) network and not answered yet. */
+/**
+ * How the server answers a chunk: "ok" stores it; "failed" is an error that retrying will not
+ * fix, so the upload gives up on the spot, just as it does once it has run out of retries;
+ * "flaky" is a hiccup that is worth another try.
+ */
+type UploadAnswer = "ok" | "failed" | "flaky";
+
+/** One attempt at a chunk upload that has been handed to the (fake) network. */
 interface PendingUpload {
   track: string
   index: number
-  policy: RetryPolicy
-  answer: (status: UploadStatus) => void
+  signal: AbortSignal | undefined
+  answer: (answer: UploadAnswer) => void
 }
 
 let uploads: PendingUpload[];
 
-// Answering the same way the real upload does once its signal is aborted: at once, and
-// quietly, with "aborted".
+// Answering the same way the real upload does once its signal is aborted: at once, by
+// throwing the abort reason.
 function fakeUploads() {
   uploads = [];
 
-  vi.mocked(sendChunkToServer).mockImplementation((_destination, _chunk, _recording, track, index, policy) =>
-    new Promise(resolve => {
-      const answer = (status: UploadStatus) =>
-        resolve({ status, message: status === "failed" ? "server responded 503" : undefined });
+  vi.mocked(uploadChunk).mockImplementation((_destination, _chunk, _recording, track, index, signal) =>
+    new Promise((resolve, reject) => {
+      const answer = (answer: UploadAnswer) => {
+        if(answer === "ok") {
+          resolve();
+        } else if(answer === "failed") {
+          reject(new ApiError("HTTP 400: chunk rejected", "http", 400, "chunk rejected"));
+        } else {
+          reject(new ApiError("HTTP 503", "http", 503));
+        }
+      };
 
-      policy.abortSignal?.addEventListener("abort", () => answer("aborted"), { once: true });
-      uploads.push({ track, index, policy, answer });
+      if(signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      uploads.push({ track, index, signal, answer });
     }));
 }
 
-/** The upload of one chunk, once it has been handed over. */
+const attemptsAt = (track: string, index: number) =>
+  uploads.filter(u => u.track === track && u.index === index).length;
+
+/** The latest attempt at uploading one chunk, once it has been handed over. */
 async function upload(track: string, index: number) {
-  await until(() => uploads.some(u => u.track === track && u.index === index));
-  return uploads.find(u => u.track === track && u.index === index)!;
+  await until(() => attemptsAt(track, index) > 0);
+  return uploads.findLast(u => u.track === track && u.index === index)!;
 }
 
-const uploadsSent = () => vi.mocked(sendChunkToServer).mock.calls.length;
+const uploadsSent = () => vi.mocked(uploadChunk).mock.calls.length;
+
+const requestUrl = (input: RequestInfo | URL) => (input instanceof Request ? input.url : String(input));
 
 const jobRequests = () =>
-  vi.mocked(window.fetch).mock.calls.filter(([ url ]) => String(url).endsWith("/api/jobs"));
+  vi.mocked(window.fetch).mock.calls.filter(([ input ]) => requestUrl(input).endsWith("/render"));
+
+/** What the backend says when it has taken on a job. */
+const jobAccepted = () => Response.json({ state: "rendering", name: "GVS" }, { status: 202 });
 
 /** Output streams by file name, and which of them have finished closing. */
 let streams: Map<string, FileSystemWritableFileStream>;
@@ -196,7 +225,7 @@ beforeEach(() => {
   window.MediaRecorder = FakeMediaRecorder as unknown as typeof MediaRecorder;
 
   fakeUploads();
-  window.fetch = vi.fn().mockImplementation(async () => Response.json({}, { status: 202 }));
+  window.fetch = vi.fn().mockImplementation(async () => jobAccepted());
   vi.mocked(showError).mockClear();
 
   streams = new Map();
@@ -245,6 +274,33 @@ test("a recording whose chunks all arrived is scheduled and not marked for re-up
   expect(showError).not.toHaveBeenCalled();
 });
 
+test("a chunk that fails for a moment is tried again rather than given up on", async () => {
+  // a backend that is restarting, or a load balancer that hiccups: the chunk is still worth
+  // sending, and the recording is still fine
+  useStopClock();
+  const rec = await startRecording();
+
+  await rec.stream.emit();
+  (await upload("stream", 0)).answer("flaky");
+
+  // the next try comes after a pause, not at once
+  await until(() => vi.getTimerCount() > 0);
+  expect(attemptsAt("stream", 0)).toBe(1);
+
+  await vi.advanceTimersByTimeAsync(60 * 1000);
+  await until(() => attemptsAt("stream", 0) === 2);
+  (await upload("stream", 0)).answer("ok");
+
+  rec.stop();
+  (await upload("stream", 1)).answer("ok");
+  (await upload("overlay", 0)).answer("ok");
+  await rec.done;
+
+  expect(rec.onStreamingFailed).not.toHaveBeenCalled();
+  expect(showError).not.toHaveBeenCalled();
+  expect(jobRequests()).toHaveLength(1);
+});
+
 // --- a chunk that gives up -------------------------------------------------
 
 test("a chunk that gives up marks the recording for re-upload", async () => {
@@ -291,7 +347,7 @@ test("uploads in flight when a chunk gives up are told to stop", async () => {
   streamChunk.answer("failed");
   await until(() => rec.onStreamingFailed.mock.calls.length > 0);
 
-  expect(overlayChunk.policy.abortSignal?.aborted).toBe(true);
+  expect(overlayChunk.signal?.aborted).toBe(true);
 
   rec.stop();
   await rec.done;
@@ -300,16 +356,16 @@ test("uploads in flight when a chunk gives up are told to stop", async () => {
   expect(showError).toHaveBeenCalledOnce();
 });
 
-test("an upload that throws ends streaming the same way as one that gives up", async () => {
-  // Nothing in the upload is meant to throw -- failures come back as a status -- but should a
-  // later change make it, the recording must not carry on as though its chunks had arrived:
-  // it would be sent for postprocessing with a gap in it, and never marked for re-upload.
+test("an upload that throws something unexpected ends streaming the same way as one that gives up", async () => {
+  // Uploads are meant to fail with an ApiError, but should a later change make one throw
+  // something else, the recording must not carry on as though its chunks had arrived: it
+  // would be sent for postprocessing with a gap in it, and never marked for re-upload.
   const rec = await startRecording();
 
   await rec.overlay.emit();
   const overlayChunk = await upload("overlay", 0);
 
-  vi.mocked(sendChunkToServer).mockImplementationOnce(async () => {
+  vi.mocked(uploadChunk).mockImplementationOnce(async () => {
     throw new TypeError("upload blew up");
   });
   await rec.stream.emit();
@@ -317,7 +373,7 @@ test("an upload that throws ends streaming the same way as one that gives up", a
   await until(() => rec.onStreamingFailed.mock.calls.length > 0);
   expect(rec.onStreamingFailed).toHaveBeenCalledExactlyOnceWith(rec.recordingName());
   // the other uploads are stopped just as they are for a chunk that gave up
-  expect(overlayChunk.policy.abortSignal?.aborted).toBe(true);
+  expect(overlayChunk.signal?.aborted).toBe(true);
 
   rec.stop();
   await rec.done;
@@ -453,8 +509,6 @@ test("a recording that could not stream from the start says no job was requested
 
 test("a frontend-only deployment does not claim a job was scheduled", async () => {
   // there is no backend to have accepted one, so a confirmation would be a false one
-  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
-
   const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
 
   rec.stop();
@@ -485,8 +539,6 @@ test("a recording that cannot stream from the start sends nothing and is marked"
 
 test("a frontend-only deployment is not marked for re-upload", async () => {
   // no backend is not the same as no stream: there is nowhere to re-upload to either
-  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
-
   const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
 
   await rec.stream.emit();
@@ -523,7 +575,6 @@ test("storage is refreshed only once the local files are saved", async () => {
   // close that was started but not awaited shows: onFinished reads the file sizes from the
   // browser and then drops the live size estimates, and a file that is still being
   // committed reads as empty.
-  vi.mocked(sendChunkToServer).mockResolvedValue({ status: "ok" });
   const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
 
   let savedWhenFinished: string[] = [];
@@ -562,12 +613,12 @@ test("uploads still unanswered after stop are given up on after a grace period",
   await upload("overlay", 0);
 
   // not the moment stop is pressed: the last chunks have only just gone out
-  expect(chunk.policy.abortSignal?.aborted).toBe(false);
+  expect(chunk.signal?.aborted).toBe(false);
 
   await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
   await rec.done;
 
-  expect(chunk.policy.abortSignal?.aborted).toBe(true);
+  expect(chunk.signal?.aborted).toBe(true);
   expect(rec.onStreamingFailed).toHaveBeenCalledOnce();
   expect(jobRequests()).toHaveLength(0);
 });
@@ -575,25 +626,32 @@ test("uploads still unanswered after stop are given up on after a grace period",
 test("a frontend-only deployment is not given up on however long stopping takes", async () => {
   // There is no backend whose absence the grace period could be about, so it must not run:
   // giving up would mark a recording for re-upload in a deployment with nowhere to upload
-  // to. The (faked) uploads are left hanging to make stopping take as long as it likes.
+  // to. Without a backend no chunk goes up at all, so it is saving the (faked) local files
+  // that is left hanging to make stopping take as long as it likes.
   useStopClock();
+
+  let finishSaving: () => void = () => {};
+  const saved = new Promise<void>(resolve => finishSaving = resolve);
+  vi.mocked(openRecordingFileStream).mockImplementation(async () => ({
+    write: vi.fn(async () => {}),
+    close: vi.fn(() => saved)
+  }) as unknown as FileSystemWritableFileStream);
+
   const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
 
   await rec.stream.emit();
   rec.stop();
-  const lastChunks = [ await upload("stream", 1), await upload("overlay", 0) ];
 
   await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
 
-  expect(lastChunks.every(chunk => chunk.policy.abortSignal?.aborted === false)).toBe(true);
+  expect(rec.onFinished).not.toHaveBeenCalled();
   expect(rec.onStreamingFailed).not.toHaveBeenCalled();
 
-  for(const pending of uploads) {
-    pending.answer("ok");
-  }
+  finishSaving();
   await rec.done;
 
   expect(rec.onStreamingFailed).not.toHaveBeenCalled();
+  expect(uploadsSent()).toBe(0);
 });
 
 test("uploads that keep arriving after stop are not given up on", async () => {
@@ -632,7 +690,7 @@ test("a slow upload during the lecture is not given up on", async () => {
   const chunk = await upload("stream", 0);
 
   await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
-  expect(chunk.policy.abortSignal?.aborted).toBe(false);
+  expect(chunk.signal?.aborted).toBe(false);
 
   chunk.answer("ok");
   rec.stop();
@@ -651,9 +709,9 @@ test("the grace period does not cut off the job request", async () => {
 
   let answerJob: (response: Response) => void = () => {};
   let jobSignal: AbortSignal | undefined;
-  window.fetch = vi.fn().mockImplementation((_url: string | URL | Request, init?: RequestInit) =>
+  window.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
     new Promise<Response>((resolve, reject) => {
-      jobSignal = init?.signal ?? undefined;
+      jobSignal = input instanceof Request ? input.signal : init?.signal ?? undefined;
       jobSignal?.addEventListener("abort", () => reject(jobSignal?.reason), { once: true });
       answerJob = resolve;
     }));
@@ -668,7 +726,7 @@ test("the grace period does not cut off the job request", async () => {
   await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
   expect(jobSignal?.aborted).toBe(false);
 
-  answerJob(Response.json({}, { status: 202 }));
+  answerJob(jobAccepted());
   await rec.done;
 
   expect(rec.onStreamingFailed).not.toHaveBeenCalled();

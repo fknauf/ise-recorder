@@ -114,7 +114,7 @@ test("a re-uploaded recording drops off the list", async () => {
     store.markUnstreamed("GVS_1");
     store.markUnstreamed("GVS_2");
   });
-  act(() => store.signalManualUploadFinished("GVS_1", "ok"));
+  act(() => store.signalManualUploadFinished("GVS_1", true));
 
   expect(screen.getByRole("alert")).not.toHaveTextContent("GVS_1");
   expect(screen.getByRole("alert")).toHaveTextContent("GVS_2");
