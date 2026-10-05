@@ -82,11 +82,14 @@ async def classify_disk_state(recording_path: Path) -> tuple[RecordingDiskState,
         # can happen if the recording is being purged while we inspect it.
         return RecordingDiskState.NONEXISTENT, None
 
+
 def _last_chunk_mtime_in_track(track_path: Path) -> float | None:
     try:
         with os.scandir(track_path) as entries:
             last_chunk = max(
-                (e for e in entries if e.name.startswith("chunk.")), key=lambda e: e.name, default=None
+                (e for e in entries if e.name.startswith("chunk.")),
+                key=lambda e: e.name,
+                default=None,
             )
 
             if last_chunk is None:
@@ -96,6 +99,7 @@ def _last_chunk_mtime_in_track(track_path: Path) -> float | None:
     except FileNotFoundError:
         # can happen if the recording is being purged while the listing is being generated.
         return None
+
 
 async def _last_chunk_time_in_recording(recording_path: Path) -> datetime | None:
     if await recording_path.is_dir(follow_symlinks=False):

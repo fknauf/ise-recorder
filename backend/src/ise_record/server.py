@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager, ExitStack
 import logging
 from typing import Annotated
 
+import anyio
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -88,19 +89,25 @@ async def upload_chunk_endpoint(
 
     with enclave.claim_upload(location.recording):
         filename = f"chunk.{location.index:0{settings.chunk_file_digits}d}"
-        partname = f"part.{filename}"
 
         track_path = enclave.recording_dir(location.recording) / location.track
-        partpath = track_path / partname
         filepath = track_path / filename
         logger.debug("saving %s", filepath)
 
         await track_path.mkdir(parents=True, exist_ok=True)
 
-        async with await partpath.open("wb") as out:
+        # use temporary file instead of a fixed name so simultaneous uploads to the same chunk
+        # don't try to write to the same file. That's an edge case that shouldn't happen in normal
+        # operation, but it's tidier semantics this way.
+        async with anyio.NamedTemporaryFile(
+            mode="wb", dir=track_path, prefix=f"part.{filename}.", delete_on_close=False
+        ) as part:
             async for content in request.stream():
-                await out.write(content)
+                await part.write(content)
 
+            partpath = anyio.Path(part.name)
+
+        # atomic replace at the end so the postprocessing logic can never see half-written chunks.
         await partpath.replace(filepath)
 
 

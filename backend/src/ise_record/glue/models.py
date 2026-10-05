@@ -29,7 +29,9 @@ SafeRecording = Annotated[
 class ApiModel(BaseModel):
     """Base for request and response bodies: snake_case in Python, camelCase on the wire"""
 
-    model_config = ConfigDict(alias_generator=to_camel, validate_by_name=True, serialize_by_alias=True)
+    model_config = ConfigDict(
+        alias_generator=to_camel, validate_by_name=True, serialize_by_alias=True
+    )
 
 
 class RenderRequest(ApiModel):
