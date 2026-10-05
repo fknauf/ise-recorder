@@ -228,10 +228,11 @@ function AnyRecordingCard(
   return null;
 }
 
-function ProcessedRecordingsSectionImpl({ id }: Readonly<{ id: string }>) {
+function ServerStorageSectionImpl({ id }: Readonly<{ id: string }>) {
   const { data, error } = useProcessedRecordings();
-  const sectionTitle = "Server-Side Processed Recordings";
   const [ purgeCandidate, setPurgeCandidate ] = useState<string | null>(null);
+
+  const sectionTitle = "Server-Side Processed Recordings";
 
   if(error !== undefined) {
     return (
@@ -264,7 +265,7 @@ function ProcessedRecordingsSectionImpl({ id }: Readonly<{ id: string }>) {
   );
 }
 
-export function ProcessedRecordingsSection({ id }: Readonly<{ id: string }>) {
+export function ServerStorageSection({ id }: Readonly<{ id: string }>) {
   const { isAuthenticated, isExpired } = useAppSession();
   const { apiUrl } = useServerEnv();
 
@@ -272,5 +273,5 @@ export function ProcessedRecordingsSection({ id }: Readonly<{ id: string }>) {
     return null;
   }
 
-  return <ProcessedRecordingsSectionImpl id={id}/>;
+  return <ServerStorageSectionImpl id={id}/>;
 }

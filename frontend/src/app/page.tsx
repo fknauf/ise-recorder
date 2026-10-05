@@ -10,7 +10,7 @@ import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
 import { useAutoSignin } from "react-oidc-context";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { useHydrated } from "@/lib/hooks/useHydrated";
-import { ProcessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
+import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
 import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 
 function AutoSignin() {
@@ -40,7 +40,7 @@ export function Home() {
       <PreviewSection canvasWidth={384} canvasHeight={216}/>
       <Accordion isQuiet allowsMultipleExpanded defaultExpandedKeys={["saved", "processed"]}>
         <SavedRecordingsSection id="saved"/>
-        <ProcessedRecordingsSection id="processed"/>
+        <ServerStorageSection id="processed"/>
       </Accordion>
       <ToastContainer/>
     </Flex>

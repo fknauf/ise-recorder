@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
-import { ProcessedRecordingsSection } from "@/lib/components/ProcessedRecordingsSection";
+import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
 import { useProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
 import { fetchProcessedRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
@@ -149,7 +149,7 @@ function renderSection(options: SectionOptions = {}) {
     <SWRConfig value={{ provider: () => new Map() }}>
       <Provider theme={defaultTheme}>
         <ExpandedSection>
-          <ProcessedRecordingsSection id={SECTION_ID}/>
+          <ServerStorageSection id={SECTION_ID}/>
         </ExpandedSection>
       </Provider>
     </SWRConfig>
