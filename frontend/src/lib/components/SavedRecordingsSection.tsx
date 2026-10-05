@@ -102,10 +102,10 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               gap="size-100"
               justifyContent="center"
               alignItems="center"
-              height="size-900"
+              height="size-400"
               data-testid="sr-ind-uploading"
             >
-              <ProgressCircle size="M" value={progress} aria-label="Uploading"/>
+              <ProgressCircle size="S" value={progress} aria-label="Uploading"/>
               <Text>Uploading...</Text>
             </Flex>
           : <ActionGroup
