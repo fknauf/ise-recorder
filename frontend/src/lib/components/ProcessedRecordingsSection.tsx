@@ -189,7 +189,7 @@ const RenderingRecordingCard = (
       gap="size-100"
       alignItems="center"
       justifyContent="center"
-      marginTop="size-100"
+      height="100%"
     >
       <ProgressCircle size="S" aria-label="Rendering" isIndeterminate/>
       <Text>Rendering...</Text>
