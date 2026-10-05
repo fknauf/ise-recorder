@@ -277,6 +277,13 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
   // the recording's card, and the wording is free to change.
   await screen.findByRole("alertdialog", { name: new RegExp(recordingName) }, { timeout: 8000 });
 
+  // When signed in, the end of the recording also refreshes the server-side listing without
+  // waiting for it. Its answer now includes the new recording, so the server storage section
+  // re-renders whenever that answer arrives -- outside act unless something waits for it here.
+  if(tokenSource.isAuthenticated) {
+    await screen.findByTestId("rendering-card");
+  }
+
   const recordings = await gatherRecordingsList();
 
   expect(recordings.length).toBe(1);

@@ -5,7 +5,7 @@ import { ApiDestination, defaultRetryPolicy, RetryPolicy, withRetries } from "..
 import { uploadFile, schedulePostprocessing } from "../utils/serverStorage";
 import { useAppStore } from "./useAppStore";
 import { useLecture } from "./useLecture";
-import { useRefreshProcessedRecordings } from "./useProcessedRecordings";
+import { useRefreshServerStorage } from "./useServerStorage";
 import { useServerEnv } from "./useServerEnv";
 
 export function useReupload(recordingName: string) {
@@ -16,7 +16,7 @@ export function useReupload(recordingName: string) {
 
   const signalManualUploadProgress = useAppStore(state => state.signalManualUploadProgress);
   const signalManualUploadFinished = useAppStore(state => state.signalManualUploadFinished);
-  const refreshProcessedRecordings = useRefreshProcessedRecordings();
+  const refreshProcessedRecordings = useRefreshServerStorage();
 
   const reupload = async () => {
     if(apiUrl === undefined) {

@@ -3,8 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
-import { useProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
-import { fetchProcessedRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "@/lib/utils/serverStorage";
+import { useServerStorage } from "@/lib/hooks/useServerStorage";
+import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
 import { showError, showSuccess } from "@/lib/utils/notifications";
 import { useAppSession } from "@/lib/components/SessionProvider";
@@ -13,12 +13,12 @@ import { SWRConfig } from "swr";
 import * as z from "zod";
 import { ExpandedSection, SECTION_ID } from "./ExpandedSection";
 
-vi.mock("@/lib/hooks/useProcessedRecordings");
+vi.mock("@/lib/hooks/useServerStorage");
 // the requests are mocked, but the URL builder is kept: which href the link carries is
 // exactly what the download tests below are about
 vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/utils/serverStorage")>(),
-  fetchProcessedRecordings: vi.fn(),
+  fetchRecordings: vi.fn(),
   schedulePostprocessing: vi.fn(),
   purgeRecording: vi.fn()
 }));
@@ -57,8 +57,8 @@ const LECTURER_EMAIL = "lecturer@example.edu";
 const getAccessToken = async () => "test-token";
 
 // what the mocked hook hands the cards; the tests that run the real one pass `hook` instead
-const rerender = vi.fn<ReturnType<typeof useProcessedRecordings>["rerender"]>();
-const purge = vi.fn<ReturnType<typeof useProcessedRecordings>["purge"]>();
+const rerender = vi.fn<ReturnType<typeof useServerStorage>["rerender"]>();
+const purge = vi.fn<ReturnType<typeof useServerStorage>["purge"]>();
 
 type Listing = ServerStorageRecording[];
 
@@ -88,7 +88,7 @@ interface SectionOptions {
   data?: Listing | undefined
   error?: unknown
   /** In place of data and error: run this as the hook, e.g. the real one over its cache. */
-  hook?: typeof useProcessedRecordings
+  hook?: typeof useServerStorage
 }
 
 function renderSection(options: SectionOptions = {}) {
@@ -137,10 +137,10 @@ function renderSection(options: SectionOptions = {}) {
   purge.mockResolvedValue(undefined);
 
   if(hook !== undefined) {
-    vi.mocked(useProcessedRecordings).mockImplementation(hook);
+    vi.mocked(useServerStorage).mockImplementation(hook);
   } else {
-    vi.mocked(useProcessedRecordings).mockReturnValue(
-      { data, error, rerender, purge } as unknown as ReturnType<typeof useProcessedRecordings>
+    vi.mocked(useServerStorage).mockReturnValue(
+      { data, error, rerender, purge } as unknown as ReturnType<typeof useServerStorage>
     );
   }
 
@@ -297,14 +297,14 @@ test("a stale listing's rendering cards are withdrawn with the rest while the er
  * longer has the recording.
  */
 async function renderSectionWithCache(listing: Listing = LISTING) {
-  const actual = await vi.importActual<typeof import("@/lib/hooks/useProcessedRecordings")>("@/lib/hooks/useProcessedRecordings");
+  const actual = await vi.importActual<typeof import("@/lib/hooks/useServerStorage")>("@/lib/hooks/useServerStorage");
 
-  vi.mocked(fetchProcessedRecordings).mockResolvedValue(listing);
-  renderSection({ hook: actual.useProcessedRecordings });
+  vi.mocked(fetchRecordings).mockResolvedValue(listing);
+  renderSection({ hook: actual.useServerStorage });
   // the backend only lists the recording without it once the purge is through, so a fetch
   // that merely happened to run earlier cannot pass for the one after it
   vi.mocked(purgeRecording).mockImplementation(async (_destination, name) => {
-    vi.mocked(fetchProcessedRecordings).mockResolvedValue(without(listing, name));
+    vi.mocked(fetchRecordings).mockResolvedValue(without(listing, name));
   });
 
   await waitFor(() => expect(screen.getByText("Server-Side Processed Recordings")).toBeInTheDocument());
@@ -312,7 +312,7 @@ async function renderSectionWithCache(listing: Listing = LISTING) {
 
 /** From here on the listing is not answered, so whatever is on screen is what the cache holds. */
 const holdFurtherListings = () =>
-  vi.mocked(fetchProcessedRecordings).mockReturnValue(new Promise(() => {}));
+  vi.mocked(fetchRecordings).mockReturnValue(new Promise(() => {}));
 
 
 // --- rerendering a finished recording --------------------------------------
@@ -377,7 +377,7 @@ test("a scheduled rerender fetches the listing again rather than trusting its ow
   // the backend only answers with the new listing once the job is accepted, so a fetch
   // that merely happened to run earlier cannot pass for the one after the rerender
   vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, name) => {
-    vi.mocked(fetchProcessedRecordings).mockResolvedValue(after);
+    vi.mocked(fetchRecordings).mockResolvedValue(after);
     return { state: "rendering", name };
   });
 
@@ -430,7 +430,7 @@ test("a refused rerender still fetches the listing again", async () => {
   const after = asRendering(LISTING, "GVS_2025");
 
   vi.mocked(schedulePostprocessing).mockImplementation(async () => {
-    vi.mocked(fetchProcessedRecordings).mockResolvedValue(after);
+    vi.mocked(fetchRecordings).mockResolvedValue(after);
     throw new ApiError("HTTP 409: already rendering", "http", 409, "already rendering");
   });
 
@@ -458,7 +458,7 @@ test("a rerender that blows up unexpectedly puts the card back and says why", as
 
 test("a listing that fails to come back after a rerender is reported in place of the recordings", async () => {
   await renderSectionWithCache();
-  vi.mocked(fetchProcessedRecordings).mockRejectedValue(new ApiError("HTTP 503: upstream unavailable", "http", 503, "upstream unavailable"));
+  vi.mocked(fetchRecordings).mockRejectedValue(new ApiError("HTTP 503: upstream unavailable", "http", 503, "upstream unavailable"));
 
   await userEvent.click(rerenderButton(cards()[0]));
 
@@ -725,7 +725,7 @@ test("a purge that succeeds after the dialog closed still says so", async () => 
 
   vi.mocked(purgeRecording).mockReturnValue(new Promise(resolve => {
     done = () => {
-      vi.mocked(fetchProcessedRecordings).mockResolvedValue(without(LISTING, "GVS_2025"));
+      vi.mocked(fetchRecordings).mockResolvedValue(without(LISTING, "GVS_2025"));
       resolve();
     };
   }));
@@ -881,16 +881,16 @@ test("a purge fetches the listing again rather than trusting its own guess", asy
   const after = sorted([ ...without(LISTING, "PSU_2026"), rendering("NEW_2026") ]);
 
   vi.mocked(purgeRecording).mockImplementation(async () => {
-    vi.mocked(fetchProcessedRecordings).mockResolvedValue(after);
+    vi.mocked(fetchRecordings).mockResolvedValue(after);
   });
-  vi.mocked(fetchProcessedRecordings).mockClear();
+  vi.mocked(fetchRecordings).mockClear();
 
   await userEvent.click(purgeButton(cards()[1]));
   await userEvent.click(confirmButton());
 
   await waitFor(() => expect(names(renderingCards())).toStrictEqual([ "NEW_2026" ]));
   expect(names(cards())).toStrictEqual([ "GVS_2025" ]);
-  expect(fetchProcessedRecordings).toHaveBeenCalledOnce();
+  expect(fetchRecordings).toHaveBeenCalledOnce();
 });
 
 test("the purged card stays gone while the listing is fetched again", async () => {

@@ -146,7 +146,7 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
  * Shows download buttons for the individual files and a remove button for the whole recording.
  * Buttons are disabled for the currently active recording.
  */
-export function SavedRecordingsSection({ id }: Readonly<{ id: string }>) {
+export function BrowserStorageSection({ id }: Readonly<{ id: string }>) {
   const { removeSavedRecording, savedRecordings } = useBrowserStorage();
   const [ deleteCandidate, setDeleteCandidate ] = useState<string | null>(null);
   const unstreamedRecordings = useAppStore(state => state.unstreamedRecordings);

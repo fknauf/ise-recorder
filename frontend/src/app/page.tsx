@@ -3,7 +3,7 @@
 import { Accordion, Flex, ToastContainer } from "@adobe/react-spectrum";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
 import { RecorderControls } from "@/lib/components/RecorderControls";
-import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
+import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
 import { PreviewSection } from "@/lib/components/PreviewSection";
 import { GithubLink } from "@/lib/components/GithubLink";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
@@ -39,7 +39,7 @@ export function Home() {
       </Flex>
       <PreviewSection canvasWidth={384} canvasHeight={216}/>
       <Accordion isQuiet allowsMultipleExpanded defaultExpandedKeys={["saved", "processed"]}>
-        <SavedRecordingsSection id="saved"/>
+        <BrowserStorageSection id="saved"/>
         <ServerStorageSection id="processed"/>
       </Accordion>
       <ToastContainer/>

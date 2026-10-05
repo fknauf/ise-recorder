@@ -21,7 +21,7 @@ SafeRecording = Annotated[
         pattern=r"\A[\p{L}\p{N}_][\p{L}\p{M}\p{N}._-]*\z",
         min_length=1,
         description="Name of the recording. Usually consists of Lecture Title and Timestamp",
-        examples=["PSU_2026-02-13T164309.313Z"],
+        examples=["PSU_2026-02-13T16.43.09.313Z"],
     ),
 ]
 

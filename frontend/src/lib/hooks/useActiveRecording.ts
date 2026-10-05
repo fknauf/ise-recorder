@@ -7,7 +7,7 @@ import { useServerEnv } from "./useServerEnv";
 import { useMediaTracks } from "./useMediaTracks";
 import { showError } from "../utils/notifications";
 import { SessionTransition, useAppSession } from "../components/SessionProvider";
-import { useRefreshProcessedRecordings } from "./useProcessedRecordings";
+import { useRefreshServerStorage } from "./useServerStorage";
 
 function preventClosing(e: BeforeUnloadEvent) {
   e.preventDefault();
@@ -34,7 +34,7 @@ export function useStartStopRecording() {
   const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
   const updateQuotaInformation = useAppStore(state => state.updateQuotaInformation);
   const overrideFileSize = useAppStore(state => state.overrideFileSize);
-  const refreshProcessedRecordings = useRefreshProcessedRecordings();
+  const refreshProcessedRecordings = useRefreshServerStorage();
   const markUnstreamed = useAppStore(state => state.markUnstreamed);
 
   const {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { useProcessedRecordings, useRefreshProcessedRecordings } from "@/lib/hooks/useProcessedRecordings";
+import { useServerStorage, useRefreshServerStorage } from "@/lib/hooks/useServerStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import { ServerStorageRecording } from "@/lib/utils/serverStorage";
@@ -81,7 +81,7 @@ function swrWrapper() {
   return Wrapper;
 }
 
-function renderPreprocessedRecordings(
+function renderServerStorageRecordings(
   {
     serverEnv = { apiUrl: API_URL } as ServerEnv,
     getAccessToken = (async () => "test-token") as AppSession["getAccessToken"],
@@ -91,7 +91,7 @@ function renderPreprocessedRecordings(
   mockServerEnv.mockReturnValue(serverEnv);
   mockUseAppSession.mockReturnValue(session(getAccessToken, isAuthenticated));
 
-  return renderHook(useProcessedRecordings, { wrapper: swrWrapper() });
+  return renderHook(useServerStorage, { wrapper: swrWrapper() });
 }
 
 /**
@@ -122,7 +122,7 @@ afterEach(() => {
 test("the listing is fetched from the configured backend with the access token", async () => {
   respondWith(() => jsonResponse(LISTING));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.data).toEqual(LISTING));
 
@@ -138,7 +138,7 @@ test("the listing is fetched from the configured backend with the access token",
 });
 
 test("nothing is fetched when the deployment has no backend", async () => {
-  const { result } = renderPreprocessedRecordings({ serverEnv: {} });
+  const { result } = renderServerStorageRecordings({ serverEnv: {} });
 
   // the null SWR key is what disables the poll; without it the hook would retry against
   // "undefined/api/recordings" every minute for the whole session
@@ -149,7 +149,7 @@ test("nothing is fetched when the deployment has no backend", async () => {
 });
 
 test("nothing is fetched while nobody is signed in", async () => {
-  const { result } = renderPreprocessedRecordings({ isAuthenticated: false });
+  const { result } = renderServerStorageRecordings({ isAuthenticated: false });
 
   await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -162,7 +162,7 @@ test("nothing is fetched while nobody is signed in", async () => {
 test("signing in fetches the listing without waiting for the poll", async () => {
   respondWith(() => jsonResponse(LISTING));
 
-  const { result, rerender } = renderPreprocessedRecordings({ isAuthenticated: false });
+  const { result, rerender } = renderServerStorageRecordings({ isAuthenticated: false });
 
   await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -177,7 +177,7 @@ test("signing out drops the listing", async () => {
   // every TOTP in it is a download link, and they are not the next user's to have
   respondWith(() => jsonResponse(LISTING));
 
-  const { result, rerender } = renderPreprocessedRecordings();
+  const { result, rerender } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.data).toEqual(LISTING));
 
@@ -199,7 +199,7 @@ test("a signed-in session that yields no token is a failure rather than an empty
       : jsonResponse({ detail: "Not authenticated" }, 401)
   ));
 
-  const { result } = renderPreprocessedRecordings({ getAccessToken: async () => undefined });
+  const { result } = renderServerStorageRecordings({ getAccessToken: async () => undefined });
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -217,7 +217,7 @@ test("a fresh token is requested for every poll rather than captured once", asyn
 
   respondWith(() => jsonResponse(LISTING));
 
-  const { result } = renderPreprocessedRecordings({ getAccessToken });
+  const { result } = renderServerStorageRecordings({ getAccessToken });
 
   await waitFor(() => expect(result.current.data).toEqual(LISTING));
 
@@ -241,7 +241,7 @@ test("a fresh token is requested for every poll rather than captured once", asyn
 test("re-rendering does not set off another request", async () => {
   respondWith(() => jsonResponse(LISTING));
 
-  const { result, rerender } = renderPreprocessedRecordings();
+  const { result, rerender } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.data).toEqual(LISTING));
 
@@ -260,7 +260,7 @@ test("a rejected listing surfaces the status and the server's explanation", asyn
   // what FastAPI answers an HTTPException with
   respondWith(() => jsonResponse({ detail: "Not authenticated" }, 401));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -279,7 +279,7 @@ test("a body that is not JSON is left out rather than put on screen", async () =
     { status: 502, headers: { "Content-Type": "text/html" } }
   ));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -295,7 +295,7 @@ test("a body that is not JSON is left out rather than put on screen", async () =
 test("a JSON body with no string detail is left out rather than stringified", async () => {
   respondWith(() => jsonResponse({ error: "upstream refused" }, 503));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -308,7 +308,7 @@ test("a malformed listing is a failure rather than something to render", async (
   // otherwise reach the MiB formatter as NaN
   respondWith(() => jsonResponse([ { state: "completed", name: "x", size: "1024", downloadUrl: "downloads/u/x?totp=1" } ]));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -327,7 +327,7 @@ test("a backend that cannot be reached at all fails the same way", async () => {
   const unreachable = new TypeError("NetworkError when attempting to fetch resource.");
   fetchMock.mockRejectedValue(unreachable);
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -339,7 +339,7 @@ test("a backend that cannot be reached at all fails the same way", async () => {
 test("a failed poll leaves the previous listing in the cache for the section to suppress", async () => {
   respondWith(() => jsonResponse(LISTING));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   // read `error` before the failure, not only after it: SWR tracks which fields the caller
   // touches and skips the re-render when an untouched one changes, so waiting on `error`
@@ -364,7 +364,7 @@ test("a failed poll leaves the previous listing in the cache for the section to 
 test("a recovered poll clears the error so the minute refresh resumes", async () => {
   respondWith(() => new Response("nope", { status: 500 }));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -387,7 +387,7 @@ test("a listing in the old shape of /api/completed is refused rather than half-r
   // in place of `completed`, and no `rendering` at all
   respondWith(() => jsonResponse({ user: "u", recordings: [ { name: "x", size: 1024, totp: "1" } ] }));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -398,7 +398,7 @@ test("a listing in the grouped shape from before is refused", async () => {
   // what a backend that still sorts its recordings into one array per kind answers
   respondWith(() => jsonResponse({ user: "u", completed: [], rendering: [], unprocessed: [] }));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -409,7 +409,7 @@ test("an entry in a state the frontend does not know is refused", async () => {
   // the state is what picks the card, and there is none to pick for this one
   respondWith(() => jsonResponse([ { state: "queued", name: "x" } ]));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -420,7 +420,7 @@ test("a finished entry without a download URL is refused", async () => {
   // the URL, TOTP included, is the whole of what the download link is built from
   respondWith(() => jsonResponse([ { state: "completed", name: "x", size: 1024 } ]));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -431,7 +431,7 @@ test("an unprocessed entry without a name is refused", async () => {
   // the name is what the Rerender button posts back as the job's recording
   respondWith(() => jsonResponse([ { state: "unprocessed" } ]));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -441,7 +441,7 @@ test("an unprocessed entry without a name is refused", async () => {
 test("a rendering entry without a name is refused", async () => {
   respondWith(() => jsonResponse([ { state: "rendering" } ]));
 
-  const { result } = renderPreprocessedRecordings();
+  const { result } = renderServerStorageRecordings();
 
   await waitFor(() => expect(result.current.error).toBeDefined());
 
@@ -450,7 +450,7 @@ test("a rendering entry without a name is refused", async () => {
 
 // --- refreshing from outside the section -----------------------------------
 //
-// useRefreshProcessedRecordings is what the recorder calls once a recording is finished.
+// useRefreshServerStorage is what the recorder calls once a recording is finished.
 // It goes through the mutate of the nearest SWRConfig, so it has to reach the same cache
 // the listing lives in -- here the fresh-Map wrapper's, which the global mutate would miss.
 
@@ -463,7 +463,7 @@ test("a refresh fetches the listing again without waiting for the poll", async (
   respondWith(() => jsonResponse(LISTING));
 
   const { result } = renderHook(
-    () => ({ listing: useProcessedRecordings(), refresh: useRefreshProcessedRecordings() }),
+    () => ({ listing: useServerStorage(), refresh: useRefreshServerStorage() }),
     { wrapper: swrWrapper() }
   );
 
@@ -488,8 +488,8 @@ test("a refresh from outside the listing's cache does not reach it", async () =>
 
   respondWith(() => jsonResponse(LISTING));
 
-  const listing = renderHook(useProcessedRecordings, { wrapper: swrWrapper() });
-  const elsewhere = renderHook(useRefreshProcessedRecordings, { wrapper: swrWrapper() });
+  const listing = renderHook(useServerStorage, { wrapper: swrWrapper() });
+  const elsewhere = renderHook(useRefreshServerStorage, { wrapper: swrWrapper() });
 
   await waitFor(() => expect(listing.result.current.data).toEqual(LISTING));
 
@@ -505,7 +505,7 @@ test("a refresh from outside the listing's cache does not reach it", async () =>
 // Both go through the listing's own mutate, so the card moves the moment the lecturer has
 // pressed the button and moves back if the backend refuses. Whether a request goes out is
 // the listing's business here; which toast follows is the section's, in
-// ProcessedRecordingsSection.test.tsx.
+// ServerStorageSection.test.tsx.
 
 /**
  * Answers each endpoint the hook talks to with a builder of its own: the listing, the DELETE
@@ -541,7 +541,7 @@ const accepted = (name: string) => () => jsonResponse({ state: "rendering", name
 async function renderWithListing(listing = LISTING) {
   backend({ listing: () => jsonResponse(listing) });
 
-  const rendered = renderPreprocessedRecordings();
+  const rendered = renderServerStorageRecordings();
 
   await waitFor(() => expect(rendered.result.current.data).toEqual(listing));
   return rendered;

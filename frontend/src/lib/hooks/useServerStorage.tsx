@@ -1,12 +1,12 @@
 import useSWR, { useSWRConfig } from "swr";
 import { useAppSession } from "../components/SessionProvider";
 import { useServerEnv } from "./useServerEnv";
-import { fetchProcessedRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording, UnfinishedRecording } from "../utils/serverStorage";
+import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording, UnfinishedRecording } from "../utils/serverStorage";
 import { useLecture } from "./useLecture";
 
 const RECORDINGS_KEY = "/api/recordings";
 
-export function useProcessedRecordings() {
+export function useServerStorage() {
   const { apiUrl } = useServerEnv();
   const { lecturerEmail } = useLecture();
   const { isAuthenticated, getAccessToken } = useAppSession();
@@ -15,7 +15,7 @@ export function useProcessedRecordings() {
 
   const { data, mutate, error, isLoading, isValidating } = useSWR(
     canFetch ? RECORDINGS_KEY : null,
-    () => (apiUrl !== undefined ? fetchProcessedRecordings({ apiUrl, getAccessToken }) : []),
+    () => (apiUrl !== undefined ? fetchRecordings({ apiUrl, getAccessToken }) : []),
     {
       fallbackData: undefined,
       refreshInterval: 60000,
@@ -79,7 +79,7 @@ export function useProcessedRecordings() {
   return { data, error, isLoading, isValidating, refresh, rerender, purge };
 }
 
-export function useRefreshProcessedRecordings() {
+export function useRefreshServerStorage() {
   const { mutate } = useSWRConfig();
   return () => mutate(RECORDINGS_KEY);
 }

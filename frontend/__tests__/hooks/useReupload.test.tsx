@@ -33,10 +33,10 @@ vi.mock("@/lib/components/SessionProvider", () => ({
   useAppSession: () => ({ getAccessToken })
 }));
 
-// the refresh goes through the SWR cache, which is useProcessedRecordings.test.tsx's business
-const refreshProcessedRecordings = vi.fn();
-vi.mock("@/lib/hooks/useProcessedRecordings", () => ({
-  useRefreshProcessedRecordings: () => refreshProcessedRecordings
+// the refresh goes through the SWR cache, which is useServerStorage.test.tsx's business
+const refreshServerStorage = vi.fn();
+vi.mock("@/lib/hooks/useServerStorage", () => ({
+  useRefreshServerStorage: () => refreshServerStorage
 }));
 
 const trackOf = (trackName: string) => ({ trackName, file: new File([ trackName ], `${trackName}.webm`) });
@@ -51,7 +51,7 @@ beforeEach(() => {
   vi.mocked(schedulePostprocessing).mockResolvedValue({ state: "rendering", name: "GVS_2025-reupload" });
   vi.mocked(showError).mockClear();
   vi.mocked(showSuccess).mockClear();
-  refreshProcessedRecordings.mockClear();
+  refreshServerStorage.mockClear();
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 0 });
 });
@@ -103,7 +103,7 @@ test("every track goes up under a name of its own, then the job is scheduled", a
   // the report goes to whoever is in the lecture form now; the backend keeps no record of
   // the original recipient
   expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-reupload", "lecturer@example.edu", undefined);
-  expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
+  expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
 
 test("a scheduled job is confirmed to the user", async () => {
@@ -131,7 +131,7 @@ test("a job the backend refused is reported with what it said", async () => {
   expect(schedulePostprocessing).toHaveBeenCalledOnce();
   expect(showSuccess).not.toHaveBeenCalled();
   expect(result.current.upload.isUploading).toBe(false);
-  expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
+  expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
 
 test("a job request that fails for a passing reason is tried again", async () => {
@@ -235,7 +235,7 @@ test("a failed track stops the upload before anything is scheduled", async () =>
   expect(showError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("overlay"), failed);
   // released and refreshed all the same, so the button can be pressed again
   expect(result.current.upload.isUploading).toBe(false);
-  expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
+  expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
 
 test("a recording without any tracks says so instead of doing nothing", async () => {
@@ -286,7 +286,7 @@ test("an upload that blows up is reported and gives the button back", async () =
   expect(showError).toHaveBeenCalledWith(expect.stringContaining("GVS_2025-reupload"), expect.any(Error));
   expect(uploadFile).not.toHaveBeenCalled();
   expect(result.current.upload.isUploading).toBe(false);
-  expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
+  expect(refreshServerStorage).toHaveBeenCalledOnce();
   error.mockRestore();
 });
 

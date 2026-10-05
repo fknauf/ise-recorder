@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
-import { SavedRecordingsSection } from "@/lib/components/SavedRecordingsSection";
+import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
 import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
@@ -78,7 +78,7 @@ async function renderSection(scale: "medium" | "large" = "medium") {
       <AppStoreProvider serverEnv={{}}>
         <StoreHandle/>
         <ExpandedSection>
-          <SavedRecordingsSection id={SECTION_ID}/>
+          <BrowserStorageSection id={SECTION_ID}/>
         </ExpandedSection>
       </AppStoreProvider>
     </Provider>

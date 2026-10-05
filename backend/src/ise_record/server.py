@@ -172,7 +172,7 @@ async def purge_endpoint(
 async def download_endpoint(
     enclave: Annotated[Enclave | None, Depends(get_enclave_by_user_digest)],
     recording: SafeRecording,
-    totp: Annotated[str, Field(pattern=r"[0-9]+")],
+    totp: Annotated[str, Field(pattern=r"\A[0-9]+\z")],
 ) -> FileResponse:
     """Endpoint for downloading a completed recording that the active user owns"""
     if enclave is None or not enclave.verify_totp(totp, recording):

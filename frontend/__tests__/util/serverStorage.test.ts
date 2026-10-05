@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { downloadHref, fetchProcessedRecordings, purgeRecording, schedulePostprocessing, uploadChunk, uploadFile } from "@/lib/utils/serverStorage";
+import { downloadHref, fetchRecordings, purgeRecording, schedulePostprocessing, uploadChunk, uploadFile } from "@/lib/utils/serverStorage";
 import { ApiDestination, ApiError, defaultRetryPolicy, RetryPolicy, withRetries } from "@/lib/utils/apiFetch";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import * as z from "zod";
@@ -514,7 +514,7 @@ const LISTING = [
 test("the listing is fetched with one authenticated GET", async () => {
   window.fetch = vi.fn().mockResolvedValue(Response.json(LISTING));
 
-  await fetchProcessedRecordings(destination);
+  await fetchRecordings(destination);
 
   expect(window.fetch).toHaveBeenCalledOnce();
 
@@ -528,13 +528,13 @@ test("the listing is fetched with one authenticated GET", async () => {
 test("the listing resolves with the recordings the backend answered with", async () => {
   window.fetch = vi.fn().mockResolvedValue(Response.json(LISTING));
 
-  await expect(fetchProcessedRecordings(destination)).resolves.toStrictEqual(LISTING);
+  await expect(fetchRecordings(destination)).resolves.toStrictEqual(LISTING);
 });
 
 test("a listing with nothing in it is an empty array", async () => {
   window.fetch = vi.fn().mockResolvedValue(Response.json([]));
 
-  await expect(fetchProcessedRecordings(destination)).resolves.toStrictEqual([]);
+  await expect(fetchRecordings(destination)).resolves.toStrictEqual([]);
 });
 
 test.each([
@@ -546,7 +546,7 @@ test.each([
   // showing a listing it cannot make sense of
   window.fetch = vi.fn().mockResolvedValue(Response.json(listing));
 
-  const error = await rejectionOf(fetchProcessedRecordings(destination));
+  const error = await rejectionOf(fetchRecordings(destination));
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).kind).toBe("invalid-response");
@@ -558,7 +558,7 @@ test("a refused listing fails with the server's explanation", async () => {
   window.fetch = vi.fn().mockResolvedValue(
     Response.json({ detail: "Authentication not configured" }, { status: 403 }));
 
-  const error = await rejectionOf(fetchProcessedRecordings(destination));
+  const error = await rejectionOf(fetchRecordings(destination));
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).status).toBe(403);
@@ -569,7 +569,7 @@ test("a refused listing fails with the server's explanation", async () => {
 //
 // The request that deletes a recording for good. What the lecturer has to confirm first,
 // and telling them how it went, is the dialog's business, in
-// ProcessedRecordingsSection.test.tsx; this is the request once they have confirmed.
+// ServerStorageSection.test.tsx; this is the request once they have confirmed.
 
 const purged = () => new Response(null, { status: 204 });
 

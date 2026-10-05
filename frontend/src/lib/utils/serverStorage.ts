@@ -84,7 +84,7 @@ export async function schedulePostprocessing(
   return await apiFetchData(destination, urlPath, request, RenderingRecordingSchema);
 }
 
-export async function fetchProcessedRecordings(
+export async function fetchRecordings(
   destination: ApiDestination
 ): Promise<ServerStorageRecording[]> {
   const request: RequestInit = {

@@ -7,7 +7,7 @@ import Download from "@spectrum-icons/workflow/Download";
 import Refresh from "@spectrum-icons/workflow/Refresh";
 import Delete from "@spectrum-icons/workflow/Delete";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { useProcessedRecordings } from "../hooks/useProcessedRecordings";
+import { useServerStorage } from "../hooks/useServerStorage";
 import * as z from "zod";
 import { DownloadableRecording, downloadHref, ServerStorageRecording, UnfinishedRecording } from "../utils/serverStorage";
 import { ReactNode, useState } from "react";
@@ -37,7 +37,7 @@ function prettifyError(error: unknown) {
 
 function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
   const { apiUrl } = useServerEnv();
-  const { purge } = useProcessedRecordings();
+  const { purge } = useServerStorage();
 
   const { dismiss } = useDialogContainer();
 
@@ -95,7 +95,7 @@ function ActionableRecordingCard(
   }>
 ) {
   const { apiUrl } = useServerEnv();
-  const { rerender } = useProcessedRecordings();
+  const { rerender } = useServerStorage();
   const [ busy, setBusy ] = useState(false);
 
   if(apiUrl === undefined) {
@@ -229,7 +229,7 @@ function AnyRecordingCard(
 }
 
 function ServerStorageSectionImpl({ id }: Readonly<{ id: string }>) {
-  const { data, error } = useProcessedRecordings();
+  const { data, error } = useServerStorage();
   const [ purgeCandidate, setPurgeCandidate ] = useState<string | null>(null);
 
   const sectionTitle = "Server-Side Processed Recordings";

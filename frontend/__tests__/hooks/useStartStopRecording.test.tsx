@@ -21,11 +21,11 @@ vi.mock("@/lib/utils/notifications", () => ({
   showMessage: vi.fn()
 }));
 vi.mock("@/lib/utils/browserStorage");
-// what the refresh does to the SWR cache is useProcessedRecordings.test.tsx's business;
+// what the refresh does to the SWR cache is useServerStorage.test.tsx's business;
 // here it only matters that finishing a recording asks for it
-const refreshProcessedRecordings = vi.fn();
-vi.mock("@/lib/hooks/useProcessedRecordings", () => ({
-  useRefreshProcessedRecordings: () => refreshProcessedRecordings
+const refreshServerStorage = vi.fn();
+vi.mock("@/lib/hooks/useServerStorage", () => ({
+  useRefreshServerStorage: () => refreshServerStorage
 }));
 
 const mockUseAccessTokenSource = vi.fn();
@@ -114,7 +114,7 @@ beforeEach(() => {
   localStorage.clear();
 
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
-  refreshProcessedRecordings.mockClear();
+  refreshServerStorage.mockClear();
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 1234 });
 
   vi.mocked(recordLecture).mockImplementation(async (
@@ -391,13 +391,13 @@ test("finishing a recording refreshes the server-side listing", async () => {
     await call.onStarted("REC_1", vi.fn());
   });
 
-  expect(refreshProcessedRecordings).not.toHaveBeenCalled();
+  expect(refreshServerStorage).not.toHaveBeenCalled();
 
   await act(async () => {
     await call.onFinished("REC_1");
   });
 
-  expect(refreshProcessedRecordings).toHaveBeenCalledOnce();
+  expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
 
 // --- stopping --------------------------------------------------------------
