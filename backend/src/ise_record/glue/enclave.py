@@ -6,10 +6,13 @@ enclave that's not associated with a user because there are no users.
 In this module, that state is defined and exported as a fastapi dependable.
 """
 
+import anyio
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
-from typing import Annotated
+import shutil
+from typing import Annotated, Any
 
+from aiorwlock import RWLock
 from anyio import Path
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import Field
@@ -39,6 +42,11 @@ class Enclave:
         self._tracker = RecordingTracker()
         self._download_totp = DownloadTotpAuthority()
 
+        # lock on the home dir to prevent concurrent purges and file system inspection. This could
+        # be a per-recording lock, but I don't expect that purges will ever become so high-volume
+        # per user that it'll make a noticeable difference, and this way means fewer moving parts.
+        self._fs_lock = RWLock()
+
     def user_digest(self) -> str | None:
         """stable identifier for a user. None in unauthenticated deployments"""
         return self._user_digest
@@ -49,7 +57,7 @@ class Enclave:
 
     @contextmanager
     def _claim(
-        self, fn: Callable[[Path], AbstractContextManager], recording: str, detail: str
+        self, fn: Callable[[Path], AbstractContextManager[Any]], recording: str, detail: str
     ) -> Generator[None]:
         try:
             with fn(self.recording_dir(recording)):
@@ -86,8 +94,9 @@ class Enclave:
 
     async def disk_state(self, recording: str) -> RecordingDiskState:
         """Determine the on-disk state of a recording"""
-        state, _ = await classify_disk_state(self.recording_dir(recording))
-        return state
+        async with self._fs_lock.reader_lock:
+            state, _ = await classify_disk_state(self.recording_dir(recording))
+            return state
 
     def activity(self, recording: str) -> RecordingActivity:
         """
@@ -101,21 +110,28 @@ class Enclave:
         Determine whether the recording is currently being streamed to the backend, i.e. whether
         we should expect that more chunks could arrive. Heuristic.
         """
-        return await self._tracker.streaming(self.recording_dir(recording))
+        async with self._fs_lock.reader_lock:
+            return await self._tracker.streaming(self.recording_dir(recording))
 
     async def classify(self, recording: str) -> RecordingInfo:
         """
         Collect disk state, activity, streaming state, and size for a recording.
         """
-        return await self._tracker.classify(self.recording_dir(recording))
+        async with self._fs_lock.reader_lock:
+            return await self._tracker.classify(self.recording_dir(recording))
 
     async def classify_all(self) -> list[RecordingInfo]:
         """Classify all recordings in this enclave for display/download in the frontend"""
-        return [
-            await self._tracker.classify(rec_dir)
-            async for rec_dir in self._home_dir.iterdir()
-            if await rec_dir.is_dir(follow_symlinks=False)
-        ]
+        async with self._fs_lock.reader_lock:
+            return [
+                await self._tracker.classify(rec_dir)
+                async for rec_dir in self._home_dir.iterdir()
+                if await rec_dir.is_dir(follow_symlinks=False)
+            ]
+
+    async def purge(self, recording: str) -> None:
+        async with self._fs_lock.writer_lock:
+            await anyio.to_thread.run_sync(shutil.rmtree, self.recording_dir(recording))
 
     def generate_totp(self, recording: str) -> str:
         """Generate a TOTP for the download of a finished recording"""

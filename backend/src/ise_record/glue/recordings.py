@@ -3,10 +3,8 @@ Lists of recordings for display in the UI as server-side recordings, binned into
 rendering, and unprocessed/failed-postprocessing recordings.
 """
 
-import asyncio
 from collections.abc import Callable
 import logging
-import shutil
 from typing import NoReturn
 from urllib.parse import quote
 
@@ -107,7 +105,7 @@ async def purge_recording(recording: SafeRecording, enclave: Enclave, user_info:
             )
 
         try:
-            await asyncio.to_thread(shutil.rmtree, enclave.recording_dir(recording))
+            await enclave.purge(recording)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.exception("Filesystem error")
             raise HTTPException(

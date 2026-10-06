@@ -88,11 +88,10 @@ async def upload_chunk_endpoint(
         )
 
     with enclave.claim_upload(location.recording):
-        filename = f"chunk.{location.index:0{settings.chunk_file_digits}d}"
-
         track_path = enclave.recording_dir(location.recording) / location.track
-        filepath = track_path / filename
-        logger.debug("saving %s", filepath)
+        out_name = f"chunk.{location.index:0{settings.chunk_file_digits}d}"
+        out_path = track_path / out_name
+        logger.debug("saving %s", out_path)
 
         await track_path.mkdir(parents=True, exist_ok=True)
 
@@ -100,15 +99,14 @@ async def upload_chunk_endpoint(
         # don't try to write to the same file. That's an edge case that shouldn't happen in normal
         # operation, but it's tidier semantics this way.
         async with anyio.NamedTemporaryFile(
-            mode="wb", dir=track_path, prefix=f"part.{filename}.", delete_on_close=False
+            mode="wb", dir=str(track_path), prefix=f"part.{out_name}."
         ) as part:
             async for content in request.stream():
                 await part.write(content)
 
-            partpath = anyio.Path(part.name)
-
-        # atomic replace at the end so the postprocessing logic can never see half-written chunks.
-        await partpath.replace(filepath)
+            await part.flush()
+            # atomic replace at the end so the postprocessing logic can never see half-written chunks.
+            await anyio.Path(str(part.name)).replace(out_path)
 
 
 @router.post("/recordings/{recording}/render", status_code=status.HTTP_202_ACCEPTED)

@@ -60,27 +60,23 @@ async def classify_disk_state(recording_path: Path) -> tuple[RecordingDiskState,
     is it renderable at all?
     """
 
-    try:
-        if not await recording_path.is_dir(follow_symlinks=False):
-            return RecordingDiskState.NONEXISTENT, None
-
-        output_path = recording_path / OUTPUT_FILENAME
-        if await output_path.is_file():
-            output_info = await output_path.stat()
-            return RecordingDiskState.FINISHED, output_info.st_size
-
-        main_track_dir = recording_path / MAIN_TRACK_NAME
-        if (
-            not await main_track_dir.is_dir()
-            or await output_path.exists()
-            or await anext(main_track_dir.glob("chunk.*"), None) is None
-        ):
-            return RecordingDiskState.NOT_RENDERABLE, None
-
-        return RecordingDiskState.UNPROCESSED, None
-    except FileNotFoundError:
-        # can happen if the recording is being purged while we inspect it.
+    if not await recording_path.is_dir(follow_symlinks=False):
         return RecordingDiskState.NONEXISTENT, None
+
+    output_path = recording_path / OUTPUT_FILENAME
+    if await output_path.is_file():
+        output_info = await output_path.stat()
+        return RecordingDiskState.FINISHED, output_info.st_size
+
+    main_track_dir = recording_path / MAIN_TRACK_NAME
+    if (
+        not await main_track_dir.is_dir()
+        or await output_path.exists()
+        or await anext(main_track_dir.glob("chunk.*"), None) is None
+    ):
+        return RecordingDiskState.NOT_RENDERABLE, None
+
+    return RecordingDiskState.UNPROCESSED, None
 
 
 def _last_chunk_mtime_in_track(track_path: Path) -> float | None:
@@ -97,19 +93,21 @@ def _last_chunk_mtime_in_track(track_path: Path) -> float | None:
 
             return last_chunk.stat().st_mtime
     except FileNotFoundError:
-        # can happen if the recording is being purged while the listing is being generated.
+        # purely defensive safety net. Caller checks that track_path is a directory, and concurrent
+        # purging is excluded by the fs lock in Enclave, so this should never happen.
         return None
 
 
 async def _last_chunk_time_in_recording(recording_path: Path) -> datetime | None:
     if await recording_path.is_dir(follow_symlinks=False):
+        track_mtimes = [
+            await asyncio.to_thread(_last_chunk_mtime_in_track, track_path)
+            async for track_path in recording_path.iterdir()
+            if await track_path.is_dir(follow_symlinks=False)
+        ]
+
         last_upload_mtime = max(
-            [
-                await asyncio.to_thread(_last_chunk_mtime_in_track, track_path)
-                async for track_path in recording_path.iterdir()
-                if await track_path.is_dir(follow_symlinks=False)
-            ],
-            default=None,
+            (mtime for mtime in track_mtimes if mtime is not None), default=None
         )
 
         if last_upload_mtime is not None:
@@ -119,15 +117,11 @@ async def _last_chunk_time_in_recording(recording_path: Path) -> datetime | None
 
 
 async def _estimate_render_time_from_disk(recording_path: Path) -> datetime | None:
-    try:
-        for fname in [OUTPUT_FILENAME, INTERMEDIATE_FILENAME]:
-            file_path = recording_path / fname
-            if await file_path.is_file():
-                file_stat = await file_path.stat()
-                return datetime.fromtimestamp(file_stat.st_mtime, UTC)
-    except FileNotFoundError:
-        # can happen in exceptional cases when a recording is being purged while we inspect it.
-        pass
+    for fname in [OUTPUT_FILENAME, INTERMEDIATE_FILENAME]:
+        file_path = recording_path / fname
+        if await file_path.is_file():
+            file_stat = await file_path.stat()
+            return datetime.fromtimestamp(file_stat.st_mtime, UTC)
 
     return None
 

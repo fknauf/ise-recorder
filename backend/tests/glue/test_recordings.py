@@ -469,7 +469,7 @@ async def test_a_filesystem_error_is_a_500_and_keeps_the_otp(
     # whatever is left of the recording may still be listed, and its link should still work
     finish_recording(home, "DONE_2025")
     otp = enclave.generate_totp("DONE_2025")
-    mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=OSError("busy"))
+    mocker.patch("ise_record.glue.enclave.shutil.rmtree", side_effect=OSError("busy"))
 
     assert await refusal(enclave, "DONE_2025") == 500
     assert enclave.verify_totp(otp, "DONE_2025")
@@ -508,7 +508,7 @@ async def test_the_recording_is_claimed_while_it_is_deleted(
         seen_while_deleting.append(enclave.activity("DONE_2025"))
         real_rmtree(path)
 
-    mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=watching_rmtree)
+    mocker.patch("ise_record.glue.enclave.shutil.rmtree", side_effect=watching_rmtree)
 
     await purge_recording("DONE_2025", enclave, LECTURER)
 
@@ -567,7 +567,7 @@ async def test_the_claim_is_gone_after_a_filesystem_error(
     mocker: MockerFixture, enclave: Enclave, home: Path
 ):
     finish_recording(home, "DONE_2025")
-    mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=OSError("busy"))
+    mocker.patch("ise_record.glue.enclave.shutil.rmtree", side_effect=OSError("busy"))
 
     with pytest.raises(HTTPException):
         await purge_recording("DONE_2025", enclave, LECTURER)

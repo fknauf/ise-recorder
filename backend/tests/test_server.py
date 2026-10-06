@@ -14,23 +14,25 @@ import datetime
 import os
 from pathlib import Path
 import shutil
+import threading
 from unittest.mock import ANY
 from urllib.parse import quote
 
 import anyio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx2 import Response
 from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
+from starlette.requests import ClientDisconnect
 from starlette.types import Message, Scope
 
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.core.recordings import RecordingActivity
 from ise_record.glue.jobs import postprocessing_task
 from ise_record.server import create_app
-from ise_record.settings import Settings
+from ise_record.settings import AuthBackend, Settings
 
 from .harness import (
     abandon_recording,
@@ -69,7 +71,7 @@ ROUTE_PREFIX = "/foo"
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     """A deployment without authentication, with a destination directory of this test's own."""
-    return Settings(destdir=tmp_path, auth="disabled")
+    return Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED)
 
 
 @pytest.fixture
@@ -87,7 +89,9 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 
 @pytest.fixture
 def prefixed_settings(tmp_path: Path) -> Settings:
-    return Settings(destdir=tmp_path, auth="disabled", route_prefix=ROUTE_PREFIX)
+    return Settings(
+        destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED, route_prefix=ROUTE_PREFIX
+    )
 
 
 @pytest.fixture
@@ -103,11 +107,12 @@ def render_url(recording: str) -> str:
 def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, settings: Settings):
     abandon_recording(settings.destdir, "foo")
     claimed_when_queued: list[RecordingActivity] = []
+
+    def note_claim_when_queued(*_args: object) -> None:
+        claimed_when_queued.append(activity_of(client, settings.destdir, "foo"))
+
     mock_add_task = mocker.patch(
-        "fastapi.BackgroundTasks.add_task",
-        side_effect=lambda *_args: claimed_when_queued.append(
-            activity_of(client, settings.destdir, "foo")
-        ),
+        "fastapi.BackgroundTasks.add_task", side_effect=note_claim_when_queued
     )
 
     response = client.post(render_url("foo"), json={"recipient": "foo@bar.de"})
@@ -287,25 +292,13 @@ def test_a_chunk_larger_than_one_read_arrives_whole(client: TestClient, settings
     assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0000").read_bytes() == big
 
 
-@pytest.mark.asyncio
-async def test_a_chunk_that_arrives_in_pieces_is_stored_whole(app: FastAPI, settings: Settings):
-    # A real server hands the body over piece by piece as it comes off the socket, and the
-    # endpoint has to write every piece. A TestClient hands it over in one go, so this talks
-    # ASGI to the app directly to deliver it in three.
-    pieces = [b"first ", b"second ", b"third"]
-    incoming: list[Message] = [
-        {"type": "http.request", "body": piece, "more_body": True} for piece in pieces
-    ] + [{"type": "http.request", "body": b"", "more_body": False}]
-    outgoing: list[Message] = []
-
-    async def receive() -> Message:
-        return incoming.pop(0) if incoming else {"type": "http.disconnect"}
-
-    async def send(message: Message) -> None:
-        outgoing.append(message)
-
-    path = chunk_url("foo", "stream", 0)
-    scope: Scope = {
+def chunk_upload_scope(recording: str, index: int) -> Scope:
+    """
+    The ASGI scope of a chunk upload, for tests that talk ASGI to the app directly because they
+    need control over how the body arrives, which a TestClient hands over in one go.
+    """
+    path = chunk_url(recording, "stream", index)
+    return {
         "type": "http",
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
@@ -321,7 +314,25 @@ async def test_a_chunk_that_arrives_in_pieces_is_stored_whole(app: FastAPI, sett
         "state": {},
     }
 
-    await app(scope, receive, send)
+
+@pytest.mark.asyncio
+async def test_a_chunk_that_arrives_in_pieces_is_stored_whole(app: FastAPI, settings: Settings):
+    # A real server hands the body over piece by piece as it comes off the socket, and the
+    # endpoint has to write every piece. This delivers it in three.
+    pieces = [b"first ", b"second ", b"third"]
+    incoming: list[Message] = [
+        {"type": "http.request", "body": piece, "more_body": True} for piece in pieces
+    ]
+    incoming.append({"type": "http.request", "body": b"", "more_body": False})
+    outgoing: list[Message] = []
+
+    async def receive() -> Message:
+        return incoming.pop(0) if incoming else {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        outgoing.append(message)
+
+    await app(chunk_upload_scope("foo", 0), receive, send)
 
     assert outgoing[0]["status"] == 204
     chunk = Path(settings.destdir) / "foo" / "stream" / "chunk.0000"
@@ -408,7 +419,9 @@ def test_chunk_upload_input_validation(client: TestClient, settings: Settings, u
 def test_chunk_upload_with_more_digits(tmp_path: Path):
     # chunk_file_digits is not the default, so this builds its own app rather than taking
     # the shared fixture
-    settings = Settings(destdir=tmp_path, auth="disabled", chunk_file_digits=5)
+    settings = Settings(
+        destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED, chunk_file_digits=5
+    )
     sample = SAMPLE.read_bytes()
 
     cases: list[tuple[int, int, str | None]] = [
@@ -454,20 +467,29 @@ def test_a_chunk_appears_under_its_name_only_once_it_is_complete(
     assert sorted(p.name for p in track.iterdir()) == ["chunk.0003"]
 
 
-def test_a_chunk_that_breaks_off_is_kept_aside_rather_than_as_a_chunk(
-    mocker: MockerFixture, client: TestClient, settings: Settings
+@pytest.mark.asyncio
+async def test_a_chunk_that_breaks_off_leaves_nothing_behind(
+    app: FastAPI, client: TestClient, settings: Settings
 ):
-    # what arrived is left on disk for whoever wants to rescue it, but never under a name a
-    # render would take for a complete chunk
-    mocker.patch("anyio.Path.replace", autospec=True, side_effect=OSError("disk full"))
+    # the client went away halfway through. What arrived must not turn up under a name a render
+    # would take for a complete chunk, and is not worth keeping either: the frontend's retry
+    # sends the whole chunk again. Left behind, it would pile up with every broken upload.
+    incoming: list[Message] = [
+        {"type": "http.request", "body": b"first half", "more_body": True},
+        {"type": "http.disconnect"},
+    ]
 
-    with pytest.raises(OSError):
-        upload(client, None, index=3)
+    async def receive() -> Message:
+        return incoming.pop(0)
 
-    track = Path(settings.destdir) / "foo" / "stream"
-    assert not (track / "chunk.0003").exists()
-    assert [p.name for p in track.iterdir()] != []
-    # and the failed upload does not keep the recording claimed
+    async def send(_message: Message) -> None:
+        return None
+
+    with pytest.raises(ClientDisconnect):
+        await app(chunk_upload_scope("foo", 3), receive, send)
+
+    assert list((Path(settings.destdir) / "foo" / "stream").iterdir()) == []
+    # and the broken upload does not keep the recording claimed
     assert activity_of(client, settings.destdir, "foo") == RecordingActivity.NONE
 
 
@@ -499,7 +521,9 @@ def test_cors_preflight_jobs_unconfigured(client: TestClient):
 
 def test_cors_preflight_jobs(tmp_path: Path):
     cors_settings = Settings(
-        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
+        destdir=anyio.Path(tmp_path),
+        auth=AuthBackend.DISABLED,
+        cors_origins=("http://allowed.example.com",),
     )
 
     with TestClient(create_app(cors_settings)) as cors_client:
@@ -520,7 +544,9 @@ def test_cors_preflight_jobs(tmp_path: Path):
 
 def test_cors_preflight_jobs_forbidden(tmp_path: Path):
     cors_settings = Settings(
-        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
+        destdir=anyio.Path(tmp_path),
+        auth=AuthBackend.DISABLED,
+        cors_origins=("http://allowed.example.com",),
     )
 
     with TestClient(create_app(cors_settings)) as cors_client:
@@ -566,8 +592,8 @@ def test_downloading_is_refused_without_user(client: TestClient, settings: Setti
 
 def test_two_apps_share_no_state(tmp_path: Path):
     # each app gets instances of its own, rather than one dict living on a class or module
-    first = create_app(Settings(destdir=tmp_path, auth="disabled"))
-    second = create_app(Settings(destdir=tmp_path, auth="disabled"))
+    first = create_app(Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED))
+    second = create_app(Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED))
 
     assert first.state.enclaves is not second.state.enclaves
     # one limit per app: a semaphore shared between apps would let one app's jobs hold up
@@ -578,7 +604,7 @@ def test_two_apps_share_no_state(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_the_app_allows_as_many_jobs_at_once_as_configured(tmp_path: Path):
     semaphore = create_app(
-        Settings(destdir=tmp_path, auth="disabled", max_parallel_jobs=3)
+        Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED, max_parallel_jobs=3)
     ).state.jobs_semaphore
 
     for _ in range(3):
@@ -638,12 +664,14 @@ def test_nothing_is_left_behind_at_the_unprefixed_path(
 @pytest.mark.parametrize("prefix", ["foo", "/foo/", "/", " /foo"])
 def test_a_malformed_prefix_is_refused_by_the_settings(tmp_path: Path, prefix: str):
     with pytest.raises(ValidationError):
-        Settings(destdir=tmp_path, auth="disabled", route_prefix=prefix)
+        Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED, route_prefix=prefix)
 
 
 @pytest.mark.parametrize("prefix", ["", "/foo", "/foo/bar", "/a-b_c"])
 def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str):
-    settings = Settings(destdir=tmp_path, auth="disabled", route_prefix=prefix)
+    settings = Settings(
+        destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED, route_prefix=prefix
+    )
 
     with TestClient(create_app(settings)) as client:
         assert client.get(f"{prefix}/api/health").status_code == 200
@@ -1734,6 +1762,45 @@ def arriving_during(
     return during
 
 
+# How long a request sent during a purge gets to come back before rmtree goes on. One held up by
+# the purge is still out after that; one that does not wait for it is back in a fraction of this.
+UNHINDERED_ANSWER_SECONDS = 0.5
+# Upper bound for a request to come back once nothing holds it up any more, so that a deadlock
+# fails the test instead of hanging the suite
+ANSWER_TIMEOUT_SECONDS = 10.0
+
+
+class RequestInThread:
+    """
+    A request sent from a thread of its own, for requests that arrive during a purge and have to
+    wait for it: sent from inside rmtree itself, the request would wait for the purge, and the
+    purge for rmtree, which waits for the request.
+    """
+
+    def __init__(self, request: Callable[[], Response]) -> None:
+        self._request = request
+        self._response: Response | None = None
+        self._thread = threading.Thread(target=self._send, daemon=True)
+
+    def _send(self) -> None:
+        self._response = self._request()
+
+    def start(self) -> None:
+        """Send the request"""
+        self._thread.start()
+
+    def answered_within(self, seconds: float) -> bool:
+        """Wait up to `seconds` for the answer; whether it came"""
+        self._thread.join(seconds)
+        return not self._thread.is_alive()
+
+    def response(self) -> Response:
+        """The answer, once it is there"""
+        assert self.answered_within(ANSWER_TIMEOUT_SECONDS), "request never came back"
+        assert self._response is not None, "request raised instead of answering"
+        return self._response
+
+
 def test_a_job_for_a_recording_being_purged_is_refused(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1749,7 +1816,7 @@ def test_a_job_for_a_recording_being_purged_is_refused(
         during.append(schedule(auth_client, token))
         real_rmtree(path)
 
-    mocker.patch("ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_job_arriving)
+    mocker.patch("ise_record.glue.enclave.shutil.rmtree", side_effect=rmtree_with_a_job_arriving)
 
     assert purge(auth_client, token, "foo").status_code == 204
 
@@ -1773,9 +1840,7 @@ def test_a_chunk_for_a_recording_being_purged_is_refused(
         during.append(upload(auth_client, token, index=7))
         real_rmtree(path)
 
-    mocker.patch(
-        "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_chunk_arriving
-    )
+    mocker.patch("ise_record.glue.enclave.shutil.rmtree", side_effect=rmtree_with_a_chunk_arriving)
 
     assert purge(auth_client, token, "foo").status_code == 204
 
@@ -1799,7 +1864,7 @@ def test_a_second_purge_of_the_same_recording_is_refused_rather_than_failing(
         real_rmtree(path)
 
     mocker.patch(
-        "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_another_purge_arriving
+        "ise_record.glue.enclave.shutil.rmtree", side_effect=rmtree_with_another_purge_arriving
     )
 
     assert purge(auth_client, token, "GVS_2025").status_code == 204
@@ -1854,25 +1919,29 @@ def test_the_listing_leaves_out_a_recording_while_it_is_purged(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     # the frontend removed the card when the purge was confirmed; the minute poll, or another
-    # tab, must not bring it back half-deleted
+    # tab, must not bring it back half-deleted. Nor may it look at the files while rmtree takes
+    # them away, so it waits for the purge and lists what is left after it.
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "GVS_2025")
     rendered_recording(home, "PSU_2026")
     token = provider.mint()
-    during: list[Response] = []
+    listing = RequestInThread(lambda: list_recordings(auth_client, token))
+    answered_before_rmtree: list[bool] = []
     real_rmtree = shutil.rmtree
 
     def rmtree_with_a_listing_arriving(path: Path) -> None:
-        during.append(list_recordings(auth_client, token))
+        listing.start()
+        answered_before_rmtree.append(listing.answered_within(UNHINDERED_ANSWER_SECONDS))
         real_rmtree(path)
 
     mocker.patch(
-        "ise_record.glue.recordings.shutil.rmtree", side_effect=rmtree_with_a_listing_arriving
+        "ise_record.glue.enclave.shutil.rmtree", side_effect=rmtree_with_a_listing_arriving
     )
 
     assert purge(auth_client, token, "GVS_2025").status_code == 204
 
-    data = during[0].json()
+    assert answered_before_rmtree == [False]
+    data = listing.response().json()
     assert names(data, "completed") == ["PSU_2026"]
     assert names(data, "rendering") == [] and names(data, "unprocessed") == []
 
@@ -1889,21 +1958,24 @@ def test_another_recording_still_takes_a_job_while_one_is_purged(
     rendered_recording(home, "GVS_2025")
     abandon_recording(home, "foo")
     token = provider.mint()
-    during: list[Response] = []
+    job = RequestInThread(lambda: schedule(auth_client, token, "foo"))
     real_rmtree = shutil.rmtree
 
     def rmtree_with_a_job_for_another_arriving(path: Path) -> None:
-        during.append(schedule(auth_client, token, "foo"))
+        # the job may have to wait for the purge before it looks at the disk; that is fine, as
+        # long as it is taken in the end rather than refused
+        job.start()
+        job.answered_within(UNHINDERED_ANSWER_SECONDS)
         real_rmtree(path)
 
     mocker.patch(
-        "ise_record.glue.recordings.shutil.rmtree",
+        "ise_record.glue.enclave.shutil.rmtree",
         side_effect=rmtree_with_a_job_for_another_arriving,
     )
 
     assert purge(auth_client, token, "GVS_2025").status_code == 204
 
-    assert during[0].status_code == 202
+    assert job.response().status_code == 202
 
 
 def test_the_name_takes_uploads_again_once_the_purge_is_done(
@@ -1946,7 +2018,9 @@ def test_cors_preflight_allows_uploading(tmp_path: Path):
     # without PUT here the browser refuses every chunk upload before it is sent, whenever the
     # frontend is served from another origin than the backend
     cors_settings = Settings(
-        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
+        destdir=anyio.Path(tmp_path),
+        auth=AuthBackend.DISABLED,
+        cors_origins=("http://allowed.example.com",),
     )
 
     with TestClient(create_app(cors_settings)) as cors_client:
@@ -1968,7 +2042,9 @@ def test_cors_preflight_allows_purging(tmp_path: Path):
     # without DELETE here the browser refuses the request before it is sent, whenever the
     # frontend is served from another origin than the backend
     cors_settings = Settings(
-        destdir=tmp_path, auth="disabled", cors_origins=("http://allowed.example.com",)
+        destdir=anyio.Path(tmp_path),
+        auth=AuthBackend.DISABLED,
+        cors_origins=("http://allowed.example.com",),
     )
 
     with TestClient(create_app(cors_settings)) as cors_client:

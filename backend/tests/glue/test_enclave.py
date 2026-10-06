@@ -236,9 +236,18 @@ def test_the_disk_state_is_read_from_the_home_directory(enclave: Enclave, tmp_pa
     finish_recording(tmp_path, "DONE_2025")
     abandon_recording(tmp_path, "FAILED_2025")
 
-    assert anyio.run(enclave.disk_state, "DONE_2025") == RecordingDiskState.FINISHED
-    assert anyio.run(enclave.disk_state, "FAILED_2025") == RecordingDiskState.UNPROCESSED
-    assert anyio.run(enclave.disk_state, "NEVER_2025") == RecordingDiskState.NONEXISTENT
+    # all in one event loop, as in the server: the enclave's lock belongs to the first loop it
+    # is used in
+    async def disk_states() -> list[RecordingDiskState]:
+        return [
+            await enclave.disk_state(name) for name in ("DONE_2025", "FAILED_2025", "NEVER_2025")
+        ]
+
+    assert anyio.run(disk_states) == [
+        RecordingDiskState.FINISHED,
+        RecordingDiskState.UNPROCESSED,
+        RecordingDiskState.NONEXISTENT,
+    ]
 
 
 def test_every_recording_in_the_home_directory_is_classified(tmp_path: Path):

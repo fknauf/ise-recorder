@@ -290,7 +290,7 @@ def app_of(client: TestClient) -> FastAPI:
     return client.app  # type: ignore[return-value]
 
 
-def enclave_of(client: TestClient, user_home: Path) -> Enclave:
+def enclave_of(client: TestClient, user_home: Path | anyio.Path) -> Enclave:
     """
     The enclave whose recordings live in `user_home`, made the way the server would make it
     if no request has yet.
@@ -307,13 +307,15 @@ def enclave_of(client: TestClient, user_home: Path) -> Enclave:
     return enclaves.setdefault(key, Enclave(key, anyio.Path(user_home)))
 
 
-def activity_of(client: TestClient, user_home: Path, recording: str) -> RecordingActivity:
+def activity_of(
+    client: TestClient, user_home: Path | anyio.Path, recording: str
+) -> RecordingActivity:
     """What, if anything, has claimed one of `user_home`'s recordings right now."""
     return enclave_of(client, user_home).activity(recording)
 
 
 def job_in_flight(
-    client: TestClient, user_home: Path, recording: str
+    client: TestClient, user_home: Path | anyio.Path, recording: str
 ) -> AbstractContextManager[None]:
     """
     Hold a render claim on one of `user_home`'s recordings, as a job in flight does.
@@ -325,13 +327,15 @@ def job_in_flight(
 
 
 def purge_in_flight(
-    client: TestClient, user_home: Path, recording: str
+    client: TestClient, user_home: Path | anyio.Path, recording: str
 ) -> AbstractContextManager[None]:
     """Hold a purge claim on one of `user_home`'s recordings, as a purge in flight does."""
     return enclave_of(client, user_home).claim_purging(recording)
 
 
-def otp_generator_of(client: TestClient, user_home: Path, recording: str) -> pyotp.TOTP:
+def otp_generator_of(
+    client: TestClient, user_home: Path | anyio.Path, recording: str
+) -> pyotp.TOTP:
     """
     The generator behind the OTPs in a recording's download links.
 
