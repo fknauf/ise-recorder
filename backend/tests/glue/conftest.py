@@ -5,13 +5,12 @@ Fixtures for the tests that call the FastAPI dependables directly, without a req
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
-from pathlib import Path
-
+from anyio import Path
 from fastapi import Request
 import pytest
 
 from ise_record.server import create_app
-from ise_record.settings import OidcSettings, Settings
+from ise_record.settings import AuthBackend, OidcSettings, Settings
 
 
 @pytest.fixture
@@ -25,7 +24,7 @@ def settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def open_settings(tmp_path: Path) -> Settings:
     """A deployment with authentication turned off, where every caller shares destdir."""
-    return Settings(destdir=tmp_path, auth="disabled")
+    return Settings(destdir=tmp_path, auth=AuthBackend.DISABLED)
 
 
 def request_for(app_settings: Settings) -> Request:

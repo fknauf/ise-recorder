@@ -5,8 +5,7 @@
 # pylint: disable=protected-access
 # pylint: disable=no-member
 
-from pathlib import Path
-
+from anyio import Path
 import pytest
 from pytest_mock import MockerFixture
 

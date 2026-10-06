@@ -6,13 +6,13 @@ enclave that's not associated with a user because there are no users.
 In this module, that state is defined and exported as a fastapi dependable.
 """
 
-import anyio
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 import shutil
 from typing import Annotated, Any
 
 from aiorwlock import RWLock
+import anyio
 from anyio import Path
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import Field
@@ -130,6 +130,7 @@ class Enclave:
             ]
 
     async def purge(self, recording: str) -> None:
+        """Delete a recording and all its raw data"""
         async with self._fs_lock.writer_lock:
             await anyio.to_thread.run_sync(shutil.rmtree, self.recording_dir(recording))
 

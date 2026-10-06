@@ -9,7 +9,7 @@
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
 
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncGenerator, Callable, Iterator
 import datetime
 import os
 from pathlib import Path
@@ -19,7 +19,8 @@ from unittest.mock import ANY
 from urllib.parse import quote
 
 import anyio
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import ResponseValidationError
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
@@ -31,7 +32,12 @@ from starlette.types import Message, Scope
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.core.recordings import RecordingActivity
 from ise_record.glue.jobs import postprocessing_task
-from ise_record.server import create_app
+from ise_record.glue.models import RenderRequest
+from ise_record.server import (
+    _get_request_exit_stacks,  # pyright: ignore[reportPrivateUsage]
+    create_app,
+    HandoverExitStacks,
+)
 from ise_record.settings import AuthBackend, Settings
 
 from .harness import (
@@ -119,7 +125,12 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
 
     assert response.status_code == 202
     mock_add_task.assert_called_once_with(
-        postprocessing_task, settings.destdir / "foo", "foo@bar.de", settings.smtp, ANY
+        postprocessing_task,
+        settings.destdir / "foo",
+        RenderRequest(recipient="foo@bar.de"),
+        settings.smtp,
+        ANY,
+        ANY,
     )
     # claimed by the time the task is queued, so no request that comes in before it starts
     # can take the recording for a purge or a second render
@@ -165,7 +176,12 @@ def test_schedule_postprocessing_recipient_omitted(
 
     assert response.status_code == 202
     mock_add_task.assert_called_once_with(
-        postprocessing_task, settings.destdir / "foo", None, settings.smtp, ANY
+        postprocessing_task,
+        settings.destdir / "foo",
+        RenderRequest(recipient=None),
+        settings.smtp,
+        ANY,
+        ANY,
     )
     # the app's one semaphore, which is what makes the limit apply across all jobs and users
     assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
@@ -180,7 +196,7 @@ def test_the_recipient_is_not_taken_from_the_url(
 
     client.post(render_url("foo"), params={"recipient": "foo@bar.de"}, json={})
 
-    assert mock_add_task.call_args.args[2] is None
+    assert mock_add_task.call_args.args[2] == RenderRequest(recipient=None)
 
 
 def test_schedule_postprocessing_error(
@@ -250,7 +266,12 @@ def test_schedule_postprocessing_broken_recipient_still_starts_post(
 
     assert response.status_code == 202
     mock_add_task.assert_called_once_with(
-        postprocessing_task, settings.destdir / "foo", "I made a lot of typos", settings.smtp, ANY
+        postprocessing_task,
+        settings.destdir / "foo",
+        RenderRequest(recipient="I made a lot of typos"),
+        settings.smtp,
+        ANY,
+        ANY,
     )
     # the app's one semaphore, which is what makes the limit apply across all jobs and users
     assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
@@ -488,7 +509,7 @@ async def test_a_chunk_that_breaks_off_leaves_nothing_behind(
     with pytest.raises(ClientDisconnect):
         await app(chunk_upload_scope("foo", 3), receive, send)
 
-    assert list((Path(settings.destdir) / "foo" / "stream").iterdir()) == []
+    assert not list((Path(settings.destdir) / "foo" / "stream").iterdir())
     # and the broken upload does not keep the recording claimed
     assert activity_of(client, settings.destdir, "foo") == RecordingActivity.NONE
 
@@ -1039,6 +1060,117 @@ def test_a_job_that_blows_up_still_releases_the_recording(
 
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     assert activity_of(auth_client, home, "foo") == RecordingActivity.NONE
+
+
+def test_a_render_whose_answer_fails_gives_the_recording_back(
+    mocker: MockerFixture, client: TestClient, settings: Settings
+):
+    # the endpoint has handed the claim to its job by then, but the job only starts once the
+    # answer is out. Left with a job that never runs, the claim would keep the recording from
+    # being purged or rendered again until the server is restarted.
+    abandon_recording(settings.destdir, "foo")
+    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    mocker.patch(
+        "ise_record.server.UnfinishedRecording.model_construct", return_value="not a recording"
+    )
+
+    with pytest.raises(ResponseValidationError):
+        client.post(render_url("foo"), json={})
+
+    mock_postprocess.assert_not_called()
+    assert activity_of(client, settings.destdir, "foo") == RecordingActivity.NONE
+
+
+# --- handing the rendering claim over to the job ---------------------------
+#
+# Driven directly rather than through a request: FastAPI tears the dependency down after the job
+# has run, but that order is FastAPI's business and has changed between versions. These pin that
+# the claim is given up exactly once, and not before the job is done, whichever comes first.
+
+
+class Releases:
+    """Counts how often the claim it stands in for is given up."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def __call__(self) -> None:
+        self.count += 1
+
+
+async def claim_in_endpoint(
+    releases: Releases,
+) -> tuple[AsyncGenerator[HandoverExitStacks], HandoverExitStacks]:
+    """Start the dependency, and take a claim in the endpoint as the render endpoint does."""
+    dependency = _get_request_exit_stacks()
+    stacks = await anext(dependency)
+    stacks.in_endpoint.callback(releases)
+    return dependency, stacks
+
+
+async def finish_request(dependency: AsyncGenerator[HandoverExitStacks]) -> None:
+    """Tear the dependency down as FastAPI does after a request without errors."""
+    with pytest.raises(StopAsyncIteration):
+        await anext(dependency)
+
+
+@pytest.mark.asyncio
+async def test_a_claim_handed_to_the_job_outlasts_the_request_if_the_request_ends_first():
+    releases = Releases()
+    dependency, stacks = await claim_in_endpoint(releases)
+    handed = stacks.handover()
+
+    await finish_request(dependency)
+    assert releases.count == 0
+
+    with handed:  # the job runs
+        pass
+    assert releases.count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_claim_handed_to_a_job_that_never_starts_is_given_up_with_the_request():
+    # an error after the endpoint -- the answer failing, say -- and FastAPI never starts the job
+    releases = Releases()
+    dependency, stacks = await claim_in_endpoint(releases)
+    stacks.handover()
+
+    with pytest.raises(ValueError):
+        await dependency.athrow(ValueError("the answer failed"))
+
+    assert releases.count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_claim_is_given_up_once_when_the_job_fails_after_it_ran():
+    # FastAPI hands what the job raised on to the dependency, by which time the job has given
+    # the claim up itself
+    releases = Releases()
+    dependency, stacks = await claim_in_endpoint(releases)
+    handed = stacks.handover()
+
+    with pytest.raises(RuntimeError), handed:  # the job runs and blows up
+        raise RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        await dependency.athrow(RuntimeError("boom"))
+
+    assert releases.count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refused", [False, True])
+async def test_a_claim_never_handed_over_is_given_up_with_the_request(refused: bool):
+    # the endpoint turned the job away, or never got as far as handing the claim over
+    releases = Releases()
+    dependency, _ = await claim_in_endpoint(releases)
+
+    if refused:
+        with pytest.raises(HTTPException):
+            await dependency.athrow(HTTPException(status_code=404))
+    else:
+        await finish_request(dependency)
+
+    assert releases.count == 1
 
 
 class WatchedSlots:

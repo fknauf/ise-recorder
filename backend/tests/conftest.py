@@ -18,8 +18,8 @@ fixture then covers the rest: a cached Settings from an earlier test cannot leak
 
 from collections.abc import Iterator
 import os
-from pathlib import Path
 
+from anyio import Path
 from fastapi.testclient import TestClient
 import pytest
 

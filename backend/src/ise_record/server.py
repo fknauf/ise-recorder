@@ -7,6 +7,7 @@ This module defines the HTTP API endpoints and validates inputs.
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, ExitStack
+from dataclasses import dataclass
 import logging
 from typing import Annotated
 
@@ -60,9 +61,44 @@ def _require_auth_configured(settings: Annotated[Settings, Depends(get_settings)
         )
 
 
-async def _get_request_exit_stack() -> AsyncGenerator[ExitStack]:
-    with ExitStack() as stack:
-        yield stack
+@dataclass
+class HandoverExitStacks:
+    """
+    Exit stacks for handover of context managers (in our case, the I-am-rendering claim) from an
+    endpoint to a background task. The endpoint pushes context onto the in_endpoint exit stack,
+    in the handover all its contents are moved to the for_background stack.
+
+    In case of error, the dependency is going to roll back the handover because in this case the
+    background task may not have been started.
+
+    At time of writing, dependencies are kept alive by fastapi 0.142 while the background task
+    runs, so this is not strictly necessary. That behavior is undocumented and has been different
+    at some points in the past, though, so I don't want to depend on it. This should be robust
+    whether or not the request dependency is cleaned up before or after the background task has
+    finished: either the background task runs and has the cleanup in its exit stack, or it doesn't
+    because something in the request threw an error, and then the dependency takes it back into
+    the endpoint stack and cleans it up.
+    """
+
+    in_endpoint: ExitStack
+    for_background: ExitStack
+
+    def handover(self) -> ExitStack:
+        """Move contents of the endpoint stack to the background stack"""
+        self.for_background.push(self.in_endpoint.pop_all())
+        return self.for_background
+
+
+async def _get_request_exit_stacks() -> AsyncGenerator[HandoverExitStacks]:
+    with ExitStack() as in_endpoint:
+        for_background = ExitStack()
+
+        try:
+            yield HandoverExitStacks(in_endpoint=in_endpoint, for_background=for_background)
+        except BaseException:
+            # roll back on error, because the background task is not going to be started then.
+            in_endpoint.push(for_background.pop_all())
+            raise
 
 
 @router.put(
@@ -105,14 +141,15 @@ async def upload_chunk_endpoint(
                 await part.write(content)
 
             await part.flush()
-            # atomic replace at the end so the postprocessing logic can never see half-written chunks.
+            # atomic replace at the end so the postprocessing never sees half-written chunks.
             await anyio.Path(str(part.name)).replace(out_path)
 
 
 @router.post("/recordings/{recording}/render", status_code=status.HTTP_202_ACCEPTED)
 async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     background_tasks: BackgroundTasks,
-    exit_stack: Annotated[ExitStack, Depends(_get_request_exit_stack)],
+    # mention scope explicitly here because in this one case we really depend on request scope.
+    exit_stacks: Annotated[HandoverExitStacks, Depends(_get_request_exit_stacks, scope="request")],
     settings: Annotated[Settings, Depends(get_settings)],
     enclave: Annotated[Enclave, Depends(get_enclave)],
     jobs_semaphore: Annotated[asyncio.Semaphore, Depends(get_jobs_semaphore)],
@@ -121,7 +158,7 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
 ) -> RecordingResponse:
     """Endpoint for the scheduling of postprocessing jobs"""
 
-    exit_stack.enter_context(enclave.claim_rendering(recording))
+    exit_stacks.in_endpoint.enter_context(enclave.claim_rendering(recording))
 
     disk_state = await enclave.disk_state(recording)
 
@@ -141,9 +178,10 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
     background_tasks.add_task(
         postprocessing_task,
         enclave.recording_dir(recording),
-        render.recipient,
+        render,
         settings.smtp,
         jobs_semaphore,
+        exit_stacks.handover(),
     )
 
     return UnfinishedRecording.model_construct(state="rendering", name=recording)

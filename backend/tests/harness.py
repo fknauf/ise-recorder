@@ -270,7 +270,9 @@ def names(listing: list[dict[str, Any]], state: str) -> list[str]:
 
 def download_parts(entry: dict[str, Any]) -> tuple[str, str, str]:
     """The user digest, recording name and OTP a listed download link carries, decoded."""
-    link = urlsplit(entry["downloadUrl"])
+    download_url = entry["downloadUrl"]
+    assert isinstance(download_url, str)
+    link = urlsplit(download_url)
     _downloads, user_digest, recording = (unquote(part) for part in link.path.split("/"))
     return user_digest, recording, parse_qs(link.query)["totp"][0]
 

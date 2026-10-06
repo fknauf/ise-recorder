@@ -1,26 +1,70 @@
 """
-Postprocessing jobs: running one, reporting on it, and the limit on how many jobs render at once.
+Postprocessing jobs: running one, reporting on it, giving up the rendering claim it was handed, and
+the limit on how many jobs render at once.
 
-The task knows nothing of the record of busy recordings: /jobs marks the recording as rendering
-for the whole request, which a FastAPI request lasts until its background tasks are done. Holding
-and releasing that mark, turning away a duplicate and how the listing presents a job all live in
-test_server.py; the mark itself in core/test_recordings.py.
+The task gets the recording's rendering claim from the render endpoint and only has to give it up
+when its render is done. How the endpoint takes the claim and hands it over, turning away a
+duplicate, and how the listing presents a job all live in test_server.py; the claim itself in
+core/test_recordings.py.
 """
 
 # pylint: disable=line-too-long
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
+# pylint: disable=too-few-public-methods
 
 import asyncio
-from pathlib import Path
+from collections.abc import Coroutine
+from contextlib import ExitStack
+from typing import Any
 from unittest.mock import ANY
 
+import anyio
+from anyio import Path
 import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.glue.jobs import postprocessing_task
-from ise_record.settings import Settings, SmtpSettings
+from ise_record.glue.models import RenderRequest
+from ise_record.settings import AuthBackend, Settings, SmtpSettings
+
+
+def job(
+    recording_path: Path | anyio.Path,
+    slots: asyncio.Semaphore,
+    recipient: str | None = None,
+    smtp_settings: SmtpSettings | None = None,
+    claim: ExitStack | None = None,
+) -> Coroutine[Any, Any, None]:
+    """
+    A postprocessing job as the render endpoint starts it, with a claim that holds nothing unless
+    the test hands one in.
+    """
+    return postprocessing_task(
+        anyio.Path(recording_path),
+        RenderRequest(recipient=recipient),
+        smtp_settings,
+        slots,
+        claim if claim is not None else ExitStack(),
+    )
+
+
+class Claim:
+    """A stand-in for the rendering claim that notes when it is given up."""
+
+    def __init__(self) -> None:
+        self.released = 0
+
+    def stack(self) -> ExitStack:
+        """An exit stack holding this claim, as the endpoint hands it to the job"""
+        stack = ExitStack()
+        stack.callback(self._release)
+        return stack
+
+    def _release(self) -> None:
+        self.released += 1
+
 
 # --- running a job ---------------------------------------------------------
 
@@ -35,7 +79,7 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     settings = Settings(
-        auth="disabled",
+        auth=AuthBackend.DISABLED,
         smtp=SmtpSettings(
             server="localhost",
             port=587,
@@ -48,9 +92,7 @@ async def test_postprocessing_task_with_report(mocker: MockerFixture):
         ),
     )
 
-    await postprocessing_task(
-        settings.destdir / "foo", "lecturer@example.de", settings.smtp, asyncio.Semaphore(1)
-    )
+    await job(settings.destdir / "foo", asyncio.Semaphore(1), "lecturer@example.de", settings.smtp)
 
     mock_postprocess.assert_called_once_with(settings.destdir / "foo")
     mock_send.assert_called_once_with(
@@ -82,7 +124,7 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
     settings = Settings(
-        auth="disabled",
+        auth=AuthBackend.DISABLED,
         smtp=SmtpSettings(
             server="localhost",
             port=587,
@@ -95,7 +137,7 @@ async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
         ),
     )
 
-    await postprocessing_task(settings.destdir / "foo", None, settings.smtp, asyncio.Semaphore(1))
+    await job(settings.destdir / "foo", asyncio.Semaphore(1), None, settings.smtp)
 
     mock_postprocess.assert_called_once_with(settings.destdir / "foo")
     mock_send.assert_not_called()
@@ -110,11 +152,9 @@ async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
     )
     mock_send = mocker.patch("aiosmtplib.send", autospec=True)
 
-    settings = Settings(auth="disabled")
+    settings = Settings(auth=AuthBackend.DISABLED)
 
-    await postprocessing_task(
-        settings.destdir / "foo", "lecturer@example.de", None, asyncio.Semaphore(1)
-    )
+    await job(settings.destdir / "foo", asyncio.Semaphore(1), "lecturer@example.de")
 
     mock_postprocess.assert_called_once_with(settings.destdir / "foo")
     mock_send.assert_not_called()
@@ -137,7 +177,8 @@ class GatedRenders:
         self.most_at_once = 0
         self._gates: dict[Path, asyncio.Event] = {}
 
-    async def render(self, recording_path: Path) -> Result:
+    async def render(self, recording_path: Path | anyio.Path) -> Result:
+        recording_path = Path(recording_path)
         self.started.append(recording_path)
         self.running += 1
         self.most_at_once = max(self.most_at_once, self.running)
@@ -174,8 +215,8 @@ def renders(mocker: MockerFixture) -> GatedRenders:
 @pytest.mark.asyncio
 async def test_with_one_slot_a_second_job_waits_for_the_first(renders: GatedRenders):
     slots = asyncio.Semaphore(1)
-    first = asyncio.create_task(postprocessing_task(Path("data/foo"), None, None, slots))
-    second = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, slots))
+    first = asyncio.create_task(job(Path("data/foo"), slots))
+    second = asyncio.create_task(job(Path("data/bar"), slots))
     await settle()
 
     assert renders.started == [Path("data/foo")]
@@ -195,9 +236,7 @@ async def test_with_one_slot_a_second_job_waits_for_the_first(renders: GatedRend
 async def test_as_many_jobs_render_at_once_as_there_are_slots(renders: GatedRenders):
     slots = asyncio.Semaphore(2)
     recordings = [Path("data/a"), Path("data/b"), Path("data/c")]
-    jobs = [
-        asyncio.create_task(postprocessing_task(path, None, None, slots)) for path in recordings
-    ]
+    jobs = [asyncio.create_task(job(path, slots)) for path in recordings]
     await settle()
 
     # in the order they were scheduled
@@ -229,9 +268,9 @@ async def test_a_job_that_blows_up_gives_its_slot_back(mocker: MockerFixture):
     slots = asyncio.Semaphore(1)
 
     with pytest.raises(RuntimeError):
-        await postprocessing_task(Path("data/foo"), None, None, slots)
+        await job(Path("data/foo"), slots)
 
-    await asyncio.wait_for(postprocessing_task(Path("data/bar"), None, None, slots), timeout=1)
+    await asyncio.wait_for(job(Path("data/bar"), slots), timeout=1)
     assert started == [Path("data/foo"), Path("data/bar")]
 
 
@@ -252,10 +291,8 @@ async def test_the_report_is_sent_after_the_slot_is_given_back(
     smtp_settings = SmtpSettings(server="localhost", sender="render@example.de")
     slots = asyncio.Semaphore(1)
 
-    first = asyncio.create_task(
-        postprocessing_task(Path("data/foo"), "lecturer@example.de", smtp_settings, slots)
-    )
-    second = asyncio.create_task(postprocessing_task(Path("data/bar"), None, None, slots))
+    first = asyncio.create_task(job(Path("data/foo"), slots, "lecturer@example.de", smtp_settings))
+    second = asyncio.create_task(job(Path("data/bar"), slots))
     await settle()
 
     renders.release(Path("data/foo"))
@@ -269,3 +306,89 @@ async def test_the_report_is_sent_after_the_slot_is_given_back(
     relay_answers.set()
     renders.release(Path("data/bar"))
     await asyncio.gather(first, second)
+
+
+# --- the rendering claim ---------------------------------------------------
+#
+# The endpoint hands the job the claim that marks the recording as rendering. While it is held,
+# the listing shows a spinner and purges and second renders are turned away; once the render is
+# done, the recording has to be free again.
+
+
+@pytest.mark.asyncio
+async def test_the_claim_is_held_while_the_job_waits_for_a_slot_and_renders(
+    renders: GatedRenders,
+):
+    # a job waiting for its slot is as good as rendering: a purge let in then would delete the
+    # recording just before its render starts reading it
+    slots = asyncio.Semaphore(1)
+    claim = Claim()
+    first = asyncio.create_task(job(Path("data/foo"), slots))
+    second = asyncio.create_task(job(Path("data/bar"), slots, claim=claim.stack()))
+    await settle()
+
+    assert claim.released == 0
+
+    renders.release(Path("data/foo"))
+    await first
+    await settle()
+
+    assert renders.started == [Path("data/foo"), Path("data/bar")]
+    assert claim.released == 0
+
+    renders.release(Path("data/bar"))
+    await second
+    assert claim.released == 1
+
+
+@pytest.mark.asyncio
+async def test_the_claim_is_given_up_before_the_report_is_sent(
+    mocker: MockerFixture, renders: GatedRenders
+):
+    # the video is there once the render is done; a slow mail relay must not keep the card
+    # spinning, or the recording from being purged or rendered again
+    sending = asyncio.Event()
+    relay_answers = asyncio.Event()
+
+    async def slow_send(*_args: object, **_kwargs: object) -> None:
+        sending.set()
+        await relay_answers.wait()
+
+    mocker.patch("ise_record.glue.jobs.send_report", autospec=True, side_effect=slow_send)
+    smtp_settings = SmtpSettings(server="localhost", sender="render@example.de")
+    claim = Claim()
+
+    running = asyncio.create_task(
+        job(
+            Path("data/foo"),
+            asyncio.Semaphore(1),
+            "lecturer@example.de",
+            smtp_settings,
+            claim=claim.stack(),
+        )
+    )
+    renders.release(Path("data/foo"))
+    await asyncio.wait_for(sending.wait(), timeout=1)
+
+    assert claim.released == 1
+
+    relay_answers.set()
+    await running
+    assert claim.released == 1
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_blows_up_gives_its_claim_back(mocker: MockerFixture):
+    # otherwise the recording would show as rendering, and could be neither purged nor rendered
+    # again, until the server is restarted
+    mocker.patch(
+        "ise_record.glue.jobs.postprocess_recording",
+        autospec=True,
+        side_effect=RuntimeError("boom"),
+    )
+    claim = Claim()
+
+    with pytest.raises(RuntimeError):
+        await job(Path("data/foo"), asyncio.Semaphore(1), claim=claim.stack())
+
+    assert claim.released == 1
