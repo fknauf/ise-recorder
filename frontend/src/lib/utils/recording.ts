@@ -146,7 +146,7 @@ function prepareTrackRecording(
  *
  * The main display and first audio track are combined into one recording stream called "stream",
  * the overlay track (if any) is recorded into the "overlay" stream, and any remaining video or audio
- * tracks are recorded into their own streams named "video-N" or "audio-N".
+ * tracks are recorded into their own streams named "display-N", "video-N" or "audio-N".
  *
  * Storage behavior is handled through the onChunkAvailable callback to separate recording logic from
  * storage logic.

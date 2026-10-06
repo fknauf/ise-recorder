@@ -17,7 +17,6 @@ export function useServerStorage() {
     canFetch ? RECORDINGS_KEY : null,
     () => (apiUrl !== undefined ? fetchRecordings({ apiUrl, getAccessToken }) : []),
     {
-      fallbackData: undefined,
       refreshInterval: 60000,
       refreshWhenHidden: false,
       refreshWhenOffline: false,

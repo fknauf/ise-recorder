@@ -4,12 +4,12 @@ import { ApiDestination, apiFetchData, apiFetchVoid, RetryPolicy, withRetries } 
 import * as z from "zod";
 
 const RenderingRecordingSchema = z.object({
-  state: z.literal(["rendering"]),
+  state: z.literal("rendering"),
   name: z.string()
 });
 
 const UnprocessedRecordingSchema = z.object({
-  state: z.literal(["unprocessed"]),
+  state: z.literal("unprocessed"),
   name: z.string()
 });
 

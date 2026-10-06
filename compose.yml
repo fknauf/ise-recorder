@@ -51,8 +51,8 @@ services:
 #      - ISE_RECORD_SMTP_USE_TLS=true
 #      - ISE_RECORD_SMTP_ALLOWED_DOMAINS=[ "example.com", "example.org" ]
 #      - ISE_RECORD_CHUNK_FILE_DIGITS=4
-# see compose-with-auth.yaml for a deployment with oidc authentication
+# see compose-with-auth.yml for a deployment with oidc authentication
 #      - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
-#      - ISE_RECORD_OIDC_AUDIENCE=ise-recorder
+#      - ISE_RECORD_OIDC_AUDIENCE=ise-recorder-api
 #      - ISE_RECORD_OIDC_LEEWAY_SECONDS=30
 #      - ISE_RECORD_OIDC_HTTP_TIMEOUT_SECONDS=5
