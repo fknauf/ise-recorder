@@ -1,5 +1,7 @@
 "use client";
 
+import { showError } from "./notifications";
+
 /**
  * Helper functions to organize access to the recordings stored in the OPFS.
  *
@@ -136,6 +138,8 @@ export async function downloadFile(recordingName: string, filename: string) {
     document.body.appendChild(link);
     link.click();
     link.remove();
+  } catch(e) {
+    showError(`Failed download of ${recordingName}/${filename}`, e);
   } finally {
     URL.revokeObjectURL(url);
   }

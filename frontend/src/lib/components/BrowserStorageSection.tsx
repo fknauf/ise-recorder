@@ -13,6 +13,7 @@ import { useServerEnv } from "../hooks/useServerEnv";
 import { useAppSession } from "./SessionProvider";
 import { useState } from "react";
 import { useAppStore } from "../hooks/useAppStore";
+import { showError } from "../utils/notifications";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -47,9 +48,13 @@ function DeleteDialog({ recordingName }: Readonly<{ recordingName: string }>) {
         </Button>
         <Button
           variant="negative"
-          onPress={() => {
+          onPress={async () => {
             dismiss();
-            removeSavedRecording(recordingName);
+            try {
+              removeSavedRecording(recordingName);
+            } catch(e) {
+              showError(`Failed to delete ${recordingName}`, e);
+            }
           }}
           data-testid="sr-dd-btn-delete"
         >
