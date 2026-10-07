@@ -17,7 +17,6 @@ import asyncio
 from collections.abc import Coroutine
 from contextlib import ExitStack
 from typing import Any
-from unittest.mock import ANY
 
 import anyio
 from anyio import Path
@@ -27,7 +26,7 @@ from pytest_mock import MockerFixture
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.glue.jobs import postprocessing_task
 from ise_record.glue.models import RenderRequest
-from ise_record.settings import AuthBackend, Settings, SmtpSettings
+from ise_record.settings import SmtpSettings
 
 
 def job(
@@ -69,94 +68,49 @@ class Claim:
 # --- running a job ---------------------------------------------------------
 
 
+# What a report says and how it is sent is core/test_reporting.py's business; a job only decides
+# whether there is one, and whom it goes to.
+
+SMTP = SmtpSettings(server="localhost", sender="render@example.de", allowed_domains=("example.de",))
+RENDERED = Result(reason=ResultReason.SUCCESS, output_file=Path("data/foo/presentation.webm"))
+
+
 @pytest.mark.asyncio
-async def test_postprocessing_task_with_report(mocker: MockerFixture):
-    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
-
+async def test_a_job_renders_and_reports_to_the_normalized_recipient(mocker: MockerFixture):
     mock_postprocess = mocker.patch(
-        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=RENDERED
     )
-    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
+    mock_send = mocker.patch("ise_record.glue.jobs.send_report", autospec=True)
 
-    settings = Settings(
-        auth=AuthBackend.DISABLED,
-        smtp=SmtpSettings(
-            server="localhost",
-            port=587,
-            local_hostname="smtp.example.de",
-            username="server@example.de",
-            password="supersecure",
-            sender="render@example.de",
-            starttls=True,
-            allowed_domains=("example.de",),
-        ),
-    )
+    await job(Path("data/foo"), asyncio.Semaphore(1), "lecturer@Example.DE", SMTP)
 
-    await job(settings.destdir / "foo", asyncio.Semaphore(1), "lecturer@example.de", settings.smtp)
-
-    mock_postprocess.assert_called_once_with(settings.destdir / "foo")
+    mock_postprocess.assert_called_once_with(anyio.Path("data/foo"))
     mock_send.assert_called_once_with(
-        ANY,
-        hostname="localhost",
-        port=587,
-        local_hostname="smtp.example.de",
-        start_tls=True,
-        use_tls=False,
-        username="server@example.de",
-        password="supersecure",
+        smtp_settings=SMTP, recipient="lecturer@example.de", job_title="foo", result=RENDERED
     )
 
-    sent_report = mock_send.call_args[0][0]
 
-    assert "foo" in sent_report["Subject"]
-    assert "render@example.de" == sent_report["From"]
-    assert "lecturer@example.de" == sent_report["To"]
-    assert "foo/presentation.webm" in sent_report.get_payload()
-
-
+@pytest.mark.parametrize(
+    "recipient, smtp_settings",
+    [
+        pytest.param(None, SMTP, id="no-recipient"),
+        pytest.param("lecturer@elsewhere.org", SMTP, id="domain-not-allowed"),
+        pytest.param("not an address", SMTP, id="malformed-recipient"),
+        pytest.param("lecturer@example.de", None, id="no-smtp"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_postprocessing_task_no_lecturer(mocker: MockerFixture):
-    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
-
+async def test_a_job_without_anyone_to_report_to_still_renders(
+    mocker: MockerFixture, recipient: str | None, smtp_settings: SmtpSettings | None
+):
     mock_postprocess = mocker.patch(
-        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result
+        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=RENDERED
     )
-    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
+    mock_send = mocker.patch("ise_record.glue.jobs.send_report", autospec=True)
 
-    settings = Settings(
-        auth=AuthBackend.DISABLED,
-        smtp=SmtpSettings(
-            server="localhost",
-            port=587,
-            local_hostname="smtp.example.de",
-            username="server@example.de",
-            password="supersecure",
-            sender="render@example.de",
-            starttls=True,
-            allowed_domains=("example.de",),
-        ),
-    )
+    await job(Path("data/foo"), asyncio.Semaphore(1), recipient, smtp_settings)
 
-    await job(settings.destdir / "foo", asyncio.Semaphore(1), None, settings.smtp)
-
-    mock_postprocess.assert_called_once_with(settings.destdir / "foo")
-    mock_send.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_postprocessing_task_no_smtp_config(mocker: MockerFixture):
-    expected_result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
-
-    mock_postprocess = mocker.patch(
-        "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=expected_result
-    )
-    mock_send = mocker.patch("aiosmtplib.send", autospec=True)
-
-    settings = Settings(auth=AuthBackend.DISABLED)
-
-    await job(settings.destdir / "foo", asyncio.Semaphore(1), "lecturer@example.de")
-
-    mock_postprocess.assert_called_once_with(settings.destdir / "foo")
+    mock_postprocess.assert_called_once_with(anyio.Path("data/foo"))
     mock_send.assert_not_called()
 
 

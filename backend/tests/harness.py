@@ -51,6 +51,11 @@ CLIENT_ID = "ise-recorder"
 AUDIENCE = "ise-recorder-api"
 DEFAULT_SUBJECT = "b472c41f9b227e6596e921541f46dc9d7"
 ASSETS = Path(__file__).parent / "assets"
+# NAME_MAX on ext4, and what pathvalidate caps a filename at on every platform it knows. The
+# app does not name this number -- it relies on pathvalidate's default -- so the bound is
+# pinned by test_the_effective_length_bound_is_the_one_the_filesystem_has in
+# glue/test_models.py rather than shared with the code.
+NAME_MAX_BYTES = 255
 
 
 def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
@@ -59,6 +64,22 @@ def make_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
     jwk = jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
     jwk.update({"kid": kid, "use": "sig", "alg": "RS256"})  # pyright: ignore[reportUnknownMemberType]
     return private_key, jwk  # pyright: ignore[reportUnknownVariableType]
+
+
+# A 2048-bit key takes a good part of a second to generate, and nearly every test against an
+# authenticated backend starts a provider with one. Each provider has a server of its own, so
+# sharing the key behind a kid between them is invisible to the tests; one that needs a key the
+# provider does not know calls make_key directly.
+_PROVIDER_KEYS: dict[str, tuple[rsa.RSAPrivateKey, dict[str, Any]]] = {}
+
+
+def provider_key(kid: str) -> tuple[rsa.RSAPrivateKey, dict[str, Any]]:
+    """The key pair a Provider signs with under `kid`, generated once per test session"""
+    if kid not in _PROVIDER_KEYS:
+        _PROVIDER_KEYS[kid] = make_key(kid)
+    private_key, jwk = _PROVIDER_KEYS[kid]
+    # a copy of the JWK, so a test that edits one provider's key set leaves the next one's alone
+    return private_key, dict(jwk)
 
 
 class Provider:
@@ -87,7 +108,7 @@ class Provider:
         return f"http://127.0.0.1:{self._server.server_port}"
 
     def add_key(self, kid: str) -> None:
-        self.keys[kid] = make_key(kid)
+        self.keys[kid] = provider_key(kid)
 
     def start(self) -> None:
         provider = self
@@ -294,12 +315,15 @@ def app_of(client: TestClient) -> FastAPI:
 
 def enclave_of(client: TestClient, user_home: Path | anyio.Path) -> Enclave:
     """
-    The enclave whose recordings live in `user_home`, made the way the server would make it
-    if no request has yet.
+    The enclave whose recordings live in `user_home`, filed where the server looks for it, and
+    made here if no request has made it yet.
 
     An authenticated deployment files each enclave under the digest that names its home
     directory, which is also what the download links carry; an open one has a single enclave,
     filed under None. Restated here for the same reason as the directory scheme below.
+
+    One made here skips what the server does on a user's first request: preparing the home
+    directory and the alias that names it. A test that needs the alias makes a request first.
     """
     app = app_of(client)
     settings: Settings = app.dependency_overrides[get_settings]()
@@ -351,7 +375,7 @@ def otp_generator_of(
 def purge(client: TestClient, token: str | None, recording: str):
     """Ask for a recording to be deleted, as the Purge dialog does once it is confirmed."""
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    return client.delete(f"/api/recordings/{quote(recording)}", headers=headers)
+    return client.delete(f"/api/recordings/{quote(recording, safe='')}", headers=headers)
 
 
 def download_completed(client: TestClient, user_digest: str, recording: str, totp: str | None):

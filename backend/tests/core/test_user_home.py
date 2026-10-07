@@ -6,8 +6,8 @@ a UserInfo endpoint that answers today but not yesterday; a symlink named after 
 sits beside it so that someone with shell access can tell whose is whose. These cover both
 halves.
 
-Where the username comes from is in core/test_auth.py and glue/test_auth.py, and how the
-app caches the result per subject is in glue/test_user_home.py.
+Where the username comes from is in core/test_auth_oidc.py and glue/test_auth.py, and how the
+app caches the result per subject is in glue/test_auth.py and glue/test_enclave.py.
 """
 
 # pylint: disable=line-too-long
@@ -29,6 +29,7 @@ from ..harness import (
     alias_of,
     digest_of,
     home_entries,
+    NAME_MAX_BYTES,
 )
 
 # --- directory naming ------------------------------------------------------
@@ -36,9 +37,8 @@ from ..harness import (
 SUBJECT_DIGEST = digest_of("abc")
 
 
-# NAME_MAX on ext4. user_home.py keeps its own, much smaller cap on the username part; this is
-# the bound the filesystem imposes on whatever comes out of it.
-NAME_MAX_BYTES = 255
+# user_home.py keeps its own, much smaller cap on the username part; NAME_MAX_BYTES is the bound
+# the filesystem imposes on whatever comes out of it.
 
 
 def user_for(username: Any) -> UserInfo:
@@ -239,16 +239,16 @@ async def test_two_preparations_at_once_both_get_the_home_directory(
     # A lecturer's first requests arrive together -- the listing and the first chunk -- and
     # each prepares the home directory. Both can find the alias missing before either has
     # made it; the one that comes second must not fail the request over a link it wanted
-    # anyway. The barrier holds each preparation after its look until the other has looked.
-    real_exists = anyio.Path.exists
-    both_looked = asyncio.Barrier(2)
+    # anyway. The barrier holds each preparation after it has made the home directory, which
+    # comes before anything is done about the alias, until the other has got as far.
+    real_mkdir = anyio.Path.mkdir
+    both_made_the_home = asyncio.Barrier(2)
 
-    async def exists_then_wait(self: anyio.Path, *args: Any, **kwargs: Any) -> bool:
-        found = await real_exists(self, *args, **kwargs)
-        await both_looked.wait()
-        return found
+    async def mkdir_then_wait(self: anyio.Path, *args: Any, **kwargs: Any) -> None:
+        await real_mkdir(self, *args, **kwargs)
+        await both_made_the_home.wait()
 
-    mocker.patch.object(anyio.Path, "exists", autospec=True, side_effect=exists_then_wait)
+    mocker.patch.object(anyio.Path, "mkdir", autospec=True, side_effect=mkdir_then_wait)
 
     first, second = await asyncio.wait_for(
         asyncio.gather(home_dir_for(tmp_path, "lecturer"), home_dir_for(tmp_path, "lecturer")),

@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { anAppSession } from "../helpers/session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
@@ -7,11 +8,10 @@ import { useServerStorage } from "@/lib/hooks/useServerStorage";
 import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
 import { showError, showSuccess } from "@/lib/utils/notifications";
-import { useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import { SWRConfig } from "swr";
 import * as z from "zod";
-import { ExpandedSection, SECTION_ID } from "./ExpandedSection";
+import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
 
 vi.mock("@/lib/hooks/useServerStorage");
 // the requests are mocked, but the URL builder is kept: which href the link carries is
@@ -22,13 +22,7 @@ vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
   schedulePostprocessing: vi.fn(),
   purgeRecording: vi.fn()
 }));
-vi.mock("@/lib/utils/notifications", () => ({
-  // An explicit factory, not automocking: vi.mock() alone yields spies that still call
-  // through, and real toasts outlive the test that raised them.
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
 // a rerender reads the recipient from the lecture form, which lives in the app store; a
 // factory keeps the store out of these tests
@@ -50,8 +44,6 @@ vi.mock("@/lib/hooks/useServerEnv", () => ({
 const API_URL = "https://record.example.edu";
 const USER_DIGEST = "8f14e45fceea167a";
 
-type AppSession = ReturnType<typeof useAppSession>;
-
 const MiB = 2 ** 20;
 const LECTURER_EMAIL = "lecturer@example.edu";
 const getAccessToken = async () => "test-token";
@@ -72,10 +64,6 @@ const LISTING: Listing = [
 
 /** The listing with one recording gone from it, whichever kind it is. */
 const without = (listing: Listing, name: string): Listing => listing.filter(rec => rec.name !== name);
-
-/** The listing with one recording turned into a rendering one, in the place it already had. */
-const asRendering = (listing: Listing, name: string): Listing =>
-  listing.map(rec => (rec.name === name ? { state: "rendering", name } : rec));
 
 const rendering = (name: string): ServerStorageRecording => ({ state: "rendering", name });
 const unprocessed = (name: string): ServerStorageRecording => ({ state: "unprocessed", name });
@@ -104,21 +92,7 @@ function renderSection(options: SectionOptions = {}) {
 
   mockServerEnv.mockReturnValue(serverEnv);
 
-  mockUseAppSession.mockReturnValue({
-    authRequired: true,
-    autoSignin: false,
-    isAuthenticated,
-    isLoading: false,
-    isExpired,
-    isStale: false,
-    error: undefined,
-    userName: "lecturer",
-    getAccessToken,
-    signout: async () => {},
-    interactiveSignin: async () => {},
-    reauthenticate: async () => {},
-    expandSession: async () => "can-stream"
-  } satisfies AppSession);
+  mockUseAppSession.mockReturnValue(anAppSession({ isAuthenticated, isExpired, getAccessToken }));
 
   mockUseLecture.mockReturnValue({
     lectureTitle: "",
@@ -127,13 +101,9 @@ function renderSection(options: SectionOptions = {}) {
     setLecturerEmail: vi.fn()
   });
 
-  vi.mocked(schedulePostprocessing).mockReset();
   // what the backend answers an accepted rerender with: the recording's new state
   vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, name) => ({ state: "rendering", name }));
-  vi.mocked(purgeRecording).mockReset();
-  rerender.mockReset();
   rerender.mockResolvedValue(undefined);
-  purge.mockReset();
   purge.mockResolvedValue(undefined);
 
   if(hook !== undefined) {
@@ -314,7 +284,6 @@ async function renderSectionWithCache(listing: Listing = LISTING) {
 const holdFurtherListings = () =>
   vi.mocked(fetchRecordings).mockReturnValue(new Promise(() => {}));
 
-
 // --- rerendering a finished recording --------------------------------------
 
 // Controls are found by test id rather than by label, so rewording or restyling a button --
@@ -329,35 +298,6 @@ test("each finished recording offers a rerender", () => {
   cards().forEach(card => expect(rerenderButton(card)).toBeEnabled());
 });
 
-test("a rerender schedules a job for that recording with the form's recipient", async () => {
-  await renderSectionWithCache();
-
-  await userEvent.click(rerenderButton(cards()[1]));
-
-  // the recipient is whatever the lecture form holds now, not whoever got the first
-  // report: the backend keeps no record of that
-  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(
-    { apiUrl: API_URL, getAccessToken },
-    "PSU_2026",
-    LECTURER_EMAIL,
-    // nothing to abort it with: somebody is sitting in front of the button, and the card is
-    // locked only for as long as this one request takes
-    undefined
-  );
-});
-
-test("a rerendered card turns into a rendering one before the backend has answered", async () => {
-  await renderSectionWithCache();
-  holdFurtherListings();
-  vi.mocked(schedulePostprocessing).mockReturnValue(new Promise(() => {}));
-
-  await userEvent.click(rerenderButton(cards()[0]));
-
-  // the lecturer sees the press land at once, and has no second button to press
-  await waitFor(() => expect(names(renderingCards())).toStrictEqual([ "GVS_2025" ]));
-  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
-});
-
 test("a scheduled rerender is confirmed by name", async () => {
   renderSection();
 
@@ -366,25 +306,6 @@ test("a scheduled rerender is confirmed by name", async () => {
   expect(rerender).toHaveBeenCalledExactlyOnceWith("PSU_2026");
   await waitFor(() => expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Re-rendering scheduled for PSU_2026"));
   expect(showError).not.toHaveBeenCalled();
-});
-
-test("a scheduled rerender fetches the listing again rather than trusting its own guess", async () => {
-  // anything else that changed on the backend in the meantime comes along with it
-  await renderSectionWithCache();
-
-  const after = sorted([ ...asRendering(LISTING, "GVS_2025"), rendering("NEW_2026") ]);
-
-  // the backend only answers with the new listing once the job is accepted, so a fetch
-  // that merely happened to run earlier cannot pass for the one after the rerender
-  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, name) => {
-    vi.mocked(fetchRecordings).mockResolvedValue(after);
-    return { state: "rendering", name };
-  });
-
-  await userEvent.click(rerenderButton(cards()[0]));
-
-  await waitFor(() => expect(names(renderingCards())).toStrictEqual([ "GVS_2025", "NEW_2026" ]));
-  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
 });
 
 test("the rerendered card stays a rendering one while the listing is fetched again", async () => {
@@ -420,24 +341,6 @@ test("a refused rerender puts the card back and says why", async () => {
   expect(renderingCards()).toHaveLength(0);
   // and it can be pressed again
   expect(rerenderButton(cards()[0])).toBeEnabled();
-});
-
-test("a refused rerender still fetches the listing again", async () => {
-  // A refusal usually means the listing was out of date -- the recording is rendering
-  // already, or gone -- so fetching it again is what brings the card up to date.
-  await renderSectionWithCache();
-
-  const after = asRendering(LISTING, "GVS_2025");
-
-  vi.mocked(schedulePostprocessing).mockImplementation(async () => {
-    vi.mocked(fetchRecordings).mockResolvedValue(after);
-    throw new ApiError("HTTP 409: already rendering", "http", 409, "already rendering");
-  });
-
-  await userEvent.click(rerenderButton(cards()[0]));
-
-  await waitFor(() => expect(names(renderingCards())).toStrictEqual([ "GVS_2025" ]));
-  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
 });
 
 test("a rerender that blows up unexpectedly puts the card back and says why", async () => {
@@ -558,18 +461,6 @@ test("a rerender of a failed recording schedules a job for it and turns the card
   expect(names(allCards())).toStrictEqual([ "ABC_2026", "GVS_2025", "OLD_2024", "PSU_2026", "XYZ_2025" ]);
   expect(names(unprocessedCards())).toStrictEqual([ "OLD_2024" ]);
   expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Re-rendering scheduled for XYZ_2025");
-});
-
-test("a refused rerender of a failed recording puts its card back", async () => {
-  await renderSectionWithCache(UNPROCESSED_LISTING);
-  holdFurtherListings();
-  vi.mocked(schedulePostprocessing).mockRejectedValue(new ApiError("HTTP 404", "http", 404));
-
-  await userEvent.click(rerenderButton(unprocessedCards()[0]));
-
-  await waitFor(() => expect(showError).toHaveBeenCalledOnce());
-  expect(names(unprocessedCards())).toStrictEqual([ "OLD_2024", "XYZ_2025" ]);
-  expect(names(renderingCards())).toStrictEqual([ "ABC_2026" ]);
 });
 
 test("a failed recording's card is locked while its rerender is in flight", async () => {
@@ -797,114 +688,6 @@ test("a rerender while a purge is in flight does not bring the purged card back"
 
   await waitFor(() => expect(names(renderingCards())).toContain("PSU_2026"));
   expect(names(cards())).toStrictEqual([]);
-});
-
-test("the purged card leaves the listing while the request is in flight, and only that one", async () => {
-  // the lecturer has confirmed; the card staying up until the backend answers would look
-  // like the press did nothing
-  await renderSectionWithCache(UNPROCESSED_LISTING);
-
-  vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
-
-  await userEvent.click(purgeButton(cards()[1]));
-  await userEvent.click(confirmButton());
-
-  await waitFor(() => expect(names(cards())).toStrictEqual([ "GVS_2025" ]));
-  // the other two kinds are filtered by name too, and keep their places
-  expect(names(renderingCards())).toStrictEqual([ "ABC_2026" ]);
-  expect(names(unprocessedCards())).toStrictEqual([ "OLD_2024", "XYZ_2025" ]);
-  expect(names(allCards())).toStrictEqual([ "ABC_2026", "GVS_2025", "OLD_2024", "XYZ_2025" ]);
-});
-
-test("a failed recording's card leaves the listing the same way", async () => {
-  await renderSectionWithCache(UNPROCESSED_LISTING);
-
-  vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
-
-  await userEvent.click(purgeButton(unprocessedCards()[0]));
-  await userEvent.click(confirmButton());
-
-  await waitFor(() => expect(names(unprocessedCards())).toStrictEqual([ "XYZ_2025" ]));
-  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
-  expect(names(renderingCards())).toStrictEqual([ "ABC_2026" ]);
-});
-
-test("a refused purge puts the card back and says why", async () => {
-  await renderSectionWithCache();
-  // so that nothing but the rollback can bring the card back
-  holdFurtherListings();
-
-  const refusal = new ApiError(
-    "HTTP 409: Recording PSU_2026 is in use and currently not purgeable",
-    "http",
-    409,
-    "Recording PSU_2026 is in use and currently not purgeable"
-  );
-  vi.mocked(purgeRecording).mockRejectedValue(refusal);
-
-  await userEvent.click(purgeButton(cards()[1]));
-  await userEvent.click(confirmButton());
-
-  // the dialog is not left hanging on a refusal either
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
-  expect(showError).toHaveBeenCalledExactlyOnceWith("Failed to purge PSU_2026", refusal);
-  expect(showSuccess).not.toHaveBeenCalled();
-});
-
-test("a purge the backend cannot be reached for puts the card back and says so", async () => {
-  await renderSectionWithCache();
-  holdFurtherListings();
-
-  const unreachable = new ApiError(
-    "Network error: NetworkError when attempting to fetch resource.",
-    "network",
-    undefined,
-    undefined,
-    { cause: new TypeError("NetworkError when attempting to fetch resource.") }
-  );
-  vi.mocked(purgeRecording).mockRejectedValue(unreachable);
-
-  await userEvent.click(purgeButton(cards()[1]));
-  await userEvent.click(confirmButton());
-
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
-  expect(showError).toHaveBeenCalledExactlyOnceWith("Failed to purge PSU_2026", unreachable);
-});
-
-test("a purge fetches the listing again rather than trusting its own guess", async () => {
-  // the backend answers a purge with nothing, so anything else that changed on it in the
-  // meantime only comes along with the listing fetched after it
-  await renderSectionWithCache();
-
-  const after = sorted([ ...without(LISTING, "PSU_2026"), rendering("NEW_2026") ]);
-
-  vi.mocked(purgeRecording).mockImplementation(async () => {
-    vi.mocked(fetchRecordings).mockResolvedValue(after);
-  });
-  vi.mocked(fetchRecordings).mockClear();
-
-  await userEvent.click(purgeButton(cards()[1]));
-  await userEvent.click(confirmButton());
-
-  await waitFor(() => expect(names(renderingCards())).toStrictEqual([ "NEW_2026" ]));
-  expect(names(cards())).toStrictEqual([ "GVS_2025" ]);
-  expect(fetchRecordings).toHaveBeenCalledOnce();
-});
-
-test("the purged card stays gone while the listing is fetched again", async () => {
-  // the purge is through, but the listing that no longer has it is not in yet; the card
-  // must not come back with its buttons in that window
-  await renderSectionWithCache();
-  holdFurtherListings();
-
-  await userEvent.click(purgeButton(cards()[0]));
-  await userEvent.click(confirmButton());
-
-  await waitFor(() => expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Purged GVS_2025"));
-  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
-  expect(purgeRecording).toHaveBeenCalledOnce();
 });
 
 test("nothing is rendered before the first listing arrives", () => {

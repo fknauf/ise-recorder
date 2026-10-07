@@ -81,7 +81,7 @@ def test_the_whitelist_is_case_insensitive_end_to_end():
     # accepted every job and sent no mail at all, with nothing but a per-job warning to
     # show for it. SmtpSettings lowers the case on the way in, so this has to go through the
     # settings object rather than hand normalize_recipient a literal list -- that is also
-    # exactly what _postprocessing_task does.
+    # exactly what postprocessing_task does.
     settings = SmtpSettings(
         server="mail.example.edu",
         sender="ise-record@example.edu",
@@ -143,73 +143,57 @@ def test_an_ascii_only_address_is_unaffected_by_the_punycode_fallback():
     assert normalize_recipient("föö@uni-hannover.de", whitelist) == "föö@uni-hannover.de"
 
 
-def test_generate_report():
-    sender = "render@example.de"
-    recipient = "lecturer@example.de"
-    job_title = "foo_1234"
-    result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
+@pytest.mark.parametrize(
+    "reason, output_file, says",
+    [
+        pytest.param(
+            ResultReason.SUCCESS,
+            Path("foo/presentation.webm"),
+            "Encoding succeeded",
+            id="success",
+        ),
+        pytest.param(ResultReason.FAILURE, None, "Encoding failed", id="failure"),
+        pytest.param(
+            ResultReason.MAIN_STREAM_MISSING,
+            None,
+            "Missing main display stream",
+            id="main-stream-missing",
+        ),
+        # the lecturer has a usable file but must know it is short, or they will find out
+        # only when the recording stops mid-sentence
+        pytest.param(
+            ResultReason.PARTIAL_SUCCESS,
+            Path("foo/presentation.webm"),
+            "incomplete",
+            id="partial-success",
+        ),
+    ],
+)
+def test_generate_report(reason: ResultReason, output_file: Path | None, says: str):
+    result = Result(reason=reason, output_file=output_file)
 
-    report = _generate_report(sender, recipient, job_title, result)
+    report = _generate_report("render@example.de", "lecturer@example.de", "foo_1234", result)
 
-    assert report["From"] == sender
-    assert report["To"] == recipient
-    assert job_title in report["Subject"]
-    assert job_title in report.get_payload()
-    assert "foo/presentation.webm" in report.get_payload()
-    assert "Encoding succeeded" in report.get_payload()
-
-
-def test_generate_report_failure():
-    sender = "render@example.de"
-    recipient = "lecturer@example.de"
-    job_title = "foo_1234"
-    result = Result(reason=ResultReason.FAILURE, output_file=None)
-
-    report = _generate_report(sender, recipient, job_title, result)
-
-    assert report["From"] == sender
-    assert report["To"] == recipient
-    assert job_title in report["Subject"]
-    assert job_title in report.get_payload()
-    assert "Encoding failed" in report.get_payload()
-
-
-def test_generate_report_missing():
-    sender = "render@example.de"
-    recipient = "lecturer@example.de"
-    job_title = "foo_1234"
-    result = Result(reason=ResultReason.MAIN_STREAM_MISSING, output_file=None)
-
-    report = _generate_report(sender, recipient, job_title, result)
-
-    assert report["From"] == sender
-    assert report["To"] == recipient
-    assert job_title in report["Subject"]
-    assert job_title in report.get_payload()
-    assert "Missing main display stream" in report.get_payload()
+    assert report["From"] == "render@example.de"
+    assert report["To"] == "lecturer@example.de"
+    assert "foo_1234" in report["Subject"]
+    assert "foo_1234" in report.get_payload()
+    assert says in report.get_payload()
+    if output_file is not None:
+        assert str(output_file) in report.get_payload()
 
 
-def test_generate_report_partial_success():
-    sender = "render@example.de"
-    recipient = "lecturer@example.de"
-    job_title = "foo_1234"
-    result = Result(reason=ResultReason.PARTIAL_SUCCESS, output_file=Path("foo/presentation.webm"))
+def test_generate_report_has_a_message_for_every_result_reason():
+    # a reason without a case of its own falls through to the catch-all, which tells the
+    # lecturer only that something is wrong with the code. This fails the moment a variant is
+    # added without a message for it.
+    catch_all = _generate_report(
+        "render@example.de",
+        "lecturer@example.de",
+        "foo_1234",
+        Result(reason=None, output_file=None),  # type: ignore[arg-type]  # no reason matches
+    ).get_payload()
 
-    report = _generate_report(sender, recipient, job_title, result)
-
-    assert report["From"] == sender
-    assert report["To"] == recipient
-    assert job_title in report["Subject"]
-    assert job_title in report.get_payload()
-    # the lecturer has a usable file but must know it is short, or they will find out
-    # only when the recording stops mid-sentence
-    assert "incomplete" in report.get_payload()
-
-
-def test_generate_report_covers_every_result_reason():
-    # the match in generate_report has no fallback: a reason it does not handle leaves
-    # `message` unbound and raises UnboundLocalError instead of sending a degraded mail.
-    # This fails the moment a variant is added without a case for it.
     for reason in ResultReason:
         report = _generate_report(
             "render@example.de",
@@ -218,7 +202,7 @@ def test_generate_report_covers_every_result_reason():
             Result(reason=reason, output_file=None),
         )
 
-        assert str(report.get_payload()).strip() != ""
+        assert report.get_payload() != catch_all
 
 
 @pytest.mark.asyncio

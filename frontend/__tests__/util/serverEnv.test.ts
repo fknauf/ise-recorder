@@ -4,7 +4,7 @@ import type { ServerEnv } from "@/lib/utils/serverEnv";
 /**
  * Covers the deployment-configuration parsing in serverEnv.
  *
- * validateBackendUrl is not exported and getServerEnv memoizes its result in a module
+ * validateApiUrl is not exported and getServerEnv memoizes its result in a module
  * level variable, so each case imports a fresh copy of the module. vi.resetModules()
  * is unavailable in browser mode -- it reloads the page -- so a cache-busting query
  * suffix is used instead, which Vite treats as a distinct module.

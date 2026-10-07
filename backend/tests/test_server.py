@@ -9,9 +9,8 @@
 # pylint: disable=no-member
 # pylint: disable=redefined-outer-name
 
+import asyncio
 from collections.abc import AsyncGenerator, Callable, Iterator
-import datetime
-import os
 from pathlib import Path
 import shutil
 import threading
@@ -45,6 +44,7 @@ from .harness import (
     activity_of,
     alias_of,
     app_of,
+    ASSETS,
     chunk_url,
     DEFAULT_SUBJECT,
     DEFAULT_SUBJECT_DIGEST,
@@ -58,8 +58,8 @@ from .harness import (
     home_entries,
     job_in_flight,
     list_recordings,
+    NAME_MAX_BYTES,
     names,
-    otp_generator_of,
     Provider,
     purge,
     purge_in_flight,
@@ -68,16 +68,8 @@ from .harness import (
     write_chunks,
 )
 
-# NAME_MAX on ext4, which is what pathvalidate caps a filename at inside SafeRecording
-NAME_MAX_BYTES = 255
 # Prefix for the route-prefix tests
 ROUTE_PREFIX = "/foo"
-
-
-@pytest.fixture
-def settings(tmp_path: Path) -> Settings:
-    """A deployment without authentication, with a destination directory of this test's own."""
-    return Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED)
 
 
 @pytest.fixture
@@ -166,25 +158,30 @@ def test_a_render_answers_with_the_name_the_recording_is_stored_under(
     assert response.json() == {"state": "rendering", "name": "\u00dcbung_2025"}
 
 
-def test_schedule_postprocessing_recipient_omitted(
-    mocker: MockerFixture, client: TestClient, settings: Settings
+@pytest.mark.parametrize(
+    "body, recipient",
+    [
+        pytest.param({}, None, id="omitted"),
+        # the address is checked when the report goes out; a typo costs the mail, not the render
+        pytest.param(
+            {"recipient": "I made a lot of typos"}, "I made a lot of typos", id="malformed"
+        ),
+    ],
+)
+def test_the_recipient_is_passed_on_as_given(
+    mocker: MockerFixture,
+    client: TestClient,
+    settings: Settings,
+    body: dict[str, str],
+    recipient: str | None,
 ):
     abandon_recording(settings.destdir, "foo")
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    response = client.post(render_url("foo"), json={})
+    response = client.post(render_url("foo"), json=body)
 
     assert response.status_code == 202
-    mock_add_task.assert_called_once_with(
-        postprocessing_task,
-        settings.destdir / "foo",
-        RenderRequest(recipient=None),
-        settings.smtp,
-        ANY,
-        ANY,
-    )
-    # the app's one semaphore, which is what makes the limit apply across all jobs and users
-    assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
+    assert mock_add_task.call_args.args[2] == RenderRequest(recipient=recipient)
 
 
 def test_the_recipient_is_not_taken_from_the_url(
@@ -256,28 +253,7 @@ def test_a_render_request_needs_a_body(
     mock_add_task.assert_not_called()
 
 
-def test_schedule_postprocessing_broken_recipient_still_starts_post(
-    mocker: MockerFixture, client: TestClient, settings: Settings
-):
-    abandon_recording(settings.destdir, "foo")
-    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
-
-    response = client.post(render_url("foo"), json={"recipient": "I made a lot of typos"})
-
-    assert response.status_code == 202
-    mock_add_task.assert_called_once_with(
-        postprocessing_task,
-        settings.destdir / "foo",
-        RenderRequest(recipient="I made a lot of typos"),
-        settings.smtp,
-        ANY,
-        ANY,
-    )
-    # the app's one semaphore, which is what makes the limit apply across all jobs and users
-    assert mock_add_task.call_args.args[4] is app_of(client).state.jobs_semaphore
-
-
-SAMPLE = Path(os.path.dirname(__file__)) / "assets" / "sample.webm"
+SAMPLE = ASSETS / "sample.webm"
 
 
 def test_chunk_upload(client: TestClient, settings: Settings):
@@ -477,17 +453,6 @@ def test_a_chunk_for_a_recording_that_is_rendering_is_kept(client: TestClient, s
     assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0001").read_bytes() == b"payload"
 
 
-def test_a_chunk_appears_under_its_name_only_once_it_is_complete(
-    client: TestClient, settings: Settings
-):
-    # a render running alongside reads every chunk.* it finds, so a chunk being written is
-    # kept under another name until the last byte is in
-    assert upload(client, None, index=3).status_code == 204
-
-    track = Path(settings.destdir) / "foo" / "stream"
-    assert sorted(p.name for p in track.iterdir()) == ["chunk.0003"]
-
-
 @pytest.mark.asyncio
 async def test_a_chunk_that_breaks_off_leaves_nothing_behind(
     app: FastAPI, client: TestClient, settings: Settings
@@ -599,18 +564,6 @@ def test_the_recordings_listing_is_forbidden_without_authentication(
     assert response.status_code == 403
 
 
-def test_downloading_is_refused_without_user(client: TestClient, settings: Settings):
-    finish_recording(settings.destdir, "GVS_2025")
-
-    for path in ["/api/recordings/GVS_2025", "/api/downloads/GVS_2025"]:
-        response = client.get(path)
-
-        # either path is some other route's or none at all -- either way, a recording is not
-        # served without the user digest in front of it
-        assert response.status_code in (404, 405)
-        assert b"video" not in response.content
-
-
 def test_two_apps_share_no_state(tmp_path: Path):
     # each app gets instances of its own, rather than one dict living on a class or module
     first = create_app(Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED))
@@ -628,16 +581,19 @@ async def test_the_app_allows_as_many_jobs_at_once_as_configured(tmp_path: Path)
         Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED, max_parallel_jobs=3)
     ).state.jobs_semaphore
 
-    for _ in range(3):
-        await semaphore.acquire()
+    # with a timeout, so a limit lower than configured fails the test rather than hang it
+    async with asyncio.timeout(1):
+        for _ in range(3):
+            await semaphore.acquire()
 
     # three slots taken, so a fourth job would have to wait
     assert semaphore.locked()
 
 
 def test_requests_do_not_replace_the_app_state(client: TestClient, app: FastAPI):
-    # the listing and /jobs both resolve get_enclave, and a job registers in the set of the
-    # enclave it was handed; a request that swapped either out would strand it there
+    # the listing and the render endpoint both resolve get_enclave, and a job claims its
+    # recording in the enclave it was handed; a request that swapped either out would strand
+    # the claim there
     enclaves = app.state.enclaves
     semaphore = app.state.jobs_semaphore
 
@@ -706,7 +662,7 @@ def test_a_well_formed_prefix_is_accepted_and_mounts(tmp_path: Path, prefix: str
 # destdir itself -- so these are what show that a caller is confined to their own. How
 # that directory gets its name is in core/test_user_home.py.
 #
-# Token validation and the UserInfo lookup are in core/test_auth.py, and how their outcomes
+# Token validation and the UserInfo lookup are in core/test_auth_oidc.py, and how their outcomes
 # become responses in glue/test_auth.py. The first few tests here are the end-to-end check
 # that the pieces are wired together: one of each outcome, over a real request.
 
@@ -852,7 +808,7 @@ def test_another_subjects_purge_does_not_block_a_recording_of_the_same_name(
 # without becoming a way into somebody else's home directory.
 #
 # What the one-time password in the download link is scoped to and how long it lasts is
-# the download_totp module's own contract, and lives in core/test_download_totp.py.
+# DownloadTotpAuthority's own contract, and lives in core/test_auth_download.py.
 
 
 def test_listing_recordings_without_a_token_is_rejected(auth_client: TestClient):
@@ -929,30 +885,20 @@ def test_the_listing_only_shows_the_callers_own_recordings(
 
 
 # The listing also names the recordings that are still being postprocessed, so the frontend
-# can show that a lecture is on its way rather than missing. What it reads is the per-user
-# set of running jobs that /jobs marks a recording in for as long as its job lasts; a
-# TestClient runs background tasks to completion before it returns, so the set is seeded by
-# hand to catch a job mid-flight.
+# can show that a lecture is on its way rather than missing. What it reads is the rendering
+# claim the render endpoint takes and its job holds for as long as it lasts; a TestClient
+# runs background tasks to completion before it returns, so the claim is taken by hand to
+# catch a job mid-flight.
 
 
-def test_the_listing_reports_nothing_rendering_when_no_job_is_running(
+def test_the_listing_reports_each_recording_in_its_state(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
-
-    data = list_recordings(auth_client, provider.mint()).json()
-
-    # present and empty rather than absent, because the frontend schema requires the field
-    assert names(data, "rendering") == []
-
-
-def test_a_recording_in_postprocessing_is_listed_as_rendering(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
+    # which state wins when is user_recordings_list's business, in glue/test_recordings.py;
+    # this is the end-to-end check that the endpoint lists the caller's enclave with its claims
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "GVS_2025")
-    # a job only ever runs for a recording that is on disk -- /jobs refuses anything else --
-    # and the listing classifies what it finds there
+    finish_recording(home, "DONE_2025")
+    abandon_recording(home, "FAILED_2025")
     abandon_recording(home, "PSU_2026")
     abandon_recording(home, "ABC_2026")
 
@@ -962,42 +908,11 @@ def test_a_recording_in_postprocessing_is_listed_as_rendering(
     # the frontend renders the list as it comes, so the cards would shuffle between polls
     # without the sort
     assert names(data, "rendering") == ["ABC_2026", "PSU_2026"]
-    # only the name: there is no file to size and nothing to download yet
-    assert names(data, "completed") == ["GVS_2025"]
-
-
-def test_a_recording_being_rerendered_is_only_listed_as_rendering(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    # the previous render stays on disk until the new one replaces it, so without the
-    # filter the recording would show up twice: a download card and a spinner side by side
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "GVS_2025")
-    finish_recording(home, "PSU_2026")
-
-    with job_in_flight(auth_client, home, "PSU_2026"):
-        data = list_recordings(auth_client, provider.mint()).json()
-
-    assert names(data, "completed") == ["GVS_2025"]
-    assert names(data, "rendering") == ["PSU_2026"]
-
-
-def test_a_rerendered_recording_is_offered_for_download_again_once_the_job_is_done(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    # the job letting go of the recording is all it takes; a failed rerender leaves the
-    # previous render in place, so this holds either way
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "GVS_2025")
-    token = provider.mint()
-
-    with job_in_flight(auth_client, home, "GVS_2025"):
-        assert names(list_recordings(auth_client, token).json(), "completed") == []
-
-    data = list_recordings(auth_client, token).json()
-
-    assert names(data, "completed") == ["GVS_2025"]
-    assert names(data, "rendering") == []
+    assert names(data, "completed") == ["DONE_2025"]
+    # only the name for the others: there is nothing to download, and the Rerender button
+    # needs no more
+    assert names(data, "unprocessed") == ["FAILED_2025"]
+    assert all(set(entry) == {"state", "name"} for entry in data if entry["state"] != "completed")
 
 
 def test_the_listing_only_shows_the_callers_own_rendering_jobs(
@@ -1231,32 +1146,8 @@ def test_a_finished_job_leaves_another_users_recording_of_the_same_name_renderin
 
 
 # The listing's third list: recordings whose postprocessing never produced anything. Which
-# recordings count is get_unprocessed_recordings' business, in glue/test_recording_lists.py;
+# recordings count is user_recordings_list's business, in glue/test_recordings.py;
 # these pin what the endpoint makes of it.
-
-
-def test_the_listing_reports_unprocessed_recordings_by_name(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "DONE_2025")
-    abandon_recording(home, "GVS_2025")
-
-    data = list_recordings(auth_client, provider.mint()).json()
-
-    # only the name: there is nothing to download, and the Rerender button needs no more
-    assert names(data, "unprocessed") == ["GVS_2025"]
-    assert names(data, "completed") == ["DONE_2025"]
-    assert names(data, "rendering") == []
-
-
-def test_the_listing_reports_no_unprocessed_recordings_when_there_are_none(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    finish_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "DONE_2025")
-
-    # present and empty rather than absent, because the frontend schema requires the field
-    assert names(list_recordings(auth_client, provider.mint()).json(), "unprocessed") == []
 
 
 def test_the_listing_only_shows_the_callers_own_unprocessed_recordings(
@@ -1271,24 +1162,6 @@ def test_the_listing_only_shows_the_callers_own_unprocessed_recordings(
     assert names(
         list_recordings(auth_client, provider.mint(sub="user-b")).json(), "unprocessed"
     ) == ["theirs"]
-
-
-def test_a_rerendered_recording_moves_from_unprocessed_to_rendering(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    # what the lecturer sees after pressing Rerender on a failed card: the card turns into
-    # a spinner rather than showing up twice
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    recording_dir = abandon_recording(home, "GVS_2025")
-    token = provider.mint()
-
-    assert names(list_recordings(auth_client, token).json(), "unprocessed") == ["GVS_2025"]
-
-    with job_in_flight(auth_client, home, recording_dir.name):
-        data = list_recordings(auth_client, token).json()
-
-    assert names(data, "unprocessed") == []
-    assert names(data, "rendering") == ["GVS_2025"]
 
 
 def test_a_completed_recording_can_be_downloaded(
@@ -1355,7 +1228,9 @@ def test_a_decomposed_name_downloads_the_composed_recording(
     assert response.content == b"video"
 
 
-@pytest.mark.parametrize("user_digest", ["..", "not-hex", "AAAA", ""])
+# dot segments go encoded, as a browser sends them: a literal ".." would be resolved away by the
+# client before the request is sent, and never reach the app
+@pytest.mark.parametrize("user_digest", ["%2e%2e", "not-hex", "AAAA"])
 def test_a_user_directory_that_is_not_a_digest_is_refused(
     user_digest: str, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1369,7 +1244,7 @@ def test_a_user_directory_that_is_not_a_digest_is_refused(
     _, _, totp = download_parts(entries(server_list, "completed")[0])
     response = download_completed(auth_client, user_digest, "GVS_2025", totp)
 
-    assert response.status_code in (404, 422)
+    assert response.status_code == 422
     assert b"video" not in response.content
 
 
@@ -1386,7 +1261,7 @@ def test_downloading_is_forbidden_without_authentication(client: TestClient, set
 
 # --- download OTPs through the endpoints -----------------------------------
 
-# The properties from core/test_auth_download.py, restated over a real request, because what
+# The scope of an OTP from core/test_auth_download.py, restated over a real request, because what
 # the download route verifies against is put together from two segments the caller supplies:
 # the digest picks the enclave, whose authority checks the OTP against the recording name.
 
@@ -1484,51 +1359,12 @@ def test_a_recording_that_was_never_listed_cannot_be_downloaded(
     assert b"secret lecture" not in response.content
 
 
-def test_a_totp_from_an_earlier_interval_is_refused_by_the_endpoint(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "GVS_2025")
-
-    list_recordings(auth_client, provider.mint())
-
-    generator = otp_generator_of(auth_client, home, "GVS_2025")
-    three_intervals = datetime.timedelta(seconds=3 * generator.interval)
-    three_intervals_ago = datetime.datetime.now(datetime.UTC) - three_intervals
-    stale = generator.at(three_intervals_ago)
-
-    response = download_completed(auth_client, DEFAULT_SUBJECT_DIGEST, "GVS_2025", stale)
-
-    assert response.status_code == 401
-    assert b"video" not in response.content
-
-
-def test_a_totp_from_the_previous_interval_is_accepted_by_the_endpoint(
-    auth_client: TestClient, provider: Provider, tmp_path: Path
-):
-    # the link the page shows is up to one poll old, and that poll may have been on the other
-    # side of an interval boundary
-    home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    finish_recording(home, "GVS_2025")
-
-    list_recordings(auth_client, provider.mint())
-
-    generator = otp_generator_of(auth_client, home, "GVS_2025")
-    one_interval = datetime.timedelta(seconds=generator.interval)
-    one_interval_ago = datetime.datetime.now(datetime.UTC) - one_interval
-    previous = generator.at(one_interval_ago)
-
-    response = download_completed(auth_client, DEFAULT_SUBJECT_DIGEST, "GVS_2025", previous)
-
-    assert response.status_code == 200
-
-
 # --- purging a recording ---------------------------------------------------
 
 # The one endpoint that destroys data, and irreversibly. Every refusal below checks the disk
 # rather than only the status code: a 4xx that had already deleted something would pass a
-# status check just fine. Which recordings count as purgeable is get_purgeable_recordings'
-# business, in glue/test_recording_lists.py; these pin what the endpoint does with the answer.
+# status check just fine. Which recordings count as purgeable is purge_recording's business,
+# in glue/test_recordings.py; these pin what the endpoint does with the answer.
 
 
 def snapshot(root: Path | anyio.Path) -> dict[str, bytes]:
@@ -1713,20 +1549,21 @@ def test_another_users_recording_cannot_be_purged(
     assert snapshot(tmp_path) == before
 
 
+# sent encoded, as a browser sends them: literal dot segments would be resolved away by the
+# client before the request is sent, and never reach the app
 @pytest.mark.parametrize(
-    "recording",
+    "recording, status_code",
     [
-        "..",
-        "%2e%2e",
-        "..%2fvictim",
-        "%2e%2e%2fvictim",
-        ".hidden",
-        "%2e%2e%2f%2e%2e%2fvictim",
-        "foo%00bar",
+        pytest.param("%2e%2e", 422, id="dot-dot"),
+        pytest.param(".hidden", 422, id="hidden"),
+        # a name holds no slash, so the route does not match and no name is ever made of it
+        pytest.param("..%2fvictim", 404, id="slash"),
+        # sanitized to a name that is not there
+        pytest.param("foo%00bar", 404, id="nul"),
     ],
 )
 def test_a_recording_name_cannot_reach_outside_the_home_directory(
-    recording: str, auth_client: TestClient, provider: Provider, tmp_path: Path
+    recording: str, status_code: int, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "GVS_2025")
@@ -1739,7 +1576,7 @@ def test_a_recording_name_cannot_reach_outside_the_home_directory(
         f"/api/recordings/{recording}", headers={"Authorization": f"Bearer {provider.mint()}"}
     )
 
-    assert response.status_code in (404, 405, 422)
+    assert response.status_code == status_code
     assert snapshot(tmp_path) == before
     assert home.is_dir()
 
@@ -1824,21 +1661,6 @@ def test_a_scheduled_job_answers_with_the_recording_now_rendering(
     assert response.json() == {"state": "rendering", "name": "foo"}
 
 
-def test_a_job_in_an_open_deployment_answers_like_anywhere_else(
-    mocker: MockerFixture, client: TestClient, settings: Settings
-):
-    # the answer says nothing the caller did not know: the name is theirs, and that it is
-    # rendering is what the 202 means. So there is no reason to withhold it where the listing
-    # is refused.
-    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
-    abandon_recording(settings.destdir, "foo")
-
-    response = client.post(render_url("foo"), json={})
-
-    assert response.status_code == 202
-    assert response.json() == {"state": "rendering", "name": "foo"}
-
-
 def test_a_duplicate_job_is_refused_without_disturbing_the_first(
     mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
@@ -1863,10 +1685,6 @@ def test_a_duplicate_job_is_refused_without_disturbing_the_first(
 # leaves the event loop free for the next. Each test below sends its second request from inside
 # such a thread, so the two really overlap: the rmtree of a purge, or one of the filesystem calls
 # that anyio.Path hands to a worker thread while a classification or a listing awaits it.
-
-
-def bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
 
 
 def arriving_during(

@@ -79,7 +79,7 @@ def test_an_address_that_merely_starts_like_the_loopback_one_is_kept():
 
 def test_another_endpoint_from_the_same_address_is_kept():
     # Chunk uploads from a backend on the same host are real traffic, not health checks.
-    assert health_check_filter(health_check(path="/api/chunks")) is True
+    assert health_check_filter(health_check(path="/api/recordings")) is True
 
 
 def test_a_path_that_merely_contains_the_health_endpoint_is_kept():

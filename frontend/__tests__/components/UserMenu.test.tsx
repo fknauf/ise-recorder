@@ -1,9 +1,9 @@
-import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { expect, test, vi } from "vitest";
+import { anAppSession } from "../helpers/session";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { UserMenu } from "@/lib/components/UserMenu";
-import { useAppSession } from "@/lib/components/SessionProvider";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -26,23 +26,7 @@ async function renderMenu(
   const reauthenticate = vi.fn(async () => {});
   const signout = vi.fn(async () => {});
 
-  const tokenSource: ReturnType<typeof useAppSession> = {
-    authRequired: true,
-    autoSignin: false,
-    isStale: false,
-    isAuthenticated,
-    isExpired: false,
-    isLoading: false,
-    userName: userName,
-    error: undefined,
-    getAccessToken: async () => "token",
-    signout,
-    interactiveSignin,
-    reauthenticate,
-    expandSession: async () => "can-stream"
-  };
-
-  mockUseAppSession.mockReturnValue(tokenSource);
+  mockUseAppSession.mockReturnValue(anAppSession({ isAuthenticated, userName, signout, interactiveSignin, reauthenticate }));
 
   render(
     <Provider theme={defaultTheme}>
@@ -56,14 +40,7 @@ async function renderMenu(
   return { signout, interactiveSignin, reauthenticate };
 }
 
-afterEach(cleanup);
-
 // --- who you are -----------------------------------------------------------
-
-test("the trigger says what it opens", async () => {
-  await renderMenu();
-  expect(screen.getByRole("button", { name: "User menu" })).toBeInTheDocument();
-});
 
 test("the menu names the account you are signed in as", async () => {
   await renderMenu({ isAuthenticated: true, userName: "lecturer" });

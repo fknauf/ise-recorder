@@ -99,7 +99,6 @@ export default defineConfig({
             }
           },
           mockReset: true,
-          environment: "jsdom",
           include: [ "__tests__/**/*.test.{ts,tsx}" ],
           exclude: [ "__tests__/build/**" ],
           setupFiles: [ "__tests__/setup.ts" ],

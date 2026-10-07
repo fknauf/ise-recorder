@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { canvasVideoTrack } from "../helpers/media";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
@@ -21,11 +22,7 @@ import { showError } from "@/lib/utils/notifications";
 
 vi.mock("@/lib/utils/serverStorage");
 vi.mock("@/lib/utils/browserStorage");
-vi.mock("@/lib/utils/notifications", () => ({
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
 const destination: RecordingDestination = {
   apiUrl: undefined,
@@ -86,13 +83,6 @@ class FakeMediaRecorder {
   }
 }
 
-const videoTrack = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 48;
-  return canvas.captureStream().getVideoTracks()[0];
-};
-
 const OriginalMediaRecorder = window.MediaRecorder;
 
 // Output streams by file name, so a test can check they were all closed.
@@ -108,8 +98,8 @@ interface Outcome {
  * way the stop button does.
  */
 async function recordWithFailingOverlay(): Promise<Outcome> {
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
   const bundle: RecordingTrackBundle = {
     displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
     mainDisplay: display, overlay: camera
@@ -142,8 +132,6 @@ async function recordWithFailingOverlay(): Promise<Outcome> {
 }
 
 beforeEach(() => {
-  vi.mocked(showError).mockClear();
-
   FakeMediaRecorder.instances = [];
   window.MediaRecorder = FakeMediaRecorder as unknown as typeof MediaRecorder;
 

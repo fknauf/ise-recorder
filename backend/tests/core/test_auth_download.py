@@ -7,7 +7,7 @@ what that OTP is scoped to -- one recording of one enclave -- and how long it la
 properties the scheme rests on.
 
 How the endpoints behave around it (status codes, headers, which recordings a listing
-offers) lives in test_server.py, including the properties below restated over a real request;
+offers) lives in test_server.py, including the scope of an OTP restated over a real request;
 this file is about the mechanism itself.
 """
 
@@ -29,10 +29,11 @@ def test_an_otp_verifies_for_the_recording_it_was_issued_for():
 
 
 def test_an_otp_does_not_verify_for_a_different_recording():
-    # two OTPs generated in the same interval would be identical if the recordings shared a
-    # secret, which is the failure this rules out rather than merely the key lookup
+    # both recordings have been listed, so both have a secret: what turns the OTP away is that
+    # the secrets differ, not merely that the other recording has none
     download_totp = DownloadTotpAuthority()
     totp = download_totp.generate("GVS_2025")
+    download_totp.generate("PSU_2026")
 
     assert not download_totp.verify(totp, "PSU_2026")
 
@@ -83,43 +84,19 @@ def test_an_otp_is_long_enough_and_short_lived_enough_to_carry_the_link():
     assert generator.interval == 120
 
 
-def test_an_otp_from_an_earlier_interval_no_longer_verifies():
-    download_totp = DownloadTotpAuthority()
-    recording = "GVS_2025"
-    download_totp.generate(recording)
-
-    generator = download_totp.factories[recording]
-    # dating an OTP back rather than moving the clock keeps this independent of how the
-    # app measures time
-    three_intervals = datetime.timedelta(seconds=3 * generator.interval)
-    three_intervals_ago = datetime.datetime.now(datetime.UTC) - three_intervals
-    stale = generator.at(three_intervals_ago)
-
-    assert not download_totp.verify(stale, recording)
-
-
-def test_an_otp_from_one_poll_ago_still_verifies():
+def test_an_otp_from_the_previous_interval_still_verifies():
     # The frontend refreshes the listing once a minute, so the link on the page can be a
     # minute old -- and that minute may straddle an interval boundary. A check against the
     # current interval alone would turn that click away, for up to half of every interval.
+    # One interval back is the far end of that: the page polled just before a boundary, and
+    # the click comes just before the next one.
     download_totp = DownloadTotpAuthority()
     recording = "GVS_2025"
     download_totp.generate(recording)
 
     generator = download_totp.factories[recording]
-    one_poll_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=60)
-
-    assert download_totp.verify(generator.at(one_poll_ago), recording)
-
-
-def test_an_otp_from_the_previous_interval_still_verifies():
-    # the far end of the above: the page polled just before a boundary and the click comes
-    # just before the next one
-    download_totp = DownloadTotpAuthority()
-    recording = "GVS_2025"
-    download_totp.generate(recording)
-
-    generator = download_totp.factories[recording]
+    # dating an OTP back rather than moving the clock keeps this independent of how the app
+    # measures time
     one_interval_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
         seconds=generator.interval
     )

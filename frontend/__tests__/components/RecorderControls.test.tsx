@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { makeDevice } from "../helpers/media";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RecorderControls } from "@/lib/components/RecorderControls";
@@ -100,16 +101,7 @@ function setupMockHooks(
   };
 }
 
-test("RecorderControls renders controls correctly when idle", async () => {
-  setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    { state: "idle" }
-  );
-
+function renderControls() {
   render(
     <Provider theme={defaultTheme}>
       <SessionProvider serverEnv={{}}>
@@ -117,178 +109,40 @@ test("RecorderControls renders controls correctly when idle", async () => {
       </SessionProvider>
     </Provider>
   );
+}
 
-  const textFields = await screen.findAllByRole("textbox") as HTMLInputElement[];
-  const buttons = await screen.findAllByRole("button");
+// --- what each recorder state lets the user do -----------------------------
 
-  expect(textFields.length).toBe(2);
+test.each([
+  { activeRecording: { state: "idle" }, editable: true, recordButton: "Start Recording", recordEnabled: true },
+  // the transitional states take no input: a second press could start or stop twice
+  { activeRecording: { state: "preparing" }, editable: false, recordButton: "Stop Recording", recordEnabled: false },
+  { activeRecording: { state: "starting", name: "PSU_TIMESTAMP" }, editable: false, recordButton: "Stop Recording", recordEnabled: false },
+  { activeRecording: { state: "recording", name: "PSU_TIMESTAMP", stop: () => {} }, editable: false, recordButton: "Stop Recording", recordEnabled: true },
+  { activeRecording: { state: "stopping", name: "PSU_TIMESTAMP" }, editable: false, recordButton: "Stop Recording", recordEnabled: false }
+] as { activeRecording: ActiveRecording; editable: boolean; recordButton: string; recordEnabled: boolean }[])(
+  "RecorderControls while $activeRecording.state",
+  async ({ activeRecording, editable, recordButton, recordEnabled }) => {
+    setupMockHooks("http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [], [], activeRecording);
+    renderControls();
 
-  expect(textFields[0].value).toBe("PSU");
-  expect(textFields[1].value).toBe("lecturer@vss.uni-hannover.de");
+    const textFields = await screen.findAllByRole("textbox") as HTMLInputElement[];
+    const buttons = await screen.findAllByRole("button");
 
-  expect(textFields[0]).not.toBeDisabled();
-  expect(textFields[1]).not.toBeDisabled();
+    expect(textFields.map(field => field.value)).toStrictEqual([ "PSU", "lecturer@vss.uni-hannover.de" ]);
+    expect(buttons.map(button => button.textContent)).toStrictEqual(["Add Screen/Window", "Add Video Source", "Add Audio Source", recordButton]);
 
-  expect(buttons.length).toBe(4);
-
-  expect(buttons[0]).toHaveTextContent("Add Screen/Window");
-  expect(buttons[1]).toHaveTextContent("Add Video Source");
-  expect(buttons[2]).toHaveTextContent("Add Audio Source");
-  expect(buttons[3]).toHaveTextContent("Start Recording");
-
-  expect(buttons[0]).not.toBeDisabled();
-  expect(buttons[1]).not.toBeDisabled();
-  expect(buttons[2]).not.toBeDisabled();
-  expect(buttons[3]).not.toBeDisabled();
-});
-
-test("RecorderControls renders controls correctly when recording", async () => {
-  setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    {
-      state: "recording",
-      name: "PSU_TIMESTAMP",
-      stop: vi.fn()
+    // the title and the tracks belong to the recording once it is under way
+    for(const control of [ ...textFields, ...buttons.slice(0, 3) ]) {
+      expect(control.matches(":disabled")).toBe(!editable);
     }
-  );
-
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
-
-  const textFields = await screen.findAllByRole("textbox") as HTMLInputElement[];
-  const buttons = await screen.findAllByRole("button");
-
-  expect(textFields.length).toBe(2);
-
-  expect(textFields[0].value).toBe("PSU");
-  expect(textFields[1].value).toBe("lecturer@vss.uni-hannover.de");
-
-  expect(textFields[0]).toBeDisabled();
-  expect(textFields[1]).toBeDisabled();
-
-  expect(buttons.length).toBe(4);
-
-  expect(buttons[0]).toHaveTextContent("Add Screen/Window");
-  expect(buttons[1]).toHaveTextContent("Add Video Source");
-  expect(buttons[2]).toHaveTextContent("Add Audio Source");
-  expect(buttons[3]).toHaveTextContent("Stop Recording");
-
-  expect(buttons[0]).toBeDisabled();
-  expect(buttons[1]).toBeDisabled();
-  expect(buttons[2]).toBeDisabled();
-  expect(buttons[3]).not.toBeDisabled();
-});
-
-test("RecorderControls renders controls correctly when starting a recording", async () => {
-  setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    { state: "starting", name: "PSU_TIMESTAMP" }
-  );
-
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
-
-  const textFields = await screen.findAllByRole("textbox") as HTMLInputElement[];
-  const buttons = await screen.findAllByRole("button");
-
-  expect(textFields.length).toBe(2);
-
-  expect(textFields[0].value).toBe("PSU");
-  expect(textFields[1].value).toBe("lecturer@vss.uni-hannover.de");
-
-  expect(textFields[0]).toBeDisabled();
-  expect(textFields[1]).toBeDisabled();
-
-  expect(buttons.length).toBe(4);
-
-  expect(buttons[0]).toHaveTextContent("Add Screen/Window");
-  expect(buttons[1]).toHaveTextContent("Add Video Source");
-  expect(buttons[2]).toHaveTextContent("Add Audio Source");
-  expect(buttons[3]).toHaveTextContent("Stop Recording");
-
-  expect(buttons[0]).toBeDisabled();
-  expect(buttons[1]).toBeDisabled();
-  expect(buttons[2]).toBeDisabled();
-  expect(buttons[3]).toBeDisabled();
-});
-
-test("RecorderControls renders controls correctly when stopping a recording", async () => {
-  setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    { state: "stopping", name: "PSU_TIMESTAMP" }
-  );
-
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
-
-  const textFields = await screen.findAllByRole("textbox") as HTMLInputElement[];
-  const buttons = await screen.findAllByRole("button");
-
-  expect(textFields.length).toBe(2);
-
-  expect(textFields[0].value).toBe("PSU");
-  expect(textFields[1].value).toBe("lecturer@vss.uni-hannover.de");
-
-  expect(textFields[0]).toBeDisabled();
-  expect(textFields[1]).toBeDisabled();
-
-  expect(buttons.length).toBe(4);
-
-  expect(buttons[0]).toHaveTextContent("Add Screen/Window");
-  expect(buttons[1]).toHaveTextContent("Add Video Source");
-  expect(buttons[2]).toHaveTextContent("Add Audio Source");
-  expect(buttons[3]).toHaveTextContent("Stop Recording");
-
-  expect(buttons[0]).toBeDisabled();
-  expect(buttons[1]).toBeDisabled();
-  expect(buttons[2]).toBeDisabled();
-  expect(buttons[3]).toBeDisabled();
-});
+    expect(buttons[3].matches(":disabled")).toBe(!recordEnabled);
+  }
+);
 
 test("RecorderControls hides the e-mail field when apiUrl is undefined", async () => {
-  setupMockHooks(
-    undefined,
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    { state: "idle" }
-  );
-
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
+  setupMockHooks(undefined, "PSU", "lecturer@vss.uni-hannover.de", [], [], { state: "idle" });
+  renderControls();
 
   const textFields = await screen.findAllByRole("textbox") as HTMLInputElement[];
 
@@ -296,217 +150,76 @@ test("RecorderControls hides the e-mail field when apiUrl is undefined", async (
   expect(textFields[0].value).toBe("PSU");
 });
 
-test("RecorderControls handles the start recording button properly", async () => {
-  const callbacks = setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    { state: "idle" }
-  );
+// --- what the controls set off -----------------------------------------------
+//
+// The hooks behind them are mocked; what each action does is the hooks' business, in
+// useStartStopRecording.test.tsx, useMediaDevices.test.tsx and store/store.test.tsx.
 
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
+test("RecorderControls starts a recording", async () => {
+  const callbacks = setupMockHooks("http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [], [], { state: "idle" });
+  renderControls();
 
-  const user = userEvent.setup();
+  await userEvent.setup().click(await screen.findByRole("button", { name: /Start Recording/ }));
 
-  const buttons = await screen.findAllByRole("button");
-  expect(buttons[3]).toHaveTextContent("Start Recording");
-  await user.click(buttons[3]);
-
-  expect(callbacks.startRecording).toHaveBeenCalled();
-  expect(callbacks.stopRecording).not.toHaveBeenCalled();
-
-  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
-  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
-  expect(callbacks.refreshMediaDevices).not.toHaveBeenCalled();
-  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
-  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
-  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
+  expect(callbacks.startRecording).toHaveBeenCalledOnce();
 });
 
-test("RecorderControls handles the stop recording button properly", async () => {
+test("RecorderControls stops the recording", async () => {
   const callbacks = setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    {
-      state: "recording",
-      name: "PSU_TIMESTAMP",
-      stop: vi.fn()
-    }
+    "http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [], [],
+    { state: "recording", name: "PSU_TIMESTAMP", stop: vi.fn() }
   );
+  renderControls();
 
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
+  await userEvent.setup().click(await screen.findByRole("button", { name: /Stop Recording/ }));
 
-  const user = userEvent.setup();
-
-  const buttons = await screen.findAllByRole("button");
-  expect(buttons[3]).toHaveTextContent("Stop Recording");
-  await user.click(buttons[3]);
-
-  expect(callbacks.stopRecording).toHaveBeenCalled();
-  expect(callbacks.startRecording).not.toHaveBeenCalled();
-
-  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
-  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
-  expect(callbacks.refreshMediaDevices).not.toHaveBeenCalled();
-  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
-  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
-  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
+  expect(callbacks.stopRecording).toHaveBeenCalledOnce();
 });
 
-test("RecorderControls show video device menu", async () => {
-  const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-    deviceId, groupId, kind, label,
-    toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-  });
-
-  const videoDevices = [
-    makeDevice("c1", "1", "videoinput", "Camera 1"),
-    makeDevice("c2", "2", "videoinput", "Camera 2")
-  ];
-
+test.each([
+  {
+    button: "Add Video Source",
+    devices: { video: [ makeDevice("c1", "1", "videoinput", "Camera 1"), makeDevice("c2", "2", "videoinput", "Camera 2") ], audio: [] },
+    pick: 0,
+    opens: "openVideoStream",
+    with: { groupId: "1", deviceId: "c1" }
+  },
+  {
+    button: "Add Audio Source",
+    devices: { video: [], audio: [ makeDevice("m1", "1", "audioinput", "Microphone 1"), makeDevice("m2", "2", "audioinput", "Microphone 2") ] },
+    pick: 1,
+    opens: "openAudioStream",
+    with: { groupId: "2", deviceId: "m2" }
+  }
+] as const)("RecorderControls lists the devices behind $button and opens the one picked", async ({ button, devices, pick, opens, with: uid }) => {
   const callbacks = setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    videoDevices,
-    [],
-    { state: "idle" }
+    "http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [ ...devices.video ], [ ...devices.audio ], { state: "idle" }
   );
-
-  const tree = render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
-
+  renderControls();
   const user = userEvent.setup();
 
-  await user.click(tree.getByText("Add Video Source"));
+  await user.click(screen.getByText(button));
   expect(callbacks.refreshMediaDevices).toHaveBeenCalledOnce();
 
-  const videoMenu = await screen.findAllByRole("menuitem");
-  expect(videoMenu.length).toBe(2);
-  expect(videoMenu[0]).toHaveTextContent("Camera 1");
-  expect(videoMenu[1]).toHaveTextContent("Camera 2");
+  const menu = await screen.findAllByRole("menuitem");
+  expect(menu.map(item => item.textContent)).toStrictEqual([ ...devices.video, ...devices.audio ].map(dev => dev.label));
 
-  await user.click(videoMenu[0]);
-  expect(callbacks.openVideoStream).toHaveBeenCalledExactlyOnceWith({ groupId: "1", deviceId: "c1" });
-  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
-  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
-
-  expect(callbacks.startRecording).not.toHaveBeenCalled();
-  expect(callbacks.stopRecording).not.toHaveBeenCalled();
-  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
-  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
+  await user.click(menu[pick]);
+  expect(callbacks[opens]).toHaveBeenCalledExactlyOnceWith(uid);
 });
 
-
-test("RecorderControls show audio device menu", async () => {
-  const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-    deviceId, groupId, kind, label,
-    toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-  });
-
-  const audioDevices = [
-    makeDevice("m1", "1", "audioinput", "Microphone 1"),
-    makeDevice("m2", "2", "audioinput", "Microphone 2"),
-    makeDevice("m3", "3", "audioinput", "Microphone 3")
-  ];
-
-  const callbacks = setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    audioDevices,
-    { state: "idle" }
-  );
-
-  const tree = render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
-
+test("RecorderControls hands typed lecture data to the store", async () => {
+  const callbacks = setupMockHooks("http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [], [], { state: "idle" });
+  renderControls();
   const user = userEvent.setup();
 
-  await user.click(tree.getByText("Add Audio Source"));
-  expect(callbacks.refreshMediaDevices).toHaveBeenCalledOnce();
-
-  const audioMenu = await screen.findAllByRole("menuitem");
-  expect(audioMenu.length).toBe(3);
-  expect(audioMenu[0]).toHaveTextContent("Microphone 1");
-  expect(audioMenu[1]).toHaveTextContent("Microphone 2");
-  expect(audioMenu[2]).toHaveTextContent("Microphone 3");
-
-  await user.click(audioMenu[1]);
-  expect(callbacks.openAudioStream).toHaveBeenCalledExactlyOnceWith({ groupId: "2", deviceId: "m2" });
-  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
-  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
-
-  expect(callbacks.startRecording).not.toHaveBeenCalled();
-  expect(callbacks.stopRecording).not.toHaveBeenCalled();
-  expect(callbacks.setLectureTitle).not.toHaveBeenCalled();
-  expect(callbacks.setLecturerEmail).not.toHaveBeenCalled();
-});
-
-test("RecorderControls handles lecture metadata", async () => {
-  const callbacks = setupMockHooks(
-    "http://localhost:8000",
-    "PSU",
-    "lecturer@vss.uni-hannover.de",
-    [],
-    [],
-    { state: "idle" }
-  );
-
-  const tree = render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
-
-  const user = userEvent.setup();
-
-  // text field value is controlled and doesn't change upon typing, the callback would usually change it.
-  // Hard to force rerenders here, though.
-  await user.click(tree.getByLabelText("Lecture Title"));
-  await user.type(tree.getByLabelText("Lecture Title"), "2");
+  // the fields are controlled and the mocked hook does not feed the change back, so each
+  // keystroke arrives on top of the original value
+  await user.type(screen.getByLabelText("Lecture Title"), "2");
   expect(callbacks.setLectureTitle).toHaveBeenCalledExactlyOnceWith("PSU2");
 
-  await user.click(tree.getByLabelText("e-Mail"));
-  await user.type(tree.getByLabelText("e-Mail"), "2");
+  await user.type(screen.getByLabelText("e-Mail"), "2");
   expect(callbacks.setLecturerEmail).toHaveBeenCalledExactlyOnceWith("lecturer@vss.uni-hannover.de2");
-
-  expect(callbacks.refreshMediaDevices).not.toHaveBeenCalled();
-  expect(callbacks.openAudioStream).not.toHaveBeenCalled();
-  expect(callbacks.openDisplayStream).not.toHaveBeenCalled();
-  expect(callbacks.openVideoStream).not.toHaveBeenCalled();
-  expect(callbacks.startRecording).not.toHaveBeenCalled();
-  expect(callbacks.stopRecording).not.toHaveBeenCalled();
 });
 
 // --- there has to be something to record -----------------------------------
@@ -530,13 +243,7 @@ const renderIdleWith = (tracks: ConfiguredTracks) => {
     tracks
   );
 
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
+  renderControls();
 };
 
 test("RecorderControls disables start when nothing is configured", async () => {
@@ -570,9 +277,7 @@ const DEVICE_MENUS = [
 ] as const;
 
 function renderWithDeviceMenus() {
-  const device = (label: string, kind: MediaDeviceKind): MediaDeviceInfo => ({
-    deviceId: label, groupId: label, kind, label, toJSON: () => ({})
-  });
+  const device = (label: string, kind: MediaDeviceKind) => makeDevice(label, label, kind, label);
 
   const callbacks = setupMockHooks(
     "http://localhost:8000",
@@ -589,13 +294,7 @@ function renderWithDeviceMenus() {
     settleRefresh = resolve;
   }));
 
-  render(
-    <Provider theme={defaultTheme}>
-      <SessionProvider serverEnv={{}}>
-        <RecorderControls/>
-      </SessionProvider>
-    </Provider>
-  );
+  renderControls();
 
   return {
     callbacks,

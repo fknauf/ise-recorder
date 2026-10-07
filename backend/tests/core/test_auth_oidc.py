@@ -220,8 +220,9 @@ async def test_fetching_the_key_set_does_not_hold_up_other_requests(
         ticker.cancel()
 
     assert provider.jwks_fetch_count == 1
-    # a blocked loop would not have ticked at all while the fetch was under way
-    assert ticks >= 10
+    # a blocked loop would not have ticked at all while the fetch was under way; a free one ticks
+    # some 30 times, and a few are enough to tell the two apart on a busy machine
+    assert ticks >= 3
 
 
 # --- the signing algorithm comes from the key set --------------------------

@@ -1,4 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
+import { appStoreWrapper } from "../helpers/appStore";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
@@ -12,21 +13,14 @@ import { showError, showSuccess } from "@/lib/utils/notifications";
 // Sends a locally saved recording to the server under a name of its own, so it cannot mix
 // with whatever the live upload left there, and schedules its postprocessing. How a file is
 // split into chunks is uploadFile's business, in serverStorage.test.ts; where the button
-// appears and when it can be pressed is SavedRecordingsSection.test.tsx's.
+// appears and when it can be pressed is BrowserStorageSection.test.tsx's.
 
 // with the trailing slash getServerEnv gives it; the API paths are resolved against it
-const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
-  <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
-    {children}
-  </AppStoreProvider>;
+const wrapper = appStoreWrapper({ apiUrl: "http://localhost:5000/" });
 
 vi.mock("@/lib/utils/browserStorage");
 vi.mock("@/lib/utils/serverStorage");
-vi.mock("@/lib/utils/notifications", () => ({
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
 const getAccessToken = async () => "test-token";
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -44,14 +38,8 @@ const trackOf = (trackName: string) => ({ trackName, file: new File([ trackName 
 beforeEach(() => {
   // the store persists part of itself, the list of unstreamed recordings among it
   localStorage.clear();
-  vi.mocked(getAllRecordingTracks).mockReset();
-  vi.mocked(uploadFile).mockReset();
   vi.mocked(uploadFile).mockResolvedValue(undefined);
-  vi.mocked(schedulePostprocessing).mockReset();
   vi.mocked(schedulePostprocessing).mockResolvedValue({ state: "rendering", name: "GVS_2025-reupload" });
-  vi.mocked(showError).mockClear();
-  vi.mocked(showSuccess).mockClear();
-  refreshServerStorage.mockClear();
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 0 });
 });

@@ -1,13 +1,11 @@
 
 import { deleteRecording, downloadFile, gatherRecordingsList, openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { expect, test, afterEach } from "vitest";
+import { wipeOpfs } from "../helpers/opfs";
 import { commands } from "vitest/browser";
 
 afterEach(async () => {
-  const rootDir = await navigator.storage.getDirectory();
-  for await (const key of rootDir.keys()) {
-    await rootDir.removeEntry(key, { recursive: true });
-  }
+  await wipeOpfs();
 });
 
 test("creating a recording track works", async () => {

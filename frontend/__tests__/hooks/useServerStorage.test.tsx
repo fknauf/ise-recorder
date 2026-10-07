@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { anAppSession } from "../helpers/session";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -30,21 +31,8 @@ const LECTURER_EMAIL = "lecturer@example.edu";
 
 type AppSession = ReturnType<typeof useAppSession>;
 
-const session = (getAccessToken: AppSession["getAccessToken"], isAuthenticated = true): AppSession => ({
-  authRequired: true,
-  autoSignin: false,
-  isAuthenticated,
-  isLoading: false,
-  isExpired: false,
-  isStale: false,
-  error: undefined,
-  userName: "lecturer",
-  getAccessToken,
-  signout: async () => {},
-  interactiveSignin: async () => {},
-  reauthenticate: async () => {},
-  expandSession: async () => "can-stream"
-});
+const session = (getAccessToken: AppSession["getAccessToken"], isAuthenticated = true): AppSession =>
+  anAppSession({ getAccessToken, isAuthenticated });
 
 const USER_DIGEST = "8f14e45fceea167a";
 
@@ -378,74 +366,6 @@ test("a recovered poll clears the error so the minute refresh resumes", async ()
   // is what hands the polling back from the retry chain to the interval
   await waitFor(() => expect(result.current.error).toBeUndefined());
   expect(result.current.data).toEqual(LISTING);
-});
-
-// --- the listing's shape ---------------------------------------------------
-
-test("a listing in the old shape of /api/completed is refused rather than half-rendered", async () => {
-  // what a backend that has not been updated alongside the frontend answers: `recordings`
-  // in place of `completed`, and no `rendering` at all
-  respondWith(() => jsonResponse({ user: "u", recordings: [ { name: "x", size: 1024, totp: "1" } ] }));
-
-  const { result } = renderServerStorageRecordings();
-
-  await waitFor(() => expect(result.current.error).toBeDefined());
-
-  expect(result.current.error.cause).toBeInstanceOf(z.ZodError);
-});
-
-test("a listing in the grouped shape from before is refused", async () => {
-  // what a backend that still sorts its recordings into one array per kind answers
-  respondWith(() => jsonResponse({ user: "u", completed: [], rendering: [], unprocessed: [] }));
-
-  const { result } = renderServerStorageRecordings();
-
-  await waitFor(() => expect(result.current.error).toBeDefined());
-
-  expect(result.current.error.cause).toBeInstanceOf(z.ZodError);
-});
-
-test("an entry in a state the frontend does not know is refused", async () => {
-  // the state is what picks the card, and there is none to pick for this one
-  respondWith(() => jsonResponse([ { state: "queued", name: "x" } ]));
-
-  const { result } = renderServerStorageRecordings();
-
-  await waitFor(() => expect(result.current.error).toBeDefined());
-
-  expect(result.current.error.cause).toBeInstanceOf(z.ZodError);
-});
-
-test("a finished entry without a download URL is refused", async () => {
-  // the URL, TOTP included, is the whole of what the download link is built from
-  respondWith(() => jsonResponse([ { state: "completed", name: "x", size: 1024 } ]));
-
-  const { result } = renderServerStorageRecordings();
-
-  await waitFor(() => expect(result.current.error).toBeDefined());
-
-  expect(result.current.error.cause).toBeInstanceOf(z.ZodError);
-});
-
-test("an unprocessed entry without a name is refused", async () => {
-  // the name is what the Rerender button posts back as the job's recording
-  respondWith(() => jsonResponse([ { state: "unprocessed" } ]));
-
-  const { result } = renderServerStorageRecordings();
-
-  await waitFor(() => expect(result.current.error).toBeDefined());
-
-  expect(result.current.error.cause).toBeInstanceOf(z.ZodError);
-});
-
-test("a rendering entry without a name is refused", async () => {
-  respondWith(() => jsonResponse([ { state: "rendering" } ]));
-
-  const { result } = renderServerStorageRecordings();
-
-  await waitFor(() => expect(result.current.error).toBeDefined());
-
-  expect(result.current.error.cause).toBeInstanceOf(z.ZodError);
 });
 
 // --- refreshing from outside the section -----------------------------------

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { canvasVideoTrack } from "../helpers/media";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
@@ -25,11 +26,7 @@ vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
   uploadChunk: vi.fn()
 }));
 vi.mock("@/lib/utils/browserStorage");
-vi.mock("@/lib/utils/notifications", () => ({
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
 // Captured before any test installs a fake clock: the fake recorder and the polling below
 // run on the real event loop whatever the stop timer's clock is doing.
@@ -89,13 +86,6 @@ class FakeMediaRecorder {
 }
 
 const OriginalMediaRecorder = window.MediaRecorder;
-
-const videoTrack = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 48;
-  return canvas.captureStream().getVideoTracks()[0];
-};
 
 const API = "http://record.example.com";
 const backend: RecordingDestination = { apiUrl: API, impeded: false, getAccessToken: async () => "test-token" };
@@ -176,8 +166,8 @@ let closedStreams: Set<string>;
  */
 async function startRecording(destinationOrImpeded: RecordingDestination | "impeded" = backend) {
   const destination = destinationOrImpeded === "impeded" ? { ...backend, impeded: true } : destinationOrImpeded;
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
   const bundle: RecordingTrackBundle = {
     displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
     mainDisplay: display, overlay: camera
@@ -226,7 +216,6 @@ beforeEach(() => {
 
   fakeUploads();
   window.fetch = vi.fn().mockImplementation(async () => jobAccepted());
-  vi.mocked(showError).mockClear();
 
   streams = new Map();
   closedStreams = new Set();
@@ -741,8 +730,8 @@ test("a recording that failed to start is not marked for re-upload later", async
     .mockImplementationOnce(async () => ({ write: vi.fn(async () => {}), close: vi.fn(async () => {}) }) as unknown as FileSystemWritableFileStream)
     .mockRejectedValueOnce(new Error("no space left"));
 
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
 
   await expect(recordLecture(
     { displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [], mainDisplay: display, overlay: camera },
@@ -765,8 +754,8 @@ test("an upload that arrives after a failed start does not restart the grace per
     .mockImplementationOnce(async () => ({ write: vi.fn(async () => {}), close: vi.fn(async () => {}) }) as unknown as FileSystemWritableFileStream)
     .mockRejectedValueOnce(new Error("no space left"));
 
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
 
   await expect(recordLecture(
     { displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [], mainDisplay: display, overlay: camera },

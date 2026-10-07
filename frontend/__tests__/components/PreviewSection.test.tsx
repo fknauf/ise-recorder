@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { canvasVideoTrack } from "../helpers/media";
 import { useEffect } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
@@ -44,13 +45,6 @@ function StoreHandles() {
   return null;
 }
 
-const videoTrack = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 48;
-  return canvas.captureStream().getVideoTracks()[0];
-};
-
 let tracks: MediaStreamTrack[] = [];
 
 function renderSection() {
@@ -66,7 +60,7 @@ function renderSection() {
 
 /** One captured screen, which the store makes the main display on arrival. */
 function withOneDisplay() {
-  const display = videoTrack();
+  const display = canvasVideoTrack();
   tracks.push(display);
   renderSection();
   act(() => handles.addDisplayTracks([ display ]));
@@ -81,7 +75,6 @@ afterEach(() => {
   for(const track of tracks) {
     track.stop();
   }
-  cleanup();
 });
 
 // --- controls are locked while a recording is in flight --------------------

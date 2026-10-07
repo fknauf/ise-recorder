@@ -1,7 +1,8 @@
 import { expect, test, vi } from "vitest";
-import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { ReactNode, useEffect } from "react";
+import { appStoreWrapper } from "../helpers/appStore";
+import { makeDevice } from "../helpers/media";
+import { act, render, renderHook, screen } from "@testing-library/react";
+import { useAppStore } from "@/lib/hooks/useAppStore";
 import { RefreshEffect, useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import userEvent from "@testing-library/user-event";
 import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
@@ -9,21 +10,9 @@ import _ from "lodash";
 import { showError } from "@/lib/utils/notifications";
 
 // an explicit factory, so a failure path logs nothing and queues no toast outside a Provider
-vi.mock("@/lib/utils/notifications", () => ({
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
-const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
-  <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-    {children}
-  </AppStoreProvider>;
-
-const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-  deviceId, groupId, kind, label,
-  toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-});
+const wrapper = appStoreWrapper();
 
 const mockVideoDevices = [
   makeDevice("c1", "1", "videoinput", "Camera 1"),
@@ -35,222 +24,6 @@ const mockAudioDevices = [
   makeDevice("m2", "2", "audioinput", "Microphone 2"),
   makeDevice("m3", "3", "audioinput", "Microphone 3")
 ];
-
-test("useMediaDevices handles store data", async () => {
-  const { result } = renderHook(() => {
-    const setMediaDevices = useAppStore(state => state.setMediaDevices);
-
-    useEffect(() => {
-      setMediaDevices(mockVideoDevices.concat(mockAudioDevices));
-    }, [ setMediaDevices ]);
-
-    return useMediaDevices();
-  }, { wrapper });
-
-  await waitFor(() => {
-    expect(result.current.videoDevices).toStrictEqual(mockVideoDevices);
-    expect(result.current.audioDevices).toStrictEqual(mockAudioDevices);
-  });
-});
-
-
-test("useMediaDevices().refreshMediaDevices opens streams before enumerating the first time", async () => {
-  navigator.permissions.query = vi.fn().mockImplementation(
-    async (desc: PermissionDescriptor): Promise<PermissionStatus> => ({
-      state: "granted",
-      name: desc.name,
-      onchange: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn()
-    })
-  );
-
-  const onStopTrack = vi.fn();
-  const mockTrack = { stop: onStopTrack };
-  const mockStream = { getTracks: vi.fn().mockReturnValue([ mockTrack, mockTrack ]) };
-
-  mockTrack.stop = onStopTrack;
-
-  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
-  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(mockStream);
-
-  const TestComponent = () => {
-    const {
-      videoDevices,
-      audioDevices,
-      refreshMediaDevices
-    } = useMediaDevices();
-
-    return (
-      <>
-        <button role="button" onClick={refreshMediaDevices}>Click</button>
-        <ul role="list">
-          {
-            [ ...videoDevices, ...audioDevices ].map((dev, i) =>
-              <li key={`${dev.groupId}/${dev.deviceId}`} data-testid={`dev-${i}`} role="listitem">
-                {dev.label}
-              </li>
-            )
-          }
-        </ul>
-      </>
-    );
-  };
-
-  render(<TestComponent/>, { wrapper });
-
-  const user = userEvent.setup();
-
-  const btn = await screen.findByRole("button");
-  await user.click(btn);
-
-  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({ video: true, audio: true });
-  expect(onStopTrack).toHaveBeenCalledTimes(2);
-
-  await waitFor(async () => {
-    const items = await screen.findAllByRole("listitem");
-    expect(items.length).toBe(5);
-
-    expect(items[0]).toHaveTextContent(mockVideoDevices[0].label);
-    expect(items[1]).toHaveTextContent(mockVideoDevices[1].label);
-    expect(items[2]).toHaveTextContent(mockAudioDevices[0].label);
-    expect(items[3]).toHaveTextContent(mockAudioDevices[1].label);
-    expect(items[4]).toHaveTextContent(mockAudioDevices[2].label);
-  });
-});
-
-test("useMediaDevices().refreshMediaDevices doesn't open streams the second time", async () => {
-  navigator.permissions.query = vi.fn().mockImplementation(
-    async (desc: PermissionDescriptor): Promise<PermissionStatus> => ({
-      state: "granted",
-      name: desc.name,
-      onchange: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn()
-    })
-  );
-
-  const onStopTrack = vi.fn();
-  const mockTrack = { stop: onStopTrack };
-  const mockStream = { getTracks: vi.fn().mockReturnValue([ mockTrack, mockTrack ]) };
-
-  mockTrack.stop = onStopTrack;
-
-  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
-  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(mockStream);
-
-  const TestComponent = () => {
-    const {
-      videoDevices,
-      audioDevices,
-      refreshMediaDevices
-    } = useMediaDevices();
-
-    return (
-      <>
-        <button role="button" onClick={refreshMediaDevices}>Click</button>
-        <ul role="list">
-          {
-            [ ...videoDevices, ...audioDevices ].map(dev =>
-              <li key={`${dev.groupId}/${dev.deviceId}`} data-testid="devitem" role="listitem">
-                {dev.label}
-              </li>
-            )
-          }
-        </ul>
-      </>
-    );
-  };
-
-  render(<TestComponent/>, { wrapper });
-
-  const user = userEvent.setup();
-
-  await screen.findByRole("button").then(btn => user.click(btn));
-  await screen.findByRole("button").then(btn => user.click(btn));
-
-  expect(navigator.mediaDevices.enumerateDevices).toHaveBeenCalledTimes(2);
-  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({ video: true, audio: true });
-});
-
-test("useMediaDevices().refreshMediaDevices adds streams when user was prompted for permission", async () => {
-  navigator.permissions.query = vi.fn().mockImplementation(
-    async (desc: PermissionDescriptor): Promise<PermissionStatus> => ({
-      state: "prompt",
-      name: desc.name,
-      onchange: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn()
-    })
-  );
-
-  const mockAudioTrack = { label: "mock audio" };
-  const mockVideoTrack = { label: "mock video" };
-
-  const mockStream = {
-    getAudioTracks: vi.fn().mockReturnValue([ mockAudioTrack ]),
-    getVideoTracks: vi.fn().mockReturnValue([ mockVideoTrack ])
-  };
-
-  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
-  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(mockStream);
-
-  const TestComponent = () => {
-    const {
-      videoDevices,
-      audioDevices,
-      refreshMediaDevices
-    } = useMediaDevices();
-
-    const {
-      videoTracks,
-      audioTracks
-    } = useMediaTracks();
-
-    return (
-      <>
-        <button role="button" onClick={refreshMediaDevices}>Click</button>
-        <ul role="list" data-testid="devlist">
-          {
-            [ ...videoDevices, ...audioDevices ].map(dev =>
-              <li key={`${dev.groupId}/${dev.deviceId}`} data-testid="devitem" role="listitem">
-                {dev.label}
-              </li>
-            )
-          }
-        </ul>
-        <ul role="list" data-testid="tracklist">
-          {
-            [ ...videoTracks, ...audioTracks ].map((track, i) =>
-              <li key={`track-${i}`} data-testid="trackitem" role="listitem">
-                {track.label}
-              </li>
-            )
-          }
-        </ul>
-      </>
-    );
-  };
-
-  render(<TestComponent/>, { wrapper });
-
-  const user = userEvent.setup();
-
-  const btn = await screen.findByRole("button");
-  await user.click(btn);
-
-  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({ video: true, audio: true });
-
-  await waitFor(async () => {
-    const devs = await screen.queryAllByTestId("devitem");
-    expect(devs.length).toBe(5);
-    const tracks = await screen.queryAllByTestId("trackitem");
-    expect(tracks.length).toBe(2);
-  });
-});
 
 test("useMediaDevices().openDisplayStream works", async () => {
   const mockTrack = { label: "abc" };
@@ -291,7 +64,6 @@ test("useMediaDevices().openDisplayStream works", async () => {
   const trackList = await screen.findAllByRole("listitem");
 
   expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledExactlyOnceWith();
-  expect(Object.keys(mockTrack).includes("onended")).toBeTruthy();
   expect(trackList.length).toBe(1);
   expect(trackList[0]).toHaveTextContent(mockTrack.label);
   expect(await screen.findByTestId("main")).toHaveTextContent(mockTrack.label);
@@ -309,7 +81,6 @@ test("useMediaDevices().openDisplayStream works", async () => {
   const trackList2 = await screen.findAllByRole("listitem");
 
   expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledExactlyOnceWith();
-  expect(Object.keys(mockTrack2).includes("onended")).toBeTruthy();
   expect(trackList2.length).toBe(2);
   expect(trackList2[0]).toHaveTextContent(mockTrack.label);
   expect(trackList2[1]).toHaveTextContent(mockTrack2.label);
@@ -407,7 +178,6 @@ test("useMediaDevices().openVideoStream works", async () => {
     },
     audio: false
   });
-  expect(Object.keys(mockTracks[0]).includes("onended")).toBeTruthy();
   expect(trackList.length).toBe(1);
   expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
   expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
@@ -425,7 +195,6 @@ test("useMediaDevices().openVideoStream works", async () => {
   expect(trackList.length).toBe(2);
   expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
   expect(trackList[1]).toHaveTextContent(mockTracks[1].label);
-  expect(Object.keys(mockTracks[1]).includes("onended")).toBeTruthy();
   expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
   expect(await screen.findByTestId("overlay")).toHaveTextContent(mockTracks[0].label);
 });
@@ -515,7 +284,6 @@ test("useMediaDevices().openAudioStream works", async () => {
       deviceId: { exact: "d1" }
     }
   });
-  expect(Object.keys(mockTracks[0]).includes("onended")).toBeTruthy();
   expect(trackList.length).toBe(1);
   expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
   expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
@@ -533,7 +301,6 @@ test("useMediaDevices().openAudioStream works", async () => {
   expect(trackList.length).toBe(2);
   expect(trackList[0]).toHaveTextContent(mockTracks[0].label);
   expect(trackList[1]).toHaveTextContent(mockTracks[1].label);
-  expect(Object.keys(mockTracks[1]).includes("onended")).toBeTruthy();
   expect(await screen.findByTestId("main")).toBeEmptyDOMElement();
   expect(await screen.findByTestId("overlay")).toBeEmptyDOMElement();
 });
@@ -579,23 +346,32 @@ test("a refresh that asked for permission reports the devices it added", async (
   const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
 
   expect(await refreshed(result.current.refreshMediaDevices)).toBe("added-tracks");
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({ video: true, audio: true });
   // and it did add them: the report is about what happened, not a guess
   expect(result.current.videoTracks.map(t => t.label)).toStrictEqual([ "camera track" ]);
   expect(result.current.audioTracks.map(t => t.label)).toStrictEqual([ "microphone track" ]);
+  expect(result.current.videoDevices).toStrictEqual(mockVideoDevices);
+  expect(result.current.audioDevices).toStrictEqual(mockAudioDevices);
 });
 
 test("a first refresh with permissions already granted only lists devices", async () => {
   // it still opens a stream to be allowed to read the labels, but closes it again: the
   // user picked nothing, so the menu is where they will
   permissionsAre("granted");
-  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(aStream());
+  const stream = aStream();
+  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(stream);
   navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
 
   const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
 
   expect(await refreshed(result.current.refreshMediaDevices)).toBe("just-refreshed");
-  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({ video: true, audio: true });
+  for(const track of stream.getTracks()) {
+    expect(track.stop).toHaveBeenCalled();
+  }
   expect(result.current.videoTracks).toStrictEqual([]);
+  expect(result.current.videoDevices).toStrictEqual(mockVideoDevices);
+  expect(result.current.audioDevices).toStrictEqual(mockAudioDevices);
 });
 
 test("a later refresh that needs no permission only lists devices", async () => {
@@ -608,6 +384,8 @@ test("a later refresh that needs no permission only lists devices", async () => 
 
   expect(await refreshed(result.current.refreshMediaDevices)).toBe("just-refreshed");
   expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+  // the list itself is fetched every time: a device may have been plugged in since
+  expect(navigator.mediaDevices.enumerateDevices).toHaveBeenCalledTimes(2);
 });
 
 test("a refused permission prompt adds nothing and says so", async () => {

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { wipeOpfs } from "../helpers/opfs";
+import { canvasVideoTrack } from "../helpers/media";
 import { normalizeLectureTitle, RecordingDestination, RecordingTrackBundle, recordLecture, sanitizeLectureTitle } from "@/lib/utils/recording";
 
 /**
@@ -55,10 +57,7 @@ const destination: RecordingDestination = {
 };
 
 function singleDisplayBundle(): RecordingTrackBundle {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 48;
-  const display = canvas.captureStream().getVideoTracks()[0];
+  const display = canvasVideoTrack();
 
   return {
     displayTracks: [ display ],
@@ -216,10 +215,7 @@ beforeEach(() => {
 afterEach(async () => {
   vi.useRealTimers();
 
-  const rootDir = await navigator.storage.getDirectory();
-  for await (const key of rootDir.keys()) {
-    await rootDir.removeEntry(key, { recursive: true });
-  }
+  await wipeOpfs();
 });
 
 test("a plain title is carried into the name in front of the timestamp", async () => {

@@ -133,6 +133,12 @@ async function renderPreview() {
 
 // --- the visual contract ---------------------------------------------------
 
+// some tests give the theme's colors values of their own, to tell the two strokes apart
+afterEach(() => {
+  document.body.style.removeProperty("--foreground");
+  document.body.style.removeProperty("--warning");
+});
+
 test("bar height scales with the level in each frequency bin", async () => {
   // a ramp across the bins: later bins are louder, so their bars must reach higher
   stubAnalyser(new Array(256).fill(0)

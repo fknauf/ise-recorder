@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 import { hydrateRoot } from "react-dom/client";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { useHydrated } from "@/lib/hooks/useHydrated";
 
 /**
@@ -38,7 +38,6 @@ beforeEach(() => {
 
 afterEach(() => {
   consoleError.mockRestore();
-  cleanup();
 });
 
 test("server rendering reports not hydrated", () => {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { canvasVideoTrack } from "../helpers/media";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
@@ -13,13 +14,7 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
 // job is the state machine around recording, not the recording itself, and the real
 // implementation would need media devices and six seconds of wall clock.
 vi.mock("@/lib/utils/recording");
-vi.mock("@/lib/utils/notifications", () => ({
-  // An explicit factory, not automocking: vi.mock() alone yields spies that still call
-  // through, so the real showError logs and queues Spectrum toasts during the suite.
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 vi.mock("@/lib/utils/browserStorage");
 // what the refresh does to the SWR cache is useServerStorage.test.tsx's business;
 // here it only matters that finishing a recording asks for it
@@ -28,12 +23,12 @@ vi.mock("@/lib/hooks/useServerStorage", () => ({
   useRefreshServerStorage: () => refreshServerStorage
 }));
 
-const mockUseAccessTokenSource = vi.fn();
+const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockUseAccessTokenSource()
+  useAppSession: () => mockUseAppSession()
 }));
 
-type AccessTokenSource = ReturnType<typeof useAppSession>;
+type AppSession = ReturnType<typeof useAppSession>;
 
 interface CapturedRecording {
   trackBundle: RecordingTrackBundle
@@ -54,7 +49,7 @@ const makeTokenSource = (
   authRequired: boolean,
   token: string | undefined,
   sessionResult: SessionTransition = "can-stream"
-): AccessTokenSource => ({
+): AppSession => ({
   authRequired,
   autoSignin: false,
   isAuthenticated: true,
@@ -71,10 +66,10 @@ const makeTokenSource = (
 });
 
 async function renderRecorder(
-  tokenSource: AccessTokenSource,
+  tokenSource: AppSession,
   serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" }
 ) {
-  mockUseAccessTokenSource.mockReturnValue(tokenSource);
+  mockUseAppSession.mockReturnValue(tokenSource);
 
   const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
     <AppStoreProvider serverEnv={serverEnv}>
@@ -114,7 +109,6 @@ beforeEach(() => {
   localStorage.clear();
 
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
-  refreshServerStorage.mockClear();
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 1234 });
 
   vi.mocked(recordLecture).mockImplementation(async (
@@ -156,8 +150,7 @@ test("useStartStopRecording starts idle", async () => {
 test("startRecording hands the lecture details and tracks to recordLecture", async () => {
   const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
-  const canvas = document.createElement("canvas");
-  const displayTracks = canvas.captureStream().getVideoTracks();
+  const displayTracks = [ canvasVideoTrack() ];
 
   act(() => {
     result.current.store.setLectureTitle("GVS");
@@ -267,7 +260,7 @@ test("the recorder walks idle -> preparing -> starting -> recording -> idle", as
   const call = await startAndCapture(result.current.startRecording);
   const stop = vi.fn();
 
-  // "preparing" is claimed synchronously, before expandSessionHeadroom is awaited, so a
+  // "preparing" is claimed synchronously, before expandSession is awaited, so a
   // second press during that await sees a non-idle state and bails. The recording has no
   // name yet -- recordLecture has not been reached -- and nothing is on disk to protect.
   expect(result.current.activeRecording.state).toBe("preparing");
@@ -422,7 +415,7 @@ test("stopRecording stops the recording and moves to stopping", async () => {
 });
 
 test("a stopRecording captured before the recording began still stops it", async () => {
-  // The reason stopRecording reads the store through getStoreState() rather than using
+  // The reason stopRecording reads the store through selectFromStore rather than using
   // the activeRecording captured at render: it can be called from a closure taken before
   // the recording existed -- an async path, a timer, an event handler bound early. A
   // render-time capture would see "idle" there and refuse to stop, stranding the
@@ -471,7 +464,7 @@ test("stopRecording is a no-op when nothing is being recorded", async () => {
 
 test("pressing start twice before the session check resolves records once", async () => {
   // The guard reads the store, but until "preparing" is claimed the store still says
-  // "idle" for the whole duration of the expandSessionHeadroom await -- which can be a
+  // "idle" for the whole duration of the expandSession await -- which can be a
   // silent sign-in lasting seconds, while the button stays enabled. Both presses used to
   // get through, producing two recordings writing two sets of files.
   const { result } = await renderRecorder(makeTokenSource(false, undefined));

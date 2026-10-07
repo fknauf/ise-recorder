@@ -1,16 +1,13 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { wipeOpfs } from "../helpers/opfs";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { render, screen } from "@testing-library/react";
 import { uploadChunk, schedulePostprocessing } from "@/lib/utils/serverStorage";
 
 vi.mock("@/lib/utils/serverStorage");
-vi.mock("@/lib/utils/notifications", () => ({
-  // recordLecture says how the job request went; a real toast would outlive the test
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+// recordLecture says how the job request went; a real toast would outlive the test
+vi.mock("@/lib/utils/notifications");
 
 beforeEach(() => {
   // stand-ins for a backend that accepts everything
@@ -21,10 +18,7 @@ beforeEach(() => {
 const accessToken = async () => "test-token";
 
 afterEach(async () => {
-  const rootDir = await navigator.storage.getDirectory();
-  for await (const key of rootDir.keys()) {
-    await rootDir.removeEntry(key, { recursive: true });
-  }
+  await wipeOpfs();
 });
 
 test("recordLecture does nothing when there are no tracks", async () => {

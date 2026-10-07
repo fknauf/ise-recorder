@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
+import { canvasVideoTrack } from "../helpers/media";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
@@ -15,11 +16,7 @@ import { showError } from "@/lib/utils/notifications";
 
 vi.mock("@/lib/utils/serverStorage");
 vi.mock("@/lib/utils/browserStorage");
-vi.mock("@/lib/utils/notifications", () => ({
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
 const destination: RecordingDestination = {
   apiUrl: undefined,
@@ -44,21 +41,12 @@ function workingStream() {
   } as unknown as FileSystemWritableFileStream;
 }
 
-let audioContext: AudioContext;
-
-const videoTrack = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 48;
-  return canvas.captureStream().getVideoTracks()[0];
-};
-
 /**
  * Record briefly and stop. MediaRecorder flushes a final chunk on stop, so one chunk
  * per track arrives without waiting out the 5s timeslice.
  */
 async function recordOneChunk(onChunkWritten: (name: string, file: string, size: number) => void) {
-  const display = videoTrack();
+  const display = canvasVideoTrack();
   const bundle: RecordingTrackBundle = {
     displayTracks: [ display ], videoTracks: [], audioTracks: [],
     mainDisplay: display, overlay: undefined
@@ -76,14 +64,6 @@ async function recordOneChunk(onChunkWritten: (name: string, file: string, size:
     () => {}
   );
 }
-
-beforeEach(() => {
-  audioContext = new AudioContext();
-});
-
-afterEach(async () => {
-  await audioContext.close();
-});
 
 test("a chunk that fails to write is not counted towards the file size", async () => {
   vi.mocked(openRecordingFileStream).mockResolvedValue(failingStream());

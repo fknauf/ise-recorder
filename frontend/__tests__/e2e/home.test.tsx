@@ -1,5 +1,8 @@
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { ReactNode } from "react";
+import { SWRConfig } from "swr";
+import { anAppSession } from "../helpers/session";
+import { wipeOpfs } from "../helpers/opfs";
+import { makeDevice } from "../helpers/media";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { Home } from "@/app/page";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -13,62 +16,30 @@ vi.mock("@/lib/components/SessionProvider", () => ({
   useAppSession: () => mockUseAppSession()
 }));
 
-const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-  deviceId, groupId, kind, label,
-  toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-});
-
-// AuthStatusMessage drives the real sign-in flow when authentication is required. These
-// tests are about what the uploader sends, not about the redirect dance, so the OIDC
-// library is stubbed out as already-signed-in. The token itself comes from the injected
-// AccessTokenSourceContext below, which is the seam the uploader actually reads.
-//
-// useAutoSignin counts its calls: whether the page runs it at all is the whole of the
-// auto-signin gate, and the two tests at the bottom of this file assert on it.
+// These tests are about what the page does and what the uploader sends, not about the
+// sign-in dance: the session the page sees is the mocked useAppSession below, so no OIDC
+// library is involved -- except for useAutoSignin, which the page calls itself. That one
+// counts its calls: whether the page runs it at all is the whole of the auto-signin gate,
+// and the two tests at the bottom of this file assert on it.
 const oidc = vi.hoisted(() => ({ autoSigninCalls: 0 }));
 
 vi.mock("react-oidc-context", () => ({
   useAutoSignin: () => {
     oidc.autoSigninCalls += 1;
     return { isLoading: false, isAuthenticated: true, error: undefined };
-  },
-  useAuth: () => ({ isLoading: false, isAuthenticated: true, error: undefined }),
-  AuthProvider: ({ children }: { children: ReactNode }) => children
+  }
 }));
 
-type AccessTokenSource = ReturnType<typeof useAppSession>;
+type AppSession = ReturnType<typeof useAppSession>;
 
-const anonymousTokenSource: AccessTokenSource = {
+const anonymousSession = anAppSession({
   authRequired: false,
-  autoSignin: false,
   isAuthenticated: false,
-  isExpired: false,
-  isLoading: false,
-  isStale: false,
   userName: undefined,
-  error: undefined,
-  getAccessToken: async () => undefined,
-  signout: async () => {},
-  interactiveSignin: async () => {},
-  reauthenticate: async () => {},
-  expandSession: async () => "can-stream"
-};
+  getAccessToken: async () => undefined
+});
 
-const authenticatedTokenSource: AccessTokenSource = {
-  authRequired: true,
-  autoSignin: false,
-  isAuthenticated: true,
-  isExpired: false,
-  isLoading: false,
-  isStale: false,
-  userName: "lecturer",
-  error: undefined,
-  getAccessToken: async () => "test-token",
-  signout: async () => {},
-  interactiveSignin: async () => {},
-  reauthenticate: async () => {},
-  expandSession: async () => "can-stream"
-};
+const authenticatedSession = anAppSession();
 
 const cleanupBetweenTests = async () => {
   // react-spectrum queues toasts globally, outside the React tree, so they survive cleanup()
@@ -79,10 +50,7 @@ const cleanupBetweenTests = async () => {
   }
 
   localStorage.clear();
-  const rootDir = await navigator.storage.getDirectory();
-  for await (const key of rootDir.keys()) {
-    await rootDir.removeEntry(key, { recursive: true });
-  }
+  await wipeOpfs();
 
   cleanup();
 };
@@ -122,26 +90,33 @@ function fakeBackend() {
   });
 }
 
-/** Just the page, for the tests that only care about what it decides to render. */
-function renderHome(tokenSource: AccessTokenSource) {
-  mockUseAppSession.mockReturnValue(tokenSource);
-
-  render(
-    <Provider theme={defaultTheme}>
-      <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
+/**
+ * The page as the app mounts it, with an SWR cache of its own: SWR's default cache is global,
+ * so without this a test would start out with whatever listing the one before it fetched.
+ */
+const page = () =>
+  <Provider theme={defaultTheme}>
+    <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
+      <SWRConfig value={{ provider: () => new Map() }}>
         <Home/>
-      </AppStoreProvider>
-    </Provider>
-  );
+      </SWRConfig>
+    </AppStoreProvider>
+  </Provider>;
+
+/** Just the page, for the tests that only care about what it decides to render. */
+function renderHome(session: AppSession) {
+  mockUseAppSession.mockReturnValue(session);
+
+  render(page());
 }
 
 /**
  * Drives a complete recording through the UI: adds sources, fills in the lecture details,
  * records for two seconds, stops, and checks the resulting local files. Parameterized by the
- * access token source so the same session can be run for an unauthenticated deployment and
+ * session so the same session can be run for an unauthenticated deployment and
  * for one behind an OpenID provider.
  */
-async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: string) {
+async function recordAStream(session: AppSession, lectureTitle: string) {
   window.fetch = fakeBackend() as unknown as typeof window.fetch;
 
   let x = 0;
@@ -171,15 +146,11 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
     return () => clearInterval(timer);
   };
 
-  mockUseAppSession.mockReturnValue(tokenSource);
+  mockUseAppSession.mockReturnValue(session);
 
   const tree = render(
     <>
-      <Provider theme={defaultTheme}>
-        <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
-          <Home/>
-        </AppStoreProvider>
-      </Provider>
+      {page()}
       <canvas width={384} height={216} data-testid="display-src" ref={animate}/>
       <canvas width={384} height={216} data-testid="video-src" ref={animate}/>
     </>
@@ -280,7 +251,7 @@ async function recordAStream(tokenSource: AccessTokenSource, lectureTitle: strin
   // When signed in, the end of the recording also refreshes the server-side listing without
   // waiting for it. Its answer now includes the new recording, so the server storage section
   // re-renders whenever that answer arrives -- outside act unless something waits for it here.
-  if(tokenSource.isAuthenticated) {
+  if(session.isAuthenticated) {
     await screen.findByTestId("rendering-card");
   }
 
@@ -315,7 +286,7 @@ const chunkUrl = (recordingName: string) =>
 const renderUrl = (recordingName: string) => `http://localhost:5000/api/recordings/${recordingName}/render`;
 
 test("e2e recording a stream works", async () => {
-  const recordingName = await recordAStream(anonymousTokenSource, "FOO_101");
+  const recordingName = await recordAStream(anonymousSession, "FOO_101");
 
   // one job for one recording; a second would render it twice
   expect(requestsTo(renderUrl(recordingName))).toBe(1);
@@ -337,7 +308,7 @@ test("e2e recording a stream works", async () => {
 });
 
 test("e2e recording a stream sends the access token to the server", async () => {
-  const recordingName = await recordAStream(authenticatedTokenSource, "BAR_202");
+  const recordingName = await recordAStream(authenticatedSession, "BAR_202");
 
   expect(requestsTo(renderUrl(recordingName))).toBe(1);
   expect(requestsTo(chunkUrl(recordingName))).toBeGreaterThan(0);
@@ -372,8 +343,8 @@ test("e2e recording a stream sends the access token to the server", async () => 
 
 // --- the auto sign-in gate -------------------------------------------------
 
-test("the page signs in automatically when the token source says to", async () => {
-  renderHome({ ...authenticatedTokenSource, autoSignin: true });
+test("the page signs in automatically when the session says to", async () => {
+  renderHome({ ...authenticatedSession, autoSignin: true });
 
   await screen.findByText("Start Recording");
 
@@ -386,7 +357,7 @@ test("the page stops signing in automatically once the user has signed out", asy
   // source turns its autoSignin flag off for the rest of the session, and this gate is
   // what makes that mean anything -- reading env.oidcAutoSignin here instead would
   // reinstate the loop.
-  renderHome({ ...authenticatedTokenSource, autoSignin: false });
+  renderHome({ ...authenticatedSession, autoSignin: false });
 
   await screen.findByText("Start Recording");
 

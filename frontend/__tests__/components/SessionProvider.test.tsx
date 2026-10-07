@@ -255,7 +255,6 @@ afterEach(() => {
   // the rest of the file down with it
   vi.useRealTimers();
   localStorage.clear();
-  vi.clearAllMocks();
 });
 
 test("useAppSession refuses to work outside a provider", () => {
@@ -552,7 +551,7 @@ test("a failed renewal does not keep later requests from trying again", async ()
 });
 
 // A recording holds on to one getAccessToken for its whole length -- useStartStopRecording
-// builds the ServerStorageDestination once and every chunk upload calls through it, for
+// builds the RecordingDestination once and every chunk upload calls through it, for
 // ninety minutes. Silent renewal replaces the user several times over that span, so the
 // function has to read the *current* user rather than the one that was in scope when the
 // recording started, or uploads start failing with 401 partway through the lecture.

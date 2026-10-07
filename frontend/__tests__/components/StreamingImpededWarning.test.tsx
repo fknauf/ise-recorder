@@ -57,7 +57,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanup();
   localStorage.clear();
 });
 

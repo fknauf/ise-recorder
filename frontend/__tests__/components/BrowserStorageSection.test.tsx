@@ -12,7 +12,7 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { AppStoreState } from "@/lib/store/store";
 import { useEffect } from "react";
-import { ExpandedSection, SECTION_ID } from "./ExpandedSection";
+import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
 
 vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useBrowserStorage");
@@ -101,7 +101,6 @@ beforeEach(() => {
   mockServerEnv.mockReturnValue({});
   mockSession.mockReturnValue({ authRequired: false, isAuthenticated: false });
   reuploadProgress = new Map();
-  reupload.mockReset();
   vi.mocked(useReupload).mockImplementation(recordingName => ({
     isUploading: reuploadProgress.has(recordingName),
     progress: reuploadProgress.get(recordingName),
@@ -109,37 +108,40 @@ beforeEach(() => {
   }));
 });
 
-test("SavedRecordingsSection displays recordings and reacts to clicks", async () => {
-  const MiB = 2 ** 20;
+const MiB = 2 ** 20;
 
-  const recordings: RecordingFileList[] = [
-    {
-      name: "FOO_2025-12-11T213822.748Z",
-      files: [
-        {
-          name: "stream.webm",
-          size: 1.23 * MiB
-        }
-      ]
-    },
-    {
-      name: "BAR_2025-12-11T214230.418Z",
-      files: [
-        {
-          name: "stream.webm",
-          size: 2.34 * MiB
-        },
-        {
-          name: "overlay.webm",
-          size: 3.45 * MiB
-        },
-        {
-          name: "audio-0.webm",
-          size: undefined
-        }
-      ]
-    }
-  ];
+/** Two recordings in the browser's storage, one of them with every kind of track. */
+const RECORDINGS: RecordingFileList[] = [
+  {
+    name: "FOO_2025-12-11T213822.748Z",
+    files: [
+      {
+        name: "stream.webm",
+        size: 1.23 * MiB
+      }
+    ]
+  },
+  {
+    name: "BAR_2025-12-11T214230.418Z",
+    files: [
+      {
+        name: "stream.webm",
+        size: 2.34 * MiB
+      },
+      {
+        name: "overlay.webm",
+        size: 3.45 * MiB
+      },
+      {
+        name: "audio-0.webm",
+        size: undefined
+      }
+    ]
+  }
+];
+
+test("BrowserStorageSection displays recordings and reacts to clicks", async () => {
+  const recordings = RECORDINGS;
 
   const onRemove = vi.fn();
   const onDownload = vi.mocked(downloadFile);
@@ -194,7 +196,7 @@ test("SavedRecordingsSection displays recordings and reacts to clicks", async ()
   expect(onRemove).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z");
 });
 
-test("SavedRecordingsSection is empty when there are no recordings", async () => {
+test("BrowserStorageSection is empty when there are no recordings", async () => {
   vi.mocked(useActiveRecording).mockReturnValue({
     state: "idle"
   });
@@ -213,37 +215,8 @@ test("SavedRecordingsSection is empty when there are no recordings", async () =>
   expect(srCards.length).toBe(0);
 });
 
-test("SavedRecordingsSection disables buttons for the active recording", async () => {
-  const MiB = 2 ** 20;
-
-  const recordings: RecordingFileList[] = [
-    {
-      name: "FOO_2025-12-11T213822.748Z",
-      files: [
-        {
-          name: "stream.webm",
-          size: 1.23 * MiB
-        }
-      ]
-    },
-    {
-      name: "BAR_2025-12-11T214230.418Z",
-      files: [
-        {
-          name: "stream.webm",
-          size: 2.34 * MiB
-        },
-        {
-          name: "overlay.webm",
-          size: 3.45 * MiB
-        },
-        {
-          name: "audio-0.webm",
-          size: undefined
-        }
-      ]
-    }
-  ];
+test("BrowserStorageSection disables buttons for the active recording", async () => {
+  const recordings = RECORDINGS;
 
   const onRemove = vi.fn();
   const onDownload = vi.mocked(downloadFile);

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { canvasVideoTrack } from "../helpers/media";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
@@ -17,11 +18,7 @@ import { schedulePostprocessing, uploadChunk } from "@/lib/utils/serverStorage";
 
 vi.mock("@/lib/utils/serverStorage");
 vi.mock("@/lib/utils/browserStorage");
-vi.mock("@/lib/utils/notifications", () => ({
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
 const destination: RecordingDestination = {
   apiUrl: undefined,
@@ -33,13 +30,6 @@ const destination: RecordingDestination = {
 const backendDestination: RecordingDestination = {
   ...destination,
   apiUrl: "https://backend.example.edu"
-};
-
-const videoTrack = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 48;
-  return canvas.captureStream().getVideoTracks()[0];
 };
 
 // Output streams by file name, so a test can check that every one of them was closed.
@@ -107,9 +97,7 @@ async function recordBriefly(
 beforeEach(() => {
   // stand-ins for a backend that accepts everything
   vi.mocked(uploadChunk).mockResolvedValue();
-  vi.mocked(schedulePostprocessing).mockReset();
   vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => ({ state: "rendering", name: recording }));
-  vi.mocked(showError).mockClear();
 
   streams = new Map();
   vi.mocked(openRecordingFileStream).mockImplementation(async (_recording, filename) => {
@@ -131,8 +119,8 @@ afterEach(() => {
 // rather than sit out the default.
 
 test("a track that cannot start does not hold up the end of the recording", async () => {
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
   refuseToStart(camera);
 
   const outcome = await recordBriefly({
@@ -146,8 +134,8 @@ test("a track that cannot start does not hold up the end of the recording", asyn
 }, 5000);
 
 test("the tracks that did start are still recorded", async () => {
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
   refuseToStart(camera);
 
   const outcome = await recordBriefly({
@@ -160,8 +148,8 @@ test("the tracks that did start are still recorded", async () => {
 
 test("the user is told which track could not be recorded", async () => {
   // otherwise the lecture goes on without the speaker video and nobody notices until later
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
   refuseToStart(camera);
 
   await recordBriefly({
@@ -174,8 +162,8 @@ test("the user is told which track could not be recorded", async () => {
 }, 5000);
 
 test("the file opened for a track that cannot start is closed with the others", async () => {
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
   refuseToStart(camera);
 
   await recordBriefly({
@@ -190,8 +178,8 @@ test("the file opened for a track that cannot start is closed with the others", 
 }, 5000);
 
 test("a recording in which no track starts still comes to an end", async () => {
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
   refuseToStart(display, camera);
 
   const outcome = await recordBriefly({

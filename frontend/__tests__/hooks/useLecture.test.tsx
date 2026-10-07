@@ -1,64 +1,27 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
-import { AppStoreProvider } from "@/lib/hooks/useAppStore";
-import { ReactNode, useEffect } from "react";
+import { appStoreWrapper } from "../helpers/appStore";
+import { act, renderHook } from "@testing-library/react";
 import { useLecture } from "@/lib/hooks/useLecture";
 
-const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
-  <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-    {children}
-  </AppStoreProvider>;
+// The hook only selects from the store; that the store starts empty and persists the lecture
+// data is the store's business, in store/store.test.tsx.
+
+const wrapper = appStoreWrapper();
 
 beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
 
-test("useLecture starts with empty data", () => {
-  const renderResult = renderHook(() => useLecture(), { wrapper });
+test("useLecture reads and sets the lecture data in the store", () => {
+  const { result } = renderHook(() => useLecture(), { wrapper });
 
-  expect(renderResult.result.current.lectureTitle).toBe("");
-  expect(renderResult.result.current.lecturerEmail).toBe("");
-});
+  expect(result.current.lectureTitle).toBe("");
+  expect(result.current.lecturerEmail).toBe("");
 
-
-test("useLecture handles lecture data", () => {
-  const renderResult = renderHook(() => {
-    const {
-      lectureTitle,
-      lecturerEmail,
-      setLectureTitle,
-      setLecturerEmail
-    } = useLecture();
-
-    useEffect(() => {
-      setLectureTitle("GVS");
-      setLecturerEmail("someoneelse@vss.uni-hannover.de");
-    }, [ setLectureTitle, setLecturerEmail ]);
-
-    return { lectureTitle, lecturerEmail };
-  }, { wrapper });
-
-  waitFor(() => {
-    expect(renderResult.result.current.lectureTitle).toBe("GVS");
-    expect(renderResult.result.current.lecturerEmail).toBe("someoneelse@vss.uni-hannover.de");
+  act(() => {
+    result.current.setLectureTitle("GVS");
+    result.current.setLecturerEmail("someoneelse@vss.uni-hannover.de");
   });
-});
 
-test("useLecture persists data", () => {
-  renderHook(() => {
-    const {
-      setLectureTitle,
-      setLecturerEmail
-    } = useLecture();
-
-    useEffect(() => {
-      setLectureTitle("GVS");
-      setLecturerEmail("someoneelse@vss.uni-hannover.de");
-    }, [ setLectureTitle, setLecturerEmail ]);
-  }, { wrapper });
-
-  // Render in new instance of AppStoreProvider
-  const renderResult = renderHook(() => useLecture(), { wrapper });
-
-  expect(renderResult.result.current.lectureTitle).toBe("GVS");
-  expect(renderResult.result.current.lecturerEmail).toBe("someoneelse@vss.uni-hannover.de");
+  expect(result.current.lectureTitle).toBe("GVS");
+  expect(result.current.lecturerEmail).toBe("someoneelse@vss.uni-hannover.de");
 });

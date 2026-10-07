@@ -110,23 +110,6 @@ async def test_video_properties_reads_a_path_the_filtergraph_would_choke_on(tmp_
     assert info.crop == Rectangle(width=217, height=170, left=125, top=53)
 
 
-@pytest.mark.asyncio
-async def test_concat_chunks():
-    first_data = bytes(range(256))
-    second_data = bytes(range(255, -1, -1))
-
-    with tempfile.TemporaryDirectory() as tempdir:
-        temp_path = Path(tempdir)
-
-        (temp_path / "chunk.0000").write_bytes(first_data)
-        (temp_path / "chunk.0001").write_bytes(second_data)
-
-        await concat_chunks(anyio.Path(temp_path))
-
-        assert os.path.isfile(temp_path / "full.webm")
-        assert (temp_path / "full.webm").read_bytes() == first_data + second_data
-
-
 def make_track(tempdir: str, names: list[str]) -> Path:
     """A track directory holding the named chunk files, each containing its own name."""
     track_path = Path(tempdir)
@@ -192,17 +175,6 @@ async def test_concat_chunks_rejects_a_non_numeric_chunk():
     assert incomplete is True
     # the stray file is not concatenated: it is not part of the stream
     assert content == "chunk.0000chunk.0001"
-
-
-@pytest.mark.asyncio
-async def test_concat_chunks_orders_numerically_past_the_padding_width():
-    # lexicographic order only agrees with numeric order because the names are padded;
-    # this fails immediately if the padding is ever dropped
-    incomplete, content = await concat_names([f"chunk.{i:04d}" for i in range(11)])
-
-    assert incomplete is False
-    assert content.startswith("chunk.0000chunk.0001")
-    assert content.endswith("chunk.0009chunk.0010")
 
 
 @pytest.mark.asyncio

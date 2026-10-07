@@ -1,14 +1,12 @@
 import { expect, test, vi } from "vitest";
+import { appStoreWrapper } from "../helpers/appStore";
 import { renderHook, waitFor } from "@testing-library/react";
-import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
+import { useAppStore } from "@/lib/hooks/useAppStore";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
-import { ReactNode, useEffect } from "react";
+import { useEffect } from "react";
 import { gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
 
-const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
-  <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000" }}>
-    {children}
-  </AppStoreProvider>;
+const wrapper = appStoreWrapper();
 
 const mockRecordings: RecordingFileList[] = [
   {

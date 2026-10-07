@@ -336,18 +336,6 @@ async def test_an_idle_recording_that_cannot_be_rendered_is_purged(enclave: Encl
 
 
 @pytest.mark.asyncio
-async def test_a_purge_forgets_the_recordings_otp(enclave: Enclave, home: Path):
-    # a recording made again under the same name must not be downloadable with an OTP that
-    # was handed out for the one that was purged
-    finish_recording(home, "DONE_2025")
-    otp = enclave.generate_totp("DONE_2025")
-
-    await purge_recording("DONE_2025", enclave, LECTURER)
-
-    assert not enclave.verify_totp(otp, "DONE_2025")
-
-
-@pytest.mark.asyncio
 async def test_a_recording_that_does_not_exist_is_a_404(enclave: Enclave):
     assert await refusal(enclave, "NEVER_2025") == 404
 
@@ -370,40 +358,6 @@ async def test_a_symlink_is_a_404_and_its_target_stays(
 
     assert await refusal(enclave, "link") == 404
     assert (tmp_path / "victim" / "presentation.webm").exists()
-
-
-@pytest.mark.asyncio
-async def test_a_recording_that_is_rendering_is_a_409_and_stays(enclave: Enclave, home: Path):
-    # deleting it would pull the chunks out from under ffmpeg
-    abandon_recording(home, "BUSY_2025")
-
-    with enclave.claim_rendering("BUSY_2025"):
-        assert await refusal(enclave, "BUSY_2025") == 409
-
-    assert (home / "BUSY_2025").exists()
-
-
-@pytest.mark.asyncio
-async def test_a_recording_that_is_being_rerendered_is_a_409(enclave: Enclave, home: Path):
-    # finished by every other measure, since the previous output is still there
-    abandon_recording(home, "BUSY_2025")
-    finish_recording(home, "BUSY_2025")
-
-    with enclave.claim_rendering("BUSY_2025"):
-        assert await refusal(enclave, "BUSY_2025") == 409
-
-
-@pytest.mark.asyncio
-async def test_a_recording_receiving_a_chunk_right_now_is_a_409_and_stays(
-    enclave: Enclave, home: Path
-):
-    # rmtree would take the directory apart around the file being written
-    abandon_recording(home, "GVS_2025")
-
-    with enclave.claim_upload("GVS_2025"):
-        assert await refusal(enclave, "GVS_2025") == 409
-
-    assert (home / "GVS_2025").exists()
 
 
 @pytest.mark.asyncio

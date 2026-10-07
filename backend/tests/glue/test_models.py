@@ -8,7 +8,7 @@
 The recording-name rule, which is the half of a contract whose other half is in TypeScript.
 
 The frontend derives a directory name from a lecture title and this end has to accept it. A
-name that gets rejected here is not a recoverable error: a 422 on /api/chunks is permanent,
+name that gets rejected here is not a recoverable error: a 422 on a chunk upload is permanent,
 so there is no retry and no postprocessing, and the recording survives in the browser's OPFS
 and nowhere else. That has happened, which is why the corpus below is deliberately the same
 one as in frontend/__tests__/util/recordingName.test.ts -- the two files pin the same titles
@@ -47,6 +47,8 @@ import pytest
 
 from ise_record.glue.models import _normalize_for_filesystem, SafeRecording
 
+from ..harness import NAME_MAX_BYTES
+
 
 class Name(BaseModel):
     recording: SafeRecording
@@ -67,12 +69,6 @@ def accepted(value: str) -> bool:
 
 # the timestamp the frontend appends, with the colons already stripped
 STAMP = "2025-12-21T123456.789Z"
-
-# NAME_MAX on ext4, and what pathvalidate caps a filename at on every platform it knows.
-# server.py no longer names this number -- it relies on pathvalidate's default -- so the
-# bound is pinned by test_the_effective_length_bound_is_the_one_the_filesystem_has below
-# rather than shared with the code.
-NAME_MAX_BYTES = 255
 
 
 # --- names the frontend actually produces ----------------------------------
@@ -270,7 +266,7 @@ def test_an_overlong_name_is_truncated_to_the_byte_budget(raw: str, expected_byt
 
 
 def test_the_effective_length_bound_is_the_one_the_filesystem_has():
-    # server.py passes no max_len, so the budget is pathvalidate's platform default rather
+    # SafeRecording passes no max_len, so the budget is pathvalidate's platform default rather
     # than a number this project states. That is fine while the two agree; this is what
     # notices if they stop
     assert len(sanitize_filename("a" * 500, platform="universal")) == NAME_MAX_BYTES

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { canvasVideoTrack, makeDevice } from "../helpers/media";
 import { createAppStore } from "@/lib/store/store";
-import { render, screen } from "@testing-library/react";
 import { gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
 
 vi.mock("@/lib/utils/browserStorage");
@@ -26,11 +26,6 @@ test("store persists lecture information", () => {
 test("store splits media devices into video and audio", () => {
   const store = createAppStore({});
 
-  const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-    deviceId, groupId, kind, label,
-    toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-  });
-
   const devices: MediaDeviceInfo[] = [
     makeDevice("c1", "g1", "videoinput", "Cam 1"),
     makeDevice("c2", "g2", "videoinput", "Cam 2"),
@@ -51,11 +46,6 @@ test("store filters out duplicate devices", () => {
   // with the same group and device ids but different label
   const store = createAppStore({});
 
-  const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-    deviceId, groupId, kind, label,
-    toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
-  });
-
   const devices: MediaDeviceInfo[] = [
     makeDevice("dev1", "g1", "videoinput", "Cam Integrated C"),
     makeDevice("dev1", "g1", "videoinput", "Cam Integrated I"),
@@ -69,20 +59,10 @@ test("store filters out duplicate devices", () => {
   expect(store.getState().audioDevices).toStrictEqual(devices.slice(2, 3));
 });
 
-test("addDisplayTracks rigs track to remove itself from storage when stopped", async () => {
+test("a display track leaves the store when it ends", async () => {
   const store = createAppStore({});
 
-  render(
-    <canvas
-      width={384}
-      height={216}
-      data-testid="track-src"
-    />
-  );
-
-  const trackSrc = await screen.findByTestId("track-src") as HTMLCanvasElement;
-  const stream = trackSrc.captureStream(30);
-  const tracks = stream.getVideoTracks();
+  const tracks = [ canvasVideoTrack(384, 216) ];
 
   store.getState().addDisplayTracks(tracks);
 
@@ -90,33 +70,22 @@ test("addDisplayTracks rigs track to remove itself from storage when stopped", a
   expect(store.getState().displayTracks[0]).toBe(tracks[0]);
   expect(store.getState().mainDisplay).toBe(tracks[0]);
   expect(store.getState().overlay).toBeUndefined();
-  expect(tracks[0].onended).toBeInstanceOf(Function);
 
   store.getState().selectOverlay(tracks[0]);
   expect(store.getState().overlay).toBe(tracks[0]);
 
-  store.getState().removeTrack(tracks[0]);
-  await new Promise(resolve => setTimeout(resolve));
+  // ended by the browser rather than by us: the user stopped sharing, or the window closed
+  tracks[0].dispatchEvent(new Event("ended"));
 
   expect(store.getState().displayTracks).toStrictEqual([]);
   expect(store.getState().mainDisplay).toBeUndefined();
   expect(store.getState().overlay).toBeUndefined();
 });
 
-test("addVideoTracks rigs track to remove itself from storage when stopped", async () => {
+test("a video track leaves the store when it ends", async () => {
   const store = createAppStore({});
 
-  render(
-    <canvas
-      width={384}
-      height={216}
-      data-testid="track-src"
-    />
-  );
-
-  const trackSrc = await screen.findByTestId("track-src") as HTMLCanvasElement;
-  const stream = trackSrc.captureStream(30);
-  const tracks = stream.getVideoTracks();
+  const tracks = [ canvasVideoTrack(384, 216) ];
 
   store.getState().addVideoTracks(tracks);
 
@@ -124,19 +93,19 @@ test("addVideoTracks rigs track to remove itself from storage when stopped", asy
   expect(store.getState().videoTracks[0]).toBe(tracks[0]);
   expect(store.getState().mainDisplay).toBeUndefined();
   expect(store.getState().overlay).toBe(tracks[0]);
-  expect(tracks[0].onended).toBeInstanceOf(Function);
 
   store.getState().selectMainDisplay(tracks[0]);
   expect(store.getState().mainDisplay).toBe(tracks[0]);
-  store.getState().removeTrack(tracks[0]);
-  await new Promise(resolve => setTimeout(resolve));
+
+  // ended by the browser rather than by us: the camera was unplugged, or permission revoked
+  tracks[0].dispatchEvent(new Event("ended"));
 
   expect(store.getState().videoTracks).toStrictEqual([]);
   expect(store.getState().mainDisplay).toBeUndefined();
   expect(store.getState().overlay).toBeUndefined();
 });
 
-test("addAudioTracks rigs track to remove itself from storage when stopped", async () => {
+test("an audio track leaves the store when it ends", async () => {
   const store = createAppStore({});
 
   const audioCtx = new AudioContext();
@@ -151,28 +120,31 @@ test("addAudioTracks rigs track to remove itself from storage when stopped", asy
 
   expect(store.getState().audioTracks.length).toBe(1);
   expect(store.getState().audioTracks[0]).toBe(tracks[0]);
-  expect(tracks[0].onended).toBeInstanceOf(Function);
 
-  store.getState().removeTrack(tracks[0]);
-  await new Promise(resolve => setTimeout(resolve));
+  // ended by the browser rather than by us: the microphone was unplugged
+  tracks[0].dispatchEvent(new Event("ended"));
 
   expect(store.getState().audioTracks).toStrictEqual([]);
+});
+
+test("removeTrack stops the track and takes it out of the store", async () => {
+  // a track we stop ourselves fires no ended event, so removeTrack has to deliver one
+  const store = createAppStore({});
+
+  const tracks = [ canvasVideoTrack(384, 216) ];
+
+  store.getState().addVideoTracks(tracks);
+  store.getState().removeTrack(tracks[0]);
+
+  expect(tracks[0].readyState).toBe("ended");
+  expect(store.getState().videoTracks).toStrictEqual([]);
+  expect(store.getState().overlay).toBeUndefined();
 });
 
 test("selectMainDisplay accepts values and reducers", async () => {
   const store = createAppStore({});
 
-  render(
-    <canvas
-      width={384}
-      height={216}
-      data-testid="track-src"
-    />
-  );
-
-  const trackSrc = await screen.findByTestId("track-src") as HTMLCanvasElement;
-  const stream = trackSrc.captureStream(30);
-  const tracks = stream.getVideoTracks();
+  const tracks = [ canvasVideoTrack(384, 216) ];
 
   store.getState().selectMainDisplay(tracks[0]);
   expect(store.getState().mainDisplay).toBe(tracks[0]);
@@ -183,17 +155,7 @@ test("selectMainDisplay accepts values and reducers", async () => {
 test("selectOverlay accepts values and reducers", async () => {
   const store = createAppStore({});
 
-  render(
-    <canvas
-      width={384}
-      height={216}
-      data-testid="track-src"
-    />
-  );
-
-  const trackSrc = await screen.findByTestId("track-src") as HTMLCanvasElement;
-  const stream = trackSrc.captureStream(30);
-  const tracks = stream.getVideoTracks();
+  const tracks = [ canvasVideoTrack(384, 216) ];
 
   store.getState().selectOverlay(tracks[0]);
   expect(store.getState().overlay).toBe(tracks[0]);

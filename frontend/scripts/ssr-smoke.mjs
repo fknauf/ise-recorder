@@ -36,7 +36,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 const BASE_PORT = Number(process.env.SMOKE_PORT ?? 3100);
 const USE_DEV = process.argv.includes("--dev");
 
-// Both branches of AccessTokenSourceProvider need covering: the anonymous one renders
+// Both branches of SessionProvider need covering: the anonymous one renders
 // no AuthProvider at all, which is its own class of SSR failure.
 const DEPLOYMENTS = [
   {

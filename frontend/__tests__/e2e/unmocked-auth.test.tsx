@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { expect, test } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { defaultTheme, Provider } from "@adobe/react-spectrum";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { SessionProvider } from "@/lib/components/SessionProvider";
@@ -18,8 +18,6 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
  * No OpenID provider is contacted: with authentication turned off the anonymous branch
  * is taken and no UserManager is ever built.
  */
-
-afterEach(cleanup);
 
 test("an unauthenticated deployment renders with the real react-oidc-context", async () => {
   const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000", authBackend: "disabled" };

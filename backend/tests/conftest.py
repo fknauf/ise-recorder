@@ -45,7 +45,7 @@ from ise_record.server import create_app
 
 del os.environ["ISE_RECORD_AUTH"]
 
-from ise_record.settings import get_settings, OidcSettings, Settings
+from ise_record.settings import AuthBackend, get_settings, OidcSettings, Settings
 
 from .harness import AUDIENCE, Provider
 
@@ -61,11 +61,17 @@ def isolated_settings():
     get_settings.cache_clear()
 
 
-# --- a backend with authentication turned on -------------------------------
+# --- the two kinds of deployment -------------------------------------------
 
-# test_server.py drives an unauthenticated deployment and calls its own fixtures `settings`
-# and `client`; these are named apart from those so that a file holding both kinds of test
-# says in each signature which backend it is talking to.
+# Plain `settings` (and test_server.py's `client`) is a deployment without authentication; the
+# authenticated one is named apart, so that a file holding both kinds of test says in each
+# signature which backend it is talking to.
+
+
+@pytest.fixture
+def settings(tmp_path: Path) -> Settings:
+    """A deployment without authentication, with a destination directory of this test's own."""
+    return Settings(destdir=tmp_path, auth=AuthBackend.DISABLED)
 
 
 @pytest.fixture

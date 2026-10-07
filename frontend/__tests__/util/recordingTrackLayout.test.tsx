@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { wipeOpfs } from "../helpers/opfs";
+import { canvasVideoTrack } from "../helpers/media";
 import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 
@@ -20,13 +22,6 @@ const destination: RecordingDestination = {
 };
 
 let audioContext: AudioContext;
-
-const videoTrack = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 48;
-  return canvas.captureStream().getVideoTracks()[0];
-};
 
 const audioTrack = () => audioContext.createMediaStreamDestination().stream.getAudioTracks()[0];
 
@@ -85,15 +80,12 @@ beforeEach(() => {
 afterEach(async () => {
   await audioContext.close();
 
-  const rootDir = await navigator.storage.getDirectory();
-  for await (const key of rootDir.keys()) {
-    await rootDir.removeEntry(key, { recursive: true });
-  }
+  await wipeOpfs();
 });
 
 test("the standard case pairs the main display with the first audio track", async () => {
-  const display = videoTrack();
-  const camera = videoTrack();
+  const display = canvasVideoTrack();
+  const camera = canvasVideoTrack();
 
   // slides + speaker audio become one file, because that is the most useful partial
   // recording if anything else is lost
@@ -108,7 +100,7 @@ test("the standard case pairs the main display with the first audio track", asyn
 });
 
 test("additional audio tracks get their own files", async () => {
-  const display = videoTrack();
+  const display = canvasVideoTrack();
 
   // browsers cannot record several audio tracks into one file, so only the first is
   // folded into the stream
@@ -128,8 +120,8 @@ test("with no video at all every audio track gets its own file", async () => {
 });
 
 test("an unselected main display falls back to the first captured display", async () => {
-  const first = videoTrack();
-  const second = videoTrack();
+  const first = canvasVideoTrack();
+  const second = canvasVideoTrack();
 
   expect(await filesFor({
     ...emptyBundle,
@@ -140,7 +132,7 @@ test("an unselected main display falls back to the first captured display", asyn
 });
 
 test("with no display at all the first camera becomes the main display", async () => {
-  const camera = videoTrack();
+  const camera = canvasVideoTrack();
 
   expect(await filesFor({
     ...emptyBundle,
@@ -154,7 +146,7 @@ test("a lone overlay stands in as the main display rather than leave the lecture
   // Adding a first camera makes it the overlay, so a lecture recorded from nothing but a
   // camera has its only video track marked as overlay. Recorded as such, there would be no
   // "stream" for the backend to render and the recording would never be postprocessed.
-  const camera = videoTrack();
+  const camera = canvasVideoTrack();
   const microphone = audioTrack();
 
   const recorded = await recordersFor({
@@ -176,7 +168,7 @@ test("an overlay that is not among the captured tracks is not promoted either", 
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
-    const stale = videoTrack();
+    const stale = canvasVideoTrack();
 
     const recorded = await recordersFor({
       ...emptyBundle,
@@ -194,8 +186,8 @@ test("an overlay that is not among the captured tracks is not promoted either", 
 });
 
 test("the overlay is not the fallback main display while another camera is there", async () => {
-  const overlay = videoTrack();
-  const other = videoTrack();
+  const overlay = canvasVideoTrack();
+  const other = canvasVideoTrack();
 
   const recorded = await recordersFor({
     ...emptyBundle,
@@ -212,7 +204,7 @@ test("the overlay is not the fallback main display while another camera is there
 
 test("a track marked as both main display and overlay is recorded as both", async () => {
   // the user asked for it explicitly, so the postprocessing renders it on top of itself
-  const camera = videoTrack();
+  const camera = canvasVideoTrack();
   const microphone = audioTrack();
 
   const recorded = await recordersFor({
@@ -229,10 +221,10 @@ test("a track marked as both main display and overlay is recorded as both", asyn
 });
 
 test("video and display tracks beyond main and overlay get numbered files", async () => {
-  const display = videoTrack();
-  const spareDisplay = videoTrack();
-  const camera = videoTrack();
-  const spareCamera = videoTrack();
+  const display = canvasVideoTrack();
+  const spareDisplay = canvasVideoTrack();
+  const camera = canvasVideoTrack();
+  const spareCamera = canvasVideoTrack();
 
   expect(await filesFor({
     ...emptyBundle,
@@ -260,7 +252,7 @@ test("only the first audio track is folded into the main stream", async () => {
   window.MediaRecorder = SpyingMediaRecorder as unknown as typeof MediaRecorder;
 
   try {
-    const display = videoTrack();
+    const display = canvasVideoTrack();
     const firstAudio = audioTrack();
     const secondAudio = audioTrack();
 

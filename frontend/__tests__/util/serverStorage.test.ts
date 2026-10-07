@@ -4,13 +4,7 @@ import { ApiDestination, ApiError, defaultRetryPolicy, RetryPolicy, withRetries 
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import * as z from "zod";
 
-vi.mock("@/lib/utils/notifications", () => ({
-  // An explicit factory, not automocking: vi.mock() alone yields spies that still call
-  // through, so the real showError logs and queues Spectrum toasts during the suite.
-  showError: vi.fn(),
-  showSuccess: vi.fn(),
-  showMessage: vi.fn()
-}));
+vi.mock("@/lib/utils/notifications");
 
 const accessToken = async () => "test-token";
 const noAccessToken = async () => undefined;
@@ -82,9 +76,6 @@ const destination: ApiDestination = {
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.mocked(showError).mockClear();
-  vi.mocked(showSuccess).mockClear();
-  vi.mocked(showMessage).mockClear();
 });
 
 // --- streaming a chunk -------------------------------------------------------
@@ -538,9 +529,16 @@ test("a listing with nothing in it is an empty array", async () => {
 });
 
 test.each([
+  // what a backend not updated alongside the frontend answers
+  [ "in the shape of the old /api/completed", { user: "u", recordings: [ { name: "x", size: 1024, totp: "1" } ] } ],
   [ "in the shape from before the API was reshaped", { user: "8f14e45fceea167a", completed: [], rendering: [], unprocessed: [] } ],
+  // the URL, TOTP included, is the whole of what the download link is built from
   [ "with a completed recording that cannot be downloaded", [ { state: "completed", name: "PSU_2026", size: 2048 } ] ],
-  [ "with a recording in a state the frontend does not know", [ { state: "archived", name: "PSU_2026" } ] ]
+  // the state is what picks the card, and there is none to pick for this one
+  [ "with a recording in a state the frontend does not know", [ { state: "archived", name: "PSU_2026" } ] ],
+  // the name is what the Rerender button posts back as the job's recording
+  [ "with an unprocessed recording without a name", [ { state: "unprocessed" } ] ],
+  [ "with a rendering recording without a name", [ { state: "rendering" } ] ]
 ])("a listing %s is an invalid response", async (_, listing) => {
   // the section tells the lecturer the backend speaks a different version, rather than
   // showing a listing it cannot make sense of

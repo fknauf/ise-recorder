@@ -10,21 +10,18 @@ from fastapi import Request
 import pytest
 
 from ise_record.server import create_app
-from ise_record.settings import AuthBackend, OidcSettings, Settings
+from ise_record.settings import OidcSettings, Settings
 
 
 @pytest.fixture
-def settings(tmp_path: Path) -> Settings:
-    # the dependables only ask whether authentication is on; nothing here talks to a provider
+def auth_settings(tmp_path: Path) -> Settings:
+    """
+    An authenticated deployment, without the stand-in provider the root conftest's has: the
+    dependables only ask whether authentication is on, and nothing here talks to a provider.
+    """
     return Settings(
         destdir=tmp_path, oidc=OidcSettings(provider_url="https://idp.example.edu", audience="ise")
     )
-
-
-@pytest.fixture
-def open_settings(tmp_path: Path) -> Settings:
-    """A deployment with authentication turned off, where every caller shares destdir."""
-    return Settings(destdir=tmp_path, auth=AuthBackend.DISABLED)
 
 
 def request_for(app_settings: Settings) -> Request:
@@ -33,5 +30,5 @@ def request_for(app_settings: Settings) -> Request:
 
 
 @pytest.fixture
-def request_(settings: Settings) -> Request:
-    return request_for(settings)
+def request_(auth_settings: Settings) -> Request:
+    return request_for(auth_settings)
