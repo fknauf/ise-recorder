@@ -95,7 +95,7 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               isQuiet
             >
               <Download/>
-              <Text>Download {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
+              <Text>{name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
             </ActionButton>
           )
         }
@@ -114,6 +114,7 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               <Text>Uploading...</Text>
             </Flex>
           : <ActionGroup
+              minWidth="size-3000"
               isJustified={true}
               disabledKeys={[
                 ...uploadDisabled ? [ "upload" ] : [],
