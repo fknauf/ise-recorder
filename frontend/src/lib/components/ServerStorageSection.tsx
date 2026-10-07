@@ -69,14 +69,14 @@ function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
           variant="secondary"
           onPress={dismiss}
           autoFocus
-          data-testid="pd-btn-cancel"
+          data-testid="ss-btn-purgecancel"
         >
           Cancel
         </Button>
         <Button
           variant="negative"
           onPress={initiatePurge}
-          data-testid="pd-btn-purge"
+          data-testid="ss-btn-purgeconfirm"
         >
           Purge
         </Button>
@@ -129,12 +129,12 @@ function ActionableRecordingCard(
           }
         }}
       >
-        <Item key="rerender" data-testid="prec-btn-rerender">
+        <Item key="rerender" data-testid="ss-btn-rerender">
           <Refresh/>
           <Text>Rerender</Text>
         </Item>
 
-        <Item key="purge" data-testid="prec-btn-purge">
+        <Item key="purge" data-testid="ss-btn-purge">
           <Delete/>
           <Text>Purge</Text>
         </Item>
@@ -161,7 +161,7 @@ function ProcessedRecordingCard(
     <ActionableRecordingCard
       recordingName={recording.name}
       onPurge={onPurge}
-      testid="prec-card"
+      testid="ss-card-completed"
     >
       <Link
         variant="primary"
@@ -183,7 +183,7 @@ function ProcessedRecordingCard(
 const RenderingRecordingCard = (
   { recording }: Readonly<{ recording: UnfinishedRecording }>
 ) =>
-  <RecordingCard title={recording.name} testid="rendering-card">
+  <RecordingCard title={recording.name} testid="ss-card-rendering">
     <Flex
       direction="row"
       gap="size-100"
@@ -203,7 +203,7 @@ function UnprocessedRecordingCard(
     <ActionableRecordingCard
       recordingName={recording.name}
       onPurge={onPurge}
-      testid="unprocessed-card"
+      testid="ss-card-unprocessed"
     >
       <Text marginTop="size-50">Postprocessing failed.</Text>
     </ActionableRecordingCard>

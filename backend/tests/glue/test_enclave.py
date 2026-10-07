@@ -119,7 +119,7 @@ async def test_two_first_requests_at_once_end_up_in_one_enclave(
     # A lecturer's first requests arrive together -- the listing and the first chunks. If
     # each made an enclave of its own and the later one won, a job registered in the other
     # would be invisible to every later upload, listing and purge.
-    async def preparation_that_yields(user_info: UserInfo, base_dir: Path) -> Path:
+    async def preparation_that_yields(user_info: UserInfo, base_dir: anyio.Path) -> anyio.Path:
         await asyncio.sleep(0)
         return await prepare_user_home_dir(user_info, base_dir)
 

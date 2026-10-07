@@ -400,3 +400,110 @@ test("a refused permission prompt adds nothing and says so", async () => {
   expect(showError).toHaveBeenCalledWith("Could not obtain device permissions", expect.anything());
   expect(result.current.videoTracks).toStrictEqual([]);
 });
+
+// --- what a refresh asks the browser for ------------------------------------
+
+test("a refresh does not ask for a device whose permission was denied", async () => {
+  // asking again would only fail, and take the microphone down with it
+  navigator.permissions.query = vi.fn().mockImplementation(
+    async (desc: PermissionDescriptor): Promise<PermissionStatus> => ({
+      state: desc.name === "camera" ? "denied" : "prompt",
+      name: desc.name,
+      onchange: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    })
+  );
+  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(aStream());
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue(mockAudioDevices);
+
+  const { result } = renderHook(() => useMediaDevices(), { wrapper });
+  await refreshed(result.current.refreshMediaDevices);
+
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({ video: false, audio: true });
+});
+
+// Firefox reports "granted" for a permission the user granted only temporarily, and then asks
+// again anyway. So a first refresh with everything granted may still have put a prompt in front
+// of the user, in which case they picked devices there. The hook tells by how long the request
+// took: a prompt takes a person, an answer from the browser alone a few milliseconds.
+
+/** A getUserMedia that takes `millis` of the clock the hook measures with. */
+function getUserMediaTaking(millis: number) {
+  vi.useFakeTimers({ toFake: [ "Date" ] });
+  return vi.fn().mockImplementation(async () => {
+    vi.setSystemTime(Date.now() + millis);
+    return aStream();
+  });
+}
+
+test.each([
+  [ "Firefox, which may have asked anyway", "Mozilla/5.0 (X11; Linux x86_64; rv:149.0) Gecko/20100101 Firefox/149.0", "added-tracks" ],
+  [ "any other browser, which would have said so", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36", "just-refreshed" ]
+])("a slow first refresh with permissions granted is taken for a prompt only on %s", async (_label, userAgent, effect) => {
+  permissionsAre("granted");
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent);
+  navigator.mediaDevices.getUserMedia = getUserMediaTaking(2000);
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
+
+  const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
+
+  expect(await refreshed(result.current.refreshMediaDevices)).toBe(effect);
+  expect(result.current.videoTracks.length).toBe(effect === "added-tracks" ? 1 : 0);
+});
+
+test("a quick first refresh in Firefox is not taken for a prompt", async () => {
+  // the browser answered by itself, so nobody picked anything
+  permissionsAre("granted");
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64; rv:149.0) Gecko/20100101 Firefox/149.0");
+  navigator.mediaDevices.getUserMedia = getUserMediaTaking(20);
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValue([ ...mockVideoDevices, ...mockAudioDevices ]);
+
+  const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
+
+  expect(await refreshed(result.current.refreshMediaDevices)).toBe("just-refreshed");
+  expect(result.current.videoTracks).toStrictEqual([]);
+});
+
+test("a device list the browser will not give out is reported, and what was there stays", async () => {
+  permissionsAre("granted");
+  navigator.mediaDevices.getUserMedia = vi.fn().mockResolvedValue(aStream());
+  navigator.mediaDevices.enumerateDevices = vi.fn().mockResolvedValueOnce([ ...mockVideoDevices, ...mockAudioDevices ]);
+
+  const { result } = renderHook(() => useMediaDevices(), { wrapper });
+  await refreshed(result.current.refreshMediaDevices);
+
+  vi.mocked(navigator.mediaDevices.enumerateDevices).mockRejectedValue(new DOMException("gone", "InvalidStateError"));
+
+  expect(await refreshed(result.current.refreshMediaDevices)).toBe("just-refreshed");
+  expect(showError).toHaveBeenCalledOnce();
+  expect(result.current.videoDevices).toStrictEqual(mockVideoDevices);
+});
+
+// --- opening a source that the user or the browser turns down ---------------
+
+test("a screen picker the user cancels adds nothing and is reported", async () => {
+  navigator.mediaDevices.getDisplayMedia = vi.fn().mockRejectedValue(new DOMException("cancelled", "NotAllowedError"));
+
+  const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
+  await act(() => result.current.openDisplayStream());
+
+  expect(showError).toHaveBeenCalledOnce();
+  expect(result.current.displayTracks).toStrictEqual([]);
+  expect(result.current.mainDisplay).toBeUndefined();
+});
+
+test.each([
+  [ "camera", "openVideoStream", "videoTracks" ],
+  [ "microphone", "openAudioStream", "audioTracks" ]
+] as const)("a %s that cannot be opened adds nothing and is reported", async (_label, open, tracks) => {
+  // unplugged since the menu was filled, or held by another program
+  navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new DOMException("busy", "NotReadableError"));
+
+  const { result } = renderHook(() => ({ ...useMediaDevices(), ...useMediaTracks() }), { wrapper });
+  await act(() => result.current[open]({ groupId: "g1", deviceId: "d1" }));
+
+  expect(showError).toHaveBeenCalledOnce();
+  expect(result.current[tracks]).toStrictEqual([]);
+});

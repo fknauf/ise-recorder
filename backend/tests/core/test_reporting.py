@@ -6,14 +6,19 @@
 # pylint: disable=no-member
 # pylint: disable=duplicate-code  # the send test restates every SMTP setting on purpose
 
-from pathlib import Path
 from unittest.mock import ANY
 
+import aiosmtplib
+from anyio import Path
 import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
-from ise_record.core.reporting import _generate_report, normalize_recipient, send_report
+from ise_record.core.reporting import (
+    _generate_report,  # pyright: ignore[reportPrivateUsage]
+    normalize_recipient,
+    send_report,
+)
 from ise_record.settings import SmtpSettings
 
 
@@ -282,3 +287,27 @@ async def test_send_report_forwards_the_transport_security_mode(
     # with no port configured aiosmtplib picks one from these two: 465 for implicit TLS, 587
     # for STARTTLS, 25 otherwise. That delegation is what makes the README's table true.
     assert mock_send.call_args.kwargs["port"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_relay_that_refuses_the_mail_does_not_fail_the_job(
+    mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+):
+    # the video is rendered either way; a relay that is down or refuses the sender costs the
+    # mail, and the log is where the admin finds out
+    mocker.patch(
+        "aiosmtplib.send",
+        autospec=True,
+        side_effect=aiosmtplib.errors.SMTPException("relay access denied"),
+    )
+    smtp_settings = SmtpSettings(server="mail.example.edu", sender="render@example.de")
+    result = Result(reason=ResultReason.SUCCESS, output_file=Path("foo/presentation.webm"))
+
+    await send_report(
+        smtp_settings=smtp_settings, recipient="lecturer@example.de", job_title="foo", result=result
+    )
+
+    assert any(
+        record.levelname == "WARNING" and "relay access denied" in record.getMessage()
+        for record in caplog.records
+    )

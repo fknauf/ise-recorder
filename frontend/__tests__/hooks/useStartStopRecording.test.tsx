@@ -497,3 +497,21 @@ test("a failing recording is reported to the user", async () => {
   // track control locked by state !== "idle", and no way back except a page reload.
   expect(result.current.activeRecording.state).toBe("idle");
 });
+
+test("a session check that blows up is reported and records nothing", async () => {
+  // expandSession is the first thing a start awaits; the OIDC library throwing there must
+  // not leave the UI wedged in "preparing" either
+  const failure = new Error("provider unreachable");
+  const session = makeTokenSource(true, "token");
+  vi.mocked(session.expandSession).mockRejectedValue(failure);
+
+  const { result } = await renderRecorder(session);
+
+  await act(async () => {
+    await result.current.startRecording();
+  });
+
+  expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.anything(), failure);
+  expect(recordLecture).not.toHaveBeenCalled();
+  expect(result.current.activeRecording.state).toBe("idle");
+});

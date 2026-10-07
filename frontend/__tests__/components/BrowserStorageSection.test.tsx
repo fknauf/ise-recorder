@@ -13,11 +13,13 @@ import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { AppStoreState } from "@/lib/store/store";
 import { useEffect } from "react";
 import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
+import { showError } from "@/lib/utils/notifications";
 
 vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useBrowserStorage");
 vi.mock("@/lib/hooks/useReupload");
 vi.mock("@/lib/utils/browserStorage");
+vi.mock("@/lib/utils/notifications");
 
 const mockServerEnv = vi.fn<() => ServerEnv>();
 vi.mock("@/lib/hooks/useServerEnv", () => ({
@@ -40,10 +42,10 @@ const reupload = vi.fn();
 // Controls are found by test id rather than by label, so rewording a button does not break
 // the tests that are about what it does. The download buttons are still checked for the
 // file name and size they show, since that is content rather than wording.
-const removeButton = (card: HTMLElement) => within(card).getByTestId("sr-btn-remove");
-const reuploadButton = (card: HTMLElement) => within(card).getByTestId("sr-btn-reupload");
-const uploadingIndicator = (card: HTMLElement) => within(card).getByTestId("sr-ind-uploading");
-const downloadButtons = (card: HTMLElement) => within(card).getAllByTestId("sr-btn-download");
+const removeButton = (card: HTMLElement) => within(card).getByTestId("bs-btn-delete");
+const reuploadButton = (card: HTMLElement) => within(card).getByTestId("bs-btn-reupload");
+const uploadingIndicator = (card: HTMLElement) => within(card).getByTestId("bs-ind-uploading");
+const downloadButtons = (card: HTMLElement) => within(card).getAllByTestId("bs-btn-download");
 
 let store: AppStoreState;
 
@@ -161,7 +163,7 @@ test("BrowserStorageSection displays recordings and reacts to clicks", async () 
 
   await renderSection();
 
-  const srCards = await screen.findAllByTestId("sr-card");
+  const srCards = await screen.findAllByTestId("bs-card-recording");
 
   expect(srCards.length).toBe(2);
 
@@ -210,7 +212,7 @@ test("BrowserStorageSection is empty when there are no recordings", async () => 
 
   await renderSection();
 
-  const srCards = await screen.queryAllByTestId("sr-card");
+  const srCards = await screen.queryAllByTestId("bs-card-recording");
 
   expect(srCards.length).toBe(0);
 });
@@ -238,7 +240,7 @@ test("BrowserStorageSection disables buttons for the active recording", async ()
 
   await renderSection();
 
-  const srCards = await screen.findAllByTestId("sr-card");
+  const srCards = await screen.findAllByTestId("bs-card-recording");
 
   expect(srCards.length).toBe(2);
 
@@ -301,7 +303,7 @@ async function renderWithBackend(
 
   await renderSection(scale);
 
-  return screen.getAllByTestId("sr-card");
+  return screen.getAllByTestId("bs-card-recording");
 }
 
 test("with a backend, every saved recording can be re-uploaded", async () => {
@@ -324,7 +326,7 @@ test("without a backend, nothing is offered for re-upload", async () => {
 
   await renderSection();
 
-  expect(screen.queryByTestId("sr-btn-reupload")).toBeNull();
+  expect(screen.queryByTestId("bs-btn-reupload")).toBeNull();
 });
 
 test("the recording that is being made cannot be re-uploaded", async () => {
@@ -367,7 +369,7 @@ test("a recording cannot be re-uploaded again while its re-upload is running", a
 
   const cards = await renderWithBackend();
 
-  expect(within(cards[1]).queryByTestId("sr-btn-reupload")).toBeNull();
+  expect(within(cards[1]).queryByTestId("bs-btn-reupload")).toBeNull();
   expect(uploadingIndicator(cards[1])).toBeVisible();
 
   // only that recording: the others can go up in the meantime
@@ -381,7 +383,7 @@ test("a running re-upload shows how far it has got", async () => {
   const cards = await renderWithBackend();
 
   expect(within(uploadingIndicator(cards[1])).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
-  expect(within(cards[0]).queryByTestId("sr-ind-uploading")).toBeNull();
+  expect(within(cards[0]).queryByTestId("bs-ind-uploading")).toBeNull();
 });
 
 test("a recording cannot be removed while its re-upload is running", async () => {
@@ -391,7 +393,7 @@ test("a recording cannot be removed while its re-upload is running", async () =>
 
   const cards = await renderWithBackend({ state: "idle" }, onRemove);
 
-  expect(within(cards[1]).queryByTestId("sr-btn-remove")).toBeNull();
+  expect(within(cards[1]).queryByTestId("bs-btn-delete")).toBeNull();
 
   // only that recording: the others can be removed in the meantime
   await userEvent.click(removeButton(cards[0]));
@@ -432,8 +434,8 @@ test.each([ "medium", "large" ] as const)("a card keeps its height while its re-
 // in the tests above.
 
 const dialog = () => screen.getByRole("dialog");
-const confirmButton = () => within(dialog()).getByTestId("sr-dd-btn-delete");
-const cancelButton = () => within(dialog()).getByTestId("sr-dd-btn-cancel");
+const confirmButton = () => within(dialog()).getByTestId("bs-btn-deleteconfirm");
+const cancelButton = () => within(dialog()).getByTestId("bs-btn-deletecancel");
 
 /** renderWithBackend, with these recordings marked as not streamed to the backend. */
 async function renderWithUnstreamed(unstreamed: string[], removeSavedRecording = vi.fn()) {
@@ -522,4 +524,39 @@ test("a recording that has since been re-uploaded is deleted without a question"
 
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(onRemove).toHaveBeenCalledExactlyOnceWith("BAR_2025-12-11T214230.418Z");
+});
+
+// --- failures the lecturer has to hear about ---------------------------------
+
+test("a confirmed delete that fails is reported", async () => {
+  // the dialog is gone by then, so a toast is the only place left to say so
+  const failure = new DOMException("the file is open elsewhere", "NoModificationAllowedError");
+  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], vi.fn().mockRejectedValue(failure));
+
+  await userEvent.click(removeButton(cards[1]));
+  await userEvent.click(confirmButton());
+
+  await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining("BAR_2025-12-11T214230.418Z"), failure));
+});
+
+test("a download that fails is reported", async () => {
+  // deleted from another tab since the list was read, say
+  const failure = new DOMException("gone", "NotFoundError");
+  vi.mocked(downloadFile).mockRejectedValue(failure);
+  const cards = await renderWithBackend();
+
+  await userEvent.click(downloadButtons(cards[0])[0]);
+
+  await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining("stream.webm"), failure));
+});
+
+test("a delete without a question that fails is reported", async () => {
+  // a recording that did reach the backend is deleted straight away, with no dialog to come
+  // back to, so the toast is the only word the lecturer gets that it is still there
+  const failure = new DOMException("the file is open elsewhere", "NoModificationAllowedError");
+  const cards = await renderWithUnstreamed([], vi.fn().mockRejectedValue(failure));
+
+  await userEvent.click(removeButton(cards[0]));
+
+  await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining("FOO_2025-12-11T213822.748Z"), failure));
 });

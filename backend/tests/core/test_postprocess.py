@@ -4,7 +4,9 @@
 # pylint: disable=too-many-locals
 # pylint: disable=protected-access
 # pylint: disable=no-member
+# pylint: disable=redefined-outer-name
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -71,11 +73,23 @@ def test_determine_crop_area():
     assert determine_crop_area(width, height, crop_pillar_insignificant) == crop_none
 
 
+def test_determine_crop_area_crops_from_just_over_one_percent():
+    # 19 columns of a 1920 wide stream are under one percent and kept; 20 are over it
+    width, height = 1920, 1080
+
+    assert determine_crop_area(
+        width, height, Rectangle(width=1901, height=1080, left=10, top=0)
+    ) == Rectangle(width=1920, height=1080, left=0, top=0)
+    assert determine_crop_area(
+        width, height, Rectangle(width=1900, height=1080, left=10, top=0)
+    ) == Rectangle(width=1900, height=1080, left=10, top=0)
+
+
 @pytest.mark.asyncio
 async def test_video_properties():
     sample_path = ASSETS / "sample.webm"
 
-    info = await video_properties(sample_path)
+    info = await video_properties(anyio.Path(sample_path))
 
     assert info.width == 480
     assert info.height == 270
@@ -102,12 +116,34 @@ async def test_video_properties_reads_a_path_the_filtergraph_would_choke_on(tmp_
     track_path.mkdir(parents=True)
     shutil.copy(ASSETS / "sample.webm", track_path / "full.webm")
 
-    info = await video_properties(track_path / "full.webm")
+    info = await video_properties(anyio.Path(track_path / "full.webm"))
 
     # the same file as test_video_properties, so only the path can account for a difference
     assert info.width == 480
     assert info.height == 270
     assert info.crop == Rectangle(width=217, height=170, left=125, top=53)
+
+
+@pytest.mark.asyncio
+async def test_video_properties_without_crop_detection_uses_the_whole_frame(
+    mocker: MockerFixture, tmp_path: Path
+):
+    # a stream too short for cropdetect to report anything: nothing to crop away, then
+    probe: dict[str, list[Any]] = {
+        "streams": [{"codec_type": "video", "width": 640, "height": 480}],
+        "packets": [],
+    }
+    mocker.patch(
+        "ise_record.core.postprocess._run_command",
+        autospec=True,
+        return_value=json.dumps(probe).encode(),
+    )
+
+    info = await video_properties(anyio.Path(tmp_path / "full.webm"))
+
+    assert info == VideoProperties(
+        width=640, height=480, crop=Rectangle(width=640, height=480, left=0, top=0)
+    )
 
 
 def make_track(tempdir: str, names: list[str]) -> Path:
@@ -182,9 +218,9 @@ async def test_concat_chunks_removes_the_partial_output_when_writing_fails(mocke
     # a half-written full.webm left behind would be picked up by a later run as though it
     # were a finished concatenation. The first chunk is already in it when the second one
     # fails to open, so there is something on disk to clean up.
-    real_open = anyio.Path.open
+    real_open: Any = anyio.Path.open
 
-    async def open_failing_on_the_second_chunk(self: anyio.Path, *args: Any, **kwargs: Any):
+    async def open_failing_on_the_second_chunk(self: anyio.Path, *args: Any, **kwargs: Any) -> Any:
         if self.name == "chunk.0001":
             raise OSError("I/O error")
         return await real_open(self, *args, **kwargs)
@@ -288,6 +324,17 @@ def test_generate_overlay_scale():
     assert filter_none == "scale=-1:108,crop=w=min(in_w\\,1920)"
     assert filter_pillar == "scale=420:-1,crop=h=min(in_h\\,1080)"
     assert filter_letter == "scale=-1:140,crop=w=min(in_w\\,1920)"
+
+
+def test_generate_overlay_scale_keeps_the_speaker_visible_beside_narrow_bars():
+    # slides only a little narrower than the frame leave a strip too thin for a face; the
+    # overlay takes a tenth of the width anyway and covers the edge of the slides
+    crop_slim_pillar = Rectangle(left=60, top=0, width=1800, height=1080)
+
+    assert (
+        generate_overlay_scale(crop_slim_pillar, 1920, 1080)
+        == "scale=192:-1,crop=h=min(in_h\\,1080)"
+    )
 
 
 def test_generate_ffmpeg_filter():
@@ -676,7 +723,7 @@ async def test_the_rendered_file_gets_its_final_name_only_once_it_is_complete(
         anyio.Path(output_path),
     )
 
-    assert result == Result(output_file=output_path, reason=ResultReason.SUCCESS)
+    assert result == Result(output_file=anyio.Path(output_path), reason=ResultReason.SUCCESS)
     # ffmpeg wrote somewhere else, and the finished file arrived under its final name by
     # a rename -- which is atomic, so no reader ever sees a partial presentation.webm
     assert render_targets == [tmp_path / "presentation.part.webm"]
@@ -724,7 +771,7 @@ async def test_postprocess_recordings(mocker: MockerFixture, tmp_path: Path):
         (rec_path / track).mkdir(parents=True)
 
     expected_result = Result(
-        reason=ResultReason.SUCCESS, output_file=rec_path / "presentation.webm"
+        reason=ResultReason.SUCCESS, output_file=anyio.Path(rec_path / "presentation.webm")
     )
 
     mock_postprocess_tracks = mocker.patch(
@@ -803,3 +850,22 @@ async def test_audio_tracks_are_ordered_by_number_not_by_name(
     audio_args = [path.name for path in mock_tracks.call_args.args[2]]
 
     assert audio_args == audio_dirs
+
+
+@pytest.mark.asyncio
+async def test_a_render_that_crashes_unexpectedly_is_reported_as_failed(
+    mocker: MockerFixture, tmp_path: Path
+):
+    # whatever goes wrong in there, the job ends with a result to report rather than an
+    # exception that leaves the lecturer without a mail
+    rec_path = tmp_path / "foo"
+    (rec_path / "stream").mkdir(parents=True)
+    mocker.patch(
+        "ise_record.core.postprocess.postprocess_tracks",
+        autospec=True,
+        side_effect=OSError("disk gone"),
+    )
+
+    result = await postprocess_recording(anyio.Path(rec_path))
+
+    assert result == Result(output_file=None, reason=ResultReason.FAILURE)

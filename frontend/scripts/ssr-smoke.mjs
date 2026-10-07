@@ -270,6 +270,27 @@ async function checkContentSecurityPolicy(name, env, base) {
     }
   }
 
+  // silent renew loads the provider's authorize endpoint in an iframe, so the provider has to
+  // be allowed in one -- and nothing else from outside
+  const frameSrc = csp.get("frame-src") ?? [];
+  const expectedFrames = env.ISE_RECORD_OIDC_PROVIDER_URL === undefined
+    ? [ "'self'" ]
+    : [ "'self'", new URL(env.ISE_RECORD_OIDC_PROVIDER_URL).origin ];
+  if(frameSrc.toSorted().join(" ") !== expectedFrames.toSorted().join(" ")) {
+    note(`frame-src should be ${expectedFrames.join(" ")}, got: ${frameSrc.join(" ") || "(absent)"}`);
+  }
+
+  // Without a provider to embed, nothing cross-origin needs to load, so the page isolates
+  // itself. With one, require-corp would block the provider's pages in the silent-renew
+  // iframe, which send no Cross-Origin-Resource-Policy.
+  const embedderPolicy = first.headers.get("cross-origin-embedder-policy");
+  if(env.ISE_RECORD_OIDC_PROVIDER_URL === undefined && embedderPolicy !== "require-corp") {
+    note(`Cross-Origin-Embedder-Policy should be require-corp without a provider, got: ${embedderPolicy ?? "(absent)"}`);
+  }
+  if(env.ISE_RECORD_OIDC_PROVIDER_URL !== undefined && embedderPolicy !== null) {
+    note(`Cross-Origin-Embedder-Policy would keep the provider out of the silent-renew iframe: ${embedderPolicy}`);
+  }
+
   // silent renew redirects back into an iframe on our own origin
   const frameAncestors = (csp.get("frame-ancestors") ?? []).join(" ");
   if(frameAncestors !== "'self'") {

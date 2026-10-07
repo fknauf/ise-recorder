@@ -99,6 +99,11 @@ class Provider:
         # provider may leave it out
         self.advertise_userinfo = True
         self.signing_algorithms: list[Any] = ["RS256"]
+        # a discovery document to serve in place of the real one, for a provider whose answer
+        # is not what OIDC Discovery describes -- an error page, an empty array, a proxy's guess
+        self.discovery_override: tuple[str, bytes] | None = None
+        # the same for the key set
+        self.jwks_override: tuple[str, bytes] | None = None
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -114,8 +119,11 @@ class Provider:
         provider = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # pylint: disable=invalid-name
+            def do_GET(self) -> None:  # pylint: disable=invalid-name,too-many-return-statements
                 if self.path.endswith("/.well-known/openid-configuration"):
+                    if provider.discovery_override is not None:
+                        content_type, body = provider.discovery_override
+                        return provider.respond_raw(self, 200, content_type, body)
                     metadata: dict[str, Any] = {
                         "issuer": provider.issuer,
                         "authorization_endpoint": f"{provider.issuer}/authorize",
@@ -134,6 +142,9 @@ class Provider:
                         self.send_response(503)
                         self.end_headers()
                         return None
+                    if provider.jwks_override is not None:
+                        content_type, body = provider.jwks_override
+                        return provider.respond_raw(self, 200, content_type, body)
                     return provider.respond(
                         self, {"keys": [jwk for _, jwk in provider.keys.values()]}
                     )

@@ -1,10 +1,11 @@
 import { expect, test, vi } from "vitest";
 import { appStoreWrapper } from "../helpers/appStore";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useAppStore } from "@/lib/hooks/useAppStore";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 import { useEffect } from "react";
-import { gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
+import { showError } from "@/lib/utils/notifications";
+import { deleteRecording, gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
 
 const wrapper = appStoreWrapper();
 
@@ -34,6 +35,7 @@ const mockRecordings: RecordingFileList[] = [
 ];
 
 vi.mock("@/lib/utils/browserStorage");
+vi.mock("@/lib/utils/notifications");
 // The store gathers browser storage once, when the provider mounts, rather than every hook
 // that reads it doing so on its own -- a hook used once per saved recording would otherwise
 // rescan the whole of it once per card.
@@ -102,3 +104,42 @@ test("useBrowserStorage reacts to file size overrides", async () => {
   });
 });
 
+
+test("removing a recording deletes it from the browser and lists what is left", async () => {
+  vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
+  navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 0 });
+
+  const { result } = renderHook(() => useBrowserStorage(), { wrapper });
+  await waitFor(() => expect(result.current.savedRecordings).toHaveLength(2));
+
+  // the list is read back from the browser rather than edited in place, so it shows what the
+  // delete actually left behind
+  vi.mocked(deleteRecording).mockImplementation(async () => {
+    vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings.slice(1));
+  });
+
+  await act(() => result.current.removeSavedRecording("FOO"));
+
+  expect(deleteRecording).toHaveBeenCalledExactlyOnceWith("FOO");
+  expect(result.current.savedRecordings.map(recording => recording.name)).toStrictEqual([ "BAR" ]);
+});
+
+test("the app store refuses to work outside its provider", () => {
+  // a component mounted outside the provider would otherwise read a store of its own, and
+  // silently show nothing the rest of the page does
+  vi.spyOn(console, "error").mockImplementation(() => {});
+
+  expect(() => renderHook(() => useAppStore(state => state.lectureTitle))).toThrow(/AppStoreProvider/);
+});
+
+test("a browser storage that cannot be read when the page loads is reported", async () => {
+  // no OPFS in some private windows; the page still works, but the lecturer has to know
+  // that nothing will be kept in the browser
+  const failure = new DOMException("no origin private file system here", "SecurityError");
+  vi.mocked(gatherRecordingsList).mockRejectedValue(failure);
+  navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 0 });
+
+  renderHook(() => useBrowserStorage(), { wrapper });
+
+  await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.anything(), failure));
+});

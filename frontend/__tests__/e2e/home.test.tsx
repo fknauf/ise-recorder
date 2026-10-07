@@ -252,7 +252,7 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
   // waiting for it. Its answer now includes the new recording, so the server storage section
   // re-renders whenever that answer arrives -- outside act unless something waits for it here.
   if(session.isAuthenticated) {
-    await screen.findByTestId("rendering-card");
+    await screen.findByTestId("ss-card-rendering");
   }
 
   const recordings = await gatherRecordingsList();

@@ -225,6 +225,18 @@ async def test_fetching_the_key_set_does_not_hold_up_other_requests(
     assert ticks >= 3
 
 
+@pytest.mark.asyncio
+async def test_a_key_set_that_is_not_json_counts_as_the_provider_being_unavailable(
+    oidc: OidcClient, provider: Provider
+):
+    # what a proxy in front of the provider answers with, with a 200, while the provider is
+    # down; the token may be fine, so this is a 503 to try again, not a 401 to sign in again
+    provider.jwks_override = ("text/html", b"<html><body>Service Unavailable</body></html>")
+
+    with pytest.raises(ProviderUnreachable):
+        await oidc.validate_access_token(provider.mint())
+
+
 # --- the signing algorithm comes from the key set --------------------------
 
 

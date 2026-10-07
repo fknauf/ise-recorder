@@ -126,7 +126,7 @@ function renderSection(options: SectionOptions = {}) {
   );
 }
 
-const cards = () => screen.queryAllByTestId("prec-card");
+const cards = () => screen.queryAllByTestId("ss-card-completed");
 
 const names = (cardList: HTMLElement[]) =>
   cardList.map(card => within(card).getByText(/_20\d\d$/).textContent);
@@ -201,12 +201,12 @@ test("an empty backend does not render the section", () => {
 
 // --- recordings the backend is still rendering -----------------------------
 
-const renderingCards = () => screen.queryAllByTestId("rendering-card");
+const renderingCards = () => screen.queryAllByTestId("ss-card-rendering");
 
 const RENDERING_LISTING = sorted([ ...LISTING, rendering("ABC_2026"), rendering("XYZ_2026") ]);
 
 /** Every card in the section, whichever kind, in the order they appear on the page. */
-const allCards = () => screen.queryAllByTestId(/^(prec|rendering|unprocessed)-card$/);
+const allCards = () => screen.queryAllByTestId(/^ss-card-/);
 
 test("a recording that is still rendering gets a card that says so", () => {
   renderSection({ data: [ rendering("ABC_2026") ] });
@@ -288,8 +288,8 @@ const holdFurtherListings = () =>
 
 // Controls are found by test id rather than by label, so rewording or restyling a button --
 // down to an icon with no text -- does not break the tests that are about what it does.
-const rerenderButton = (card: HTMLElement) => within(card).getByTestId("prec-btn-rerender");
-const purgeButton = (card: HTMLElement) => within(card).getByTestId("prec-btn-purge");
+const rerenderButton = (card: HTMLElement) => within(card).getByTestId("ss-btn-rerender");
+const purgeButton = (card: HTMLElement) => within(card).getByTestId("ss-btn-purge");
 
 test("each finished recording offers a rerender", () => {
   renderSection();
@@ -421,7 +421,7 @@ test("a card is unlocked again after a refused rerender", async () => {
 
 // --- recordings whose postprocessing never produced anything ---------------
 
-const unprocessedCards = () => screen.queryAllByTestId("unprocessed-card");
+const unprocessedCards = () => screen.queryAllByTestId("ss-card-unprocessed");
 
 const UNPROCESSED_LISTING = sorted([ ...LISTING, rendering("ABC_2026"), unprocessed("OLD_2024"), unprocessed("XYZ_2025") ]);
 
@@ -516,8 +516,8 @@ test("a stale listing's failed cards are withdrawn with the rest while the error
 // in serverStorage.test.ts; what the dialog does with the listing around it is below.
 
 const dialog = () => screen.getByRole("dialog");
-const confirmButton = () => within(dialog()).getByTestId("pd-btn-purge");
-const cancelButton = () => within(dialog()).getByTestId("pd-btn-cancel");
+const confirmButton = () => within(dialog()).getByTestId("ss-btn-purgeconfirm");
+const cancelButton = () => within(dialog()).getByTestId("ss-btn-purgecancel");
 
 test("finished and failed recordings offer a purge, rendering ones do not", () => {
   renderSection({ data: UNPROCESSED_LISTING });
@@ -525,7 +525,7 @@ test("finished and failed recordings offer a purge, rendering ones do not", () =
   cards().forEach(card => expect(purgeButton(card)).toBeEnabled());
   unprocessedCards().forEach(card => expect(purgeButton(card)).toBeEnabled());
   // deleting it would pull the chunks out from under the render; the backend refuses too
-  expect(within(renderingCards()[0]).queryByTestId("prec-btn-purge")).toBeNull();
+  expect(within(renderingCards()[0]).queryByTestId("ss-btn-purge")).toBeNull();
 });
 
 test("the purge button asks first and sends nothing", async () => {

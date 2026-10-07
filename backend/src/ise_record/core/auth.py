@@ -17,6 +17,7 @@ refreshes the list of recordings regularly, and each time gets new TOTPs.
 import asyncio
 from dataclasses import dataclass
 import hashlib
+import json
 import logging
 from typing import Any, NamedTuple
 
@@ -117,6 +118,9 @@ class OidcClient:
             )
         except jwt.PyJWKClientConnectionError as exc:
             logger.error("cannot reach the JWKS endpoint: %s", exc)
+            raise ProviderUnreachable() from exc
+        except json.JSONDecodeError as exc:
+            logger.error("cannot decode JWKS response: %s", exc)
             raise ProviderUnreachable() from exc
         except jwt.PyJWKClientError as exc:
             logger.warning("no usable signing key for the presented token: %s", exc)

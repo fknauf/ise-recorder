@@ -64,7 +64,7 @@ function RecordButton() {
         // form autocomplete will strip the disabled tag from the SSR-rendered button if the button
         // was enabled before the reload, which then leads to a React hydration error. It'll never add
         // a disabled flag, so we can sidestep it with this check.
-        <ActionButton onPress={startRecording} isDisabled={hydrated && noTracksConfigured}>
+        <ActionButton onPress={startRecording} isDisabled={hydrated && noTracksConfigured} data-testid="rc-btn-record">
           <Circle/>
           <Text>Start Recording</Text>
         </ActionButton>
@@ -72,21 +72,21 @@ function RecordButton() {
     case "starting":
     case "preparing":
       return (
-        <ActionButton isDisabled>
+        <ActionButton isDisabled data-testid="rc-btn-record">
           <Stop/>
           <Text>Stop Recording</Text>
         </ActionButton>
       );
     case "recording":
       return (
-        <ActionButton onPress={stopRecording}>
+        <ActionButton onPress={stopRecording} data-testid="rc-btn-record">
           <Stop/>
           <Text>Stop Recording</Text>
         </ActionButton>
       );
     case "stopping":
       return (
-        <ActionButton isDisabled>
+        <ActionButton isDisabled data-testid="rc-btn-record">
           <View paddingX="size-100">
             <ProgressCircle size="S" isIndeterminate aria-label="stopping..."/>
           </View>
@@ -166,6 +166,7 @@ export function RecorderControls() {
         <Flex direction="row" gap="size-100">
           <TextField
             label="Lecture Title"
+            data-testid="rc-txt-title"
             value={lectureTitle}
             isReadOnly={hasDisabledTrackControls}
             isDisabled={hasDisabledTrackControls}
@@ -178,6 +179,7 @@ export function RecorderControls() {
             isBackendConfigured &&
               <TextField
                 label="e-Mail"
+                data-testid="rc-txt-email"
                 value={lecturerEmail}
                 isReadOnly={hasDisabledTrackControls}
                 isDisabled={hasDisabledTrackControls}
@@ -191,13 +193,13 @@ export function RecorderControls() {
       <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" wrap>
         <Divider orientation="vertical" size="S" marginX="size-100"/>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls}>
+        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls} data-testid="rc-btn-addscreen">
           <DeviceDesktop/>
           <Text>Add Screen/Window</Text>
         </ActionButton>
 
         <MenuTrigger isOpen={videoMenuOpen} onOpenChange={onMenuOpenChangeHandler(setVideoMenuOpen)}>
-          <ActionButton isDisabled={hasDisabledTrackControls}>
+          <ActionButton isDisabled={hasDisabledTrackControls} data-testid="rc-btn-addvideo">
             <MovieCamera/>
             <Text>Add Video Source</Text>
           </ActionButton>
@@ -207,7 +209,7 @@ export function RecorderControls() {
         </MenuTrigger>
 
         <MenuTrigger isOpen={audioMenuOpen} onOpenChange={onMenuOpenChangeHandler(setAudioMenuOpen)}>
-          <ActionButton isDisabled={hasDisabledTrackControls}>
+          <ActionButton isDisabled={hasDisabledTrackControls} data-testid="rc-btn-addaudio">
             <CallCenter/>
             <Text>Add Audio Source</Text>
           </ActionButton>

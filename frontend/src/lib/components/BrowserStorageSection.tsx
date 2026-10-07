@@ -42,7 +42,7 @@ function DeleteDialog({ recordingName }: Readonly<{ recordingName: string }>) {
           variant="secondary"
           onPress={dismiss}
           autoFocus
-          data-testid="sr-dd-btn-cancel"
+          data-testid="bs-btn-deletecancel"
         >
           Cancel
         </Button>
@@ -51,12 +51,12 @@ function DeleteDialog({ recordingName }: Readonly<{ recordingName: string }>) {
           onPress={async () => {
             dismiss();
             try {
-              removeSavedRecording(recordingName);
+              await removeSavedRecording(recordingName);
             } catch(e) {
               showError(`Failed to delete ${recordingName}`, e);
             }
           }}
-          data-testid="sr-dd-btn-delete"
+          data-testid="bs-btn-deleteconfirm"
         >
           Delete
         </Button>
@@ -76,10 +76,18 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
   const uploadDisabled = isRecording || isUploading || (authRequired && !isAuthenticated);
   const deleteDisabled = isRecording || isUploading;
 
+  const onDownload = async (filename: string) => {
+    try {
+      await downloadFile(recording.name, filename);
+    } catch(e) {
+      showError(`Failed download of ${recording.name}/${filename}`, e);
+    }
+  };
+
   return (
     <RecordingCard
       title={recording.name}
-      testid="sr-card"
+      testid="bs-card-recording"
     >
       <Flex
         direction="column"
@@ -90,8 +98,8 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
             <ActionButton
               key={`download-${name}`}
               isDisabled={isRecording}
-              onPress={() => downloadFile(recording.name, name)}
-              data-testid="sr-btn-download"
+              onPress={() => onDownload(name)}
+              data-testid="bs-btn-download"
               isQuiet
             >
               <Download/>
@@ -108,7 +116,7 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               justifyContent="center"
               alignItems="center"
               height="size-400"
-              data-testid="sr-ind-uploading"
+              data-testid="bs-ind-uploading"
             >
               <ProgressCircle size="S" value={progress} aria-label="Uploading"/>
               <Text>Uploading...</Text>
@@ -130,13 +138,13 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
             >
               {
                 apiUrl !== undefined
-                  ? <Item key="upload" data-testid="sr-btn-reupload">
+                  ? <Item key="upload" data-testid="bs-btn-reupload">
                       <DataUpload/>
                       <Text>Re-upload</Text>
                     </Item>
                   : null
               }
-              <Item key="delete" data-testid="sr-btn-remove">
+              <Item key="delete" data-testid="bs-btn-delete">
                 <Delete/>
                 <Text>Delete</Text>
               </Item>
@@ -161,11 +169,15 @@ export function BrowserStorageSection({ id }: Readonly<{ id: string }>) {
     return null;
   }
 
-  const onDelete = (recordingName: string) => {
+  const onDelete = async (recordingName: string) => {
     if(unstreamedRecordings.includes(recordingName)) {
       setDeleteCandidate(recordingName);
     } else {
-      removeSavedRecording(recordingName);
+      try {
+        await removeSavedRecording(recordingName);
+      } catch(e) {
+        showError(`Failed to delete ${recordingName}`, e);
+      }
     }
   };
 

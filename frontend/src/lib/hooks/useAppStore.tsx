@@ -4,6 +4,7 @@ import { StoreApi, useStore } from "zustand";
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 import { AppStoreState, createAppStore } from "../store/store";
 import { ServerEnv } from "../utils/serverEnv";
+import { showError } from "../utils/notifications";
 
 // See https://zustand.docs.pmnd.rs/guides/nextjs for why this is the way it is.
 // Long story short: This prevents the Zustand store from being created on the server side during SSR.
@@ -20,7 +21,8 @@ export function AppStoreProvider({ serverEnv, children }: Readonly<AppStoreProvi
 
   useEffect(() => {
     // gather browser storage info on first client-side render
-    store.getState().updateBrowserStorage();
+    store.getState().updateBrowserStorage()
+      .catch(e => showError("Failed to retrieve browser-local storage information", e));
   }, [ store ]);
 
   return (

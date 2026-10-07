@@ -10,7 +10,7 @@ export function UserMenu() {
 
   return (
     <DialogTrigger type="popover">
-      <Button variant="primary" aria-label="User menu">
+      <Button variant="primary" aria-label="User menu" data-testid="um-btn-open">
         <User/>
       </Button>
       <Dialog size="S">

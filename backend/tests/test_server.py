@@ -726,6 +726,29 @@ def test_an_unreachable_provider_is_reported_as_unavailable(
     assert upload(auth_client, token).status_code == 503
 
 
+@pytest.mark.parametrize(
+    "content_type, body",
+    [
+        pytest.param("application/json", b"[]", id="json-array"),
+        pytest.param("text/html", b"<html><body>502 Bad Gateway</body></html>", id="error-page"),
+    ],
+)
+def test_a_broken_discovery_document_makes_the_provider_unavailable_until_it_is_fixed(
+    provider: Provider, auth_settings: Settings, content_type: str, body: bytes
+):
+    # discovery runs at startup, so the app has to start anyway, and answer 503 rather than
+    # 500 so the frontend keeps trying -- and pick the provider up once it answers properly
+    provider.discovery_override = (content_type, body)
+    token = provider.mint()
+
+    with TestClient(create_app(auth_settings)) as client:
+        assert list_recordings(client, token).status_code == 503
+
+        provider.discovery_override = None
+
+        assert list_recordings(client, token).status_code == 200
+
+
 def schedule(auth_client: TestClient, token: str | None, recording: str = "foo"):
     headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     return auth_client.post(render_url(recording), headers=headers, json={})
@@ -1179,6 +1202,20 @@ def test_a_completed_recording_can_be_downloaded(
     # the file on disk is called presentation.webm for everyone, so the recording name is
     # what the browser has to save it under
     assert response.headers["content-disposition"] == 'attachment; filename="GVS_2025.webm"'
+
+
+def test_a_valid_link_to_a_video_that_is_gone_is_not_found(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the link was listed a minute ago, and an admin has since cleared the video away; the
+    # OTP still checks out, but there is nothing to send
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    finish_recording(home, "GVS_2025")
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    (home / "GVS_2025" / "presentation.webm").unlink()
+
+    assert follow_download(auth_client, entries(server_list, "completed")[0]).status_code == 404
 
 
 @pytest.mark.parametrize(
@@ -1677,6 +1714,23 @@ def test_a_duplicate_job_is_refused_without_disturbing_the_first(
         mock_postprocess.assert_not_called()
         # still the first job's: the refusal does not let go of a claim it never had
         assert activity_of(auth_client, home, "foo") == RecordingActivity.RENDERING
+
+
+def test_a_job_arriving_while_a_chunk_is_still_being_written_is_refused(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # The render would read the track before the chunk is in, and come out a few seconds
+    # short. The frontend only asks for the job once all of its chunks are through, so a
+    # refusal here means a chunk from somewhere else, and asking again later renders it all.
+    mock_postprocess = mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    abandon_recording(home, "foo")
+
+    with enclave_of(auth_client, home).claim_upload("foo"):
+        response = schedule(auth_client, provider.mint())
+
+    assert response.status_code == 409
+    mock_postprocess.assert_not_called()
 
 
 # --- requests that arrive while another one is in flight -----------------------

@@ -22,6 +22,8 @@
         "cropdetect",
         "crswap",
         "dcbung",
+        "deletecancel",
+        "deleteconfirm",
         "dependables",
         "destdir",
         "devitem",

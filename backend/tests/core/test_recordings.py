@@ -510,6 +510,18 @@ def test_after_a_restart_a_fresh_chunk_in_any_track_counts(home: Path):
     assert is_streaming(RecordingTracker(), home / "LIVE_2026")
 
 
+def test_after_a_restart_a_track_without_chunks_does_not_hide_the_others(home: Path):
+    # an upload that broke off before its first chunk was in leaves a track directory holding
+    # nothing that counts as a chunk; the recording is still judged by the tracks that do
+    # have some, rather than the listing falling over
+    write_chunks(home / "LIVE_2026", [5])
+    empty_track = home / "LIVE_2026" / "overlay"
+    empty_track.mkdir()
+    (empty_track / "part.chunk.0000.k2x9q1zb").write_bytes(b"half a chunk")
+
+    assert is_streaming(RecordingTracker(), home / "LIVE_2026")
+
+
 def test_a_concatenation_left_behind_is_not_a_fresh_chunk(home: Path):
     # concat_chunks writes full.webm into the stream directory, after every chunk
     recording_dir = abandon_recording(home, "GVS_2025")
@@ -683,7 +695,7 @@ def test_classify_reports_all_three_lines(home: Path):
         info = anyio.run(tracker.classify, recording(home, "GVS_2025"))
 
     assert info == RecordingInfo(
-        path=home / "GVS_2025",
+        path=recording(home, "GVS_2025"),
         activity=RecordingActivity.RENDERING,
         disk_state=RecordingDiskState.FINISHED,
         streaming=False,

@@ -23,7 +23,10 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.auth import UserInfo
-from ise_record.core.user_home import _fs_safe_user_name, prepare_user_home_dir
+from ise_record.core.user_home import (
+    _fs_safe_user_name,  # pyright: ignore[reportPrivateUsage]
+    prepare_user_home_dir,
+)
 
 from ..harness import (
     alias_of,
