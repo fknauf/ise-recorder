@@ -42,7 +42,7 @@ function stubAnalyser(frequencyBytes: number[], timeDomainBytes: number[]) {
 }
 
 /** Silence: every frequency bin empty, time domain sitting at the midpoint. */
-const SILENT_FREQUENCIES = new Array(256).fill(0);
+const SILENT_FREQUENCIES = Array.from<number>({ length: 256 }).fill(0);
 const CENTRED_TIME_DOMAIN = [ 128 ];
 
 beforeEach(() => {
@@ -141,7 +141,7 @@ afterEach(() => {
 
 test("bar height scales with the level in each frequency bin", async () => {
   // a ramp across the bins: later bins are louder, so their bars must reach higher
-  stubAnalyser(new Array(256).fill(0)
+  stubAnalyser(Array.from<number>({ length: 256 }).fill(0)
     .map((_, index) => index), CENTRED_TIME_DOMAIN);
 
   const { dispose } = await renderPreview();
@@ -181,7 +181,7 @@ test("clipping audio is drawn in the warning colour", async () => {
   document.body.style.setProperty("--warning", "rgb(9, 8, 7)");
 
   // a sample pinned near the rail is what clipping looks like in the time domain
-  stubAnalyser(new Array(256).fill(120), [ 251 ]);
+  stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [ 251 ]);
 
   const { dispose } = await renderPreview();
 
@@ -196,7 +196,7 @@ test("audio within range is drawn in the foreground colour", async () => {
   document.body.style.setProperty("--foreground", "rgb(1, 2, 3)");
   document.body.style.setProperty("--warning", "rgb(9, 8, 7)");
 
-  stubAnalyser(new Array(256).fill(120), [ 130 ]);
+  stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [ 130 ]);
 
   const { dispose } = await renderPreview();
 
@@ -208,7 +208,7 @@ test("audio within range is drawn in the foreground colour", async () => {
 });
 
 test("the canvas is cleared before each frame rather than drawn over", async () => {
-  stubAnalyser(new Array(256).fill(40), CENTRED_TIME_DOMAIN);
+  stubAnalyser(Array.from<number>({ length: 256 }).fill(40), CENTRED_TIME_DOMAIN);
 
   const { dispose } = await renderPreview();
 
