@@ -18,5 +18,5 @@ export function showSuccess(message: string) {
 }
 
 export function showMessage(message: string) {
-  ToastQueue.neutral(message);
+  ToastQueue.neutral(message, { timeout: 5000 });
 }
