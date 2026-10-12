@@ -1,7 +1,8 @@
 "use client";
 
-import { Anchor, Stack, Text } from "@mantine/core";
+import { Anchor, Group, Input, Stack, Text } from "@mantine/core";
 import { useServerEnv } from "../hooks/useServerEnv";
+import { UnlabelledRow } from "./RecorderControls";
 
 const GithubIcon = () =>
   <svg viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
@@ -17,19 +18,21 @@ export function GithubLink() {
   const env = useServerEnv();
 
   return (
-    <Anchor
-      href="https://github.com/fknauf/ise-recorder"
-      c="inherit"
-      underline="hover"
-    >
-      {
-        env.version !== undefined
-          ? <Stack align="center" gap={0} style={{ marginTop: "20px" }}>
-              <GithubIcon/>
-              <Text fz="sm" lh="sm">v{env.version}</Text>
-            </Stack>
-          : <Stack style={{ marginTop: "28px" }}><GithubIcon/></Stack>
-      }
-    </Anchor>
+    <UnlabelledRow>
+      <Anchor
+        href="https://github.com/fknauf/ise-recorder"
+        c="inherit"
+        underline="hover"
+      >
+        {
+          env.version !== undefined
+            ? <Stack align="center" gap={0}>
+                <GithubIcon/>
+                <Text fz="sm" lh="sm">v{env.version}</Text>
+              </Stack>
+            : <GithubIcon/>
+        }
+      </Anchor>
+    </UnlabelledRow>
   );
 }

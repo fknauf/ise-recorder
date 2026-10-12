@@ -1,16 +1,16 @@
 "use client";
 
-import { createTheme, MantineColorsTuple, MantineProvider, virtualColor } from "@mantine/core";
+import { createTheme, DefaultMantineColor, MantineColor, MantineColorsTuple, MantineProvider, virtualColor } from "@mantine/core";
 
 declare module "@mantine/core" {
   export interface MantineThemeColorsOverride {
     colors: Record<
-      | "error" |
+      "error" |
       "warning" |
       "success" |
       "info" |
       "neutral" |
-      string,
+      DefaultMantineColor,
       MantineColorsTuple
     >
   }

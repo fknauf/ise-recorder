@@ -96,12 +96,13 @@ function ActionableRecordingCard(
     <RecordingCard title={recordingName} testid={testid}>
       {children}
 
-      <Stack>
+      <Group justify="center" wrap="nowrap">
         <Button
           data-testid="ss-btn-rerender"
           disabled={busy}
           onClick={onRerender}
           leftSection={<RepeatIcon/>}
+          variant="outline"
         >
           Rerender
         </Button>
@@ -110,10 +111,12 @@ function ActionableRecordingCard(
           disabled={busy}
           onClick={() => confirmPurge(recordingName, () => onPurge(recordingName))}
           leftSection={<TrashIcon/>}
+          color="warning"
+          variant="outline"
         >
           Purge
         </Button>
-      </Stack>
+      </Group>
     </RecordingCard>
   );
 }
@@ -141,7 +144,6 @@ function ProcessedRecordingCard(
       <Button
         component="a"
         download
-        variant="subtle"
         key={recording.name}
         href={url}
         w="100%"

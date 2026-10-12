@@ -35,6 +35,11 @@ function validateLectureTitle(lectureTitle: string): string | undefined {
 
 const validateEmail = (email: string) => (email.trim() === "" || isEmail(email) ? undefined : "invalid e-mail address");
 
+export const UnlabelledRow = ({ children }: Readonly<{ children: ReactNode }>) =>
+  <Input.Wrapper label={" "} labelElement="div" labelProps={{ "aria-hidden": true }}>
+    <Group>{children}</Group>
+  </Input.Wrapper>;
+
 function RecordButton() {
   // The design is very human.
   //
@@ -163,11 +168,6 @@ export function RecorderControls() {
   const titleError = validateLectureTitle(lectureTitle);
   const emailError = validateEmail(lecturerEmail);
 
-  const UnlabelledRow = ({ children }: Readonly<{ children: ReactNode }>) =>
-    <Input.Wrapper label={"\u00a0"} labelElement="div" labelProps={{ "aria-hidden": true }}>
-      <Group>{children}</Group>
-    </Input.Wrapper>;
-
   return (
     <Group wrap="wrap" align="flex-start">
       {
@@ -181,7 +181,7 @@ export function RecorderControls() {
         disabled={hasDisabledTrackControls}
         error={titleError}
         onChange={event => setLectureTitle(event.currentTarget.value)}
-        styles={{ root: { position: "relative" }, error: { position: "absolute" }}}
+        h={61}
         autoFocus
       />
 
@@ -194,7 +194,7 @@ export function RecorderControls() {
             disabled={hasDisabledTrackControls}
             error={emailError}
             onChange={event => setLecturerEmail(event.currentTarget.value)}
-            styles={{ root: { position: "relative" }, error: { position: "absolute" }}}
+            h={61}
           />
       }
 

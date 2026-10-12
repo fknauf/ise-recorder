@@ -29,18 +29,16 @@ const PreviewCard = (
   }: Readonly<PreviewCardProps>
 ) =>
   <Card withBorder>
-    <Stack justify="flex-start" align="center">
-      <Card.Section w={canvasWidth}>
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Text>{label}</Text>
-          <CloseButton
-            onClick={onRemove}
-            aria-label="Close"
-            data-testid="ps-btn-remove"
-            disabled={hasDisabledButtons}
-          />
-        </Group>
-      </Card.Section>
+    <Stack justify="flex-start" align="stretch">
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Text>{label}</Text>
+        <CloseButton
+          onClick={onRemove}
+          aria-label="Close"
+          data-testid="ps-btn-remove"
+          disabled={hasDisabledButtons}
+        />
+      </Group>
       {children}
     </Stack>
   </Card>;

@@ -80,7 +80,6 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
         {
           recording.files.map(({ name, size }) =>
             <Button
-              variant="subtle"
               key={`download-${name}`}
               disabled={isRecording}
               onClick={() => onDownload(name)}
@@ -98,12 +97,12 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               justify="center"
               align="center"
               data-testid="bs-ind-uploading"
-              h={88}
+              h={36}
               gap="xs"
             >
               <RingProgress
-                size={70}
-                thickness={6}
+                size={38}
+                thickness={4}
                 sections={[{ value: progress ?? 0, color: "info" }]}
                 role="progressbar"
                 aria-label="Uploading"
@@ -113,28 +112,33 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               />
               <Text>Uploading...</Text>
             </Group>
-          : <Stack>
+          : <Group justify="center" wrap="nowrap">
               {
                 apiUrl !== undefined
                   ? <Button
-                      key="upload" data-testid="bs-btn-reupload"
+                      key="upload"
+                      data-testid="bs-btn-reupload"
                       onClick={reupload}
                       disabled={uploadDisabled}
                       leftSection={<CloudArrowUpIcon/>}
+                      variant="outline"
                     >
                     Re-upload
                     </Button>
                   : null
               }
               <Button
-                key="delete" data-testid="bs-btn-delete"
+                key="delete"
+                data-testid="bs-btn-delete"
                 onClick={() => onDelete(recording.name)}
                 disabled={deleteDisabled}
                 leftSection={<TrashIcon/>}
+                color="warning"
+                variant="outline"
               >
                 Delete
               </Button>
-            </Stack>
+            </Group>
       }
     </RecordingCard>
   );

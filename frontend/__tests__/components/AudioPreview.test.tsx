@@ -136,7 +136,7 @@ async function renderPreview() {
 // The theme's variables the strokes are read from. Some tests give them values of their own,
 // to tell the two strokes apart.
 const FOREGROUND = "--mantine-color-text";
-const WARNING = "--mantine-color-orange-4";
+const WARNING = "--mantine-color-warning-text";
 
 afterEach(() => {
   document.body.style.removeProperty(FOREGROUND);
