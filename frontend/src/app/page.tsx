@@ -32,7 +32,7 @@ export function Home() {
         <RecorderControls/>
         <GithubLink/>
       </Group>
-      <Group justify="center">
+      <Group justify="center" align="flex-start">
         <AuthStatusMessage/>
         <StreamingImpededWarning/>
         <QuotaWarning thresholdBytes={2 ** 30}/>
