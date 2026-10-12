@@ -10,7 +10,6 @@ import { Card, CloseButton, Group, Stack, Text } from "@mantine/core";
 interface PreviewCardProps {
   label: string | undefined
   hasDisabledButtons: boolean
-  canvasWidth: number
   onRemove: () => void
   children: ReactNode
 }
@@ -23,7 +22,6 @@ const PreviewCard = (
   {
     label,
     hasDisabledButtons,
-    canvasWidth,
     onRemove,
     children
   }: Readonly<PreviewCardProps>
@@ -85,7 +83,6 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={label}
             hasDisabledButtons={hasDisabledButtons}
-            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <VideoPreview
@@ -107,7 +104,6 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={track.label}
             hasDisabledButtons={hasDisabledButtons}
-            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <AudioPreview

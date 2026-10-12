@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Group, RingProgress, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Button, Group, RingProgress, Text, ThemeIcon } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { TrashIcon, DownloadIcon, CloudArrowUpIcon, WarningIcon, BrowserIcon } from "@phosphor-icons/react";
 import { downloadFile, RecordingFileList } from "../utils/browserStorage";

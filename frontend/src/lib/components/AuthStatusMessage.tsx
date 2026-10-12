@@ -2,7 +2,7 @@
 
 import { useAppSession } from "./SessionProvider";
 import { Alert, Button, Group, Loader, Stack, Text } from "@mantine/core";
-import { XIcon, WarningIcon, InfoIcon, RepeatIcon, SignInIcon } from "@phosphor-icons/react";
+import { WarningOctagonIcon, WarningIcon, InfoIcon, RepeatIcon, SignInIcon } from "@phosphor-icons/react";
 import { useServerEnv } from "../hooks/useServerEnv";
 
 export function AuthStatusMessage() {
@@ -37,7 +37,7 @@ export function AuthStatusMessage() {
 
   if(error !== undefined && error.source !== "signinSilent") {
     return (
-      <Alert variant="outline" color="error" icon={<XIcon/>} title="Authentication Error">
+      <Alert variant="outline" color="error" icon={<WarningOctagonIcon/>} title="Authentication Error">
         <Stack align="center">
           <Text>Authentication Error: {error.message || "Unknown Error"}</Text>
           <Button

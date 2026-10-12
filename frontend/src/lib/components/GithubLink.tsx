@@ -1,6 +1,6 @@
 "use client";
 
-import { Anchor, Group, Input, Stack, Text } from "@mantine/core";
+import { Anchor, Stack, Text } from "@mantine/core";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { UnlabelledRow } from "./RecorderControls";
 

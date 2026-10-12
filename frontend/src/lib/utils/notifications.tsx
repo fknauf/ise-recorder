@@ -1,7 +1,7 @@
 "use client";
 
 import { notifications, NotificationData } from "@mantine/notifications";
-import { XIcon, CheckIcon, InfoIcon } from "@phosphor-icons/react";
+import { WarningOctagonIcon, CheckIcon, InfoIcon } from "@phosphor-icons/react";
 
 const defaultNotification: Partial<NotificationData> = {
   autoClose: 5000,
@@ -12,7 +12,7 @@ export function showError(description: string, err?: unknown) {
   const common: Partial<NotificationData> = {
     ...defaultNotification,
     color: "error",
-    icon: <XIcon/>,
+    icon: <WarningOctagonIcon/>,
     title: "Error"
   };
 

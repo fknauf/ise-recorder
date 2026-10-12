@@ -2,7 +2,7 @@
 
 import { Alert, Group } from "@mantine/core";
 import { useEffect } from "react";
-import { XIcon } from "@phosphor-icons/react";
+import { WarningOctagonIcon } from "@phosphor-icons/react";
 
 export default function ErrorPage({
   error
@@ -15,7 +15,7 @@ export default function ErrorPage({
 
   return (
     <Group justify="center">
-      <Alert variant="light" color="error" title="Unexpected Error" icon={<XIcon/>}>
+      <Alert variant="light" color="error" title="Unexpected Error" icon={<WarningOctagonIcon/>}>
         {error.message}
       </Alert>
     </Group>

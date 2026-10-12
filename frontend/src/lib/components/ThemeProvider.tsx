@@ -1,6 +1,6 @@
 "use client";
 
-import { createTheme, DefaultMantineColor, MantineColor, MantineColorsTuple, MantineProvider, virtualColor } from "@mantine/core";
+import { createTheme, DefaultMantineColor, MantineColorsTuple, MantineProvider, virtualColor } from "@mantine/core";
 
 declare module "@mantine/core" {
   export interface MantineThemeColorsOverride {

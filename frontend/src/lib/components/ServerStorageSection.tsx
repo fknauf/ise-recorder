@@ -10,8 +10,8 @@ import { ReactNode, useState } from "react";
 import { showError, showSuccess } from "../utils/notifications";
 import { ApiError } from "../utils/apiFetch";
 import { modals } from "@mantine/modals";
-import { Alert, Button, Group, Loader, Stack, Text, ThemeIcon } from "@mantine/core";
-import { XIcon, DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon } from "@phosphor-icons/react";
+import { Alert, Button, Group, Loader, Text, ThemeIcon } from "@mantine/core";
+import { DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon, WarningOctagonIcon } from "@phosphor-icons/react";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -216,7 +216,7 @@ function ServerStorageSectionImpl({ id }: Readonly<{ id: string }>) {
   if(error !== undefined) {
     return (
       <RecordingCardSection id={id} title={sectionTitle}>
-        <Alert variant="light" color="error" icon={<XIcon/>} title="Error fetching list of processed recordings">
+        <Alert variant="light" color="error" icon={<WarningOctagonIcon/>} title="Error fetching list of processed recordings">
           {prettifyError(error)}
         </Alert>
       </RecordingCardSection>
