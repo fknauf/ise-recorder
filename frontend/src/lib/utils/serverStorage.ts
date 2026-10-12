@@ -3,6 +3,8 @@
 import { ApiDestination, apiFetchData, apiFetchVoid, RetryPolicy, withRetries } from "./apiFetch";
 import * as z from "zod";
 
+z.config({ jitless: true });
+
 const RenderingRecordingSchema = z.object({
   state: z.literal("rendering"),
   name: z.string()

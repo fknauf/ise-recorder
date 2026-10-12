@@ -102,16 +102,7 @@ export default defineConfig({
           include: [ "__tests__/**/*.test.{ts,tsx}" ],
           exclude: [ "__tests__/build/**" ],
           setupFiles: [ "__tests__/setup.ts" ],
-          globals: true,
-          server: {
-            deps: {
-              inline: [
-                /@react-spectrum\/.*/,
-                /@spectrum-icons\/.*/,
-                /@adobe\/.*/
-              ]
-            }
-          }
+          globals: true
         }
       },
       {

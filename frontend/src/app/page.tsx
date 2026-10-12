@@ -1,6 +1,6 @@
 "use client";
-
-import { Accordion, Flex, ToastContainer } from "@adobe/react-spectrum";
+import "@mantine/notifications/styles.css";
+import { Accordion, Group, Stack } from "@mantine/core";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
 import { RecorderControls } from "@/lib/components/RecorderControls";
 import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
@@ -12,6 +12,7 @@ import { useAppSession } from "@/lib/components/SessionProvider";
 import { useHydrated } from "@/lib/hooks/useHydrated";
 import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
 import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
+import { Notifications } from "@mantine/notifications";
 
 function AutoSignin() {
   useAutoSignin();
@@ -23,27 +24,26 @@ export function Home() {
   const { autoSignin } = useAppSession();
 
   return (
-    <Flex direction="column" width="100vw" height="100vh" gap="size-100">
+    <Stack justify="center">
       {
         hydrated && autoSignin && <AutoSignin/>
       }
-      <Flex direction="row" justifyContent="center" gap="size-500">
+      <Group justify="center" gap={64} align="flex-start">
         <RecorderControls/>
-        <GithubLink marginTop="size-450" size="M"/>
-      </Flex>
-
-      <Flex direction="row" justifyContent="center" marginTop="size-200" gap="size-100">
+        <GithubLink/>
+      </Group>
+      <Group justify="center">
         <AuthStatusMessage/>
         <StreamingImpededWarning/>
         <QuotaWarning thresholdBytes={2 ** 30}/>
-      </Flex>
+      </Group>
       <PreviewSection canvasWidth={384} canvasHeight={216}/>
-      <Accordion isQuiet allowsMultipleExpanded defaultExpandedKeys={["saved", "processed"]}>
+      <Accordion multiple defaultValue={["saved", "processed"]}>
         <BrowserStorageSection id="saved"/>
         <ServerStorageSection id="processed"/>
       </Accordion>
-      <ToastContainer/>
-    </Flex>
+      <Notifications limit={3} position="bottom-center"/>
+    </Stack>
   );
 }
 

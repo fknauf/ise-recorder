@@ -2,10 +2,6 @@
 
 import { useAppSession } from "./SessionProvider";
 import { useServerEnv } from "../hooks/useServerEnv";
-import { ActionButton, ActionGroup, Button, ButtonGroup, Content, Dialog, DialogContainer, Divider, Flex, Heading, InlineAlert, Item, Link, ProgressCircle, Text, useDialogContainer } from "@adobe/react-spectrum";
-import Download from "@spectrum-icons/workflow/Download";
-import Refresh from "@spectrum-icons/workflow/Refresh";
-import Delete from "@spectrum-icons/workflow/Delete";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
 import { useServerStorage } from "../hooks/useServerStorage";
 import * as z from "zod";
@@ -13,6 +9,9 @@ import { DownloadableRecording, downloadHref, ServerStorageRecording, Unfinished
 import { ReactNode, useState } from "react";
 import { showError, showSuccess } from "../utils/notifications";
 import { ApiError } from "../utils/apiFetch";
+import { modals } from "@mantine/modals";
+import { Alert, Button, Group, Loader, Stack, Text, ThemeIcon } from "@mantine/core";
+import { XIcon, DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon } from "@phosphor-icons/react";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -35,54 +34,34 @@ function prettifyError(error: unknown) {
   return "unknown error";
 }
 
-function PurgeDialog({ recordingName }: Readonly<{ recordingName: string }>) {
-  const { apiUrl } = useServerEnv();
-  const { purge } = useServerStorage();
-
-  const { dismiss } = useDialogContainer();
-
-  if(apiUrl === undefined) {
-    return null;
-  }
-
-  const initiatePurge = async () => {
-    dismiss();
-    try {
-      await purge(recordingName);
-      showSuccess(`Purged ${recordingName}`);
-    } catch(e) {
-      showError(`Failed to purge ${recordingName}`, e);
-    }
-  };
-
-  return (
-    <Dialog size="L">
-      <Heading>
-        Confirm Purge
-      </Heading>
-      <Divider/>
-      <Content>
-        <Text>You are about to permanently delete the recording <strong>{recordingName}</strong> from the server. This cannot be undone. Are you sure?</Text>
-      </Content>
-      <ButtonGroup>
-        <Button
-          variant="secondary"
-          onPress={dismiss}
-          autoFocus
-          data-testid="ss-btn-purgecancel"
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="negative"
-          onPress={initiatePurge}
-          data-testid="ss-btn-purgeconfirm"
-        >
-          Purge
-        </Button>
-      </ButtonGroup>
-    </Dialog>
-  );
+function confirmPurge(
+  recordingName: string,
+  onConfirm: () => void,
+  onCancel: () => void = () => {}
+) {
+  modals.openConfirmModal({
+    title: "Confirm Purge",
+    children:
+      <Group wrap="nowrap" align="flex-start">
+        <ThemeIcon variant="outline" color="warning" size="lg" radius="xl">
+          <WarningIcon/>
+        </ThemeIcon>
+        <Text>
+          You are about to permanently delete the recording <strong>{recordingName}</strong> from the server.
+          This cannot be undone. Are you sure?
+        </Text>
+      </Group>,
+    labels: {
+      confirm: "Purge",
+      cancel: "Cancel"
+    },
+    confirmProps: { "data-testid": "ss-btn-purgeconfirm", "color": "error" },
+    cancelProps: { "data-testid": "ss-btn-purgecancel", "data-autofocus": true },
+    onConfirm,
+    onCancel,
+    centered: true,
+    size: "lg"
+  });
 }
 
 function ActionableRecordingCard(
@@ -117,28 +96,24 @@ function ActionableRecordingCard(
     <RecordingCard title={recordingName} testid={testid}>
       {children}
 
-      <ActionGroup
-        minWidth="size-3000"
-        isJustified={true}
-        disabledKeys={busy ? [ "rerender", "purge" ] : []}
-        onAction={key => {
-          if(key === "rerender") {
-            onRerender();
-          } else if(key === "purge") {
-            onPurge(recordingName);
-          }
-        }}
-      >
-        <Item key="rerender" data-testid="ss-btn-rerender">
-          <Refresh/>
-          <Text>Rerender</Text>
-        </Item>
-
-        <Item key="purge" data-testid="ss-btn-purge">
-          <Delete/>
-          <Text>Purge</Text>
-        </Item>
-      </ActionGroup>
+      <Stack>
+        <Button
+          data-testid="ss-btn-rerender"
+          disabled={busy}
+          onClick={onRerender}
+          leftSection={<RepeatIcon/>}
+        >
+          Rerender
+        </Button>
+        <Button
+          data-testid="ss-btn-purge"
+          disabled={busy}
+          onClick={() => confirmPurge(recordingName, () => onPurge(recordingName))}
+          leftSection={<TrashIcon/>}
+        >
+          Purge
+        </Button>
+      </Stack>
     </RecordingCard>
   );
 }
@@ -163,19 +138,18 @@ function ProcessedRecordingCard(
       onPurge={onPurge}
       testid="ss-card-completed"
     >
-      <Link
-        variant="primary"
+      <Button
+        component="a"
+        download
+        variant="subtle"
         key={recording.name}
         href={url}
-        download={true}
-        width="100%"
+        w="100%"
         target="_blank"
+        leftSection={<DownloadIcon/>}
       >
-        <ActionButton width="100%" isQuiet>
-          <Download/>
-          <Text>Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)</Text>
-        </ActionButton>
-      </Link>
+        Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)
+      </Button>
     </ActionableRecordingCard>
   );
 }
@@ -184,16 +158,10 @@ const RenderingRecordingCard = (
   { recording }: Readonly<{ recording: UnfinishedRecording }>
 ) =>
   <RecordingCard title={recording.name} testid="ss-card-rendering">
-    <Flex
-      direction="row"
-      gap="size-100"
-      alignItems="center"
-      justifyContent="center"
-      height="100%"
-    >
-      <ProgressCircle size="S" aria-label="Rendering" isIndeterminate/>
+    <Group align="center" justify="center" h="100%">
+      <Loader role="progressbar" aria-label="Rendering"/>
       <Text>Rendering...</Text>
-    </Flex>
+    </Group>
   </RecordingCard>;
 
 function UnprocessedRecordingCard(
@@ -205,18 +173,28 @@ function UnprocessedRecordingCard(
       onPurge={onPurge}
       testid="ss-card-unprocessed"
     >
-      <Text marginTop="size-50">Postprocessing failed.</Text>
+      <Text>Postprocessing failed.</Text>
     </ActionableRecordingCard>
   );
 }
 
 function AnyRecordingCard(
-  { recording, onPurge }:
+  { recording }:
   Readonly<{
     recording: ServerStorageRecording
-    onPurge: (recordingName: string) => void
   }>
 ) {
+  const { purge } = useServerStorage();
+
+  const onPurge = async () => {
+    try {
+      await purge(recording.name);
+      showSuccess(`Purged ${recording.name}`);
+    } catch(e) {
+      showError(`Failed to purge ${recording.name}`, e);
+    }
+  };
+
   if(recording.state === "completed") {
     return <ProcessedRecordingCard recording={recording} onPurge={onPurge}/>;
   } else if(recording.state === "rendering") {
@@ -230,21 +208,15 @@ function AnyRecordingCard(
 
 function ServerStorageSectionImpl({ id }: Readonly<{ id: string }>) {
   const { data, error } = useServerStorage();
-  const [ purgeCandidate, setPurgeCandidate ] = useState<string | null>(null);
 
   const sectionTitle = "Server-Side Processed Recordings";
 
   if(error !== undefined) {
     return (
       <RecordingCardSection id={id} title={sectionTitle}>
-        <InlineAlert variant="negative">
-          <Heading>
-            Error fetching list of processed recordings
-          </Heading>
-          <Content>
-            {prettifyError(error)}
-          </Content>
-        </InlineAlert>
+        <Alert variant="light" color="error" icon={<XIcon/>} title="Error fetching list of processed recordings">
+          {prettifyError(error)}
+        </Alert>
       </RecordingCardSection>
     );
   }
@@ -254,12 +226,9 @@ function ServerStorageSectionImpl({ id }: Readonly<{ id: string }>) {
   }
 
   return (
-    <RecordingCardSection id={id} title={sectionTitle}>
-      <DialogContainer onDismiss={() => setPurgeCandidate(null)}>
-        { purgeCandidate !== null && <PurgeDialog recordingName={purgeCandidate}/> }
-      </DialogContainer>
+    <RecordingCardSection id={id} title={sectionTitle} icon={<CloudIcon/>}>
       {
-        data.map(rec => <AnyRecordingCard key={rec.name} recording={rec} onPurge={setPurgeCandidate}/>)
+        data.map(rec => <AnyRecordingCard key={rec.name} recording={rec}/>)
       }
     </RecordingCardSection>
   );
@@ -273,5 +242,7 @@ export function ServerStorageSection({ id }: Readonly<{ id: string }>) {
     return null;
   }
 
-  return <ServerStorageSectionImpl id={id}/>;
+  return (
+    <ServerStorageSectionImpl id={id}/>
+  );
 }

@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { anAppSession } from "../helpers/session";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import type { AppSession } from "@/lib/components/SessionProvider";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
@@ -47,11 +47,11 @@ function renderMessage(
   }));
 
   render(
-    <Provider theme={defaultTheme}>
+    <MantineTestProvider>
       <AppStoreProvider serverEnv={serverEnv}>
         <AuthStatusMessage/>
       </AppStoreProvider>
-    </Provider>
+    </MantineTestProvider>
   );
 
   return { interactiveSignin, reauthenticate };
@@ -91,7 +91,7 @@ test("a stale session warns and offers reauthentication", async () => {
     isStale: true
   });
 
-  expect(screen.getByText("Authentication Session is Stale")).toBeInTheDocument();
+  expect(screen.getByText("Session is Stale")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Reauthenticate/i })).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: /Reauthenticate/i }));

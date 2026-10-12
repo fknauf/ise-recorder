@@ -5,7 +5,7 @@ import { hydrateRoot, Root } from "react-dom/client";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { ActiveRecording, AppStoreState } from "@/lib/store/store";
 import { ReactNode, useEffect } from "react";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 
@@ -34,12 +34,12 @@ const recording = (name: string): ActiveRecording =>
   ({ state: "recording", name, stop: () => {} });
 
 const providers = (children: ReactNode) =>
-  <Provider theme={defaultTheme}>
+  <MantineTestProvider>
     <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:8000" }}>
       <StoreHandle/>
       {children}
     </AppStoreProvider>
-  </Provider>;
+  </MantineTestProvider>;
 
 /** Render the warning with these recordings saved in the browser, once storage has been looked at. */
 async function renderWarning(saved: string[]) {

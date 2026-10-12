@@ -51,7 +51,7 @@ export function AudioPreview(
 
       // paint spectrum as a histogram. Use the warning color iff audio is clipping.
       ctx.lineWidth = Math.ceil(space);
-      ctx.strokeStyle = computedStyle.getPropertyValue(isClipping ? "--warning" : "--foreground");
+      ctx.strokeStyle = computedStyle.getPropertyValue(isClipping ? "--mantine-color-orange-4" : "--mantine-color-text");
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 

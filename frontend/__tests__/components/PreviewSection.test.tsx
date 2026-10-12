@@ -3,7 +3,7 @@ import { canvasVideoTrack } from "../helpers/media";
 import { useEffect } from "react";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { PreviewSection } from "@/lib/components/PreviewSection";
 import { ActiveRecording } from "@/lib/store/store";
@@ -49,12 +49,12 @@ let tracks: MediaStreamTrack[] = [];
 
 function renderSection() {
   render(
-    <Provider theme={defaultTheme}>
+    <MantineTestProvider>
       <AppStoreProvider serverEnv={{}}>
         <StoreHandles/>
         <PreviewSection canvasWidth={64} canvasHeight={48}/>
       </AppStoreProvider>
-    </Provider>
+    </MantineTestProvider>
   );
 }
 

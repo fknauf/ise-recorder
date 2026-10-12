@@ -1,9 +1,8 @@
 "use client";
 
 import { useAppSession } from "./SessionProvider";
-import { ActionButton, Content, Flex, Heading, InlineAlert, ProgressCircle, Text } from "@adobe/react-spectrum";
-import Refresh from "@spectrum-icons/workflow/Refresh";
-import Login from "@spectrum-icons/workflow/Login";
+import { Alert, Button, Group, Loader, Stack, Text } from "@mantine/core";
+import { XIcon, WarningIcon, InfoIcon, RepeatIcon, SignInIcon } from "@phosphor-icons/react";
 import { useServerEnv } from "../hooks/useServerEnv";
 
 export function AuthStatusMessage() {
@@ -27,66 +26,54 @@ export function AuthStatusMessage() {
 
   if(isLoading && !isAuthenticated) {
     return (
-      <InlineAlert variant="info">
-        <Heading>Authentication Loading</Heading>
-        <Content>
-          <Flex direction="row" gap="size-100" justifyContent="center" alignItems="center">
-            <ProgressCircle aria-label="Authenticating" size="M" isIndeterminate/>
-            <Text>Authenticating...</Text>
-          </Flex>
-        </Content>
-      </InlineAlert>
+      <Alert variant="outline" color="info" icon={<InfoIcon/>} title="Authentication Loading">
+        <Group justify="center" align="center" gap="xs">
+          <Loader size="sm" role="progressbar" aria-label="Authenticating"/>
+          <Text>Authenticating...</Text>
+        </Group>
+      </Alert>
     );
   }
 
   if(error !== undefined && error.source !== "signinSilent") {
     return (
-      <InlineAlert variant="negative">
-        <Heading>Authentication Error</Heading>
-        <Content>
-          <Flex direction="column">
-            <Text>Authentication Error: {error.message || "Unknown Error"}</Text>
-            <ActionButton onPress={interactiveSignin} marginTop="size-100" alignSelf="center">
-              <Refresh/>
-              <Text>Retry authentication</Text>
-            </ActionButton>
-          </Flex>
-        </Content>
-      </InlineAlert>
+      <Alert variant="outline" color="error" icon={<XIcon/>} title="Authentication Error">
+        <Stack align="center">
+          <Text>Authentication Error: {error.message || "Unknown Error"}</Text>
+          <Button
+            onClick={interactiveSignin}
+            leftSection={<RepeatIcon size={14}/>}
+          >
+            Retry authentication
+          </Button>
+        </Stack>
+      </Alert>
     );
   }
 
   if(!isAuthenticated) {
     return (
-      <InlineAlert variant="notice">
-        <Heading>You are not authenticated</Heading>
-        <Content>
-          <Flex direction="column">
-            <Text>Streaming to backend is disabled.</Text>
-            <ActionButton onPress={interactiveSignin} marginTop="size-100" alignSelf="center">
-              <Login/>
-              <Text>Sign in</Text>
-            </ActionButton>
-          </Flex>
-        </Content>
-      </InlineAlert>
+      <Alert variant="outline" color="warning" icon={<WarningIcon/>} title="You are not authenticated">
+        <Stack align="center">
+          <Text>Streaming to backend is disabled.</Text>
+          <Button onClick={interactiveSignin} leftSection={<SignInIcon/>}>
+            Sign in
+          </Button>
+        </Stack>
+      </Alert>
     );
   }
 
   if(isStale) {
     return (
-      <InlineAlert variant="notice">
-        <Heading>Authentication Session is Stale</Heading>
-        <Content>
-          <Flex direction="column">
-            <Text>The authentication session will expire soon.</Text>
-            <ActionButton onPress={reauthenticate} marginTop="size-100" alignSelf="center">
-              <Refresh/>
-              <Text>Reauthenticate</Text>
-            </ActionButton>
-          </Flex>
-        </Content>
-      </InlineAlert>
+      <Alert variant="outline" color="orange" icon={<WarningIcon/>} title="Session is Stale">
+        <Stack align="center">
+          <Text>The authentication session will expire soon.</Text>
+          <Button onClick={reauthenticate} leftSection={<RepeatIcon/>}>
+            Reauthenticate
+          </Button>
+        </Stack>
+      </Alert>
     );
   }
 

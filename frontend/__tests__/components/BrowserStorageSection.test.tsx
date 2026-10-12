@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
 import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { useActiveRecording } from "@/lib/hooks/useActiveRecording";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 import { useReupload } from "@/lib/hooks/useReupload";
@@ -74,16 +74,16 @@ function StoreHandle() {
  * after render has returned. Waiting for it here keeps that update out of the tests, which
  * would otherwise see it land at some random point, outside act.
  */
-async function renderSection(scale: "medium" | "large" = "medium") {
+async function renderSection() {
   render(
-    <Provider theme={defaultTheme} scale={scale}>
+    <MantineTestProvider>
       <AppStoreProvider serverEnv={{}}>
         <StoreHandle/>
         <ExpandedSection>
           <BrowserStorageSection id={SECTION_ID}/>
         </ExpandedSection>
       </AppStoreProvider>
-    </Provider>
+    </MantineTestProvider>
   );
 
   // the quota comes from the same look at storage, and is undefined until it has landed
@@ -288,8 +288,7 @@ const TWO_RECORDINGS: RecordingFileList[] = [
 
 async function renderWithBackend(
   activeRecording: ReturnType<typeof useActiveRecording> = { state: "idle" },
-  removeSavedRecording: (name: string) => Promise<void> = vi.fn(),
-  scale: "medium" | "large" = "medium"
+  removeSavedRecording: (name: string) => Promise<void> = vi.fn()
 ) {
   mockServerEnv.mockReturnValue({ apiUrl: "https://record.example.edu" });
   vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
@@ -301,7 +300,7 @@ async function renderWithBackend(
   });
   vi.mocked(gatherRecordingsList).mockResolvedValue(TWO_RECORDINGS);
 
-  await renderSection(scale);
+  await renderSection();
 
   return screen.getAllByTestId("bs-card-recording");
 }
@@ -412,13 +411,13 @@ test("the downloads stay available while a re-upload is running", async () => {
   expect(downloadFile).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "stream.webm");
 });
 
-test.each([ "medium", "large" ] as const)("a card keeps its height while its re-upload runs (%s scale)", async scale => {
+test("a card keeps its height while its re-upload runs", async () => {
   // the progress takes the place of two buttons, and a card that shrank and grew around it
   // would shift every card after it in the row. The two recordings have one file each and
   // names of the same length, so the only difference between the cards is the upload.
   reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
 
-  const [ idle, uploading ] = await renderWithBackend({ state: "idle" }, vi.fn(), scale);
+  const [ idle, uploading ] = await renderWithBackend({ state: "idle" }, vi.fn());
 
   // the card's content rather than the card: the section lays cards out in a row that
   // stretches each to the tallest, which would make any two cards side by side agree
@@ -437,6 +436,12 @@ const dialog = () => screen.getByRole("dialog");
 const confirmButton = () => within(dialog()).getByTestId("bs-btn-deleteconfirm");
 const cancelButton = () => within(dialog()).getByTestId("bs-btn-deletecancel");
 
+/** Presses a card's remove button and waits for the dialog, which fades in rather than appearing at once. */
+async function askToDelete(card: HTMLElement) {
+  await userEvent.click(removeButton(card));
+  await screen.findByRole("dialog");
+}
+
 /** renderWithBackend, with these recordings marked as not streamed to the backend. */
 async function renderWithUnstreamed(unstreamed: string[], removeSavedRecording = vi.fn()) {
   const cards = await renderWithBackend({ state: "idle" }, removeSavedRecording);
@@ -454,7 +459,7 @@ test("deleting a recording that never reached the backend asks first and deletes
   const onRemove = vi.fn();
   const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
 
-  await userEvent.click(removeButton(cards[1]));
+  await askToDelete(cards[1]);
 
   // the dialog names the recording, so the lecturer can tell which one they are about to lose
   expect(within(dialog()).getByText(/BAR_2025-12-11T214230.418Z/)).toBeInTheDocument();
@@ -465,7 +470,7 @@ test("confirming deletes that one recording and closes the dialog", async () => 
   const onRemove = vi.fn();
   const cards = await renderWithUnstreamed([ "FOO_2025-12-11T213822.748Z", "BAR_2025-12-11T214230.418Z" ], onRemove);
 
-  await userEvent.click(removeButton(cards[1]));
+  await askToDelete(cards[1]);
   await userEvent.click(confirmButton());
 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -476,7 +481,7 @@ test("the dialog starts on Cancel, so a stray Enter keeps the recording", async 
   const onRemove = vi.fn();
   const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
 
-  await userEvent.click(removeButton(cards[1]));
+  await askToDelete(cards[1]);
   await waitFor(() => expect(cancelButton()).toHaveFocus());
   await userEvent.keyboard("{Enter}");
 
@@ -491,14 +496,14 @@ test.each([
   const onRemove = vi.fn();
   const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
 
-  await userEvent.click(removeButton(cards[1]));
+  await askToDelete(cards[1]);
   await backOut();
 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(onRemove).not.toHaveBeenCalled();
 
   // backing out once is not an answer for next time
-  await userEvent.click(removeButton(cards[1]));
+  await askToDelete(cards[1]);
   expect(within(dialog()).getByText(/BAR_2025-12-11T214230.418Z/)).toBeInTheDocument();
   expect(onRemove).not.toHaveBeenCalled();
 });
@@ -533,7 +538,7 @@ test("a confirmed delete that fails is reported", async () => {
   const failure = new DOMException("the file is open elsewhere", "NoModificationAllowedError");
   const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], vi.fn().mockRejectedValue(failure));
 
-  await userEvent.click(removeButton(cards[1]));
+  await askToDelete(cards[1]);
   await userEvent.click(confirmButton());
 
   await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining("BAR_2025-12-11T214230.418Z"), failure));

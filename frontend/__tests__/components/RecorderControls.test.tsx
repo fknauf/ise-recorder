@@ -4,7 +4,7 @@ import { anAppSession } from "../helpers/session";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RecorderControls } from "@/lib/components/RecorderControls";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { useServerEnv } from "@/lib/hooks/useServerEnv";
 import { useLecture } from "@/lib/hooks/useLecture";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
@@ -111,11 +111,11 @@ function setupMockHooks(
 
 function renderControls() {
   render(
-    <Provider theme={defaultTheme}>
+    <MantineTestProvider>
       <SessionProvider serverEnv={{}}>
         <RecorderControls/>
       </SessionProvider>
-    </Provider>
+    </MantineTestProvider>
   );
 }
 
@@ -246,7 +246,8 @@ test.each([
   expect(menu.map(item => item.textContent)).toStrictEqual([ ...devices.video, ...devices.audio ].map(dev => dev.label));
 
   await user.click(menu[pick]);
-  expect(callbacks[opens]).toHaveBeenCalledExactlyOnceWith(uid);
+  // the device itself may be handed over; what matters is that it names the one picked
+  expect(callbacks[opens]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(uid));
 });
 
 test("RecorderControls hands typed lecture data to the store", async () => {
@@ -415,7 +416,8 @@ test.each(DEVICE_MENUS)("the menu behind $button stays open after a refresh that
   await settle("just-refreshed");
 
   expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "true");
-  expect(screen.getByRole("menuitem", { name: device })).toBeInTheDocument();
+  // the menu fades in, so it may not be in the DOM yet even though it is open
+  expect(await screen.findByRole("menuitem", { name: device })).toBeInTheDocument();
 });
 
 test.each(DEVICE_MENUS)("the menu behind $button stays shut if the user closed it before the refresh settled", async ({ button }) => {

@@ -13,7 +13,11 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@adobe/react-spectrum": "^3.47.6",
+    "@mantine/core": "^9.7.1",
+    "@mantine/hooks": "^9.7.1",
+    "@mantine/modals": "^9.7.1",
+    "@mantine/notifications": "^9.7.1",
+    "@phosphor-icons/react": "^2.1.10",
     "glob": "^13.0.6",
     "next": "^16.4.0",
     "oidc-client-ts": "^3.5.0",
@@ -43,7 +47,11 @@
     "@vitest/browser-playwright": "^5.0.3",
     "babel-plugin-react-compiler": "^1.0.0",
     "lodash": "^4.18.1",
+    "oxc-config-mantine": "^1.0.3",
     "oxlint": "^1.87.0",
+    "postcss": "^8.5.29",
+    "postcss-preset-mantine": "^1.18.0",
+    "postcss-simple-vars": "^7.0.1",
     "typescript": "^6",
     "vitest": "^5.0.3",
     "vitest-browser-react": "^2.3.0"

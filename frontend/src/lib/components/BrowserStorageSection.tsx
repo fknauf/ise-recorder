@@ -1,9 +1,8 @@
 "use client";
 
-import { ActionButton, ActionGroup, Button, ButtonGroup, Content, Dialog, DialogContainer, Divider, Flex, Heading, Item, ProgressCircle, Text, useDialogContainer } from "@adobe/react-spectrum";
-import Delete from "@spectrum-icons/workflow/Delete";
-import Download from "@spectrum-icons/workflow/Download";
-import DataUpload from "@spectrum-icons/workflow/DataUpload";
+import { Alert, Button, Group, RingProgress, Stack, Text, ThemeIcon } from "@mantine/core";
+import { modals } from "@mantine/modals";
+import { TrashIcon, DownloadIcon, CloudArrowUpIcon, WarningIcon, BrowserIcon } from "@phosphor-icons/react";
 import { downloadFile, RecordingFileList } from "../utils/browserStorage";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
 import { useReupload } from "../hooks/useReupload";
@@ -11,7 +10,6 @@ import { useActiveRecording } from "../hooks/useActiveRecording";
 import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
 import { useServerEnv } from "../hooks/useServerEnv";
 import { useAppSession } from "./SessionProvider";
-import { useState } from "react";
 import { useAppStore } from "../hooks/useAppStore";
 import { showError } from "../utils/notifications";
 
@@ -24,45 +22,34 @@ const mibFormatter = new Intl.NumberFormat(
   }
 );
 
-function DeleteDialog({ recordingName }: Readonly<{ recordingName: string }>) {
-  const { dismiss } = useDialogContainer();
-  const { removeSavedRecording } = useBrowserStorage();
-
-  return (
-    <Dialog size="L">
-      <Heading>
-        Confirm Delete
-      </Heading>
-      <Divider/>
-      <Content>
-        <Text>You are about to delete the raw recording <strong>{recordingName}</strong> from your browser. This recording has not been uploaded to the backend. Are you sure?</Text>
-      </Content>
-      <ButtonGroup>
-        <Button
-          variant="secondary"
-          onPress={dismiss}
-          autoFocus
-          data-testid="bs-btn-deletecancel"
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="negative"
-          onPress={async () => {
-            dismiss();
-            try {
-              await removeSavedRecording(recordingName);
-            } catch(e) {
-              showError(`Failed to delete ${recordingName}`, e);
-            }
-          }}
-          data-testid="bs-btn-deleteconfirm"
-        >
-          Delete
-        </Button>
-      </ButtonGroup>
-    </Dialog>
-  );
+function confirmDelete(
+  recordingName: string,
+  onConfirm: () => void,
+  onCancel: () => void = () => {}
+) {
+  modals.openConfirmModal({
+    title: "Confirm Delete",
+    children:
+      <Group wrap="nowrap" align="flex-start">
+        <ThemeIcon variant="outline" color="warning" size="lg" radius="xl">
+          <WarningIcon/>
+        </ThemeIcon>
+        <Text>
+          You are about to delete the raw recording <strong>{recordingName}</strong> from your browser.
+          This recording has not been uploaded to the backend. Are you sure?
+        </Text>
+      </Group>,
+    labels: {
+      confirm: "Delete",
+      cancel: "Cancel"
+    },
+    confirmProps: { "data-testid": "bs-btn-deleteconfirm", color: "error" },
+    cancelProps: { "data-testid": "bs-btn-deletecancel", "data-autofocus": true },
+    onConfirm,
+    onCancel,
+    centered: true,
+    size: "lg"
+  });
 }
 
 function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: RecordingFileList; onDelete: (recordingName: string) => void }>) {
@@ -89,66 +76,65 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
       title={recording.name}
       testid="bs-card-recording"
     >
-      <Flex
-        direction="column"
-        gap="size-100"
-      >
+      <Button.Group orientation="vertical">
         {
           recording.files.map(({ name, size }) =>
-            <ActionButton
+            <Button
+              variant="subtle"
               key={`download-${name}`}
-              isDisabled={isRecording}
-              onPress={() => onDownload(name)}
+              disabled={isRecording}
+              onClick={() => onDownload(name)}
               data-testid="bs-btn-download"
-              isQuiet
+              leftSection={<DownloadIcon/>}
             >
-              <Download/>
-              <Text>{name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}</Text>
-            </ActionButton>
+              {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}
+            </Button>
           )
         }
-      </Flex>
+      </Button.Group>
       {
         isUploading
-          ? <Flex
-              direction="row"
-              gap="size-100"
-              justifyContent="center"
-              alignItems="center"
-              height="size-400"
+          ? <Group
+              justify="center"
+              align="center"
               data-testid="bs-ind-uploading"
+              h={88}
+              gap="xs"
             >
-              <ProgressCircle size="S" value={progress} aria-label="Uploading"/>
+              <RingProgress
+                size={70}
+                thickness={6}
+                sections={[{ value: progress ?? 0, color: "info" }]}
+                role="progressbar"
+                aria-label="Uploading"
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              />
               <Text>Uploading...</Text>
-            </Flex>
-          : <ActionGroup
-              minWidth="size-3000"
-              isJustified={true}
-              disabledKeys={[
-                ...uploadDisabled ? [ "upload" ] : [],
-                ...deleteDisabled ? [ "delete" ] : []
-              ]}
-              onAction={key => {
-                if(key === "upload") {
-                  reupload();
-                } else if(key === "delete") {
-                  onDelete(recording.name);
-                }
-              }}
-            >
+            </Group>
+          : <Stack>
               {
                 apiUrl !== undefined
-                  ? <Item key="upload" data-testid="bs-btn-reupload">
-                      <DataUpload/>
-                      <Text>Re-upload</Text>
-                    </Item>
+                  ? <Button
+                      key="upload" data-testid="bs-btn-reupload"
+                      onClick={reupload}
+                      disabled={uploadDisabled}
+                      leftSection={<CloudArrowUpIcon/>}
+                    >
+                    Re-upload
+                    </Button>
                   : null
               }
-              <Item key="delete" data-testid="bs-btn-delete">
-                <Delete/>
-                <Text>Delete</Text>
-              </Item>
-            </ActionGroup>
+              <Button
+                key="delete" data-testid="bs-btn-delete"
+                onClick={() => onDelete(recording.name)}
+                disabled={deleteDisabled}
+                leftSection={<TrashIcon/>}
+              >
+                Delete
+              </Button>
+            </Stack>
       }
     </RecordingCard>
   );
@@ -162,30 +148,30 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
  */
 export function BrowserStorageSection({ id }: Readonly<{ id: string }>) {
   const { removeSavedRecording, savedRecordings } = useBrowserStorage();
-  const [ deleteCandidate, setDeleteCandidate ] = useState<string | null>(null);
   const unstreamedRecordings = useAppStore(state => state.unstreamedRecordings);
 
   if(savedRecordings.length === 0) {
     return null;
   }
 
+  const doDeleteRecording = async (recordingName: string) => {
+    try {
+      await removeSavedRecording(recordingName);
+    } catch(e) {
+      showError(`Failed to delete ${recordingName}`, e);
+    }
+  };
+
   const onDelete = async (recordingName: string) => {
     if(unstreamedRecordings.includes(recordingName)) {
-      setDeleteCandidate(recordingName);
+      confirmDelete(recordingName, () => doDeleteRecording(recordingName));
     } else {
-      try {
-        await removeSavedRecording(recordingName);
-      } catch(e) {
-        showError(`Failed to delete ${recordingName}`, e);
-      }
+      await doDeleteRecording(recordingName);
     }
   };
 
   return (
-    <RecordingCardSection id={id} title="Browser-Local Raw Recordings">
-      <DialogContainer onDismiss={() => setDeleteCandidate(null)}>
-        { deleteCandidate !== null && <DeleteDialog recordingName={deleteCandidate}/> }
-      </DialogContainer>
+    <RecordingCardSection id={id} title="Browser-Local Raw Recordings" icon={<BrowserIcon/>}>
       {
         savedRecordings.map(rec =>
           <SavedRecordingCard

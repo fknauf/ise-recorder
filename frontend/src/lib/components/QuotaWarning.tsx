@@ -1,7 +1,8 @@
 "use client";
 
-import { Content, Flex, Heading, InlineAlert, Text } from "@adobe/react-spectrum";
+import { Alert, Stack, Text } from "@mantine/core";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
+import { WarningIcon } from "@phosphor-icons/react";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -37,19 +38,16 @@ export function QuotaWarning({ thresholdBytes }: Readonly<QuotaWarningProps>) {
   }
 
   return (
-    <InlineAlert variant="notice">
-      <Heading>Quota warning</Heading>
-      <Content>
-        <Flex direction="column">
-          <Text>
-            Browser storage running low: {formatMib(usage)} of {formatMib(quota)} used.
-          </Text>
+    <Alert variant="outline" color="warning" icon={<WarningIcon/>} title="Quota Warning">
+      <Stack>
+        <Text>
+          Browser storage running low: {formatMib(usage)} of {formatMib(quota)} used.
+        </Text>
 
-          <Text>
-            Please consider removing some old recordings.
-          </Text>
-        </Flex>
-      </Content>
-    </InlineAlert>
+        <Text>
+          Please consider removing some old recordings.
+        </Text>
+      </Stack>
+    </Alert>
   );
 }

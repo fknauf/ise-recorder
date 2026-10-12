@@ -1,5 +1,5 @@
-import { Disclosure, DisclosureTitle, DisclosurePanel, Flex, Text, View } from "@adobe/react-spectrum";
 import { ReactNode } from "react";
+import { Accordion, Card, Group, Stack, Text } from "@mantine/core";
 
 interface RecordingCardProps {
   title: string
@@ -10,45 +10,28 @@ interface RecordingCardProps {
 interface RecordingCardSectionProps {
   id: string
   title: string
+  icon?: ReactNode
   children: ReactNode
 }
 
 export const RecordingCard = ({ title, testid, children }: Readonly<RecordingCardProps>) =>
-  <View
-    borderWidth="thin"
-    borderColor="mid"
-    borderRadius="medium"
-    padding="size-100"
-    data-testid={testid}
-  >
-    <Flex
-      direction="column"
-      gap="size-100"
-      height="100%"
-      alignItems="center"
-    >
+  <Card withBorder data-testid={testid}>
+    <Stack align="center" h="100%">
       <Text>{title}</Text>
-      <Flex
-        direction="column"
-        gap="size-100"
-        width="100%"
-        height="100%"
-        justifyContent="space-between"
-        alignItems="stretch"
-      >
+      <Stack w="100%" h="100%" justify="space-between" align="stretch">
         { children }
-      </Flex>
-    </Flex>
-  </View>;
+      </Stack>
+    </Stack>
+  </Card>;
 
-export const RecordingCardSection = ({ id, title, children }: Readonly<RecordingCardSectionProps>) =>
-  <Disclosure id={id}>
-    <DisclosureTitle>
+export const RecordingCardSection = ({ id, title, icon, children }: Readonly<RecordingCardSectionProps>) =>
+  <Accordion.Item value={id}>
+    <Accordion.Control icon={icon}>
       {title}
-    </DisclosureTitle>
-    <DisclosurePanel>
-      <Flex direction="row" gap="size-100" wrap>
+    </Accordion.Control>
+    <Accordion.Panel>
+      <Group wrap="wrap" align="stretch">
         {children}
-      </Flex>
-    </DisclosurePanel>
-  </Disclosure>;
+      </Group>
+    </Accordion.Panel>
+  </Accordion.Item>;

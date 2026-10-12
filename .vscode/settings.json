@@ -1,8 +1,11 @@
 {
     "cSpell.words": [
+        "addaudio",
         "addgroup",
         "addopts",
+        "addscreen",
         "adduser",
+        "addvideo",
         "aiofiles",
         "aiorwlock",
         "aiosmtplib",
@@ -57,6 +60,7 @@
         "isalnum",
         "isort",
         "janked",
+        "jitless",
         "kanidm",
         "lavfi",
         "Leerzeichen",
@@ -84,6 +88,8 @@
         "postprocessings",
         "processings",
         "purgeable",
+        "purgecancel",
+        "purgeconfirm",
         "pycache",
         "pydantic",
         "pylint",

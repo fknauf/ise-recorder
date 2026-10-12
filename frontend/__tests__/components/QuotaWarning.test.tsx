@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 
 vi.mock("@/lib/hooks/useBrowserStorage");
@@ -19,9 +19,9 @@ test("QuotaWarning shows up if quota is critical", async () => {
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <MantineTestProvider>
       <QuotaWarning thresholdBytes={2 ** 30}/>
-    </Provider>
+    </MantineTestProvider>
   );
 
   await screen.findByRole("alert");
@@ -42,9 +42,9 @@ test("QuotaWarning doesn't show up if quota is not critical", async () => {
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <MantineTestProvider>
       <QuotaWarning thresholdBytes={2 ** 30}/>
-    </Provider>
+    </MantineTestProvider>
   );
 
   const quotaWarning = screen.queryByRole("alert");
@@ -63,9 +63,9 @@ test("QuotaWarning doesn't show up if quota is unknown", async () => {
   });
 
   render(
-    <Provider theme={defaultTheme}>
+    <MantineTestProvider>
       <QuotaWarning thresholdBytes={2 ** 30}/>
-    </Provider>
+    </MantineTestProvider>
   );
 
   const quotaWarning = screen.queryByRole("alert");

@@ -1,7 +1,8 @@
 "use client";
 
-import { Content, Flex, Heading, InlineAlert } from "@adobe/react-spectrum";
+import { Alert, Group } from "@mantine/core";
 import { useEffect } from "react";
+import { XIcon } from "@phosphor-icons/react";
 
 export default function ErrorPage({
   error
@@ -13,13 +14,10 @@ export default function ErrorPage({
   }, [error]);
 
   return (
-    <Flex direction="row" justifyContent="center" marginTop="size-200">
-      <InlineAlert variant="negative">
-        <Heading>Unexpected Error</Heading>
-        <Content>
-          {error.message}
-        </Content>
-      </InlineAlert>
-    </Flex>
+    <Group justify="center">
+      <Alert variant="light" color="error" title="Unexpected Error" icon={<XIcon/>}>
+        {error.message}
+      </Alert>
+    </Group>
   );
 }

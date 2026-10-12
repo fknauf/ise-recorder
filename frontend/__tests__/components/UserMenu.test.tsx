@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { anAppSession } from "../helpers/session";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { UserMenu } from "@/lib/components/UserMenu";
 
 const mockUseAppSession = vi.fn();
@@ -29,9 +29,9 @@ async function renderMenu(
   mockUseAppSession.mockReturnValue(anAppSession({ isAuthenticated, userName, signout, interactiveSignin, reauthenticate }));
 
   render(
-    <Provider theme={defaultTheme}>
+    <MantineTestProvider>
       <UserMenu/>
-    </Provider>
+    </MantineTestProvider>
   );
 
   await userEvent.click(screen.getByRole("button", { name: "User menu" }));

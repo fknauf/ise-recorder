@@ -133,10 +133,14 @@ async function renderPreview() {
 
 // --- the visual contract ---------------------------------------------------
 
-// some tests give the theme's colors values of their own, to tell the two strokes apart
+// The theme's variables the strokes are read from. Some tests give them values of their own,
+// to tell the two strokes apart.
+const FOREGROUND = "--mantine-color-text";
+const WARNING = "--mantine-color-orange-4";
+
 afterEach(() => {
-  document.body.style.removeProperty("--foreground");
-  document.body.style.removeProperty("--warning");
+  document.body.style.removeProperty(FOREGROUND);
+  document.body.style.removeProperty(WARNING);
 });
 
 test("bar height scales with the level in each frequency bin", async () => {
@@ -177,8 +181,8 @@ test("a silent input draws a flat baseline rather than nothing at all", async ()
 });
 
 test("clipping audio is drawn in the warning colour", async () => {
-  document.body.style.setProperty("--foreground", "rgb(1, 2, 3)");
-  document.body.style.setProperty("--warning", "rgb(9, 8, 7)");
+  document.body.style.setProperty(FOREGROUND, "rgb(1, 2, 3)");
+  document.body.style.setProperty(WARNING, "rgb(9, 8, 7)");
 
   // a sample pinned near the rail is what clipping looks like in the time domain
   stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [ 251 ]);
@@ -193,8 +197,8 @@ test("clipping audio is drawn in the warning colour", async () => {
 });
 
 test("audio within range is drawn in the foreground colour", async () => {
-  document.body.style.setProperty("--foreground", "rgb(1, 2, 3)");
-  document.body.style.setProperty("--warning", "rgb(9, 8, 7)");
+  document.body.style.setProperty(FOREGROUND, "rgb(1, 2, 3)");
+  document.body.style.setProperty(WARNING, "rgb(9, 8, 7)");
 
   stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [ 130 ]);
 

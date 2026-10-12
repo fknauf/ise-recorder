@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { anAppSession } from "../helpers/session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
 import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
 import { useServerStorage } from "@/lib/hooks/useServerStorage";
 import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "@/lib/utils/serverStorage";
@@ -117,11 +117,11 @@ function renderSection(options: SectionOptions = {}) {
   // a cache per test, for the tests that run the real hook; the others never reach it
   render(
     <SWRConfig value={{ provider: () => new Map() }}>
-      <Provider theme={defaultTheme}>
+      <MantineTestProvider>
         <ExpandedSection>
           <ServerStorageSection id={SECTION_ID}/>
         </ExpandedSection>
-      </Provider>
+      </MantineTestProvider>
     </SWRConfig>
   );
 }
@@ -519,6 +519,12 @@ const dialog = () => screen.getByRole("dialog");
 const confirmButton = () => within(dialog()).getByTestId("ss-btn-purgeconfirm");
 const cancelButton = () => within(dialog()).getByTestId("ss-btn-purgecancel");
 
+/** Presses a card's purge button and waits for the dialog, which fades in rather than appearing at once. */
+async function askToPurge(card: HTMLElement) {
+  await userEvent.click(purgeButton(card));
+  await screen.findByRole("dialog");
+}
+
 test("finished and failed recordings offer a purge, rendering ones do not", () => {
   renderSection({ data: UNPROCESSED_LISTING });
 
@@ -531,7 +537,7 @@ test("finished and failed recordings offer a purge, rendering ones do not", () =
 test("the purge button asks first and sends nothing", async () => {
   renderSection();
 
-  await userEvent.click(purgeButton(cards()[1]));
+  await askToPurge(cards()[1]);
 
   // the dialog names the recording, so the lecturer can tell which one they are about to lose
   expect(within(dialog()).getByText(/PSU_2026/)).toBeInTheDocument();
@@ -542,7 +548,7 @@ test("the purge button asks first and sends nothing", async () => {
 test("the dialog starts on Cancel, so a stray Enter keeps the recording", async () => {
   renderSection();
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
 
   await waitFor(() => expect(cancelButton()).toHaveFocus());
 
@@ -555,7 +561,7 @@ test("the dialog starts on Cancel, so a stray Enter keeps the recording", async 
 test("cancelling closes the dialog and sends nothing", async () => {
   renderSection();
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.click(cancelButton());
 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -565,7 +571,7 @@ test("cancelling closes the dialog and sends nothing", async () => {
 test("escape closes the dialog and sends nothing", async () => {
   renderSection();
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.keyboard("{Escape}");
 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -575,7 +581,7 @@ test("escape closes the dialog and sends nothing", async () => {
 test("confirming purges that one recording, says so and closes the dialog", async () => {
   await renderSectionWithCache();
 
-  await userEvent.click(purgeButton(cards()[1]));
+  await askToPurge(cards()[1]);
   await userEvent.click(confirmButton());
 
   expect(purgeRecording).toHaveBeenCalledExactlyOnceWith({ apiUrl: API_URL, getAccessToken }, "PSU_2026");
@@ -587,7 +593,7 @@ test("confirming purges that one recording, says so and closes the dialog", asyn
 test("a failed recording can be purged the same way", async () => {
   await renderSectionWithCache(UNPROCESSED_LISTING);
 
-  await userEvent.click(purgeButton(unprocessedCards()[0]));
+  await askToPurge(unprocessedCards()[0]);
   await userEvent.click(confirmButton());
 
   expect(purgeRecording).toHaveBeenCalledExactlyOnceWith({ apiUrl: API_URL, getAccessToken }, "OLD_2024");
@@ -600,7 +606,7 @@ test("the dialog closes as soon as the purge is confirmed", async () => {
 
   vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -621,7 +627,7 @@ test("a purge that succeeds after the dialog closed still says so", async () => 
     };
   }));
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
@@ -642,7 +648,7 @@ test("a purge that is refused after the dialog closed puts the card back and say
     refuse = () => reject(refusal);
   }));
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
@@ -660,11 +666,11 @@ test("another recording can be purged while the first purge is still in flight",
 
   vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
   await waitFor(() => expect(names(cards())).toStrictEqual([ "PSU_2026" ]));
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
 
   await waitFor(() => expect(cards()).toHaveLength(0));
@@ -680,7 +686,7 @@ test("a rerender while a purge is in flight does not bring the purged card back"
   vi.mocked(purgeRecording).mockReturnValue(new Promise(() => {}));
   vi.mocked(schedulePostprocessing).mockReturnValue(new Promise(() => {}));
 
-  await userEvent.click(purgeButton(cards()[0]));
+  await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
   await waitFor(() => expect(names(cards())).toStrictEqual([ "PSU_2026" ]));
 

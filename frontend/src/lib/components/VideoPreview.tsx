@@ -1,6 +1,6 @@
 "use client";
 
-import { Flex, Switch } from "@adobe/react-spectrum";
+import { Group, Stack, Switch } from "@mantine/core";
 import { ReactNode } from "react";
 
 export interface VideoPreviewProps {
@@ -36,7 +36,7 @@ export function VideoPreview(
   };
 
   return (
-    <Flex direction="column" gap="size-100">
+    <Stack>
       <video
         ref={attachStream}
         autoPlay
@@ -48,24 +48,22 @@ export function VideoPreview(
         role="img"
       />
 
-      <Flex direction="row" justifyContent="space-between">
+      <Group justify="space-between">
         <Switch
-          isDisabled={switchesDisabled}
-          isSelected={isMainDisplay}
-          onChange={onToggleMainDisplay}
+          disabled={switchesDisabled}
+          checked={isMainDisplay}
+          onChange={event => onToggleMainDisplay(event.currentTarget.checked)}
           data-testid="vp-toggle-main"
-        >
-          Main Display
-        </Switch>
+          label="Main Display"
+        />
         <Switch
-          isDisabled={switchesDisabled}
-          isSelected={isOverlay}
-          onChange={onToggleOverlay}
+          disabled={switchesDisabled}
+          checked={isOverlay}
+          onChange={event => onToggleOverlay(event.currentTarget.checked)}
           data-testid="vp-toggle-overlay"
-        >
-          Overlay
-        </Switch>
-      </Flex>
-    </Flex>
+          label="Overlay"
+        />
+      </Group>
+    </Stack>
   );
 }

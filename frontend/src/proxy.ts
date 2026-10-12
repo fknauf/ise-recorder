@@ -26,12 +26,13 @@ export function proxy(request: NextRequest) {
   }
 
   // would like to use ${isDev ? "'unsafe-eval'" : `nonce-${nonce}`}; instead of unsafe-inline for
-  // style-src, but react spectrum requires inline styles and doesn't apply nonces at the moment.
-  // Perhaps after https://github.com/adobe/react-spectrum/issues/8273 is resolved.
+  // style-src, but mantine requires inline styles attributes and can only apply nonces to elements.
   const cspHeader = `
     default-src 'self';
     script-src 'nonce-${nonce}' 'strict-dynamic' 'self' ${isDev ? "'unsafe-eval'" : ""};
     style-src 'self' 'unsafe-inline';
+    style-src-attr 'self' 'unsafe-inline';
+    style-src-elem 'self' ${isDev ? "'unsafe-inline'" : `'nonce-${nonce}'`};
     img-src 'self' blob: data:;
     font-src 'self';
     object-src 'none';

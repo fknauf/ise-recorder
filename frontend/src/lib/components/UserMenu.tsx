@@ -1,51 +1,42 @@
-import { ActionButton, Button, Content, Dialog, DialogTrigger, Divider, Flex, Heading, Text } from "@adobe/react-spectrum";
-import LogOut from "@spectrum-icons/workflow/LogOut";
-import Login from "@spectrum-icons/workflow/Login";
-import Refresh from "@spectrum-icons/workflow/Refresh";
-import User from "@spectrum-icons/workflow/User";
+import { ActionIcon, Button, Divider, Popover, Stack, Text } from "@mantine/core";
 import { useAppSession } from "../components/SessionProvider";
+import { RepeatIcon, SignInIcon, SignOutIcon, UserIcon } from "@phosphor-icons/react";
 
 export function UserMenu() {
   const { isAuthenticated, userName, signout, interactiveSignin, reauthenticate } = useAppSession();
 
   return (
-    <DialogTrigger type="popover">
-      <Button variant="primary" aria-label="User menu" data-testid="um-btn-open">
-        <User/>
-      </Button>
-      <Dialog size="S">
-        <Heading>
-          User Information
-        </Heading>
-        <Divider/>
-        <Content>
+    <Popover withArrow position="bottom-start" offset={12} arrowPosition="center" arrowSize={12}>
+      <Popover.Target>
+        <ActionIcon
+          variant="outline"
+          color="neutral"
+          size="xl"
+          radius="xl"
+          aria-label="User menu"
+          data-testid="um-btn-open"
+        >
+          <UserIcon style={{ width: "70%", height: "70%" }}/>
+        </ActionIcon>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Stack miw={256}>
+          <Text>User Information</Text>
+          <Divider/>
           {
             isAuthenticated
-              ? <>
-                  <Flex direction="column" gap="size-200">
-                    <Text>Signed in as {userName}</Text>
-                    <ActionButton onPress={signout}>
-                      <LogOut/>
-                      <Text>Sign out</Text>
-                    </ActionButton>
-                    <ActionButton onPress={reauthenticate}>
-                      <Refresh/>
-                      <Text>Reauthenticate</Text>
-                    </ActionButton>
-                  </Flex>
-                </>
-              : <>
-                  <Flex direction="column" gap="size-200">
-                    <Text>Not signed in</Text>
-                    <ActionButton onPress={interactiveSignin}>
-                      <Login/>
-                      <Text>Sign in</Text>
-                    </ActionButton>
-                  </Flex>
-                </>
+              ? <Stack>
+                  <Text>Signed in as {userName}</Text>
+                  <Button onClick={signout} leftSection={<SignOutIcon/>}>Sign out</Button>
+                  <Button onClick={reauthenticate} leftSection={<RepeatIcon/>}>Reauthenticate</Button>
+                </Stack>
+              : <Stack>
+                  <Text>Not signed in</Text>
+                  <Button onClick={interactiveSignin} leftSection={<SignInIcon/>}>Sign in</Button>
+                </Stack>
           }
-        </Content>
-      </Dialog>
-    </DialogTrigger>
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
   );
 }

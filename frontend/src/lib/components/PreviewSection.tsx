@@ -1,12 +1,11 @@
 "use client";
 
 import { ReactNode } from "react";
-import { ActionButton, Flex, Text, View } from "@adobe/react-spectrum";
 import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { useActiveRecording } from "../hooks/useActiveRecording";
-import Close from "@spectrum-icons/workflow/Close";
+import { Card, CloseButton, Group, Stack, Text } from "@mantine/core";
 
 interface PreviewCardProps {
   label: string | undefined
@@ -29,24 +28,22 @@ const PreviewCard = (
     children
   }: Readonly<PreviewCardProps>
 ) =>
-  <View borderWidth="thin" borderColor="mid" borderRadius="medium" padding="size-100">
-    <Flex direction="column" justifyContent="start" gap="size-100" height="100%">
-      <Flex direction="row" justifyContent="space-between" alignItems="center" maxWidth={canvasWidth}>
-        <Text>{label}</Text>
-        <ActionButton
-          isQuiet
-          onPress={onRemove}
-          alignSelf="start"
-          aria-label="Close"
-          data-testid="ps-btn-remove"
-          isDisabled={hasDisabledButtons}
-        >
-          <Close/>
-        </ActionButton>
-      </Flex>
+  <Card withBorder>
+    <Stack justify="flex-start" align="center">
+      <Card.Section w={canvasWidth}>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Text>{label}</Text>
+          <CloseButton
+            onClick={onRemove}
+            aria-label="Close"
+            data-testid="ps-btn-remove"
+            disabled={hasDisabledButtons}
+          />
+        </Group>
+      </Card.Section>
       {children}
-    </Flex>
-  </View>;
+    </Stack>
+  </Card>;
 
 /**
  * Previews section on the main page, basically a collection of preview cards for all active streams.
@@ -78,7 +75,7 @@ export function PreviewSection(
   const hasDisabledButtons = activeRecording.state !== "idle";
 
   return (
-    <Flex direction="row" gap="size-100" justifyContent="center" wrap>
+    <Group justify="center" wrap="wrap" align="stretch">
       {
         // Screen capture tracks have confusing labels in chromium, so for them we just show a
         // generic label. Webcams provide the device name, which is useful to show to the user.
@@ -123,6 +120,6 @@ export function PreviewSection(
           </PreviewCard>
         )
       }
-    </Flex>
+    </Group>
   );
 }

@@ -5,9 +5,10 @@ import { wipeOpfs } from "../helpers/opfs";
 import { makeDevice } from "../helpers/media";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { Home } from "@/app/page";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultTheme, Provider } from "@adobe/react-spectrum";
+import { MantineTestProvider } from "../helpers/mantine";
+import { notifications } from "@mantine/notifications";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
 
@@ -42,17 +43,16 @@ const anonymousSession = anAppSession({
 const authenticatedSession = anAppSession();
 
 const cleanupBetweenTests = async () => {
-  // react-spectrum queues toasts globally, outside the React tree, so they survive cleanup()
-  // and reappear when the next test mounts a ToastContainer. Only one is shown at a time, so
-  // a leftover would hide the next test's toast until its five second timeout elapsed.
-  for(const closeButton of screen.queryAllByRole("button", { name: /clear|close|dismiss/i })) {
-    fireEvent.click(closeButton);
-  }
+  cleanup();
+
+  // Mantine keeps its notifications in a global store, outside the React tree, so they
+  // survive cleanup() and reappear when the next test mounts a Notifications container --
+  // where a leftover could pass for the toast that test is waiting for. Emptied after the
+  // unmount, so that no mounted container re-renders outside act.
+  notifications.clean();
 
   localStorage.clear();
   await wipeOpfs();
-
-  cleanup();
 };
 
 beforeEach(async () => {
@@ -95,13 +95,13 @@ function fakeBackend() {
  * so without this a test would start out with whatever listing the one before it fetched.
  */
 const page = () =>
-  <Provider theme={defaultTheme}>
+  <MantineTestProvider>
     <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
       <SWRConfig value={{ provider: () => new Map() }}>
         <Home/>
       </SWRConfig>
     </AppStoreProvider>
-  </Provider>;
+  </MantineTestProvider>;
 
 /** Just the page, for the tests that only care about what it decides to render. */
 function renderHome(session: AppSession) {
@@ -238,15 +238,17 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
   // wait for the "postprocessing scheduled" toast displayed as part of the end-of-recording
   // sequence. Without this the test framework will intermittently complain about things not
   // being run inside act -- not because we actually run things here that would require act,
-  // but because react-spectrum's toast queue does. We're not waiting for the toast to disappear
-  // here, so if the test later becomes long-running after this point (more than 5 seconds), the
-  // complaints might pop up again.
-  // Only one toast is shown at a time. cleanupBetweenTests dismisses leftovers, but that
-  // races with the toast animation, so allow for waiting out a previous toast's 5s timeout.
+  // but because the notifications' enter transition does. We're not waiting for the toast to
+  // disappear here, so if the test later becomes long-running after this point (more than 5
+  // seconds), the complaints might pop up again.
   //
-  // Found as a toast naming the recording rather than by its wording: the name is also on
-  // the recording's card, and the wording is free to change.
-  await screen.findByRole("alertdialog", { name: new RegExp(recordingName) }, { timeout: 8000 });
+  // Found as an alert naming the recording rather than by its wording: the wording is free to
+  // change. The name is also on the recording's card, which is not an alert; the banners are,
+  // but none of them names a recording that streamed without trouble.
+  await waitFor(
+    () => expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes(recordingName))).toBe(true),
+    { timeout: 8000 }
+  );
 
   // When signed in, the end of the recording also refreshes the server-side listing without
   // waiting for it. Its answer now includes the new recording, so the server storage section

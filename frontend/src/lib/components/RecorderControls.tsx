@@ -1,13 +1,8 @@
 "use client";
 
-import { ActionButton, Divider, Flex, Item, Text, MenuTrigger, Menu, TextField, ProgressCircle, View } from "@adobe/react-spectrum";
-import CallCenter from "@spectrum-icons/workflow/CallCenter";
-import MovieCamera from "@spectrum-icons/workflow/MovieCamera";
-import Circle from "@spectrum-icons/workflow/Circle";
-import DeviceDesktop from "@spectrum-icons/workflow/DeviceDesktop";
-import Stop from "@spectrum-icons/workflow/Stop";
+import { MicrophoneIcon, MonitorIcon, RecordIcon, StopIcon, VideoCameraIcon } from "@phosphor-icons/react";
 import isEmail from "validator/es/lib/isEmail";
-import { createDeviceKey, parseDeviceKey } from "../store/store";
+import { createDeviceKey } from "../store/store";
 import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { useLecture } from "../hooks/useLecture";
@@ -19,10 +14,11 @@ import { useHydrated } from "../hooks/useHydrated";
 import { UserMenu } from "./UserMenu";
 import { useAppSession } from "./SessionProvider";
 import { useState } from "react";
+import { Button, Divider, Group, Loader, Menu, TextInput } from "@mantine/core";
 
 export type RecorderState = ActiveRecording["state"];
 
-function validateLectureTitle(lectureTitle: string): string | true {
+function validateLectureTitle(lectureTitle: string): string | undefined {
   const normalizedTitle = normalizeLectureTitle(lectureTitle);
   const sanitizedTitle = sanitizeLectureTitle(lectureTitle);
 
@@ -34,10 +30,10 @@ function validateLectureTitle(lectureTitle: string): string | true {
     return `sanitizes to ${sanitizedTitle}`;
   }
 
-  return true;
+  return undefined;
 }
 
-const validateEmail = (email: string) => email.trim() === "" || isEmail(email) || "invalid e-mail address";
+const validateEmail = (email: string) => (email.trim() === "" || isEmail(email) ? undefined : "invalid e-mail address");
 
 function RecordButton() {
   // The design is very human.
@@ -64,34 +60,45 @@ function RecordButton() {
         // form autocomplete will strip the disabled tag from the SSR-rendered button if the button
         // was enabled before the reload, which then leads to a React hydration error. It'll never add
         // a disabled flag, so we can sidestep it with this check.
-        <ActionButton onPress={startRecording} isDisabled={hydrated && noTracksConfigured} data-testid="rc-btn-record">
-          <Circle/>
-          <Text>Start Recording</Text>
-        </ActionButton>
+        <Button
+          data-testid="rc-btn-record"
+          onClick={startRecording}
+          disabled={hydrated && noTracksConfigured}
+          leftSection={<RecordIcon/>}
+        >
+          Start Recording
+        </Button>
       );
     case "starting":
     case "preparing":
       return (
-        <ActionButton isDisabled data-testid="rc-btn-record">
-          <Stop/>
-          <Text>Stop Recording</Text>
-        </ActionButton>
+        <Button
+          data-testid="rc-btn-record"
+          disabled
+          leftSection={<StopIcon/>}
+        >
+          Stop Recording
+        </Button>
       );
     case "recording":
       return (
-        <ActionButton onPress={stopRecording} data-testid="rc-btn-record">
-          <Stop/>
-          <Text>Stop Recording</Text>
-        </ActionButton>
+        <Button
+          data-testid="rc-btn-record"
+          onClick={stopRecording}
+          leftSection={<StopIcon/>}
+        >
+          Stop Recording
+        </Button>
       );
     case "stopping":
       return (
-        <ActionButton isDisabled data-testid="rc-btn-record">
-          <View paddingX="size-100">
-            <ProgressCircle size="S" isIndeterminate aria-label="stopping..."/>
-          </View>
-          <Text>Stop Recording</Text>
-        </ActionButton>
+        <Button
+          data-testid="rc-btn-record"
+          disabled
+          leftSection={<Loader size="xs" role="progressbar"/>}
+        >
+          Stop Recording
+        </Button>
       );
   }
 }
@@ -153,75 +160,68 @@ export function RecorderControls() {
     }
   };
 
+  const titleError = validateLectureTitle(lectureTitle);
+  const emailError = validateEmail(lecturerEmail);
+
   return (
-    <Flex direction="row" gap="size-100" marginTop="size-100" wrap>
+    <Group wrap="wrap" align="flex-start">
       {
-        authRequired &&
-        <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" marginEnd="size-100">
-          <UserMenu/>
-        </Flex>
+        authRequired && <Group style={{ marginTop: "18px", marginRight: "8px" }}><UserMenu/></Group>
       }
 
-      <View height="size-900">
-        <Flex direction="row" gap="size-100">
-          <TextField
-            label="Lecture Title"
-            data-testid="rc-txt-title"
-            value={lectureTitle}
-            isReadOnly={hasDisabledTrackControls}
-            isDisabled={hasDisabledTrackControls}
-            validate={validateLectureTitle}
-            onChange={setLectureTitle}
-            autoFocus
+      <TextInput
+        label="Lecture Title"
+        data-testid="rc-txt-title"
+        value={lectureTitle}
+        disabled={hasDisabledTrackControls}
+        error={titleError}
+        onChange={event => setLectureTitle(event.currentTarget.value)}
+        mih={80}
+        autoFocus
+      />
+
+      {
+        isBackendConfigured &&
+          <TextInput
+            label="e-Mail"
+            data-testid="rc-txt-email"
+            value={lecturerEmail}
+            disabled={hasDisabledTrackControls}
+            error={emailError}
+            onChange={event => setLecturerEmail(event.currentTarget.value)}
+            mih={80}
           />
+      }
 
-          {
-            isBackendConfigured &&
-              <TextField
-                label="e-Mail"
-                data-testid="rc-txt-email"
-                value={lecturerEmail}
-                isReadOnly={hasDisabledTrackControls}
-                isDisabled={hasDisabledTrackControls}
-                validate={validateEmail}
-                onChange={setLecturerEmail}
-              />
-          }
-        </Flex>
-      </View>
+      <Group styles={{ root: { marginTop: "25px" } }}>
+        <Divider orientation="vertical"/>
 
-      <Flex direction="row" alignContent="start" gap="size-100" marginTop="size-300" wrap>
-        <Divider orientation="vertical" size="S" marginX="size-100"/>
+        <Button onClick={openDisplayStream} disabled={hasDisabledTrackControls} data-testid="rc-btn-addscreen" leftSection={<MonitorIcon/>}>
+          Add Screen/Window
+        </Button>
 
-        <ActionButton onPress={openDisplayStream} isDisabled={hasDisabledTrackControls} data-testid="rc-btn-addscreen">
-          <DeviceDesktop/>
-          <Text>Add Screen/Window</Text>
-        </ActionButton>
+        <Menu opened={videoMenuOpen} onChange={onMenuOpenChangeHandler(setVideoMenuOpen)}>
+          <Menu.Target>
+            <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addvideo" leftSection={<VideoCameraIcon/>}>Add Video Source</Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            { videoDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openVideoStream(dev)}>{dev.label}</Menu.Item>) }
+          </Menu.Dropdown>
+        </Menu>
 
-        <MenuTrigger isOpen={videoMenuOpen} onOpenChange={onMenuOpenChangeHandler(setVideoMenuOpen)}>
-          <ActionButton isDisabled={hasDisabledTrackControls} data-testid="rc-btn-addvideo">
-            <MovieCamera/>
-            <Text>Add Video Source</Text>
-          </ActionButton>
-          <Menu onAction={devUid => openVideoStream(parseDeviceKey(devUid as string))}>
-            { videoDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
-          </Menu>
-        </MenuTrigger>
+        <Menu opened={audioMenuOpen} onChange={onMenuOpenChangeHandler(setAudioMenuOpen)}>
+          <Menu.Target>
+            <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addaudio" leftSection={<MicrophoneIcon/>}>Add Audio Source</Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            { audioDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openAudioStream(dev)}>{dev.label}</Menu.Item>) }
+          </Menu.Dropdown>
+        </Menu>
 
-        <MenuTrigger isOpen={audioMenuOpen} onOpenChange={onMenuOpenChangeHandler(setAudioMenuOpen)}>
-          <ActionButton isDisabled={hasDisabledTrackControls} data-testid="rc-btn-addaudio">
-            <CallCenter/>
-            <Text>Add Audio Source</Text>
-          </ActionButton>
-          <Menu onAction={devUid => openAudioStream(parseDeviceKey(devUid as string))}>
-            { audioDevices.map(dev => <Item key={createDeviceKey(dev)}>{dev.label}</Item>) }
-          </Menu>
-        </MenuTrigger>
-
-        <Divider orientation="vertical" size="S" marginX="size-100"/>
+        <Divider orientation="vertical"/>
 
         <RecordButton/>
-      </Flex>
-    </Flex>
+      </Group>
+    </Group>
   );
 }
