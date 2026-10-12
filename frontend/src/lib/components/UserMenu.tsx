@@ -11,7 +11,7 @@ export function UserMenu() {
         <ActionIcon
           variant="outline"
           color="neutral"
-          size="xl"
+          size="input-sm"
           radius="xl"
           aria-label="User menu"
           data-testid="um-btn-open"

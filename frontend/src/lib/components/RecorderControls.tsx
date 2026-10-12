@@ -13,8 +13,8 @@ import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording"
 import { useHydrated } from "../hooks/useHydrated";
 import { UserMenu } from "./UserMenu";
 import { useAppSession } from "./SessionProvider";
-import { useState } from "react";
-import { Button, Divider, Group, Loader, Menu, TextInput } from "@mantine/core";
+import { ReactNode, useState } from "react";
+import { Button, Divider, Group, Input, Loader, Menu, TextInput } from "@mantine/core";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -163,10 +163,15 @@ export function RecorderControls() {
   const titleError = validateLectureTitle(lectureTitle);
   const emailError = validateEmail(lecturerEmail);
 
+  const UnlabelledRow = ({ children }: Readonly<{ children: ReactNode }>) =>
+    <Input.Wrapper label={"\u00a0"} labelElement="div" labelProps={{ "aria-hidden": true }}>
+      <Group>{children}</Group>
+    </Input.Wrapper>;
+
   return (
     <Group wrap="wrap" align="flex-start">
       {
-        authRequired && <Group style={{ marginTop: "18px", marginRight: "8px" }}><UserMenu/></Group>
+        authRequired && <UnlabelledRow><UserMenu/></UnlabelledRow>
       }
 
       <TextInput
@@ -176,7 +181,7 @@ export function RecorderControls() {
         disabled={hasDisabledTrackControls}
         error={titleError}
         onChange={event => setLectureTitle(event.currentTarget.value)}
-        mih={80}
+        styles={{ root: { position: "relative" }, error: { position: "absolute" }}}
         autoFocus
       />
 
@@ -189,39 +194,41 @@ export function RecorderControls() {
             disabled={hasDisabledTrackControls}
             error={emailError}
             onChange={event => setLecturerEmail(event.currentTarget.value)}
-            mih={80}
+            styles={{ root: { position: "relative" }, error: { position: "absolute" }}}
           />
       }
 
-      <Group styles={{ root: { marginTop: "25px" } }}>
-        <Divider orientation="vertical"/>
+      <UnlabelledRow>
+        <Group>
+          <Divider orientation="vertical"/>
 
-        <Button onClick={openDisplayStream} disabled={hasDisabledTrackControls} data-testid="rc-btn-addscreen" leftSection={<MonitorIcon/>}>
-          Add Screen/Window
-        </Button>
+          <Button onClick={openDisplayStream} disabled={hasDisabledTrackControls} data-testid="rc-btn-addscreen" leftSection={<MonitorIcon/>}>
+            Add Screen/Window
+          </Button>
 
-        <Menu opened={videoMenuOpen} onChange={onMenuOpenChangeHandler(setVideoMenuOpen)}>
-          <Menu.Target>
-            <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addvideo" leftSection={<VideoCameraIcon/>}>Add Video Source</Button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            { videoDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openVideoStream(dev)}>{dev.label}</Menu.Item>) }
-          </Menu.Dropdown>
-        </Menu>
+          <Menu opened={videoMenuOpen} onChange={onMenuOpenChangeHandler(setVideoMenuOpen)}>
+            <Menu.Target>
+              <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addvideo" leftSection={<VideoCameraIcon/>}>Add Video Source</Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              { videoDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openVideoStream(dev)}>{dev.label}</Menu.Item>) }
+            </Menu.Dropdown>
+          </Menu>
 
-        <Menu opened={audioMenuOpen} onChange={onMenuOpenChangeHandler(setAudioMenuOpen)}>
-          <Menu.Target>
-            <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addaudio" leftSection={<MicrophoneIcon/>}>Add Audio Source</Button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            { audioDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openAudioStream(dev)}>{dev.label}</Menu.Item>) }
-          </Menu.Dropdown>
-        </Menu>
+          <Menu opened={audioMenuOpen} onChange={onMenuOpenChangeHandler(setAudioMenuOpen)}>
+            <Menu.Target>
+              <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addaudio" leftSection={<MicrophoneIcon/>}>Add Audio Source</Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              { audioDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openAudioStream(dev)}>{dev.label}</Menu.Item>) }
+            </Menu.Dropdown>
+          </Menu>
 
-        <Divider orientation="vertical"/>
+          <Divider orientation="vertical"/>
 
-        <RecordButton/>
-      </Group>
+          <RecordButton/>
+        </Group>
+      </UnlabelledRow>
     </Group>
   );
 }

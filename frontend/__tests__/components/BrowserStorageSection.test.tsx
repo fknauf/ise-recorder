@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
 import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
@@ -288,17 +288,18 @@ const TWO_RECORDINGS: RecordingFileList[] = [
 
 async function renderWithBackend(
   activeRecording: ReturnType<typeof useActiveRecording> = { state: "idle" },
-  removeSavedRecording: (name: string) => Promise<void> = vi.fn()
+  removeSavedRecording: (name: string) => Promise<void> = vi.fn(),
+  recordings: RecordingFileList[] = TWO_RECORDINGS
 ) {
   mockServerEnv.mockReturnValue({ apiUrl: "https://record.example.edu" });
   vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
   vi.mocked(useBrowserStorage).mockReturnValue({
     quota: undefined,
     usage: undefined,
-    savedRecordings: TWO_RECORDINGS,
+    savedRecordings: recordings,
     removeSavedRecording
   });
-  vi.mocked(gatherRecordingsList).mockResolvedValue(TWO_RECORDINGS);
+  vi.mocked(gatherRecordingsList).mockResolvedValue(recordings);
 
   await renderSection();
 
@@ -413,16 +414,25 @@ test("the downloads stay available while a re-upload is running", async () => {
 
 test("a card keeps its height while its re-upload runs", async () => {
   // the progress takes the place of two buttons, and a card that shrank and grew around it
-  // would shift every card after it in the row. The two recordings have one file each and
-  // names of the same length, so the only difference between the cards is the upload.
-  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+  // would shift every card after it in the row.
+  //
+  // Measured with the card alone in its section, once idle and once uploading. Side by side,
+  // the section stretches every card in a row to the tallest, and the card stretches its
+  // content with it, so two cards next to each other would agree whatever their content.
+  const recording = TWO_RECORDINGS[1];
 
-  const [ idle, uploading ] = await renderWithBackend({ state: "idle" }, vi.fn());
+  const cardHeight = async () => {
+    await renderWithBackend({ state: "idle" }, vi.fn(), [ recording ]);
+    const height = screen.getByTestId("bs-card-recording").getBoundingClientRect().height;
+    cleanup();
+    return height;
+  };
 
-  // the card's content rather than the card: the section lays cards out in a row that
-  // stretches each to the tallest, which would make any two cards side by side agree
-  const contentHeight = (card: HTMLElement) => (card.firstElementChild as HTMLElement).getBoundingClientRect().height;
-  expect(contentHeight(uploading)).toBe(contentHeight(idle));
+  const idle = await cardHeight();
+  reuploadProgress = new Map([ [ recording.name, 42 ] ]);
+  const uploading = await cardHeight();
+
+  expect(uploading).toBe(idle);
 });
 
 // --- deleting a recording that never reached the backend -------------------
