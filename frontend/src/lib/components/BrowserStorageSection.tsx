@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Button, Group, RingProgress, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Button, Group, RingProgress, Stack, Text, ThemeIcon } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { TrashIcon, DownloadIcon, CloudArrowUpIcon, WarningIcon, BrowserIcon } from "@phosphor-icons/react";
 import { downloadFile, RecordingFileList } from "../utils/browserStorage";
@@ -43,7 +43,7 @@ function confirmDelete(
       confirm: "Delete",
       cancel: "Cancel"
     },
-    confirmProps: { "data-testid": "bs-btn-deleteconfirm", color: "error" },
+    confirmProps: { "data-testid": "bs-btn-deleteconfirm", "color": "error" },
     cancelProps: { "data-testid": "bs-btn-deletecancel", "data-autofocus": true },
     onConfirm,
     onCancel,
