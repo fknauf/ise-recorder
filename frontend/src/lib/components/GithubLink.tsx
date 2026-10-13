@@ -18,21 +18,19 @@ export function GithubLink() {
   const env = useServerEnv();
 
   return (
-    <UnlabelledRow>
-      <Anchor
-        href="https://github.com/fknauf/ise-recorder"
-        c="inherit"
-        underline="hover"
-      >
-        {
-          env.version !== undefined
-            ? <Stack align="center" gap={0}>
-                <GithubIcon/>
-                <Text fz="sm" lh="sm">v{env.version}</Text>
-              </Stack>
-            : <GithubIcon/>
-        }
-      </Anchor>
-    </UnlabelledRow>
+    <Anchor
+      href="https://github.com/fknauf/ise-recorder"
+      c="inherit"
+      underline="hover"
+    >
+      {
+        env.version !== undefined
+          ? <Stack align="center" gap={0}>
+              <GithubIcon/>
+              <Text fz="sm" lh="sm">v{env.version}</Text>
+            </Stack>
+          : <GithubIcon/>
+      }
+    </Anchor>
   );
 }

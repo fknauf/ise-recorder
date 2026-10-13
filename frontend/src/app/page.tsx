@@ -2,7 +2,7 @@
 import "@mantine/notifications/styles.css";
 import { Accordion, Group, Stack } from "@mantine/core";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
-import { RecorderControls } from "@/lib/components/RecorderControls";
+import { RecorderControls, UnlabelledRow } from "@/lib/components/RecorderControls";
 import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
 import { PreviewSection } from "@/lib/components/PreviewSection";
 import { GithubLink } from "@/lib/components/GithubLink";
@@ -13,6 +13,7 @@ import { useHydrated } from "@/lib/hooks/useHydrated";
 import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
 import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 import { Notifications } from "@mantine/notifications";
+import { ColorModeToggle } from "@/lib/components/ColorModeToggle";
 
 function AutoSignin() {
   useAutoSignin();
@@ -30,7 +31,10 @@ export function Home() {
       }
       <Group justify="center" gap={64} align="flex-start">
         <RecorderControls/>
-        <GithubLink/>
+        <UnlabelledRow>
+          <ColorModeToggle/>
+          <GithubLink/>
+        </UnlabelledRow>
       </Group>
       <Group justify="center" align="flex-start">
         <AuthStatusMessage/>

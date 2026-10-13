@@ -39,7 +39,7 @@ const validateEmail = (email: string | undefined) =>
 
 export const UnlabelledRow = ({ children }: Readonly<{ children: ReactNode }>) =>
   <Input.Wrapper label={" "} labelElement="div" labelProps={{ "aria-hidden": true }}>
-    <Group>{children}</Group>
+    <Group align="flex-start">{children}</Group>
   </Input.Wrapper>;
 
 function RecordButton() {
@@ -169,7 +169,10 @@ export function RecorderControls() {
   return (
     <Group wrap="wrap" align="flex-start">
       {
-        authRequired && <UnlabelledRow><UserMenu/></UnlabelledRow>
+        authRequired &&
+          <UnlabelledRow>
+            <UserMenu/>
+          </UnlabelledRow>
       }
 
       <TextInput
