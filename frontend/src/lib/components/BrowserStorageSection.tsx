@@ -112,10 +112,11 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               />
               <Text>Uploading...</Text>
             </Group>
-          : <Group justify="center" wrap="nowrap">
+          : <Group wrap="nowrap">
               {
                 apiUrl !== undefined
                   ? <Button
+                      fullWidth
                       key="upload"
                       data-testid="bs-btn-reupload"
                       onClick={reupload}
@@ -128,6 +129,7 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
                   : null
               }
               <Button
+                fullWidth
                 key="delete"
                 data-testid="bs-btn-delete"
                 onClick={() => onDelete(recording.name)}
