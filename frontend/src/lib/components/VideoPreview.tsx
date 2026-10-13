@@ -1,6 +1,6 @@
 "use client";
 
-import { Group, Stack, Switch } from "@mantine/core";
+import { Card, Group, Stack, Switch } from "@mantine/core";
 import { ReactNode } from "react";
 
 export interface VideoPreviewProps {
@@ -37,16 +37,18 @@ export function VideoPreview(
 
   return (
     <Stack>
-      <video
-        ref={attachStream}
-        autoPlay
-        muted
-        width={width}
-        height={height}
-        className="video-preview"
-        data-testid="preview-video"
-        role="img"
-      />
+      <Card.Section>
+        <video
+          ref={attachStream}
+          autoPlay
+          muted
+          width={width}
+          height={height}
+          className="video-preview"
+          data-testid="preview-video"
+          role="img"
+        />
+      </Card.Section>
 
       <Group justify="space-between">
         <Switch

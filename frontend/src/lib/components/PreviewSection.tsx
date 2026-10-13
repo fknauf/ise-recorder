@@ -26,7 +26,7 @@ const PreviewCard = (
     children
   }: Readonly<PreviewCardProps>
 ) =>
-  <Card withBorder>
+  <Card withBorder shadow="sm" padding="sm">
     <Stack justify="flex-start" align="stretch">
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Text>{label}</Text>

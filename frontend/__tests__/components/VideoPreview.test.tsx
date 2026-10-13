@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { VideoPreview } from "@/lib/components/VideoPreview";
 import userEvent from "@testing-library/user-event";
-import { MantineTestProvider } from "../helpers/mantine";
+import { InPreviewCard } from "../helpers/mantine";
 import { useEffect, useState } from "react";
 
 test("VideoPreview displays video track", async () => {
@@ -20,7 +20,7 @@ test("VideoPreview displays video track", async () => {
     }, []);
 
     return (
-      <MantineTestProvider>
+      <InPreviewCard>
         {
           track &&
           <VideoPreview
@@ -49,7 +49,7 @@ test("VideoPreview displays video track", async () => {
           height={height}
           data-testid="test-img-srcimage-extractor"
         />
-      </MantineTestProvider>
+      </InPreviewCard>
     );
   };
 
@@ -103,7 +103,7 @@ test("VideoPreview handles user input", async () => {
     }, []);
 
     return (
-      <MantineTestProvider>
+      <InPreviewCard>
         {
           track &&
           <VideoPreview
@@ -122,7 +122,7 @@ test("VideoPreview handles user input", async () => {
           height={192}
           data-testid="track-src"
         />
-      </MantineTestProvider>
+      </InPreviewCard>
     );
   };
 
@@ -160,7 +160,7 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
     }, []);
 
     return (
-      <MantineTestProvider>
+      <InPreviewCard>
         {
           track &&
           <VideoPreview
@@ -179,7 +179,7 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
           height={192}
           data-testid="track-src"
         />
-      </MantineTestProvider>
+      </InPreviewCard>
     );
   };
 

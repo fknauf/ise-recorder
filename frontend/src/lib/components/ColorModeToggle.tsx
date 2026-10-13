@@ -32,5 +32,5 @@ export function ColorModeToggle() {
       <Box component={SunIcon} lightHidden style={{ width: "70%", height: "70%" }}/>
       <Box component={MoonIcon} darkHidden style={{ width: "70%", height: "70%" }}/>
     </ActionIcon>
-  )
+  );
 }

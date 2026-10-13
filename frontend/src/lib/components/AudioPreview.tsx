@@ -1,5 +1,6 @@
 "use client";
 
+import { Card } from "@mantine/core";
 import { ReactNode } from "react";
 
 export interface AudioPreviewProps {
@@ -74,7 +75,7 @@ export function AudioPreview(
   };
 
   return (
-    <div>
+    <Card.Section>
       <canvas
         ref={attachRenderLoop}
         width={width}
@@ -82,6 +83,6 @@ export function AudioPreview(
         data-testid="preview-audio"
         role="img"
       />
-    </div>
+    </Card.Section>
   );
 }

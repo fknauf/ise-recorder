@@ -2,7 +2,6 @@
 
 import { Anchor, Stack, Text } from "@mantine/core";
 import { useServerEnv } from "../hooks/useServerEnv";
-import { UnlabelledRow } from "./RecorderControls";
 
 const GithubIcon = () =>
   <svg viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg" width="32" height="32">

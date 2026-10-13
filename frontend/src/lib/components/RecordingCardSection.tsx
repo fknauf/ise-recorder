@@ -15,7 +15,7 @@ interface RecordingCardSectionProps {
 }
 
 export const RecordingCard = ({ title, testid, children }: Readonly<RecordingCardProps>) =>
-  <Card withBorder data-testid={testid}>
+  <Card withBorder data-testid={testid} shadow="sm" padding="sm">
     <Stack align="center" h="100%">
       <Text>{title}</Text>
       <Stack w="100%" h="100%" justify="space-between" align="stretch">

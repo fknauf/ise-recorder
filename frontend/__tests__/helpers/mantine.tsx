@@ -4,7 +4,7 @@
 import "@mantine/core/styles.css";
 
 import { ReactNode } from "react";
-import { MantineProvider } from "@mantine/core";
+import { Card, MantineProvider } from "@mantine/core";
 import { ModalsProvider } from "@mantine/modals";
 
 /**
@@ -21,3 +21,14 @@ export const MantineTestProvider = ({ children }: Readonly<{ children: ReactNode
       {children}
     </ModalsProvider>
   </MantineProvider>;
+
+/**
+ * The previews draw into a Card.Section, which only renders inside the Card that PreviewSection
+ * gives every preview. Usable as a testing-library wrapper, so rerender keeps the card.
+ */
+export const InPreviewCard = ({ children }: Readonly<{ children: ReactNode }>) =>
+  <MantineTestProvider>
+    <Card>
+      {children}
+    </Card>
+  </MantineTestProvider>;

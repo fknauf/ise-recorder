@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { AudioPreview } from "@/lib/components/AudioPreview";
+import { InPreviewCard } from "../helpers/mantine";
 
 /**
  * The spectrum is driven by real WebAudio nodes, so rather than feed it sound and
@@ -124,7 +125,7 @@ function audioTrack(): { track: MediaStreamTrack; dispose: () => Promise<void> }
 /** Render, let the 30fps loop paint at least once, and hand back the render result. */
 async function renderPreview() {
   const { track, dispose } = audioTrack();
-  const rendered = render(<AudioPreview track={track} width={256} height={100}/>);
+  const rendered = render(<AudioPreview track={track} width={256} height={100}/>, { wrapper: InPreviewCard });
 
   await vi.waitFor(() => expect(canvasSpy.lines.length).toBeGreaterThan(0), { timeout: 2000 });
 
