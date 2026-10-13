@@ -280,7 +280,7 @@ test("the environment is read once and then cached", async () => {
 
 // --- whether the lecturer can name a report address -------------------------
 //
-// The backend decides where reports go (ISE_RECORD_SMTP_RECIPIENT there); this only says
+// The backend decides where reports go (ISE_RECORD_SMTP_RECIPIENT_SOURCES there); this only says
 // whether the frontend offers a field for an address of the lecturer's choosing.
 
 test.each([
@@ -295,8 +295,8 @@ test.each([
 });
 
 test("the address field can be switched off", async () => {
-  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: "disable" })).smtpRecipientOverride)
-    .toBe("disable");
-  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: " disable " })).smtpRecipientOverride)
-    .toBe("disable");
+  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: "disabled" })).smtpRecipientOverride)
+    .toBe("disabled");
+  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: " disabled " })).smtpRecipientOverride)
+    .toBe("disabled");
 });

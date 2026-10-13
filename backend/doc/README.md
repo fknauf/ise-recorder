@@ -52,90 +52,63 @@ The API is an HTTP API with the following endpoints:
 
 | Endpoint | Method | Purpose | Parameters |
 | - | - | - | - |
-| `/api/chunks` | POST | Stream chunks of a media stream | recording name, track name, chunk index, chunk data |
-| `/api/jobs` | POST | Schedule postprocessing job | recording name, notification email address |
-| `/api/health` | GET | Monitoring | none |
 | `/api/recordings` | GET | Retrieve list of user's recordings | none, needs auth |
-| `/api/recordings/{recording}` | DELETE | Purge recording from server | none, needs auth |
-| `/api/recordings/{user}/{recording}` | GET | Download recording | TOTP for the recording as returned from `/api/recordings` |
+| `/api/recordings/{name}` | DELETE | Purge recording from server | none, needs auth |
+| `/api/recordings/{name}/tracks/{track}/chunks/{index}` | PUT | Stream chunks of a media stream | recording name, track name, chunk index in the path, chunk data in the body |
+| `/api/recordings/{name}/render` | POST | Schedule postprocessing job | recording name, notification email address |
+| `/api/downloads/{user_digest}/{name}` | GET | Download recording | TOTP for the recording as returned from `/api/recordings` |
+| `/api/health` | GET | Monitoring | none |
 
-For convenience of implementation on the frontend side, `/api/chunks` accepts input encoded as `multipart/form-data` with the
-following fields:
+The `/api/recordings` GET endpoint retrieves a list of the user's (as identified by the bearer token in the HTTP
+`Authorization` header) recordings. Each recording has a name and a state (completed, rendering or unprocessed),
+and completed recordings also have a size and a pre-signed, relative download link that's valid for a short while.
+The frontend is supposed to append this to the api base url. See the "Downloads" section below for details and
+an explanation why this is necessary. The shape of the response is thus
 
-- `recording`: name of recording (string)
-- `track`: name of the track (string)
-- `index`: number of the chunk in the track (integer)
-- `chunk`: chunk data (file)
-
-This is meant to work with the following Typescript snippet:
-
-```typescript
-const data = new FormData();
-data.append("recording", "GVS_2026-01-23T123456.789Z");
-data.append("track", "stream");
-data.append("index", "0");
-data.append("chunk", chunk); // where chunk is of type Blob
-
-const request: RequestInit = {
-    method: "POST",
-    body: data
-};
+```json
+[
+    {
+        "name": "PSU_2026-10-13T23.26.12.729Z",
+        "state": "rendering"
+    },
+    {
+        "name": "PSU_2026-10-06T23.26.12.729Z",
+        "state": "completed",
+        "size": 123456789,
+        "downloadUrl": "downloads/123...def/PSU_2026-10-06T23.26.12.729Z?totp=1234567890"
+    }
+]
 ```
 
-The `/api/jobs` endpoint accepts a JSON object (with `Content-Type: application/json`) in the body shaped like
+The `/api/recordings/{name}` DELETE endpoint purges the recording named `{name}` and returns an empty body. This deletes
+both the rendered recording (if available) and the raw chunk data, so it's quite final. May fail with 404 (not found) or
+409 (busy, e.g. recording is being rendered).
+
+The `/api/recordings/{name}/tracks/{track}/chunks/{index}` PUT endpoint is for streaming chunk data. It follows the
+expected PUT semantics in that it's idempotent: If a chunk is uploaded twice, the logical state on the server remains
+unchanged. Recording name, track name and chunk index are supplied in the path (as is CRUD convention), the request
+body is the chunk binary data as an octet stream. The response body is empty.
+
+The `/api/recordings/{name}/render` endpoint accepts a JSON object (with `Content-Type: application/json`) in the body shaped like
 
 ```json
 {
-    "recording": "GVS_2026-01-23T123456.789Z",
     "recipient": "lecturer@uni.edu"
 }
 ```
 
-Where `recording` must match a recording name for which chunks have been stored before.
+where `recipient` is optional. This address is used to send completion reports if `request` is configured in
+`settings.smtp.recipient_sources`. On success, the endpoint returns in its body the new state of the rendering
+recording in the same shape as an element of the `/api/recordings` list. May return HTTP status 404 (recording
+does not exist), 422 (not renderable) or 409 (busy).
+
+The `/api/downloads/{user_digest}/{name}` GET endpoint is for downloads of completed recordings, so the response body
+is an octet stream with the recording's binary data. This more or less follows the presigned URL pattern: the user
+obtains a valid link from the `/api/recordings` GET endpoint and can use it to download the completed recording.
+The TOTP must be supplied as a GET parameter (i.e., `?totp=1234...`). See "Downloads" section below for details.
 
 The `/api/health` endpoint returns HTTP status 200 and `{ "status": "healthy" }` as long as the server is running; it
 is useful for primitive monitoring such as docker health checks.
-
-The `/api/recordings` endpoint retrieves a list of the user's (as identified by the bearer token in the HTTP
-`Authorization` header) recordings, sorted into completed, rendering, and unprocessed recordings. For completed
-recordings, the file size and a per-recording download TOTP (valid for two minutes) are also returned, as well
-as a user name digest for use with the download endpoint. See the "Downloads" section below for an explanation
-why this is necessary. The shape of the response is thus
-
-```json
-{
-    "user": "021ef10ad....",
-    "completed": [
-        {
-            "name": "GVS_2026-09-11T123456.789Z",
-            "size": 1048576,
-            "totp": "1234567890"
-        },
-        {
-            "name": "GVS_2026-09-28T123456.789Z",
-            "size": 1048576,
-            "totp": "0123456789"
-        }
-    ],
-    "rendering": [
-        {
-            "name": "GVS_2026-09-25T123456.789Z"
-        }
-    ],
-    "unprocessed": [
-        {
-            "name": "GVS_2026-09-04T123456.789Z"
-        }
-    ]
-}
-```
-
-The download endpoint must make do without a bearer token, which is why there's a username in the path. It
-needs the `totp` field retrieved from `/api/recordings` as a GET parameter (`?totp=0123456789`) for authentication.
-
-A `DELETE` query to `/api/recordings/{recording}` uses a bearer token that already has the user information, so
-it's omitted from the path there. I know this is a bit ugly, and a future version might rethink this design (unless
-I suddenly get lots of users who develop against the API and backwards-compatibility becomes critical).
 
 ## Where to find what
 
@@ -175,10 +148,11 @@ The `glue` submodule is likewise split further into submodules.
 | Module | Purpose |
 | - | - |
 | `auth` | Connects core.auth to fastapi |
-| `jobs` | a wrapper around `core.postprocessing` and `core.reporting` to be spawned as a background task |
+| `enclave` | User enclaves, describe the state of the user home and transient runtime state associated with a user |
+| `jobs` | a wrapper around `core.postprocess` and `core.reporting` to be spawned as a background task |
 | `models` | Data types for API parameters and return values, for validation and automatic JSON generation |
 | `recordings` | Connects core.recordings to fastapi |
-| `user_home` | Connects core.user_home to fastapi |
+| `reporting` | Determines the reporting address from request and oidc data according to server settings |
 
 ## Postprocessing Logic
 
@@ -210,21 +184,34 @@ This backend uses ffmpeg command-line utilities for postprocessing. The process 
 
 ## Recording classification
 
-The classification of recordings is derived from the application and file system state to avoid the need
-for a database. The post-processing logic is set up to make this relatively straightforward, in particular
-such that the output file only turns up in the file system after rendering has concluded successfully.
+Recordings are classified along three quasi-orthogonal axes:
 
-So the logic is basically:
+1. Activity: is the recording currently being rendered, purged, or accepting an upload?
+2. Disk state: Does the recording exist? Is it renderable? Does it have a completed render?
+3. Is the recording still being streamed?
 
-1. If the application knows it has started a rendering process that's still running, recording is rendering.
-2. If the output file exists, the recording is completed.
-3. If there is no main track, the recording is classified as not renderable.
-4. If the newest uploaded chunk in the main stream is younger than five minutes, the stream is considered still streaming
-5. Otherwise, it is unprocessed, which typically means postprocessing failed.
+These are then used to synthesize states for display in the UI: completed, rendering, and unprocessed,
+because these allow different operations. Completed recordings can be downloaded, deleted, and
+re-rendered, unprocessed recordings deleted and re-rendered, and rendering recordings are just displayed
+as a kind of "yes, I exist, but come back later."
 
-Streaming detection is somewhat heuristic, but the stakes are low: if it takes five minutes for a failed
-rendering to appear in the list of server-side recordings, that's acceptable until I have a better idea
-how to handle it.
+Activity is tracked by the application in response to requests: When a postprocessing is scheduled,
+the server marks the recording as rendering in its internal state, and clears it when
+postprocessing concludes. The same happens for purge requests and chunk uploads, although these states
+typically persist much shorter. The purpose is to reject conflicting requests, e.g. purging a recording
+while it is being rendered or uploading to a recording that's being purged.
+
+Disk state is read, as the name suggests, from the recording's on-disk state. If the recording
+directory does not exist (or is not a directory), the recording is considered *nonexistent*. If it
+exists and there is a file `presentation.webm`, the recording is considered *completed*. If it is not
+completed and its directory is in a state that postprocessing would not be able to handle, recording
+is *unrenderable*, and otherwise it is *unprocessed*.
+
+Streaming state is determined by the upload time of the last chunk in a recording and the last time
+a render was scheduled for it. If the last uploaded chunk is older than two minutes or if a render
+has been scheduled afterwards, then the recording is not streaming, otherwise it is. This is somewhat
+heuristic across server restarts, but the stakes are low: if it takes two minutes for a failed rendering
+to appear in the list of server-side recordings after the backend has restarted, that's acceptable.
 
 ## Authentication
 
@@ -248,7 +235,11 @@ jobs. There are no custom scopes, right now it's all-or-nothing when it comes to
 home directory is derived from `sub`. This is stable but not human-readable, so if `preferred_username`
 is present in the token or can be found out through a query against the OIDC provider's `userinfo_endpoint`,
 the backend derives a human-readable alternative name from `sub` and `preferred_username` for a symlink
-to the stable directory. In the future, it may also read the `email` claim for reporting purposes.
+to the stable directory.
+
+The backend can also use the `email` and `email_verified` claims for reporting purposes. This is
+configurable in `settings.smtp.recipient_sources`. Token claims are used if available, otherwise they're
+read from the `userinfo_endpoint` along with `preferred_username`.
 
 ## Downloads
 

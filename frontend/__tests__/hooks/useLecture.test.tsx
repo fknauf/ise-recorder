@@ -37,7 +37,7 @@ test.each([
   [ "a backend", { apiUrl: "http://localhost:5000" }, true ],
   [ "a backend that offers the field", { apiUrl: "http://localhost:5000", smtpRecipientOverride: "default" as const }, true ],
   [ "no backend", { apiUrl: undefined }, false ],
-  [ "a backend that does not offer the field", { apiUrl: "http://localhost:5000", smtpRecipientOverride: "disable" as const }, false ]
+  [ "a backend that does not offer the field", { apiUrl: "http://localhost:5000", smtpRecipientOverride: "disabled" as const }, false ]
 ])("whether an address is wanted, with %s", (_label, serverEnv, wanted) => {
   const { result } = renderHook(() => useLecture(), { wrapper: appStoreWrapper(serverEnv) });
 

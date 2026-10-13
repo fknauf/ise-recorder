@@ -53,7 +53,7 @@ class SmtpSettings(BaseModel):
 
     server: str
     sender: EmailStr
-    recipient: tuple[SmtpRecipientSource, ...] = (
+    recipient_sources: tuple[SmtpRecipientSource, ...] = (
         SmtpRecipientSource.REQUEST,
         SmtpRecipientSource.OIDC,
     )

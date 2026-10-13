@@ -62,6 +62,7 @@ services:
       - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
       - ISE_RECORD_OIDC_MAX_AGE=25200 # 7 hours
       - ISE_RECORD_OIDC_AUTO_SIGNIN=true
+      - ISE_RECORD_SMTP_RECIPIENT_OVERRIDE=disabled
 
   backend:
     image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}

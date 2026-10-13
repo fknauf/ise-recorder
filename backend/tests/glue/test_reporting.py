@@ -41,7 +41,7 @@ def deployment(
         smtp=SmtpSettings(
             server="localhost",
             sender="render@example.edu",
-            recipient=sources,
+            recipient_sources=sources,
             allowed_domains=allowed_domains,
         ),
     )

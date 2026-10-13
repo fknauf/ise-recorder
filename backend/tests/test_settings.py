@@ -218,7 +218,7 @@ def test_the_whole_environment_is_read_where_it_belongs(monkeypatch: pytest.Monk
         ISE_RECORD_SMTP_SENDER="ise-record@example.edu",
         ISE_RECORD_SMTP_PORT="2525",
         ISE_RECORD_SMTP_ALLOWED_DOMAINS='[ "Example.EDU", "example.org" ]',
-        ISE_RECORD_SMTP_RECIPIENT='[ "oidc", "request" ]',
+        ISE_RECORD_SMTP_RECIPIENT_SOURCES='[ "oidc", "request" ]',
         **OIDC_ENVIRONMENT,
     )
 
@@ -235,7 +235,7 @@ def test_the_whole_environment_is_read_where_it_belongs(monkeypatch: pytest.Monk
     assert (settings.smtp.server, settings.smtp.port) == ("mail.example.edu", 2525)
     # lowered, so a capital letter in the compose file does not stop every mail
     assert settings.smtp.allowed_domains == ("example.edu", "example.org")
-    assert settings.smtp.recipient == (SmtpRecipientSource.OIDC, SmtpRecipientSource.REQUEST)
+    assert settings.smtp.recipient_sources == (SmtpRecipientSource.OIDC, SmtpRecipientSource.REQUEST)
 
 
 def test_a_relative_destdir_is_made_absolute_at_startup(monkeypatch: pytest.MonkeyPatch):
@@ -309,7 +309,7 @@ def test_a_userinfo_answer_has_to_be_kept_for_some_time(monkeypatch: pytest.Monk
 
 # --- where reports go ------------------------------------------------------
 #
-# ISE_RECORD_SMTP_RECIPIENT ranks the sources of the report address. A JSON list, like
+# ISE_RECORD_SMTP_RECIPIENT_SOURCES ranks the sources of the report address. A JSON list, like
 # ISE_RECORD_SMTP_ALLOWED_DOMAINS: one format for every list in the environment.
 
 SMTP_ENVIRONMENT = {
@@ -327,7 +327,7 @@ def test_reports_go_to_the_request_s_address_before_the_provider_s_by_default(
     settings = Settings()
 
     assert settings.smtp is not None
-    assert settings.smtp.recipient == (SmtpRecipientSource.REQUEST, SmtpRecipientSource.OIDC)
+    assert settings.smtp.recipient_sources == (SmtpRecipientSource.REQUEST, SmtpRecipientSource.OIDC)
 
 
 @pytest.mark.parametrize("value", ["oidc", "request,oidc"])
@@ -336,7 +336,7 @@ def test_recipient_sources_that_are_not_a_json_list_stop_the_backend(
 ):
     # at startup, where the operator who wrote it sees it, rather than as reports that never
     # arrive
-    configure(monkeypatch, ISE_RECORD_SMTP_RECIPIENT=value, **SMTP_ENVIRONMENT)
+    configure(monkeypatch, ISE_RECORD_SMTP_RECIPIENT_SOURCES=value, **SMTP_ENVIRONMENT)
 
     with pytest.raises(SettingsError):
         Settings()
@@ -344,9 +344,9 @@ def test_recipient_sources_that_are_not_a_json_list_stop_the_backend(
 
 @pytest.mark.parametrize("value", ['[ "oicd" ]', '[ "request", "email" ]'])
 def test_an_unknown_recipient_source_stops_the_backend(monkeypatch: pytest.MonkeyPatch, value: str):
-    configure(monkeypatch, ISE_RECORD_SMTP_RECIPIENT=value, **SMTP_ENVIRONMENT)
+    configure(monkeypatch, ISE_RECORD_SMTP_RECIPIENT_SOURCES=value, **SMTP_ENVIRONMENT)
 
     with pytest.raises(ValidationError) as caught:
         Settings()
 
-    assert caught.value.errors()[0]["loc"][:2] == ("smtp", "recipient")
+    assert caught.value.errors()[0]["loc"][:2] == ("smtp", "recipient_sources")

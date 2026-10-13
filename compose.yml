@@ -17,6 +17,7 @@ services:
 #      - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
 #      - ISE_RECORD_OIDC_MAX_AGE=2505600 # 29 days
 #      - ISE_RECORD_OIDC_AUTO_SIGNIN=true
+#      - ISE_RECORD_SMTP_RECIPIENT_OVERRIDE=disabled
 
   backend:
     image: code.rinderher.de/library/ise-recorder-backend:${ISE_RECORD_TAG:-latest}
@@ -50,6 +51,7 @@ services:
 #      - ISE_RECORD_SMTP_STARTTLS=false
 #      - ISE_RECORD_SMTP_USE_TLS=true
 #      - ISE_RECORD_SMTP_ALLOWED_DOMAINS=[ "example.com", "example.org" ]
+#      - ISE_RECORD_SMTP_RECIPIENT_SOURCES=[ "request", "oidc" ]
 #      - ISE_RECORD_CHUNK_FILE_DIGITS=4
 # see compose-with-auth.yml for a deployment with oidc authentication
 #      - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise

@@ -128,6 +128,17 @@ variables for settings;
     | - | - |
     | `false` | `true`, `false` |
 
+* `ISE_RECORD_SMTP_RECIPIENT_OVERRIDE`
+
+    If set to `disabled`, the frontend will not show an input field for the recipient address
+    and will not send a recipient address with the request that schedules a postprocessing job.
+    This makes sense in authenticated deployments if the email address is read from OIDC. See
+    also `ISE_RECORD_SMTP_RECIPIENT_SOURCES` in the backend.
+
+    | Default | Possible values |
+    | - | - |
+    | `default` | `default`, `disabled` |
+
 * `ISE_RECORD_SHOW_VERSION`
 
     Show a version indicator on the main page
@@ -316,6 +327,27 @@ The backend has the following configuration envvars:
     | Default | Example |
     | - | - |
     | unset (no restriction) | `[ "example.edu", "example.org" ]` |
+
+* `ISE_RECORD_SMTP_RECIPIENT_SOURCES`
+
+    A list of sources that are searched for a destination e-mail address to send completion
+    reports. The first entry that can provide a mail address is used. For example, with value
+    `[ "request", "oidc" ]`, if the frontend sent a recipient address with the postprocessing
+    request, it is used. Otherwise, if the OIDC account has a verified e-mail address, that is used
+    instead. If neither can provide an address, no report will be sent.
+
+    Possible values to put into the list are `request`, `oidc`, and `oidc-unverified`. `request`
+    accepts an address from the frontend-sent request (see also `ISE_RECORD_SMTP_RECIPIENT_OVERRIDE`
+    in the frontend config docs above), `oidc` accepts verified mail addresses from OIDC, and
+    `oidc-unverified` accepts both verified and unverified addresses from OIDC.
+
+    Usually you'll want to use `[ "request", "oidc" ]` or `[ "request", "oidc-unverified" ]`
+    if the frontend is configured with `ISE_RECORD_SMTP_RECIPIENT_OVERRIDE=default`, and
+    `[ "oidc" ]` or `[ "oidc-unverified" ]` if `ISE_RECORD_SMTP_RECIPIENT_OVERRIDE=disabled`.
+
+    | Default | Example |
+    | - | - |
+    | `[ "request", "oidc" ]` | `[ "oidc-unverified" ]` |
 
 ## Hack it yourself
 

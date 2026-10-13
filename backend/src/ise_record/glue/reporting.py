@@ -1,6 +1,7 @@
 """
 FastAPI dependables to do with report sending
 """
+import logging
 from typing import Annotated
 
 from fastapi import Depends
@@ -10,6 +11,8 @@ from ise_record.core.reporting import normalize_recipient
 from ise_record.glue.auth import get_user_info
 from ise_record.glue.models import RenderRequest
 from ise_record.settings import get_settings, Settings, SmtpRecipientSource
+
+logger = logging.getLogger(__name__)
 
 
 def _normalized_recipient_address(
@@ -22,7 +25,11 @@ def _normalized_recipient_address(
         case SmtpRecipientSource.REQUEST:
             raw_address = render.recipient
         case SmtpRecipientSource.OIDC:
-            if user_info is None or user_info.email_verified is not True:
+            if user_info is None:
+                return None
+
+            if user_info.email_verified is not True:
+                logger.debug("Skipping unverified recipient address %s", user_info.email)
                 return None
 
             raw_address = user_info.email
@@ -44,7 +51,7 @@ def get_report_recipient(
     if settings.smtp is None:
         return None
 
-    for source in settings.smtp.recipient:
+    for source in settings.smtp.recipient_sources:
         recipient = _normalized_recipient_address(
             source, render, user_info, settings.smtp.allowed_domains
         )

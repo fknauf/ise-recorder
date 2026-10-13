@@ -5,15 +5,15 @@ import isURL, { IsURLOptions } from "validator/es/lib/isURL";
 import isInt from "validator/es/lib/isInt";
 import pkg from "../../../package.json" with { type: "json" };
 
-type SmtpRecipientOption = "default" | "disable";
+type SmtpRecipientOption = "default" | "disabled";
 
 function validateRecipient(envRecipient: string | undefined): SmtpRecipientOption {
   if(envRecipient === undefined || ["", "default"].includes(envRecipient.trim())) {
     return "default";
   }
 
-  if(envRecipient.trim() === "disable") {
-    return "disable";
+  if(envRecipient.trim() === "disabled") {
+    return "disabled";
   }
 
   console.error(`Invalid recipient "${envRecipient}", falling back to "default"`);

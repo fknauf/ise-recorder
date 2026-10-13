@@ -10,7 +10,7 @@ export function useLecture() {
   const setLecturerEmail = useAppStore(state => state.setLecturerEmail);
   const { apiUrl, smtpRecipientOverride: smtpRecipient } = useServerEnv();
 
-  const isLecturerEmailUsed = apiUrl !== undefined && smtpRecipient !== "disable";
+  const isLecturerEmailUsed = apiUrl !== undefined && smtpRecipient !== "disabled";
 
   return {
     lectureTitle,
