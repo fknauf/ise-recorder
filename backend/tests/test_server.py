@@ -122,7 +122,7 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
         postprocessing_task,
         settings.destdir / "foo",
         # no SMTP in this deployment, so nobody to report to; see the tests below for who is
-        [],
+        None,
         settings.smtp,
         ANY,
         ANY,
@@ -163,8 +163,8 @@ def test_a_render_answers_with_the_name_the_recording_is_stored_under(
 
 # --- whom the report goes to ------------------------------------------------
 #
-# Which candidates each recipient source contributes is glue/test_reporting.py's business. These
-# check that the request and the caller's token actually reach it, and its answer the job.
+# Which recipient source wins is glue/test_reporting.py's business. These check that the request
+# and the caller's token actually reach it, and its answer the job.
 
 REPORT_SMTP = SmtpSettings(server="localhost", sender="render@example.edu")
 
@@ -178,22 +178,21 @@ def smtp_client(tmp_path: Path) -> Iterator[TestClient]:
 
 
 @pytest.mark.parametrize(
-    "body, candidates",
+    "body, recipient",
     [
-        pytest.param({"recipient": "foo@bar.de"}, ["foo@bar.de"], id="address"),
-        pytest.param({}, [], id="omitted"),
-        # the address is checked when the report goes out; a typo costs the mail, not the render
-        pytest.param(
-            {"recipient": "I made a lot of typos"}, ["I made a lot of typos"], id="malformed"
-        ),
+        pytest.param({"recipient": "foo@bar.de"}, "foo@bar.de", id="address"),
+        pytest.param({"recipient": "foo@Bar.DE"}, "foo@bar.de", id="normalized"),
+        pytest.param({}, None, id="omitted"),
+        # a typo costs the mail, not the render
+        pytest.param({"recipient": "I made a lot of typos"}, None, id="malformed"),
     ],
 )
-def test_the_recipient_is_passed_on_as_given(
+def test_the_recipient_reaches_the_job(
     mocker: MockerFixture,
     smtp_client: TestClient,
     tmp_path: Path,
     body: dict[str, str],
-    candidates: list[str],
+    recipient: str | None,
 ):
     abandon_recording(tmp_path, "foo")
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
@@ -201,7 +200,7 @@ def test_the_recipient_is_passed_on_as_given(
     response = smtp_client.post(render_url("foo"), json=body)
 
     assert response.status_code == 202
-    assert mock_add_task.call_args.args[2] == candidates
+    assert mock_add_task.call_args.args[2] == recipient
 
 
 def test_the_recipient_is_not_taken_from_the_url(
@@ -213,7 +212,7 @@ def test_the_recipient_is_not_taken_from_the_url(
 
     smtp_client.post(render_url("foo"), params={"recipient": "foo@bar.de"}, json={})
 
-    assert mock_add_task.call_args.args[2] == []
+    assert mock_add_task.call_args.args[2] is None
 
 
 @pytest.fixture
@@ -229,10 +228,10 @@ def auth_smtp_client(provider: Provider, tmp_path: Path) -> Iterator[TestClient]
 
 
 @pytest.mark.parametrize(
-    "verified, candidates",
+    "verified, recipient",
     [
-        pytest.param(True, ["foo@bar.de", "lecturer@example.edu"], id="verified"),
-        pytest.param(False, ["foo@bar.de"], id="unverified"),
+        pytest.param(True, "lecturer@example.edu", id="verified"),
+        pytest.param(False, None, id="unverified"),
     ],
 )
 def test_the_callers_address_from_the_token_reaches_the_job(
@@ -241,7 +240,7 @@ def test_the_callers_address_from_the_token_reaches_the_job(
     provider: Provider,
     tmp_path: Path,
     verified: bool,
-    candidates: list[str],
+    recipient: str | None,
 ):
     abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
@@ -249,12 +248,12 @@ def test_the_callers_address_from_the_token_reaches_the_job(
 
     response = auth_smtp_client.post(
         render_url("foo"),
-        json={"recipient": "foo@bar.de"},
+        json={},
         headers={"Authorization": f"Bearer {token}"},
     )
 
     assert response.status_code == 202
-    assert mock_add_task.call_args.args[2] == candidates
+    assert mock_add_task.call_args.args[2] == recipient
 
 
 def test_schedule_postprocessing_error(

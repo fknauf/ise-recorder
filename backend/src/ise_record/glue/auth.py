@@ -108,10 +108,10 @@ def _combine_user_infos(token_user: UserInfo, provider_user: UserInfo | None) ->
         else provider_user.preferred_username
     )
 
-    # but email and email_verified belong together: if the email address is changed, we can't use provider's
-    # email_verified and apply it to the token email. This means that for providers that allow email into the
-    # access token but not email_verified, the old email will be used for up to userinfo_cache_seconds after
-    # it's changed.
+    # but email and email_verified belong together: if the email address is changed, we can't use
+    # provider's email_verified and apply it to the token email. This means that for providers that
+    # allow email into the access token but not email_verified, the old email will be used for up
+    # to userinfo_cache_seconds after it's changed.
     if token_user.email is not None and token_user.email_verified is not None:
         email = token_user.email
         email_verified = token_user.email_verified

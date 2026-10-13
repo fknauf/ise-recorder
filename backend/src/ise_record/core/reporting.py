@@ -3,6 +3,7 @@ ISE-Recorder reporting module. Alerts a user that a postprocessing
 job is finished.
 """
 
+from collections.abc import Sequence
 from email.message import EmailMessage
 import logging
 from textwrap import dedent
@@ -24,13 +25,13 @@ def _is_in_domain(domain: str, validated: ValidatedEmail):
     )
 
 
-def _is_whitelisted(validated_address: ValidatedEmail, whitelist: list[str]):
+def _is_whitelisted(validated_address: ValidatedEmail, whitelist: Sequence[str]):
     if not whitelist:
         return True
     return any(_is_in_domain(d, validated_address) for d in whitelist)
 
 
-def normalize_recipient(address: str | None, domain_whitelist: list[str]) -> str | None:
+def normalize_recipient(address: str | None, domain_whitelist: Sequence[str]) -> str | None:
     """
     Normalize a request-supplied (and therefore untrusted) e-mail address. Checks if the address
     is a valid email address and if the domain is whitelisted, if domain whitelisting is
@@ -52,16 +53,6 @@ def normalize_recipient(address: str | None, domain_whitelist: list[str]) -> str
         logger.warning("Recipient address is not whitelisted: %s", address)
     except EmailNotValidError:
         logger.warning("Invalid recipient address: %s", address)
-
-    return None
-
-
-def pick_recipient(recipient_candidates: list[str], domain_whitelist: list[str]) -> str | None:
-    """Picks the first valid recipient from a list of candidate addresses (and normalizes it)"""
-    for candidate in recipient_candidates:
-        normalized = normalize_recipient(candidate, domain_whitelist)
-        if normalized is not None:
-            return normalized
 
     return None
 

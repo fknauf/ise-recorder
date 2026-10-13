@@ -17,7 +17,6 @@ from ise_record.core.postprocess import Result, ResultReason
 from ise_record.core.reporting import (
     _generate_report,  # pyright: ignore[reportPrivateUsage]
     normalize_recipient,
-    pick_recipient,
     send_report,
 )
 from ise_record.settings import SmtpSettings
@@ -147,30 +146,6 @@ def test_an_ascii_only_address_is_unaffected_by_the_punycode_fallback():
     assert normalize_recipient("foo@uni-hannover.de", whitelist) == "foo@uni-hannover.de"
     assert normalize_recipient("foo@eviluni-hannover.de", whitelist) is None
     assert normalize_recipient("föö@uni-hannover.de", whitelist) == "föö@uni-hannover.de"
-
-
-def test_the_first_candidate_fit_to_mail_is_picked_and_normalized():
-    candidates = [
-        "",
-        "not an address",
-        "foo@elsewhere.org",
-        "Foo@VSS.Uni-Hannover.DE",
-        "x@uni-hannover.de",
-    ]
-
-    assert pick_recipient(candidates, ["uni-hannover.de"]) == "Foo@vss.uni-hannover.de"
-
-
-@pytest.mark.parametrize(
-    "candidates",
-    [
-        pytest.param([], id="no-candidates"),
-        pytest.param(["", "   "], id="empty"),
-        pytest.param(["not an address", "foo@elsewhere.org"], id="none-fit"),
-    ],
-)
-def test_without_a_candidate_fit_to_mail_nobody_is_picked(candidates: list[str]):
-    assert pick_recipient(candidates, ["uni-hannover.de"]) is None
 
 
 @pytest.mark.parametrize(

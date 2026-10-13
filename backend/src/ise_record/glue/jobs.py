@@ -10,7 +10,7 @@ from anyio import Path
 from fastapi import Request
 
 from ise_record.core.postprocess import postprocess_recording
-from ise_record.core.reporting import pick_recipient, send_report
+from ise_record.core.reporting import send_report
 from ise_record.settings import SmtpSettings
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ async def get_jobs_semaphore(request: Request) -> asyncio.Semaphore:
 
 async def postprocessing_task(
     recording_path: Path,
-    report_recipients: list[str],
+    report_recipient: str | None,
     smtp_settings: SmtpSettings | None,
     jobs_semaphore: asyncio.Semaphore,
     context: ExitStack,
@@ -32,8 +32,7 @@ async def postprocessing_task(
     Postprocessing job function, i.e. processes a recording and sends a report mail
 
     :param recording_path Path of the recording on disk
-    :param report_recipients list of recipient addresses for the report. The first valid one of
-           these receives the report.
+    :param report_recipient Recipient address for the completion report
     :param smtp_settings SMTP mailer configuration
     :param jobs_semaphore semaphore to wait for a slot to do the processing, to limit parallelism
     :param context exit stack that holds the claim that this recording is rendering, which must be
@@ -44,14 +43,10 @@ async def postprocessing_task(
             job_result = await postprocess_recording(recording_path)
 
     if smtp_settings is not None:
-        normalized_recipient = pick_recipient(
-            report_recipients, list(smtp_settings.allowed_domains)
-        )
-
-        if normalized_recipient is not None:
+        if report_recipient is not None:
             await send_report(
                 smtp_settings=smtp_settings,
-                recipient=normalized_recipient,
+                recipient=report_recipient,
                 job_title=recording_path.name,
                 result=job_result,
             )
