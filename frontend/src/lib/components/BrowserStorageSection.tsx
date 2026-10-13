@@ -112,13 +112,14 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
               />
               <Text>Uploading...</Text>
             </Group>
-          : <Group wrap="nowrap">
+          : <Group>
               {
                 apiUrl !== undefined
                   ? <Button
-                      fullWidth
                       key="upload"
                       data-testid="bs-btn-reupload"
+                      flex="1 1 0"
+                      miw="max-content"
                       onClick={reupload}
                       disabled={uploadDisabled}
                       leftSection={<CloudArrowUpIcon/>}
@@ -129,9 +130,10 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
                   : null
               }
               <Button
-                fullWidth
                 key="delete"
                 data-testid="bs-btn-delete"
+                flex="1 1 0"
+                miw="max-content"
                 onClick={() => onDelete(recording.name)}
                 disabled={deleteDisabled}
                 leftSection={<TrashIcon/>}

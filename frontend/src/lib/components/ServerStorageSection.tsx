@@ -96,9 +96,10 @@ function ActionableRecordingCard(
     <RecordingCard title={recordingName} testid={testid}>
       {children}
 
-      <Group wrap="nowrap">
+      <Group>
         <Button
-          fullWidth
+          flex="1 1 0"
+          miw="max-content"
           data-testid="ss-btn-rerender"
           disabled={busy}
           onClick={onRerender}
@@ -108,7 +109,8 @@ function ActionableRecordingCard(
           Rerender
         </Button>
         <Button
-          fullWidth
+          flex="1 1 0"
+          miw="max-content"
           data-testid="ss-btn-purge"
           disabled={busy}
           onClick={() => confirmPurge(recordingName, () => onPurge(recordingName))}
