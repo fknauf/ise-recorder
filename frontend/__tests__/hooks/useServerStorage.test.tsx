@@ -5,10 +5,10 @@ import { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { useServerStorage, useRefreshServerStorage } from "@/lib/hooks/useServerStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
-import { ServerEnv } from "@/lib/utils/serverEnv";
 import { ServerStorageRecording } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
 import * as z from "zod";
+import { aServerEnv } from "../helpers/serverEnv";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -71,7 +71,7 @@ function swrWrapper() {
 
 function renderServerStorageRecordings(
   {
-    serverEnv = { apiUrl: API_URL } as ServerEnv,
+    serverEnv = aServerEnv({ apiUrl: API_URL }),
     getAccessToken = (async () => "test-token") as AppSession["getAccessToken"],
     isAuthenticated = true
   } = {}
@@ -126,7 +126,7 @@ test("the listing is fetched from the configured backend with the access token",
 });
 
 test("nothing is fetched when the deployment has no backend", async () => {
-  const { result } = renderServerStorageRecordings({ serverEnv: {} });
+  const { result } = renderServerStorageRecordings({ serverEnv: aServerEnv() });
 
   // the null SWR key is what disables the poll; without it the hook would retry against
   // "undefined/api/recordings" every minute for the whole session
@@ -375,7 +375,7 @@ test("a recovered poll clears the error so the minute refresh resumes", async ()
 // the listing lives in -- here the fresh-Map wrapper's, which the global mutate would miss.
 
 test("a refresh fetches the listing again without waiting for the poll", async () => {
-  mockServerEnv.mockReturnValue({ apiUrl: API_URL });
+  mockServerEnv.mockReturnValue(aServerEnv({ apiUrl: API_URL }));
   mockUseAppSession.mockReturnValue(session(async () => "test-token"));
 
   const after = sorted([ ...LISTING, { state: "rendering", name: "NEW_2026" } ]);
@@ -403,7 +403,7 @@ test("a refresh from outside the listing's cache does not reach it", async () =>
   // the counterpart of the above: the refresh is scoped to its SWRConfig. A recorder
   // mounted under a different cache than the section would refresh nothing, which is
   // what the e2e test guards against for the real page.
-  mockServerEnv.mockReturnValue({ apiUrl: API_URL });
+  mockServerEnv.mockReturnValue(aServerEnv({ apiUrl: API_URL }));
   mockUseAppSession.mockReturnValue(session(async () => "test-token"));
 
   respondWith(() => jsonResponse(LISTING));

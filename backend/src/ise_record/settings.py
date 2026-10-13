@@ -4,7 +4,7 @@ from enum import StrEnum
 from functools import lru_cache
 from os import PathLike
 import pathlib
-from typing import Annotated
+from typing import Annotated, Any
 
 from anyio import Path
 from pydantic import (
@@ -21,12 +21,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _ENV_PREFIX = "ise_record_"
 
 
-def _absolute_path(value) -> Path:
+def _absolute_path(value: Any) -> Path:
     if not isinstance(value, str | PathLike):
         # ruff: ignore[TRY004] - pydantic needs ValueError
         raise ValueError(f"{value!s} is not a valid path")
 
-    return Path(pathlib.Path(value).absolute())
+    return Path(pathlib.Path(value).absolute())  # type: ignore
 
 
 class AuthBackend(StrEnum):
@@ -36,11 +36,27 @@ class AuthBackend(StrEnum):
     OIDC = "oidc"
 
 
+class SmtpRecipientSource(StrEnum):
+    """
+    Configuration options for the source of the report recipient address: OIDC token or HTTP
+    request. The difference between oidc and oidc-unverified is that the latter will report to
+    e-mail addresses that come from oidc with email_verified: false (or missing).
+    """
+
+    OIDC_UNVERIFIED = "oidc-unverified"
+    OIDC = "oidc"
+    REQUEST = "request"
+
+
 class SmtpSettings(BaseModel):
     """SMTP settings for reporting"""
 
     server: str
     sender: EmailStr
+    recipient: tuple[SmtpRecipientSource, ...] = (
+        SmtpRecipientSource.REQUEST,
+        SmtpRecipientSource.OIDC,
+    )
     port: Annotated[int | None, Field(ge=0, lt=65536)] = None
     local_hostname: str | None = None
     username: str | None = None
@@ -73,6 +89,7 @@ class OidcSettings(BaseModel):
     audience: str
     leeway_seconds: Annotated[float, Field(ge=0)] = 30.0
     http_timeout_seconds: Annotated[float, Field(gt=0)] = 5.0
+    userinfo_cache_seconds: Annotated[float, Field(gt=0)] = 3600.0
 
 
 class Settings(BaseSettings):

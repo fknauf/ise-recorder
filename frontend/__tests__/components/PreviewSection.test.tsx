@@ -7,6 +7,7 @@ import { MantineTestProvider } from "../helpers/mantine";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { PreviewSection } from "@/lib/components/PreviewSection";
 import { ActiveRecording } from "@/lib/store/store";
+import { aServerEnv } from "../helpers/serverEnv";
 
 /**
  * Only the two things in PreviewSection that are logic rather than presentation.
@@ -50,7 +51,7 @@ let tracks: MediaStreamTrack[] = [];
 function renderSection() {
   render(
     <MantineTestProvider>
-      <AppStoreProvider serverEnv={{}}>
+      <AppStoreProvider serverEnv={aServerEnv()}>
         <StoreHandles/>
         <PreviewSection canvasWidth={64} canvasHeight={48}/>
       </AppStoreProvider>

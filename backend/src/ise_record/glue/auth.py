@@ -3,12 +3,14 @@ FastAPI dependables to do with authentication
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, UTC
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx2
+from pydantic import ValidationError
 
 from ise_record.core.auth import (
     OidcClient,
@@ -22,12 +24,19 @@ logger = logging.getLogger(__name__)
 security_scheme = HTTPBearer(auto_error=False)
 
 
+class CachedUserInfo(NamedTuple):
+    """Entry in the queried-user cache"""
+
+    user_info: UserInfo | None
+    expiry: datetime
+
+
 @dataclass
 class OidcServerState:
     """Oidc-specific state attached to the fastapi server"""
 
     client: OidcClient | None = None
-    cached_users: dict[str, UserInfo] = field(default_factory=dict[str, UserInfo])
+    cached_users: dict[str, CachedUserInfo] = field(default_factory=dict[str, CachedUserInfo])
 
 
 def _unauthenticated():
@@ -87,6 +96,34 @@ async def get_oidc_client(
     return await load_oidc_client(request.app.state, settings.oidc)
 
 
+def _combine_user_infos(token_user: UserInfo, provider_user: UserInfo | None) -> UserInfo:
+    if provider_user is None:
+        return token_user
+
+    sub = token_user.sub
+    # assume token info is generally more recent, so prefer it over provider info.
+    username = (
+        token_user.preferred_username
+        if isinstance(token_user.preferred_username, str)
+        else provider_user.preferred_username
+    )
+
+    # but email and email_verified belong together: if the email address is changed, we can't use provider's
+    # email_verified and apply it to the token email. This means that for providers that allow email into the
+    # access token but not email_verified, the old email will be used for up to userinfo_cache_seconds after
+    # it's changed.
+    if token_user.email is not None and token_user.email_verified is not None:
+        email = token_user.email
+        email_verified = token_user.email_verified
+    else:
+        email = provider_user.email
+        email_verified = provider_user.email_verified
+
+    return UserInfo(
+        sub=sub, preferred_username=username, email=email, email_verified=email_verified
+    )
+
+
 async def get_user_info(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -100,6 +137,7 @@ async def get_user_info(
 
     if not settings.auth_required:
         return None
+    assert settings.oidc is not None
 
     if oidc_client is None:
         raise _provider_unreachable()
@@ -111,25 +149,37 @@ async def get_user_info(
 
     try:
         claims = await oidc_client.validate_access_token(token)
+        token_user = UserInfo.model_validate(claims)
     except ProviderUnreachable as exc:
         raise _provider_unreachable() from exc
     except Unauthenticated as exc:
         raise _unauthenticated() from exc
+    except ValidationError as exc:
+        raise _unauthenticated() from exc
 
-    subject = claims.get("sub")
-    if not isinstance(subject, str):
-        raise _unauthenticated()
+    if token_user.is_complete():
+        return token_user
 
-    cached_users: dict[str, UserInfo] = request.app.state.oidc.cached_users
+    cached_users: dict[str, CachedUserInfo] = request.app.state.oidc.cached_users
+    now = datetime.now(UTC)
+    sub = token_user.sub
 
-    if subject in cached_users:
-        return cached_users[subject]
+    cached_user = cached_users.get(sub)
 
-    username = claims.get("preferred_username")
-    if not isinstance(username, str):
-        username = await oidc_client.query_username(token, subject)
+    if cached_user is not None and cached_user.expiry > now:
+        provider_user = cached_users[sub].user_info
+    else:
+        provider_user = await oidc_client.query_userinfo(token, sub)
 
-    user_info = UserInfo(sub=subject, preferred_username=username)
-    cached_users[subject] = user_info
+        if provider_user is not None:
+            time_to_expiry = timedelta(seconds=settings.oidc.userinfo_cache_seconds)
+        else:
+            provider_user = cached_user.user_info if cached_user is not None else None
+            time_to_expiry = timedelta(minutes=5)
 
-    return user_info
+        cached_users[sub] = CachedUserInfo(
+            user_info=provider_user,
+            expiry=now + time_to_expiry,
+        )
+
+    return _combine_user_infos(token_user=token_user, provider_user=provider_user)

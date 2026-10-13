@@ -8,6 +8,7 @@ import { ReactNode, useEffect } from "react";
 import { MantineTestProvider } from "../helpers/mantine";
 import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
+import { aServerEnv } from "../helpers/serverEnv";
 
 // The store only keeps unstreamed recordings that are still saved in the browser, so the
 // browser's list of recordings is part of every test's setup.
@@ -35,7 +36,7 @@ const recording = (name: string): ActiveRecording =>
 
 const providers = (children: ReactNode) =>
   <MantineTestProvider>
-    <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:8000" }}>
+    <AppStoreProvider serverEnv={aServerEnv({ apiUrl: "http://localhost:8000" })}>
       <StoreHandle/>
       {children}
     </AppStoreProvider>

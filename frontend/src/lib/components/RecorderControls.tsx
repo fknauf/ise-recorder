@@ -6,7 +6,6 @@ import { createDeviceKey } from "../store/store";
 import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { useLecture } from "../hooks/useLecture";
-import { useServerEnv } from "../hooks/useServerEnv";
 import { ActiveRecording } from "../store/store";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
@@ -33,7 +32,10 @@ function validateLectureTitle(lectureTitle: string): string | undefined {
   return undefined;
 }
 
-const validateEmail = (email: string) => (email.trim() === "" || isEmail(email) ? undefined : "invalid e-mail address");
+const validateEmail = (email: string | undefined) =>
+  (email === undefined || email.trim() === "" || isEmail(email)
+    ? undefined
+    : "invalid e-mail address");
 
 export const UnlabelledRow = ({ children }: Readonly<{ children: ReactNode }>) =>
   <Input.Wrapper label={" "} labelElement="div" labelProps={{ "aria-hidden": true }}>
@@ -119,12 +121,9 @@ function RecordButton() {
  */
 export function RecorderControls() {
   const {
-    apiUrl
-  } = useServerEnv();
-
-  const {
     lectureTitle,
     lecturerEmail,
+    isLecturerEmailUsed,
     setLectureTitle,
     setLecturerEmail
   } = useLecture();
@@ -145,7 +144,6 @@ export function RecorderControls() {
   const [ videoMenuOpen, setVideoMenuOpen ] = useState(false);
   const [ audioMenuOpen, setAudioMenuOpen ] = useState(false);
 
-  const isBackendConfigured = apiUrl !== undefined;
   const hasDisabledTrackControls = activeRecording.state !== "idle";
 
   const onMenuOpenChangeHandler = (setOpen: (isOpen: boolean) => void) => async (isOpen: boolean) => {
@@ -186,7 +184,7 @@ export function RecorderControls() {
       />
 
       {
-        isBackendConfigured &&
+        isLecturerEmailUsed &&
           <TextInput
             label="e-Mail"
             data-testid="rc-txt-email"

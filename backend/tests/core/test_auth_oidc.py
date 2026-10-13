@@ -1,6 +1,7 @@
 """
 The OpenID client on its own: provider discovery, what it accepts as proof of who the caller
-is, and the UserInfo lookup that supplies a name when the token does not carry one.
+is, and the UserInfo lookup that supplies a name and an address when the token does not carry
+them.
 
 How the app maps these outcomes to responses, and caches them per subject, is in
 glue/test_auth.py. The stand-in provider is in harness.py.
@@ -17,7 +18,13 @@ from typing import Any
 import jwt
 import pytest
 
-from ise_record.core.auth import OidcClient, ProviderUnreachable, REQUIRED_CLAIMS, Unauthenticated
+from ise_record.core.auth import (
+    OidcClient,
+    ProviderUnreachable,
+    REQUIRED_CLAIMS,
+    Unauthenticated,
+    UserInfo,
+)
 
 from ..harness import AUDIENCE, CLIENT_ID, DEFAULT_SUBJECT, make_key, Provider
 from .conftest import discover
@@ -320,18 +327,61 @@ async def test_discovery_survives_a_provider_that_advertises_no_userinfo_endpoin
 
 # Kanidm does not put profile claims in an access token even when the profile scope was
 # granted, which the spec permits -- identity claims are only promised in the id token and
-# at the UserInfo endpoint. So a token without preferred_username is not an error, and the
-# name is asked for here instead. Any failure to get one is None: a cosmetic directory name
-# is not worth failing an upload over, and one that could not be made sense of is not worth
-# guessing at either.
+# at the UserInfo endpoint. Auth0 and Okta leave the e-mail address out of theirs by default.
+# So a token without them is not an error, and they are asked for here instead. Any failure to
+# get an answer is None: neither a cosmetic directory name nor a report address is worth
+# failing an upload over, and an answer that could not be made sense of is not worth guessing
+# at either.
 
 
 @pytest.mark.asyncio
-async def test_the_username_comes_from_userinfo(oidc: OidcClient, provider: Provider):
+async def test_the_user_comes_from_userinfo(oidc: OidcClient, provider: Provider):
+    provider.serve_userinfo(
+        sub=DEFAULT_SUBJECT,
+        preferred_username="lecturer",
+        email="lecturer@example.edu",
+        email_verified=True,
+    )
+
+    assert await oidc.query_userinfo(provider.mint(), DEFAULT_SUBJECT) == UserInfo(
+        sub=DEFAULT_SUBJECT,
+        preferred_username="lecturer",
+        email="lecturer@example.edu",
+        email_verified=True,
+    )
+    assert provider.userinfo_fetch_count == 1
+
+
+@pytest.mark.asyncio
+async def test_userinfo_without_an_address_is_a_user_without_one(
+    oidc: OidcClient, provider: Provider
+):
+    # the email scope not granted, or no address on file: still a usable answer
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
 
-    assert await oidc.query_username(provider.mint(), DEFAULT_SUBJECT) == "lecturer"
-    assert provider.userinfo_fetch_count == 1
+    assert await oidc.query_userinfo(provider.mint(), DEFAULT_SUBJECT) == UserInfo(
+        sub=DEFAULT_SUBJECT, preferred_username="lecturer"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_claim_userinfo_gets_wrong_is_dropped_and_the_rest_kept(
+    oidc: OidcClient, provider: Provider
+):
+    # one malformed claim says nothing about the others, which are still the provider's word
+    provider.serve_userinfo(
+        sub=DEFAULT_SUBJECT,
+        preferred_username=42,
+        email="lecturer@example.edu",
+        email_verified="true",
+    )
+
+    assert await oidc.query_userinfo(provider.mint(), DEFAULT_SUBJECT) == UserInfo(
+        sub=DEFAULT_SUBJECT,
+        preferred_username=None,
+        email="lecturer@example.edu",
+        email_verified=True,
+    )
 
 
 @pytest.mark.asyncio
@@ -341,7 +391,7 @@ async def test_userinfo_is_asked_with_the_callers_access_token(
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
     token = provider.mint(preferred_username=None)
 
-    await oidc.query_username(token, DEFAULT_SUBJECT)
+    await oidc.query_userinfo(token, DEFAULT_SUBJECT)
 
     # the access token is the credential for UserInfo too; nothing else would authorize us
     assert provider.userinfo_authorization == f"Bearer {token}"
@@ -352,10 +402,13 @@ async def test_userinfo_about_a_different_subject_is_discarded(
     oidc: OidcClient, provider: Provider
 ):
     # OIDC Core 5.3.2 requires this check: an answer about somebody else would otherwise
-    # put this caller's recordings in a directory named after them
-    provider.serve_userinfo(sub="somebody-else", preferred_username="mallory")
+    # put this caller's recordings in a directory named after them, and send their reports
+    # to that somebody
+    provider.serve_userinfo(
+        sub="somebody-else", preferred_username="mallory", email="mallory@example.edu"
+    )
 
-    assert await oidc.query_username(provider.mint(), DEFAULT_SUBJECT) is None
+    assert await oidc.query_userinfo(provider.mint(), DEFAULT_SUBJECT) is None
 
 
 @pytest.mark.parametrize(
@@ -368,38 +421,34 @@ async def test_userinfo_about_a_different_subject_is_discarded(
         (200, "application/json", b""),  # nothing at all
         (200, "application/json", b'["not", "an", "object"]'),  # json, wrong shape
         (200, "application/json", b'{"preferred_username":"lecturer"}'),  # no sub to check
-        (
-            200,
-            "application/json",
-            f'{{"sub":"{DEFAULT_SUBJECT}","preferred_username":42}}'.encode(),
-        ),
+        (200, "application/json", b'{"sub":42,"preferred_username":"lecturer"}'),  # nor here
     ],
 )
 @pytest.mark.asyncio
-async def test_unusable_userinfo_yields_no_username(
+async def test_unusable_userinfo_yields_nothing(
     oidc: OidcClient, provider: Provider, response: tuple[int, str, bytes]
 ):
     provider.serve_userinfo_raw(*response)
 
-    assert await oidc.query_username(provider.mint(), DEFAULT_SUBJECT) is None
+    assert await oidc.query_userinfo(provider.mint(), DEFAULT_SUBJECT) is None
 
 
 @pytest.mark.asyncio
-async def test_unreachable_userinfo_yields_no_username(oidc: OidcClient, provider: Provider):
+async def test_unreachable_userinfo_yields_nothing(oidc: OidcClient, provider: Provider):
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
     token = provider.mint()
     provider.stop()
 
-    assert await oidc.query_username(token, DEFAULT_SUBJECT) is None
+    assert await oidc.query_userinfo(token, DEFAULT_SUBJECT) is None
 
 
 @pytest.mark.asyncio
-async def test_no_userinfo_endpoint_yields_no_username_without_asking(provider: Provider):
+async def test_no_userinfo_endpoint_yields_nothing_without_asking(provider: Provider):
     provider.advertise_userinfo = False
     # served, but never advertised: if the endpoint were guessed at rather than taken from
     # the discovery document, this name would come back and give it away
     provider.serve_userinfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
     oidc = await discover(provider)
 
-    assert await oidc.query_username(provider.mint(), DEFAULT_SUBJECT) is None
+    assert await oidc.query_userinfo(provider.mint(), DEFAULT_SUBJECT) is None
     assert provider.userinfo_fetch_count == 0

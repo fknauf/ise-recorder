@@ -5,6 +5,21 @@ import isURL, { IsURLOptions } from "validator/es/lib/isURL";
 import isInt from "validator/es/lib/isInt";
 import pkg from "../../../package.json" with { type: "json" };
 
+type SmtpRecipientOption = "default" | "disable";
+
+function validateRecipient(envRecipient: string | undefined): SmtpRecipientOption {
+  if(envRecipient === undefined || ["", "default"].includes(envRecipient.trim())) {
+    return "default";
+  }
+
+  if(envRecipient.trim() === "disable") {
+    return "disable";
+  }
+
+  console.error(`Invalid recipient "${envRecipient}", falling back to "default"`);
+  return "default";
+}
+
 function validateApiUrl(url: string | undefined): string | undefined {
   if(url === undefined || url === "") {
     return undefined;
@@ -44,6 +59,7 @@ function validateMaxAge(envMaxAge: string | undefined): number | undefined {
 export interface ServerEnv {
   version?: string
   apiUrl?: string
+  smtpRecipientOverride: SmtpRecipientOption
   authBackend?: string
   oidcProviderUrl?: string
   oidcClientId?: string
@@ -62,6 +78,7 @@ export async function getServerEnv(): Promise<ServerEnv> {
     runtimeEnvironment = {
       version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? pkg.version : undefined,
       apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
+      smtpRecipientOverride: validateRecipient(process.env.ISE_RECORD_SMTP_RECIPIENT_OVERRIDE),
       authBackend: process.env.ISE_RECORD_AUTH,
       oidcProviderUrl: process.env.ISE_RECORD_OIDC_PROVIDER_URL,
       oidcClientId: process.env.ISE_RECORD_OIDC_CLIENT_ID,

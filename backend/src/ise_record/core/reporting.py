@@ -56,6 +56,16 @@ def normalize_recipient(address: str | None, domain_whitelist: list[str]) -> str
     return None
 
 
+def pick_recipient(recipient_candidates: list[str], domain_whitelist: list[str]) -> str | None:
+    """Picks the first valid recipient from a list of candidate addresses (and normalizes it)"""
+    for candidate in recipient_candidates:
+        normalized = normalize_recipient(candidate, domain_whitelist)
+        if normalized is not None:
+            return normalized
+
+    return None
+
+
 def _generate_report(
     sender: str | None, recipient: str | None, job_title: str | None, result: Result
 ) -> EmailMessage:

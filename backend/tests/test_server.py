@@ -4,6 +4,8 @@
 # pylint: disable=missing-module-docstring
 # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
+# pylint: disable=too-many-arguments
+# pylint: disable=too-many-positional-arguments
 # pylint: disable=too-many-lines
 # pylint: disable=protected-access
 # pylint: disable=no-member
@@ -31,13 +33,12 @@ from starlette.types import Message, Scope
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.core.recordings import RecordingActivity
 from ise_record.glue.jobs import postprocessing_task
-from ise_record.glue.models import RenderRequest
 from ise_record.server import (
     _get_request_exit_stacks,  # pyright: ignore[reportPrivateUsage]
     create_app,
     HandoverExitStacks,
 )
-from ise_record.settings import AuthBackend, Settings
+from ise_record.settings import AuthBackend, OidcSettings, Settings, SmtpSettings
 
 from .harness import (
     abandon_recording,
@@ -45,6 +46,7 @@ from .harness import (
     alias_of,
     app_of,
     ASSETS,
+    AUDIENCE,
     chunk_url,
     DEFAULT_SUBJECT,
     DEFAULT_SUBJECT_DIGEST,
@@ -119,7 +121,8 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
     mock_add_task.assert_called_once_with(
         postprocessing_task,
         settings.destdir / "foo",
-        RenderRequest(recipient="foo@bar.de"),
+        # no SMTP in this deployment, so nobody to report to; see the tests below for who is
+        [],
         settings.smtp,
         ANY,
         ANY,
@@ -158,42 +161,100 @@ def test_a_render_answers_with_the_name_the_recording_is_stored_under(
     assert response.json() == {"state": "rendering", "name": "\u00dcbung_2025"}
 
 
+# --- whom the report goes to ------------------------------------------------
+#
+# Which candidates each recipient source contributes is glue/test_reporting.py's business. These
+# check that the request and the caller's token actually reach it, and its answer the job.
+
+REPORT_SMTP = SmtpSettings(server="localhost", sender="render@example.edu")
+
+
+@pytest.fixture
+def smtp_client(tmp_path: Path) -> Iterator[TestClient]:
+    """An open deployment that sends reports, with the default recipient sources."""
+    settings = Settings(destdir=anyio.Path(tmp_path), auth=AuthBackend.DISABLED, smtp=REPORT_SMTP)
+    with TestClient(create_app(settings)) as test_client:
+        yield test_client
+
+
 @pytest.mark.parametrize(
-    "body, recipient",
+    "body, candidates",
     [
-        pytest.param({}, None, id="omitted"),
+        pytest.param({"recipient": "foo@bar.de"}, ["foo@bar.de"], id="address"),
+        pytest.param({}, [], id="omitted"),
         # the address is checked when the report goes out; a typo costs the mail, not the render
         pytest.param(
-            {"recipient": "I made a lot of typos"}, "I made a lot of typos", id="malformed"
+            {"recipient": "I made a lot of typos"}, ["I made a lot of typos"], id="malformed"
         ),
     ],
 )
 def test_the_recipient_is_passed_on_as_given(
     mocker: MockerFixture,
-    client: TestClient,
-    settings: Settings,
+    smtp_client: TestClient,
+    tmp_path: Path,
     body: dict[str, str],
-    recipient: str | None,
+    candidates: list[str],
 ):
-    abandon_recording(settings.destdir, "foo")
+    abandon_recording(tmp_path, "foo")
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    response = client.post(render_url("foo"), json=body)
+    response = smtp_client.post(render_url("foo"), json=body)
 
     assert response.status_code == 202
-    assert mock_add_task.call_args.args[2] == RenderRequest(recipient=recipient)
+    assert mock_add_task.call_args.args[2] == candidates
 
 
 def test_the_recipient_is_not_taken_from_the_url(
-    mocker: MockerFixture, client: TestClient, settings: Settings
+    mocker: MockerFixture, smtp_client: TestClient, tmp_path: Path
 ):
     # an address in the query string would end up in every access log on the way
-    abandon_recording(settings.destdir, "foo")
+    abandon_recording(tmp_path, "foo")
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
-    client.post(render_url("foo"), params={"recipient": "foo@bar.de"}, json={})
+    smtp_client.post(render_url("foo"), params={"recipient": "foo@bar.de"}, json={})
 
-    assert mock_add_task.call_args.args[2] == RenderRequest(recipient=None)
+    assert mock_add_task.call_args.args[2] == []
+
+
+@pytest.fixture
+def auth_smtp_client(provider: Provider, tmp_path: Path) -> Iterator[TestClient]:
+    """A deployment behind the stand-in provider that sends reports, with the default sources."""
+    settings = Settings(
+        destdir=anyio.Path(tmp_path),
+        oidc=OidcSettings(provider_url=provider.issuer, audience=AUDIENCE),
+        smtp=REPORT_SMTP,
+    )
+    with TestClient(create_app(settings)) as test_client:
+        yield test_client
+
+
+@pytest.mark.parametrize(
+    "verified, candidates",
+    [
+        pytest.param(True, ["foo@bar.de", "lecturer@example.edu"], id="verified"),
+        pytest.param(False, ["foo@bar.de"], id="unverified"),
+    ],
+)
+def test_the_callers_address_from_the_token_reaches_the_job(
+    mocker: MockerFixture,
+    auth_smtp_client: TestClient,
+    provider: Provider,
+    tmp_path: Path,
+    verified: bool,
+    candidates: list[str],
+):
+    abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
+    mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
+    token = provider.mint(email="lecturer@example.edu", email_verified=verified)
+
+    response = auth_smtp_client.post(
+        render_url("foo"),
+        json={"recipient": "foo@bar.de"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 202
+    assert mock_add_task.call_args.args[2] == candidates
 
 
 def test_schedule_postprocessing_error(

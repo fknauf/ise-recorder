@@ -19,11 +19,17 @@ from dataclasses import dataclass
 import hashlib
 import json
 import logging
-from typing import Any, NamedTuple
+from typing import Annotated, Any
 
 import httpx2
 import jwt
-from pydantic import BaseModel, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    WrapValidator,
+)
 import pyotp
 
 REQUIRED_CLAIMS = ("exp", "iat", "iss", "aud", "sub")
@@ -43,11 +49,34 @@ class Unauthenticated(Exception):
     """Exception class to signal that a token could not be authenticated"""
 
 
-class UserInfoResponse(BaseModel):
-    """Part of the response of the OIDC provider's userinfo_endpoint, used for validation"""
+def _none_if_invalid(value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
+    try:
+        return handler(value)
+    except ValidationError:
+        return None
+
+
+class UserInfo(BaseModel):
+    """User information used in the ise-recorder backend"""
+
+    model_config = ConfigDict(frozen=True)
 
     sub: str
-    preferred_username: str | None = None
+    preferred_username: Annotated[str | None, WrapValidator(_none_if_invalid)] = None
+    email: Annotated[str | None, WrapValidator(_none_if_invalid)] = None
+    email_verified: Annotated[bool | None, WrapValidator(_none_if_invalid)] = None
+
+    def stable_digest(self) -> str:
+        """Stable, alphanumeric (i.e., filesystem-safe) digest derived from the user's oidc sub"""
+        return hashlib.sha3_256(self.sub.encode("utf-8")).hexdigest()
+
+    def is_complete(self) -> bool:
+        """whether this user information has all fields we expect to get"""
+        return (
+            self.preferred_username is not None
+            and self.email is not None
+            and self.email_verified is not None
+        )
 
 
 @dataclass
@@ -129,7 +158,7 @@ class OidcClient:
             logger.info("rejected access token: %s", exc)
             raise Unauthenticated() from exc
 
-    async def query_username(self, access_token: str, subject: str) -> str | None:
+    async def query_userinfo(self, access_token: str, subject: str) -> UserInfo | None:
         """Fallback query to oidc provider if preferred_username isn't in the access token."""
 
         if self.userinfo_endpoint is None:
@@ -145,7 +174,7 @@ class OidcClient:
                     logger.warning("Unable to query userinfo: %s", response.text[:48])
                     return None
 
-                userinfo = UserInfoResponse.model_validate_json(response.content)
+                userinfo = UserInfo.model_validate_json(response.content)
 
                 if userinfo.sub != subject:
                     logger.warning(
@@ -155,21 +184,10 @@ class OidcClient:
                     )
                     return None
 
-                return userinfo.preferred_username
+                return userinfo
         except (httpx2.HTTPError, httpx2.InvalidURL, ValidationError) as e:
             logger.warning("Unable to query openid user info %s", e)
             return None
-
-
-class UserInfo(NamedTuple):
-    """User information used in the ise-recorder backend"""
-
-    sub: str
-    preferred_username: str | None = None
-
-    def stable_digest(self) -> str:
-        """Stable, alphanumeric (i.e., filesystem-safe) digest derived from the user's oidc sub"""
-        return hashlib.sha3_256(self.sub.encode("utf-8")).hexdigest()
 
 
 class DownloadTotpAuthority:

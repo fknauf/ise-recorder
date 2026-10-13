@@ -14,6 +14,7 @@ import { AppStoreState } from "@/lib/store/store";
 import { useEffect } from "react";
 import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
 import { showError } from "@/lib/utils/notifications";
+import { aServerEnv } from "../helpers/serverEnv";
 
 vi.mock("@/lib/hooks/useActiveRecording");
 vi.mock("@/lib/hooks/useBrowserStorage");
@@ -77,7 +78,7 @@ function StoreHandle() {
 async function renderSection() {
   render(
     <MantineTestProvider>
-      <AppStoreProvider serverEnv={{}}>
+      <AppStoreProvider serverEnv={aServerEnv()}>
         <StoreHandle/>
         <ExpandedSection>
           <BrowserStorageSection id={SECTION_ID}/>
@@ -100,7 +101,7 @@ beforeEach(() => {
 
   // no backend by default: the tests below that predate the re-upload count buttons, and
   // a deployment without a server offers nothing to upload to
-  mockServerEnv.mockReturnValue({});
+  mockServerEnv.mockReturnValue(aServerEnv());
   mockSession.mockReturnValue({ authRequired: false, isAuthenticated: false });
   reuploadProgress = new Map();
   vi.mocked(useReupload).mockImplementation(recordingName => ({
@@ -291,7 +292,7 @@ async function renderWithBackend(
   removeSavedRecording: (name: string) => Promise<void> = vi.fn(),
   recordings: RecordingFileList[] = TWO_RECORDINGS
 ) {
-  mockServerEnv.mockReturnValue({ apiUrl: "https://record.example.edu" });
+  mockServerEnv.mockReturnValue(aServerEnv({ apiUrl: "https://record.example.edu" }));
   vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
   vi.mocked(useBrowserStorage).mockReturnValue({
     quota: undefined,

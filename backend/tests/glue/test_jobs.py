@@ -25,14 +25,13 @@ from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.glue.jobs import postprocessing_task
-from ise_record.glue.models import RenderRequest
 from ise_record.settings import SmtpSettings
 
 
 def job(
     recording_path: Path | anyio.Path,
     slots: asyncio.Semaphore,
-    recipient: str | None = None,
+    recipients: tuple[str, ...] = (),
     smtp_settings: SmtpSettings | None = None,
     claim: ExitStack | None = None,
 ) -> Coroutine[Any, Any, None]:
@@ -42,7 +41,7 @@ def job(
     """
     return postprocessing_task(
         anyio.Path(recording_path),
-        RenderRequest(recipient=recipient),
+        list(recipients),
         smtp_settings,
         slots,
         claim if claim is not None else ExitStack(),
@@ -82,7 +81,7 @@ async def test_a_job_renders_and_reports_to_the_normalized_recipient(mocker: Moc
     )
     mock_send = mocker.patch("ise_record.glue.jobs.send_report", autospec=True)
 
-    await job(Path("data/foo"), asyncio.Semaphore(1), "lecturer@Example.DE", SMTP)
+    await job(Path("data/foo"), asyncio.Semaphore(1), ("lecturer@Example.DE",), SMTP)
 
     mock_postprocess.assert_called_once_with(anyio.Path("data/foo"))
     mock_send.assert_called_once_with(
@@ -91,27 +90,43 @@ async def test_a_job_renders_and_reports_to_the_normalized_recipient(mocker: Moc
 
 
 @pytest.mark.parametrize(
-    "recipient, smtp_settings",
+    "recipients, smtp_settings",
     [
-        pytest.param(None, SMTP, id="no-recipient"),
-        pytest.param("lecturer@elsewhere.org", SMTP, id="domain-not-allowed"),
-        pytest.param("not an address", SMTP, id="malformed-recipient"),
-        pytest.param("lecturer@example.de", None, id="no-smtp"),
+        pytest.param((), SMTP, id="no-recipient"),
+        pytest.param(("lecturer@elsewhere.org",), SMTP, id="domain-not-allowed"),
+        pytest.param(("not an address",), SMTP, id="malformed-recipient"),
+        pytest.param(("not an address", "lecturer@elsewhere.org"), SMTP, id="none-of-them"),
+        pytest.param(("lecturer@example.de",), None, id="no-smtp"),
     ],
 )
 @pytest.mark.asyncio
 async def test_a_job_without_anyone_to_report_to_still_renders(
-    mocker: MockerFixture, recipient: str | None, smtp_settings: SmtpSettings | None
+    mocker: MockerFixture, recipients: tuple[str, ...], smtp_settings: SmtpSettings | None
 ):
     mock_postprocess = mocker.patch(
         "ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=RENDERED
     )
     mock_send = mocker.patch("ise_record.glue.jobs.send_report", autospec=True)
 
-    await job(Path("data/foo"), asyncio.Semaphore(1), recipient, smtp_settings)
+    await job(Path("data/foo"), asyncio.Semaphore(1), recipients, smtp_settings)
 
     mock_postprocess.assert_called_once_with(anyio.Path("data/foo"))
     mock_send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_first_candidate_fit_to_mail_gets_the_report(mocker: MockerFixture):
+    # the candidates come in the order the admin ranked their sources; one that cannot be mailed
+    # -- mistyped, or outside the allowed domains -- makes way for the next rather than for nobody
+    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True, return_value=RENDERED)
+    mock_send = mocker.patch("ise_record.glue.jobs.send_report", autospec=True)
+    candidates = ("not an address", "lecturer@elsewhere.org", "dozentin@example.de", "x@example.de")
+
+    await job(Path("data/foo"), asyncio.Semaphore(1), candidates, SMTP)
+
+    mock_send.assert_called_once_with(
+        smtp_settings=SMTP, recipient="dozentin@example.de", job_title="foo", result=RENDERED
+    )
 
 
 # --- the limit on jobs rendering at once -----------------------------------
@@ -245,7 +260,9 @@ async def test_the_report_is_sent_after_the_slot_is_given_back(
     smtp_settings = SmtpSettings(server="localhost", sender="render@example.de")
     slots = asyncio.Semaphore(1)
 
-    first = asyncio.create_task(job(Path("data/foo"), slots, "lecturer@example.de", smtp_settings))
+    first = asyncio.create_task(
+        job(Path("data/foo"), slots, ("lecturer@example.de",), smtp_settings)
+    )
     second = asyncio.create_task(job(Path("data/bar"), slots))
     await settle()
 
@@ -316,7 +333,7 @@ async def test_the_claim_is_given_up_before_the_report_is_sent(
         job(
             Path("data/foo"),
             asyncio.Semaphore(1),
-            "lecturer@example.de",
+            ("lecturer@example.de",),
             smtp_settings,
             claim=claim.stack(),
         )

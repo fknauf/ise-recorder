@@ -12,6 +12,7 @@ import { RefreshEffect, useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
 import { ActiveRecording } from "@/lib/store/store";
 import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
+import { aServerEnv } from "../helpers/serverEnv";
 
 vi.mock("@/lib/hooks/useServerEnv");
 vi.mock("@/lib/hooks/useLecture");
@@ -59,13 +60,16 @@ function setupMockHooks(
   const openVideoStream = vi.fn();
   const openAudioStream = vi.fn();
 
-  vi.mocked(useServerEnv).mockReturnValue({
-    apiUrl: apiUrl
-  });
+  vi.mocked(useServerEnv).mockReturnValue(aServerEnv({ apiUrl }));
+
+  // the way useLecture answers for a deployment with this backend and no further settings;
+  // when exactly an address is wanted is the hook's business, in useLecture.test.tsx
+  const isLecturerEmailUsed = apiUrl !== undefined;
 
   vi.mocked(useLecture).mockReturnValue({
     lectureTitle,
-    lecturerEmail,
+    lecturerEmail: isLecturerEmailUsed ? lecturerEmail : undefined,
+    isLecturerEmailUsed,
     setLectureTitle,
     setLecturerEmail
   });
@@ -112,7 +116,7 @@ function setupMockHooks(
 function renderControls() {
   render(
     <MantineTestProvider>
-      <SessionProvider serverEnv={{}}>
+      <SessionProvider serverEnv={aServerEnv()}>
         <RecorderControls/>
       </SessionProvider>
     </MantineTestProvider>
@@ -155,8 +159,8 @@ test.each([
   }
 );
 
-test("RecorderControls hides the e-mail field when apiUrl is undefined", () => {
-  // there is no backend to send a report from
+test("RecorderControls hides the e-mail field when the lecture has no use for an address", () => {
+  // here because there is no backend to send a report from
   setupMockHooks(undefined, "PSU", "lecturer@vss.uni-hannover.de", [], [], { state: "idle" });
   renderControls();
 

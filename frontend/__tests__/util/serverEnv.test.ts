@@ -22,7 +22,8 @@ const ENV_KEYS = [
   "ISE_RECORD_OIDC_CLIENT_ID",
   "ISE_RECORD_OIDC_MAX_AGE",
   "ISE_RECORD_OIDC_AUTO_SIGNIN",
-  "ISE_RECORD_SHOW_VERSION"
+  "ISE_RECORD_SHOW_VERSION",
+  "ISE_RECORD_SMTP_RECIPIENT_OVERRIDE"
 ] as const;
 
 let moduleCounter = 0;
@@ -274,4 +275,28 @@ test("the environment is read once and then cached", async () => {
   // a later change to the environment must not be picked up mid-process
   expect(second.apiUrl).toBe("http://first.example.com/");
   expect(second).toBe(first);
+});
+
+
+// --- whether the lecturer can name a report address -------------------------
+//
+// The backend decides where reports go (ISE_RECORD_SMTP_RECIPIENT there); this only says
+// whether the frontend offers a field for an address of the lecturer's choosing.
+
+test.each([
+  [ "unset", undefined ],
+  [ "empty", "" ],
+  [ "default", "default" ],
+  [ "padded", " default " ]
+])("the address field is offered unless switched off -- %s", async (_label, value) => {
+  const vars = value === undefined ? {} : { ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: value };
+
+  expect((await envFor(vars)).smtpRecipientOverride).toBe("default");
+});
+
+test("the address field can be switched off", async () => {
+  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: "disable" })).smtpRecipientOverride)
+    .toBe("disable");
+  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: " disable " })).smtpRecipientOverride)
+    .toBe("disable");
 });

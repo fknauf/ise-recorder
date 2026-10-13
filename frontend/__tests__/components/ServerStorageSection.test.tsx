@@ -12,6 +12,7 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
 import { SWRConfig } from "swr";
 import * as z from "zod";
 import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
+import { aServerEnv } from "../helpers/serverEnv";
 
 vi.mock("@/lib/hooks/useServerStorage");
 // the requests are mocked, but the URL builder is kept: which href the link carries is
@@ -81,7 +82,7 @@ interface SectionOptions {
 
 function renderSection(options: SectionOptions = {}) {
   const {
-    serverEnv = { apiUrl: API_URL } as ServerEnv,
+    serverEnv = aServerEnv({ apiUrl: API_URL }),
     isAuthenticated = true,
     isExpired = false,
     error = undefined,
@@ -707,7 +708,7 @@ test("nothing is rendered before the first listing arrives", () => {
 // without a valid token, so offering the links in those states only produces errors.
 
 test("a deployment without a backend offers no downloads", () => {
-  renderSection({ serverEnv: {} });
+  renderSection({ serverEnv: aServerEnv() });
 
   expect(screen.queryByText("Server-Side Processed Recordings")).toBeNull();
 });

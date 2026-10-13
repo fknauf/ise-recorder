@@ -3,6 +3,7 @@ import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { ReactNode, useLayoutEffect } from "react";
 import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
+import { aServerEnv } from "../helpers/serverEnv";
 
 /**
  * The session provider is a thin layer over react-oidc-context: it configures AuthProvider,
@@ -167,13 +168,13 @@ vi.mock("next/navigation", () => ({
 
 const MAX_AGE_SECONDS = 25200;
 
-const authenticatedEnv: ServerEnv = {
+const authenticatedEnv = aServerEnv({
   apiUrl: "http://localhost:5000",
   oidcProviderUrl: "http://keycloak.localhost:8080/realms/ise",
   oidcClientId: "ise-recorder",
   oidcMaxAge: MAX_AGE_SECONDS,
   oidcAutoSignin: false
-};
+});
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
@@ -202,7 +203,9 @@ const userAged = (
   }
 });
 
-function providerWrapper(serverEnv: ServerEnv) {
+function providerWrapper(env: Partial<ServerEnv>) {
+  const serverEnv = aServerEnv(env);
+
   const Wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
     <SessionProvider serverEnv={serverEnv}>
       {children}
@@ -223,7 +226,7 @@ const settle = () => act(async () => {});
  * Flushed inside act() rather than waited for, because waitFor() runs on timers, and the
  * staleness tests below install a fake clock before mounting.
  */
-async function renderAppSession(serverEnv: ServerEnv, stored: ReturnType<typeof userAged> | null = null) {
+async function renderAppSession(serverEnv: Partial<ServerEnv>, stored: ReturnType<typeof userAged> | null = null) {
   const rendered = renderHook(useAppSession, { wrapper: providerWrapper(serverEnv) });
 
   await act(async () => {
@@ -276,7 +279,7 @@ test("useAppSession refuses to work outside a provider", () => {
 // a backend has nothing to authenticate against and defaults to anonymous.
 
 /** Rendering fails outright: a deployment configured like this must not come up at all. */
-function expectRenderToFail(serverEnv: ServerEnv) {
+function expectRenderToFail(serverEnv: Partial<ServerEnv>) {
   // React logs the render failure; the throw itself is what we are asserting on
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -292,7 +295,7 @@ const PROVIDER = {
   oidcClientId: "ise-recorder"
 };
 
-async function expectAnonymous(serverEnv: ServerEnv) {
+async function expectAnonymous(serverEnv: Partial<ServerEnv>) {
   const { result } = await renderAppSession(serverEnv);
 
   expect(result.current.authRequired).toBe(false);
@@ -304,7 +307,7 @@ async function expectAnonymous(serverEnv: ServerEnv) {
   expect(oidc.providerProps).toStrictEqual([]);
 }
 
-async function expectAuthenticationRequired(serverEnv: ServerEnv) {
+async function expectAuthenticationRequired(serverEnv: Partial<ServerEnv>) {
   const { result } = await renderAppSession(serverEnv);
 
   expect(result.current.authRequired).toBe(true);

@@ -9,6 +9,7 @@ import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
 import { ServerEnv } from "@/lib/utils/serverEnv";
+import { aServerEnv } from "../helpers/serverEnv";
 
 // recordLecture is mocked so the tests can drive its UI callbacks directly. This hook's
 // job is the state machine around recording, not the recording itself, and the real
@@ -33,7 +34,7 @@ type AppSession = ReturnType<typeof useAppSession>;
 interface CapturedRecording {
   trackBundle: RecordingTrackBundle
   lectureTitle: string
-  lecturerEmail: string
+  lecturerEmail: string | undefined
   destination: RecordingDestination
   onStarting: (recordingName: string) => Promise<void> | void
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void
@@ -67,8 +68,9 @@ const makeTokenSource = (
 
 async function renderRecorder(
   tokenSource: AppSession,
-  serverEnv: ServerEnv = { apiUrl: "http://localhost:5000" }
+  env: Partial<ServerEnv> = { apiUrl: "http://localhost:5000" }
 ) {
+  const serverEnv = aServerEnv(env);
   mockUseAppSession.mockReturnValue(tokenSource);
 
   const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>

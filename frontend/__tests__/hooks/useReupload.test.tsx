@@ -9,6 +9,7 @@ import { gatherRecordingsList, getAllRecordingTracks } from "@/lib/utils/browser
 import { schedulePostprocessing, uploadFile } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
 import { showError, showSuccess } from "@/lib/utils/notifications";
+import { aServerEnv } from "../helpers/serverEnv";
 
 // Sends a locally saved recording to the server under a name of its own, so it cannot mix
 // with whatever the live upload left there, and schedules its postprocessing. How a file is
@@ -246,7 +247,7 @@ test("a re-upload without a backend to send it to does not start", async () => {
     quota: useAppStore(state => state.quota)
   }), {
     wrapper: ({ children }: Readonly<{ children: ReactNode }>) =>
-      <AppStoreProvider serverEnv={{}}>
+      <AppStoreProvider serverEnv={aServerEnv()}>
         {children}
       </AppStoreProvider>
   });

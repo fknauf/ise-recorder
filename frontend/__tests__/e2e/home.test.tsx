@@ -11,6 +11,7 @@ import { MantineTestProvider } from "../helpers/mantine";
 import { notifications } from "@mantine/notifications";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
+import { aServerEnv } from "../helpers/serverEnv";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -96,7 +97,7 @@ function fakeBackend() {
  */
 const page = () =>
   <MantineTestProvider>
-    <AppStoreProvider serverEnv={{ apiUrl: "http://localhost:5000/" }}>
+    <AppStoreProvider serverEnv={aServerEnv({ apiUrl: "http://localhost:5000/" })}>
       <SWRConfig value={{ provider: () => new Map() }}>
         <Home/>
       </SWRConfig>

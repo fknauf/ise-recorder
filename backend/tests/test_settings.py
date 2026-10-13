@@ -4,9 +4,10 @@
 from typing import Any
 
 from pydantic import ValidationError
+from pydantic_settings import SettingsError
 import pytest
 
-from ise_record.settings import Settings, SmtpSettings
+from ise_record.settings import Settings, SmtpRecipientSource, SmtpSettings
 
 # aiosmtplib raises ValueError("The start_tls and use_tls options are not compatible.") when
 # it is handed both, which would surface as a failed report long after the misconfiguration
@@ -212,10 +213,12 @@ def test_the_whole_environment_is_read_where_it_belongs(monkeypatch: pytest.Monk
         ISE_RECORD_CORS_ORIGINS='[ "https://record-ui.example.edu" ]',
         ISE_RECORD_OIDC_LEEWAY_SECONDS="15",
         ISE_RECORD_OIDC_HTTP_TIMEOUT_SECONDS="10",
+        ISE_RECORD_OIDC_USERINFO_CACHE_SECONDS="600",
         ISE_RECORD_SMTP_SERVER="mail.example.edu",
         ISE_RECORD_SMTP_SENDER="ise-record@example.edu",
         ISE_RECORD_SMTP_PORT="2525",
         ISE_RECORD_SMTP_ALLOWED_DOMAINS='[ "Example.EDU", "example.org" ]',
+        ISE_RECORD_SMTP_RECIPIENT='[ "oidc", "request" ]',
         **OIDC_ENVIRONMENT,
     )
 
@@ -227,10 +230,12 @@ def test_the_whole_environment_is_read_where_it_belongs(monkeypatch: pytest.Monk
     assert settings.cors_origins == ("https://record-ui.example.edu",)
     assert settings.oidc is not None
     assert (settings.oidc.leeway_seconds, settings.oidc.http_timeout_seconds) == (15, 10)
+    assert settings.oidc.userinfo_cache_seconds == 600
     assert settings.smtp is not None
     assert (settings.smtp.server, settings.smtp.port) == ("mail.example.edu", 2525)
     # lowered, so a capital letter in the compose file does not stop every mail
     assert settings.smtp.allowed_domains == ("example.edu", "example.org")
+    assert settings.smtp.recipient == (SmtpRecipientSource.OIDC, SmtpRecipientSource.REQUEST)
 
 
 def test_a_relative_destdir_is_made_absolute_at_startup(monkeypatch: pytest.MonkeyPatch):
@@ -290,3 +295,58 @@ def test_a_provider_without_an_audience_is_refused(monkeypatch: pytest.MonkeyPat
         Settings()
 
     assert caught.value.errors()[0]["loc"] == ("oidc", "audience")
+
+
+def test_a_userinfo_answer_has_to_be_kept_for_some_time(monkeypatch: pytest.MonkeyPatch):
+    # zero would ask the provider on every chunk upload of every lecture
+    configure(monkeypatch, ISE_RECORD_OIDC_USERINFO_CACHE_SECONDS="0", **OIDC_ENVIRONMENT)
+
+    with pytest.raises(ValidationError) as caught:
+        Settings()
+
+    assert caught.value.errors()[0]["loc"] == ("oidc", "userinfo_cache_seconds")
+
+
+# --- where reports go ------------------------------------------------------
+#
+# ISE_RECORD_SMTP_RECIPIENT ranks the sources of the report address. A JSON list, like
+# ISE_RECORD_SMTP_ALLOWED_DOMAINS: one format for every list in the environment.
+
+SMTP_ENVIRONMENT = {
+    "ISE_RECORD_AUTH": "disabled",
+    "ISE_RECORD_SMTP_SERVER": "mail.example.edu",
+    "ISE_RECORD_SMTP_SENDER": "ise-record@example.edu",
+}
+
+
+def test_reports_go_to_the_request_s_address_before_the_provider_s_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    configure(monkeypatch, **SMTP_ENVIRONMENT)
+
+    settings = Settings()
+
+    assert settings.smtp is not None
+    assert settings.smtp.recipient == (SmtpRecipientSource.REQUEST, SmtpRecipientSource.OIDC)
+
+
+@pytest.mark.parametrize("value", ["oidc", "request,oidc"])
+def test_recipient_sources_that_are_not_a_json_list_stop_the_backend(
+    monkeypatch: pytest.MonkeyPatch, value: str
+):
+    # at startup, where the operator who wrote it sees it, rather than as reports that never
+    # arrive
+    configure(monkeypatch, ISE_RECORD_SMTP_RECIPIENT=value, **SMTP_ENVIRONMENT)
+
+    with pytest.raises(SettingsError):
+        Settings()
+
+
+@pytest.mark.parametrize("value", ['[ "oicd" ]', '[ "request", "email" ]'])
+def test_an_unknown_recipient_source_stops_the_backend(monkeypatch: pytest.MonkeyPatch, value: str):
+    configure(monkeypatch, ISE_RECORD_SMTP_RECIPIENT=value, **SMTP_ENVIRONMENT)
+
+    with pytest.raises(ValidationError) as caught:
+        Settings()
+
+    assert caught.value.errors()[0]["loc"][:2] == ("smtp", "recipient")

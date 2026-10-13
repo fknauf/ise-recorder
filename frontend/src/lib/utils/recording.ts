@@ -229,7 +229,7 @@ function prepareRecording(
 export async function recordLecture(
   trackBundle: RecordingTrackBundle,
   lectureTitle: string,
-  lecturerEmail: string,
+  lecturerEmail: string | undefined,
   destination: RecordingDestination,
   onStarting: (recordingName: string) => Promise<void> | void,
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,

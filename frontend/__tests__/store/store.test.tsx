@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { canvasVideoTrack, makeDevice } from "../helpers/media";
 import { createAppStore } from "@/lib/store/store";
 import { gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
+import { aServerEnv } from "../helpers/serverEnv";
 
 vi.mock("@/lib/utils/browserStorage");
 
@@ -9,7 +10,7 @@ beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
 
 test("store persists lecture information", () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   expect(store.getState().lectureTitle).toBe("");
   expect(store.getState().lecturerEmail).toBe("");
@@ -17,14 +18,14 @@ test("store persists lecture information", () => {
   store.getState().setLectureTitle("FOO");
   store.getState().setLecturerEmail("lecturer@example.com");
 
-  const secondStore = createAppStore({});
+  const secondStore = createAppStore(aServerEnv());
 
   expect(secondStore.getState().lectureTitle).toBe("FOO");
   expect(secondStore.getState().lecturerEmail).toBe("lecturer@example.com");
 });
 
 test("store splits media devices into video and audio", () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const devices: MediaDeviceInfo[] = [
     makeDevice("c1", "g1", "videoinput", "Cam 1"),
@@ -44,7 +45,7 @@ test("store splits media devices into video and audio", () => {
 test("store filters out duplicate devices", () => {
   // Work around FF149 bug where the lunar lake integrated webcam shows up twice in the device list
   // with the same group and device ids but different label
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const devices: MediaDeviceInfo[] = [
     makeDevice("dev1", "g1", "videoinput", "Cam Integrated C"),
@@ -60,7 +61,7 @@ test("store filters out duplicate devices", () => {
 });
 
 test("a display track leaves the store when it ends", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const tracks = [ canvasVideoTrack(384, 216) ];
 
@@ -83,7 +84,7 @@ test("a display track leaves the store when it ends", async () => {
 });
 
 test("a video track leaves the store when it ends", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const tracks = [ canvasVideoTrack(384, 216) ];
 
@@ -106,7 +107,7 @@ test("a video track leaves the store when it ends", async () => {
 });
 
 test("an audio track leaves the store when it ends", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const audioCtx = new AudioContext();
   const oscillator = audioCtx.createOscillator();
@@ -129,7 +130,7 @@ test("an audio track leaves the store when it ends", async () => {
 
 test("removeTrack stops the track and takes it out of the store", async () => {
   // a track we stop ourselves fires no ended event, so removeTrack has to deliver one
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const tracks = [ canvasVideoTrack(384, 216) ];
 
@@ -142,7 +143,7 @@ test("removeTrack stops the track and takes it out of the store", async () => {
 });
 
 test("selectMainDisplay accepts values and reducers", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const tracks = [ canvasVideoTrack(384, 216) ];
 
@@ -153,7 +154,7 @@ test("selectMainDisplay accepts values and reducers", async () => {
 });
 
 test("selectOverlay accepts values and reducers", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const tracks = [ canvasVideoTrack(384, 216) ];
 
@@ -164,7 +165,7 @@ test("selectOverlay accepts values and reducers", async () => {
 });
 
 test("setActiveRecording accepts values and reducers", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   store.getState().setActiveRecording({ state: "starting", name: "FOO" });
   expect(store.getState().activeRecording).toStrictEqual({ state: "starting", name: "FOO" });
@@ -184,7 +185,7 @@ test("setActiveRecording accepts values and reducers", async () => {
 });
 
 test("updateQuotaInformation reads browser storage quota", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const GiB = 2 ** 30;
 
@@ -201,7 +202,7 @@ test("updateQuotaInformation reads browser storage quota", async () => {
 });
 
 test("updateBrowserStorage respects file overrides", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   const GiB = 2 ** 30;
   navigator.storage.estimate = vi.fn().mockResolvedValue({
@@ -268,7 +269,7 @@ const saved = (...names: string[]) =>
   vi.mocked(gatherRecordingsList).mockResolvedValue(names.map(name => ({ name, files: [] })));
 
 test("a recording marked as not streamed stays listed while it is saved in the browser", async () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 1, usage: 0 });
   saved("GVS_1", "GVS_2");
 
@@ -281,7 +282,7 @@ test("a recording marked as not streamed stays listed while it is saved in the b
 
 test("a recording deleted from the browser is dropped from the list", async () => {
   // there is nothing left to re-upload
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 1, usage: 0 });
   saved("GVS_2");
 
@@ -295,7 +296,7 @@ test("a recording deleted from the browser is dropped from the list", async () =
 test("the recording being made is not dropped before its files exist", async () => {
   // A recording that cannot stream is marked before its first file is opened, so a look at
   // browser storage that was already under way does not find it yet.
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 1, usage: 0 });
   saved();
 
@@ -307,7 +308,7 @@ test("the recording being made is not dropped before its files exist", async () 
 });
 
 test("a re-upload that did not complete leaves the recording listed", () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   store.getState().markUnstreamed("GVS_1");
   store.getState().signalManualUploadProgress("GVS_1", 50);
@@ -319,7 +320,7 @@ test("a re-upload that did not complete leaves the recording listed", () => {
 });
 
 test("a successful re-upload takes only its own recording off the list", () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   store.getState().markUnstreamed("GVS_1");
   store.getState().markUnstreamed("GVS_2");
@@ -329,9 +330,9 @@ test("a successful re-upload takes only its own recording off the list", () => {
 });
 
 test("the list of recordings that were not streamed is persisted", () => {
-  const store = createAppStore({});
+  const store = createAppStore(aServerEnv());
 
   store.getState().markUnstreamed("GVS_1");
 
-  expect(createAppStore({}).getState().unstreamedRecordings).toStrictEqual([ "GVS_1" ]);
+  expect(createAppStore(aServerEnv()).getState().unstreamedRecordings).toStrictEqual([ "GVS_1" ]);
 });

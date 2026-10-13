@@ -6,7 +6,7 @@ import { MantineTestProvider } from "../helpers/mantine";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import type { AppSession } from "@/lib/components/SessionProvider";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
-import { ServerEnv } from "@/lib/utils/serverEnv";
+import { aServerEnv } from "../helpers/serverEnv";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -19,9 +19,9 @@ vi.mock("@/lib/components/SessionProvider", () => ({
  */
 const authError = (message: string, source = "signinPopup") => Object.assign(new Error(message), { source });
 
-const DEFAULT_SERVER_ENV: ServerEnv = {
+const DEFAULT_SERVER_ENV = aServerEnv({
   apiUrl: "https://record.example.edu/api"
-};
+});
 
 function renderMessage(
   {
@@ -137,7 +137,7 @@ test.each([
   [ "signed in", { isAuthenticated: true, isLoading: false } ],
   [ "stale", { isAuthenticated: true, isLoading: false, isStale: true }]
 ])("a deployment with no backend says nothing at all -- %s", (_label, authState) => {
-  renderMessage({ serverEnv: {}, ...authState });
+  renderMessage({ serverEnv: aServerEnv(), ...authState });
 
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByText(/Authenticat/i)).toBeNull();

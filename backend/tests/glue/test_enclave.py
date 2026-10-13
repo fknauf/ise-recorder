@@ -31,11 +31,16 @@ from ..harness import abandon_recording, alias_of, digest_of, finish_recording, 
 from .conftest import request_for
 
 
+def user(sub: str, preferred_username: str | None) -> UserInfo:
+    """The caller as get_user_info would hand them over"""
+    return UserInfo(sub=sub, preferred_username=preferred_username)
+
+
 @pytest.mark.asyncio
 async def test_the_home_directory_is_prepared_under_destdir(
     request_: Request, auth_settings: Settings, tmp_path: Path
 ):
-    enclave = await get_enclave(request_, auth_settings, UserInfo("abc", "lecturer"))
+    enclave = await get_enclave(request_, auth_settings, user("abc", "lecturer"))
 
     assert enclave.recording_dir("GVS_2025") == tmp_path / digest_of("abc") / "GVS_2025"
     assert home_entries(tmp_path) == {digest_of("abc"), alias_of("lecturer", digest_of("abc"))}
@@ -43,7 +48,7 @@ async def test_the_home_directory_is_prepared_under_destdir(
 
 @pytest.mark.asyncio
 async def test_a_new_enclave_has_nothing_running(request_: Request, auth_settings: Settings):
-    enclave = await get_enclave(request_, auth_settings, UserInfo("abc", "lecturer"))
+    enclave = await get_enclave(request_, auth_settings, user("abc", "lecturer"))
 
     assert enclave.activity("GVS_2025") == RecordingActivity.NONE
     assert not enclave.verify_totp("0000000000", "GVS_2025")
@@ -91,8 +96,8 @@ async def test_a_known_subject_keeps_its_enclave_without_preparing_it_again(
 ):
     # the rest of a lecture has to keep landing beside its first chunk, and its job has to
     # stay in the set the next request looks in
-    first = await get_enclave(request_, auth_settings, UserInfo("abc", None))
-    second = await get_enclave(request_, auth_settings, UserInfo("abc", "lecturer"))
+    first = await get_enclave(request_, auth_settings, user("abc", None))
+    second = await get_enclave(request_, auth_settings, user("abc", "lecturer"))
 
     assert first is second
     # no alias appears mid-lecture either: the second call was answered from the cache
@@ -101,8 +106,8 @@ async def test_a_known_subject_keeps_its_enclave_without_preparing_it_again(
 
 @pytest.mark.asyncio
 async def test_subjects_get_enclaves_of_their_own(request_: Request, auth_settings: Settings):
-    first = await get_enclave(request_, auth_settings, UserInfo("user-a", "same"))
-    second = await get_enclave(request_, auth_settings, UserInfo("user-b", "same"))
+    first = await get_enclave(request_, auth_settings, user("user-a", "same"))
+    second = await get_enclave(request_, auth_settings, user("user-b", "same"))
 
     assert first.recording_dir("foo") != second.recording_dir("foo")
 
@@ -128,8 +133,8 @@ async def test_two_first_requests_at_once_end_up_in_one_enclave(
     )
 
     first, second = await asyncio.gather(
-        get_enclave(request_, auth_settings, UserInfo("abc", "lecturer")),
-        get_enclave(request_, auth_settings, UserInfo("abc", "lecturer")),
+        get_enclave(request_, auth_settings, user("abc", "lecturer")),
+        get_enclave(request_, auth_settings, user("abc", "lecturer")),
     )
 
     assert first is second
@@ -141,7 +146,7 @@ async def test_the_enclave_is_found_again_by_the_digest_its_download_links_name(
 ):
     # the browser follows a download link without a token, so the digest in the URL is all
     # there is to find the authority that issued its OTP
-    enclave = await get_enclave(request_, auth_settings, UserInfo("abc", "lecturer"))
+    enclave = await get_enclave(request_, auth_settings, user("abc", "lecturer"))
 
     assert enclave.user_digest() == digest_of("abc")
     assert await get_enclave_by_user_digest(request_, digest_of("abc")) is enclave
@@ -151,7 +156,7 @@ async def test_the_enclave_is_found_again_by_the_digest_its_download_links_name(
 async def test_a_digest_nobody_has_used_since_the_start_has_no_enclave(
     request_: Request, auth_settings: Settings
 ):
-    await get_enclave(request_, auth_settings, UserInfo("abc", "lecturer"))
+    await get_enclave(request_, auth_settings, user("abc", "lecturer"))
 
     assert await get_enclave_by_user_digest(request_, digest_of("someone-else")) is None
 

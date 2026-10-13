@@ -4,7 +4,7 @@ import { MantineTestProvider } from "../helpers/mantine";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { SessionProvider } from "@/lib/components/SessionProvider";
 import { Home } from "@/app/page";
-import { ServerEnv } from "@/lib/utils/serverEnv";
+import { aServerEnv } from "../helpers/serverEnv";
 
 /**
  * This file deliberately does NOT mock react-oidc-context.
@@ -20,7 +20,7 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
  */
 
 test("an unauthenticated deployment renders with the real react-oidc-context", async () => {
-  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000", authBackend: "disabled" };
+  const serverEnv = aServerEnv({ apiUrl: "http://localhost:5000", authBackend: "disabled" });
 
   render(
     <MantineTestProvider>
@@ -38,7 +38,7 @@ test("an unauthenticated deployment renders with the real react-oidc-context", a
 });
 
 test("an unauthenticated deployment shows no authentication UI", async () => {
-  const serverEnv: ServerEnv = { apiUrl: "http://localhost:5000", authBackend: "disabled" };
+  const serverEnv = aServerEnv({ apiUrl: "http://localhost:5000", authBackend: "disabled" });
 
   render(
     <MantineTestProvider>

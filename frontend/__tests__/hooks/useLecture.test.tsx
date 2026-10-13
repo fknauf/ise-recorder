@@ -25,3 +25,24 @@ test("useLecture reads and sets the lecture data in the store", () => {
   expect(result.current.lectureTitle).toBe("GVS");
   expect(result.current.lecturerEmail).toBe("someoneelse@vss.uni-hannover.de");
 });
+
+
+// --- whether the lecture needs an address ------------------------------------
+//
+// Only for a backend that sends reports and lets the lecturer name the recipient. Where there
+// is none, the hook hands out no address at all, so nothing the store kept from an earlier
+// deployment -- it persists the lecture data -- reaches a render request.
+
+test.each([
+  [ "a backend", { apiUrl: "http://localhost:5000" }, true ],
+  [ "a backend that offers the field", { apiUrl: "http://localhost:5000", smtpRecipientOverride: "default" as const }, true ],
+  [ "no backend", { apiUrl: undefined }, false ],
+  [ "a backend that does not offer the field", { apiUrl: "http://localhost:5000", smtpRecipientOverride: "disable" as const }, false ]
+])("whether an address is wanted, with %s", (_label, serverEnv, wanted) => {
+  const { result } = renderHook(() => useLecture(), { wrapper: appStoreWrapper(serverEnv) });
+
+  act(() => result.current.setLecturerEmail("lecturer@vss.uni-hannover.de"));
+
+  expect(result.current.isLecturerEmailUsed).toBe(wanted);
+  expect(result.current.lecturerEmail).toBe(wanted ? "lecturer@vss.uni-hannover.de" : undefined);
+});

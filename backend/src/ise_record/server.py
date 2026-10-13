@@ -41,11 +41,11 @@ from ise_record.glue.jobs import (
 from ise_record.glue.models import (
     ChunkLocation,
     RecordingResponse,
-    RenderRequest,
     SafeRecording,
     UnfinishedRecording,
 )
 from ise_record.glue.recordings import purge_recording, user_recordings_list
+from ise_record.glue.reporting import get_recipient_address_candidates
 from ise_record.settings import get_settings, Settings
 
 setup_logging()
@@ -153,8 +153,8 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
     settings: Annotated[Settings, Depends(get_settings)],
     enclave: Annotated[Enclave, Depends(get_enclave)],
     jobs_semaphore: Annotated[asyncio.Semaphore, Depends(get_jobs_semaphore)],
+    report_recipients: Annotated[list[str], Depends(get_recipient_address_candidates)],
     recording: SafeRecording,
-    render: RenderRequest,
 ) -> RecordingResponse:
     """Endpoint for the scheduling of postprocessing jobs"""
 
@@ -178,7 +178,7 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
     background_tasks.add_task(
         postprocessing_task,
         enclave.recording_dir(recording),
-        render,
+        report_recipients,
         settings.smtp,
         jobs_semaphore,
         exit_stacks.handover(),
