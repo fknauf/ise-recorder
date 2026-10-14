@@ -80,7 +80,7 @@ async def load_oidc_client(
             leeway_seconds=oidc.leeway_seconds,
             http_timeout_seconds=oidc.http_timeout_seconds,
         )
-    except httpx2.HTTPError, KeyError, ValueError, TypeError:
+    except httpx2.HTTPError, httpx2.InvalidURL, KeyError, ValueError, TypeError:
         logger.exception("OpenID discovery failed; authenticated endpoints will return 503")
         return None
 

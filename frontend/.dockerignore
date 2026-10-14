@@ -16,4 +16,4 @@ tsconfig.tsbuildinfo
 __tests__
 vitest.config.mts
 vitest.d.ts
-eslint.config.mjs
+oxlint.config.mts

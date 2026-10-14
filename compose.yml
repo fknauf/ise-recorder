@@ -12,7 +12,7 @@ services:
       - ISE_RECORD_AUTH=disabled
       - ISE_RECORD_API_URL=http://localhost:8000
       - ISE_RECORD_SHOW_VERSION=true
-# see compose-with-auth.yaml for a deployment with oidc authentication
+# see compose-with-auth.yml for a deployment with oidc authentication
 #      - ISE_RECORD_OIDC_PROVIDER_URL=http://keycloak.localhost:8080/realms/ise
 #      - ISE_RECORD_OIDC_CLIENT_ID=ise-recorder
 #      - ISE_RECORD_OIDC_MAX_AGE=2505600 # 29 days

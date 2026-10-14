@@ -144,8 +144,6 @@ User --_> UC7
 - Admin configures the use of his OpenID backend (see section below)
 - System asks user to authenticate upon first access
 - System displays a message warning the user that the session is about to expire and offering to reauthenticate when the session is past max_age
-- System will, if the user starts a recording while the session is past max_age, require the user to reauthenticate
-    - This is to ensure that the user always has more than the expected length of a recording left in the session
     - max_age should be configured so that session length - max_age > max expected recording length
 - System shows the notification email address input field, streams to postprocessing and schedules postprocessing jobs upon completion
     - Alternative: Admin leaves `ISE_RECORD_API_URL` empty. Notification email address input field is not shown, streaming not attempted, and postprocessing not scheduled.
@@ -444,10 +442,8 @@ The mechanism for UI updates during recording are four callback functions, passe
 recording utility function and called at state transitions or in response to arriving media chunks.
 
 - At the idle -> preparing transition, large parts of the UI are disabled. The "Start Recording" button is relabeled "Stop Recording"
-  and disabled. If the session is stale, the user is asked to reauthenticate. If he does, the state resets to "idle". If he refuses,
-  the recording starts but may stop streaming if the session expires. If the session is expired, the system will only create a
-  browser-local recording. The assumption is that the user will typically just reauthenticate when asked, everything else is
-  best-effort fallbacks.
+  and disabled. If the session is expired, the system will only create a browser-local recording. The assumption is that the user
+  will typically just reauthenticate when prompted to by the staleness warning, everything else is best-effort fallbacks.
 - At the preparing -> starting transition, the `beforeunload` event is arrested to prevent accidental closing of the application
   during an active recording.
 - At the starting -> recording transition, the "Stop Recording button" is re-enabled and the new recording first shown in the

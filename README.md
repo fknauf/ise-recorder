@@ -26,9 +26,10 @@ If there are additional screen or video streams, they will be streamed to the
 backend but not used in post-processing. It's then possible to process the
 recording manually.
 
-If a backend and authentication are configured, then it's also possible to
-download, delete, and schedule re-rendering of processed recordings, as well
-as to re-upload recordings that are stored in the browser.
+If a backend is configured, then it's possible to re-upload recordings that are
+stored in the browser. If authentication is configured in addition to a backend,
+then it's also possible to download, delete, and schedule re-rendering of
+processed recordings.
 
 ## Take a look
 
@@ -70,7 +71,7 @@ example deployment with a toy keycloak openid provider.
 
 Frontend configuration consists mostly of pointing it at a post-processing
 backend and an openid provider for authentication. It has the following
-variables for settings;
+variables for settings:
 
 * `ISE_RECORD_API_URL`
 
@@ -110,9 +111,8 @@ variables for settings;
 
     OIDC max_age in seconds. Sessions past `ISE_RECORD_OIDC_MAX_AGE` will be
     considered stale, i.e. ise-recorder will not assume that there is enough time left
-    before its expiry to record a full lecture. It will then force the user to reauthenticate
-    when a recording is started. Should be set to at least several hours shorter than the OIDC
-    max session age.
+    before its expiry to record a full lecture. It will then prompt the user to reauthenticate.
+    Should be set to at least several hours shorter than the OIDC max session age.
 
     | Default | Example |
     | - | - |
@@ -236,7 +236,7 @@ The backend has the following configuration envvars:
 
 * `ISE_RECORD_OIDC_LEEWAY_SECONDS`
 
-    Allowable clock skew in seconds between frontend and backend,
+    Allowable clock skew in seconds between oidc provider and backend,
     used in the expiration check for access tokens
 
     | Default | Example |
@@ -251,9 +251,17 @@ The backend has the following configuration envvars:
     | - | - |
     | `5` | `10` |
 
+* `ISE_RECORD_OIDC_USERINFO_CACHE_SECONDS`
+
+    Duration in seconds for which userinfo query responses will be cached.
+
+    | Default | Example |
+    | - | - |
+    | `3600` | `86400` |
+
 * `ISE_RECORD_SMTP_SERVER`
 
-    Hostname or IP address of the SMTP relay
+    Hostname or IP address of the SMTP relay. If this is set, `ISE_RECORD_SMTP_SENDER` must also be configured.
 
     | Default | Example |
     | - | - |
@@ -294,7 +302,7 @@ The backend has the following configuration envvars:
 
 * `ISE_RECORD_SMTP_SENDER`
 
-    Mail address to put in the "From" header
+    Mail address to put in the "From" header. If this is set, `ISE_RECORD_SMTP_SERVER` must also be configured.
 
     | Default | Example |
     | - | - |
@@ -349,6 +357,17 @@ The backend has the following configuration envvars:
     | - | - |
     | `[ "request", "oidc" ]` | `[ "oidc-unverified" ]` |
 
+### Reverse Proxy Setup
+
+Most of the time, you'll deploy the backend behind a reverse proxy. For that to
+work, the reverse proxy must allow sufficiently large request body sizes for upload
+(e.g. nginx `client_max_body_size 4m`).
+
+Frontend's recording sends per-input chunks in 5-second intervals, and re-upload
+sends chunks of 4 MiB. So technically the required size depends on what your webcam
+and slide feed produce in 5 seconds, but generally 4 MiB should be enough to cover
+everything.
+
 ## Hack it yourself
 
 ### Frontend-Only
@@ -366,7 +385,7 @@ It will then be reachable under http://localhost:3000.
 
 A development environment with an unauthenticated backend requires some
 configuration with environment variables. A comprehensive example of this can
-be found in the `compose.yml` file next ot this README. Minimally, the
+be found in the `compose.yml` file next to this README. Minimally, the
 following environment variables must be supplied:
 
 Frontend:

@@ -48,7 +48,7 @@ precisely, so the number of chunks per stream will drift slightly over time.
 
 ## API
 
-The API is an HTTP API with the following endpoints:
+The API is an HTTP API with the following endpoints under the configured route prefix:
 
 | Endpoint | Method | Purpose | Parameters |
 | - | - | - | - |
@@ -60,10 +60,11 @@ The API is an HTTP API with the following endpoints:
 | `/api/health` | GET | Monitoring | none |
 
 The `/api/recordings` GET endpoint retrieves a list of the user's (as identified by the bearer token in the HTTP
-`Authorization` header) recordings. Each recording has a name and a state (completed, rendering or unprocessed),
-and completed recordings also have a size and a pre-signed, relative download link that's valid for a short while.
-The frontend is supposed to append this to the api base url. See the "Downloads" section below for details and
-an explanation why this is necessary. The shape of the response is thus
+`Authorization` header) recordings. Only available in authenticated deployments (will respond 403 otherwise). Each
+recording has a name and a state (completed, rendering or unprocessed), and completed recordings also have a size
+and a pre-signed, relative download link that's valid for a short while. The frontend is supposed to append this to
+the api base url. See the "Downloads" section below for details and an explanation why this is necessary. The shape
+of the response is thus
 
 ```json
 [
@@ -82,7 +83,7 @@ an explanation why this is necessary. The shape of the response is thus
 
 The `/api/recordings/{name}` DELETE endpoint purges the recording named `{name}` and returns an empty body. This deletes
 both the rendered recording (if available) and the raw chunk data, so it's quite final. May fail with 404 (not found) or
-409 (busy, e.g. recording is being rendered).
+409 (busy, e.g. recording is being rendered). Only available in authenticated deployments (will respond 403 otherwise).
 
 The `/api/recordings/{name}/tracks/{track}/chunks/{index}` PUT endpoint is for streaming chunk data. It follows the
 expected PUT semantics in that it's idempotent: If a chunk is uploaded twice, the logical state on the server remains
@@ -106,6 +107,7 @@ The `/api/downloads/{user_digest}/{name}` GET endpoint is for downloads of compl
 is an octet stream with the recording's binary data. This more or less follows the presigned URL pattern: the user
 obtains a valid link from the `/api/recordings` GET endpoint and can use it to download the completed recording.
 The TOTP must be supplied as a GET parameter (i.e., `?totp=1234...`). See "Downloads" section below for details.
+ Only available in authenticated deployments (will respond 403 otherwise).
 
 The `/api/health` endpoint returns HTTP status 200 and `{ "status": "healthy" }` as long as the server is running; it
 is useful for primitive monitoring such as docker health checks.

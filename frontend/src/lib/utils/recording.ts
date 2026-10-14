@@ -376,16 +376,20 @@ export async function recordLecture(
       clearTimeout(stopTimer);
 
       if(apiDest !== undefined) {
-        try {
-          await withRetries(() => schedulePostprocessing(apiDest, recordingName, lecturerEmail, postRetryPolicy.abortSignal), postRetryPolicy);
-          showSuccess(`Scheduled postprocessing for recording "${recordingName}"`);
-        } catch(e) {
-          if(streamingAbort.signal.aborted) {
-            showMessage("Post-processing could not be scheduled because streaming was impeded.");
-          } else {
-            const message = e instanceof Error ? e.message : "unknown error";
-            showError(`Failed to schedule postprocessing: ${message}. The recording was streamed to backend and will be available for re-rendering soon.`);
+        if(jobs.some(job => job.trackTitle === "stream")) {
+          try {
+            await withRetries(() => schedulePostprocessing(apiDest, recordingName, lecturerEmail, postRetryPolicy.abortSignal), postRetryPolicy);
+            showSuccess(`Scheduled postprocessing for recording "${recordingName}"`);
+          } catch(e) {
+            if(streamingAbort.signal.aborted) {
+              showMessage("Post-processing could not be scheduled because streaming was impeded.");
+            } else {
+              const message = e instanceof Error ? e.message : "unknown error";
+              showError(`Failed to schedule postprocessing: ${message}. The recording was streamed to backend and will be available for re-rendering soon.`);
+            }
           }
+        } else {
+          showMessage("Post-processing could not be scheduled because there's no main display.");
         }
       }
     } catch(e) {

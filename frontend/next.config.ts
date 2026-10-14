@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-import { glob } from "glob";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
@@ -7,11 +6,6 @@ const nextConfig: NextConfig = {
   reactCompiler: {
     panicThreshold: "all_errors"
   },
-  transpilePackages: [
-    "@adobe/react-spectrum",
-    "@react-spectrum/*",
-    "@spectrum-icons/*"
-  ].flatMap(spec => glob.sync(`${spec}`, { cwd: "node_modules/" })),
   async headers() {
     return [
       {
