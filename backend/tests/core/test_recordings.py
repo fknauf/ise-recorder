@@ -44,6 +44,8 @@ from ..harness import (
     age,
     finish_recording,
     MINUTE,
+    recording_dir,
+    stray,
     write_chunks,
 )
 
@@ -57,16 +59,16 @@ def home(tmp_path: Path) -> Path:
 
 def recording(home: Path, name: str) -> anyio.Path:
     """The path the tracker is handed for a recording: an anyio one, as the enclave builds it."""
-    return anyio.Path(home / name)
+    return anyio.Path(recording_dir(home, name))
 
 
-def disk_state_of(recording_dir: Path) -> RecordingDiskState:
-    state, _ = anyio.run(classify_disk_state, anyio.Path(recording_dir))
+def disk_state_of(path: Path) -> RecordingDiskState:
+    state, _ = anyio.run(classify_disk_state, anyio.Path(path))
     return state
 
 
-def is_streaming(tracker: RecordingTracker, recording_dir: Path) -> bool:
-    return anyio.run(tracker.streaming, anyio.Path(recording_dir))
+def is_streaming(tracker: RecordingTracker, path: Path) -> bool:
+    return anyio.run(tracker.streaming, anyio.Path(path))
 
 
 class Clock:  # pylint: disable=too-few-public-methods
@@ -128,27 +130,27 @@ def test_an_abandoned_recording_is_unprocessed(home: Path):
 def test_a_recording_still_receiving_chunks_is_unprocessed_on_disk(home: Path):
     # whether it is still being streamed is the liveness line's business; on disk it is a
     # renderable recording like any other
-    write_chunks(home / "LIVE_2026", [5])
+    write_chunks(recording_dir(home, "LIVE_2026"), [5])
 
-    assert disk_state_of(home / "LIVE_2026") == RecordingDiskState.UNPROCESSED
+    assert disk_state_of(recording_dir(home, "LIVE_2026")) == RecordingDiskState.UNPROCESSED
 
 
 def test_a_failed_render_left_behind_is_unprocessed(home: Path):
     # the case the Rerender button is mostly for: ffmpeg ran and failed, and its partial
     # output is kept for inspection -- which must not be mistaken for the finished file
-    recording_dir = abandon_recording(home, "GVS_2025")
-    (recording_dir / "presentation.part.webm").write_bytes(b"half")
+    recording_path = abandon_recording(home, "GVS_2025")
+    (recording_path / "presentation.part.webm").write_bytes(b"half")
 
-    assert disk_state_of(recording_dir) == RecordingDiskState.UNPROCESSED
+    assert disk_state_of(recording_path) == RecordingDiskState.UNPROCESSED
 
 
 def test_a_concatenation_left_behind_is_still_unprocessed(home: Path):
     # concat_chunks writes full.webm into the stream directory itself, and a crash in the
     # middle of it leaves the file there next to the chunks it was made from
-    recording_dir = abandon_recording(home, "GVS_2025")
-    (recording_dir / "stream" / "full.webm").write_bytes(b"concatenated")
+    recording_path = abandon_recording(home, "GVS_2025")
+    (recording_path / "stream" / "full.webm").write_bytes(b"concatenated")
 
-    assert disk_state_of(recording_dir) == RecordingDiskState.UNPROCESSED
+    assert disk_state_of(recording_path) == RecordingDiskState.UNPROCESSED
 
 
 # --- disk state: not renderable --------------------------------------------
@@ -157,75 +159,75 @@ def test_a_concatenation_left_behind_is_still_unprocessed(home: Path):
 def test_a_recording_without_a_main_stream_is_not_renderable(home: Path):
     # postprocessing gives up on these with MAIN_STREAM_MISSING, so a Rerender button would
     # only ever fail again
-    write_chunks(home / "GVS_2025", [30 * MINUTE], track="overlay")
+    write_chunks(recording_dir(home, "GVS_2025"), [30 * MINUTE], track="overlay")
 
-    assert disk_state_of(home / "GVS_2025") == RecordingDiskState.NOT_RENDERABLE
+    assert disk_state_of(recording_dir(home, "GVS_2025")) == RecordingDiskState.NOT_RENDERABLE
 
 
 def test_chunks_in_another_track_do_not_make_up_for_an_empty_main_stream(home: Path):
     # the overlay and audio tracks are layered onto the main stream; without it there is
     # nothing to render, however many chunks the other tracks hold
-    (home / "GVS_2025" / "stream").mkdir(parents=True)
-    write_chunks(home / "GVS_2025", [30 * MINUTE], track="overlay")
-    write_chunks(home / "GVS_2025", [30 * MINUTE], track="audio-0")
+    (recording_dir(home, "GVS_2025") / "stream").mkdir(parents=True)
+    write_chunks(recording_dir(home, "GVS_2025"), [30 * MINUTE], track="overlay")
+    write_chunks(recording_dir(home, "GVS_2025"), [30 * MINUTE], track="audio-0")
 
-    assert disk_state_of(home / "GVS_2025") == RecordingDiskState.NOT_RENDERABLE
+    assert disk_state_of(recording_dir(home, "GVS_2025")) == RecordingDiskState.NOT_RENDERABLE
 
 
 def test_a_recording_with_an_empty_main_stream_is_not_renderable(home: Path):
     # the directory is created just before the first chunk is written into it
-    (home / "GVS_2025" / "stream").mkdir(parents=True)
+    (recording_dir(home, "GVS_2025") / "stream").mkdir(parents=True)
 
-    assert disk_state_of(home / "GVS_2025") == RecordingDiskState.NOT_RENDERABLE
+    assert disk_state_of(recording_dir(home, "GVS_2025")) == RecordingDiskState.NOT_RENDERABLE
 
 
 def test_a_main_stream_with_only_a_leftover_concatenation_is_not_renderable(home: Path):
-    stream_dir = home / "GVS_2025" / "stream"
+    stream_dir = recording_dir(home, "GVS_2025") / "stream"
     stream_dir.mkdir(parents=True)
     (stream_dir / "full.webm").write_bytes(b"concatenated")
 
-    assert disk_state_of(home / "GVS_2025") == RecordingDiskState.NOT_RENDERABLE
+    assert disk_state_of(recording_dir(home, "GVS_2025")) == RecordingDiskState.NOT_RENDERABLE
 
 
 def test_a_main_stream_with_only_a_partial_chunk_is_not_renderable(home: Path):
     # an upload writes to part.chunk.* and renames it once it is complete; a part file left
     # by an upload that broke off is not a chunk
-    stream_dir = home / "GVS_2025" / "stream"
+    stream_dir = recording_dir(home, "GVS_2025") / "stream"
     stream_dir.mkdir(parents=True)
     (stream_dir / "part.chunk.0000").write_bytes(b"half a chunk")
 
-    assert disk_state_of(home / "GVS_2025") == RecordingDiskState.NOT_RENDERABLE
+    assert disk_state_of(recording_dir(home, "GVS_2025")) == RecordingDiskState.NOT_RENDERABLE
 
 
 def test_an_output_that_is_not_a_file_is_not_renderable(home: Path):
     # rendering would have to write presentation.webm where something else already is
-    recording_dir = abandon_recording(home, "GVS_2025")
-    (recording_dir / "presentation.webm").mkdir()
+    recording_path = abandon_recording(home, "GVS_2025")
+    (recording_path / "presentation.webm").mkdir()
 
-    assert disk_state_of(recording_dir) == RecordingDiskState.NOT_RENDERABLE
+    assert disk_state_of(recording_path) == RecordingDiskState.NOT_RENDERABLE
 
 
 # --- disk state: not a recording -------------------------------------------
 
 
 def test_a_missing_directory_is_nonexistent(home: Path):
-    assert disk_state_of(home / "never_recorded") == RecordingDiskState.NONEXISTENT
+    assert disk_state_of(recording_dir(home, "never_recorded")) == RecordingDiskState.NONEXISTENT
 
 
 def test_a_stray_file_is_nonexistent(home: Path):
-    (home / "notes.txt").write_text("not a recording")
+    stray(home, "notes.txt").write_text("not a recording", encoding="utf-8")
 
-    assert disk_state_of(home / "notes.txt") == RecordingDiskState.NONEXISTENT
+    assert disk_state_of(recording_dir(home, "notes.txt")) == RecordingDiskState.NONEXISTENT
 
 
 def test_a_symlink_is_not_followed(home: Path, tmp_path: Path):
     # nothing in the app creates one, but if one turns up in a home directory it must not
     # be classified by what it points at: as finished it would be listed for download and
     # offered for purging, with the listing and the purge acting on its target
-    finish_recording(tmp_path, "victim")
-    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+    victim = finish_recording(tmp_path, "victim")
+    stray(home, "link").symlink_to(victim, target_is_directory=True)
 
-    assert disk_state_of(home / "link") == RecordingDiskState.NONEXISTENT
+    assert disk_state_of(recording_dir(home, "link")) == RecordingDiskState.NONEXISTENT
 
 
 # --- activity: the claims ---------------------------------------------------
@@ -393,22 +395,22 @@ def test_an_upload_makes_a_recording_live(home: Path):
     with tracker.claim_uploading(recording(home, "GVS_2025")):
         pass
 
-    assert is_streaming(tracker, home / "GVS_2025")
+    assert is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 def test_a_recording_stops_being_live_once_the_grace_period_has_passed(home: Path, clock: Clock):
-    write_chunks(home / "GVS_2025", [5])
+    write_chunks(recording_dir(home, "GVS_2025"), [5])
     tracker = RecordingTracker()
 
     with tracker.claim_uploading(recording(home, "GVS_2025")):
         pass
     clock.advance(STREAMING_GRACE_PERIOD - timedelta(seconds=10))
 
-    assert is_streaming(tracker, home / "GVS_2025")
+    assert is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
     clock.advance(timedelta(seconds=20))
 
-    assert not is_streaming(tracker, home / "GVS_2025")
+    assert not is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 def test_a_failed_upload_is_not_a_sign_of_life(home: Path):
@@ -418,13 +420,13 @@ def test_a_failed_upload_is_not_a_sign_of_life(home: Path):
     with pytest.raises(OSError), tracker.claim_uploading(recording(home, "GVS_2025")):
         raise OSError("disk full")
 
-    assert not is_streaming(tracker, home / "GVS_2025")
+    assert not is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 def test_a_job_request_ends_the_stream(home: Path):
     # the frontend asks for the render once the lecture is over, so that is the end of it,
     # with no need to wait out the grace period
-    write_chunks(home / "GVS_2025", [5])
+    write_chunks(recording_dir(home, "GVS_2025"), [5])
     tracker = RecordingTracker()
 
     with tracker.claim_uploading(recording(home, "GVS_2025")):
@@ -432,11 +434,11 @@ def test_a_job_request_ends_the_stream(home: Path):
     with tracker.claim_rendering(recording(home, "GVS_2025")):
         pass
 
-    assert not is_streaming(tracker, home / "GVS_2025")
+    assert not is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 def test_a_chunk_after_the_job_makes_the_recording_live_again(home: Path):
-    write_chunks(home / "GVS_2025", [5])
+    write_chunks(recording_dir(home, "GVS_2025"), [5])
     tracker = RecordingTracker()
 
     with tracker.claim_rendering(recording(home, "GVS_2025")):
@@ -444,7 +446,7 @@ def test_a_chunk_after_the_job_makes_the_recording_live_again(home: Path):
     with tracker.claim_uploading(recording(home, "GVS_2025")):
         pass
 
-    assert is_streaming(tracker, home / "GVS_2025")
+    assert is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 def test_a_job_refused_by_the_tracker_does_not_end_the_stream(home: Path):
@@ -460,7 +462,7 @@ def test_a_job_refused_by_the_tracker_does_not_end_the_stream(home: Path):
             pass
         raise RuntimeError("the purge is refused after all")
 
-    assert is_streaming(tracker, home / "GVS_2025")
+    assert is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 # After a restart nothing is in memory, so the newest chunk on disk stands in for the last
@@ -475,23 +477,23 @@ def test_a_job_refused_by_the_tracker_does_not_end_the_stream(home: Path):
 def test_after_a_restart_the_newest_chunk_on_disk_stands_in_for_the_last_upload(
     home: Path, fraction: float, streaming: bool
 ):
-    write_chunks(home / "GVS_2025", [fraction * GRACE_SECONDS])
+    write_chunks(recording_dir(home, "GVS_2025"), [fraction * GRACE_SECONDS])
 
-    assert is_streaming(RecordingTracker(), home / "GVS_2025") == streaming
+    assert is_streaming(RecordingTracker(), recording_dir(home, "GVS_2025")) == streaming
 
 
 def test_after_a_restart_a_lecture_in_progress_is_judged_by_its_newest_chunk(home: Path):
     # an hour-long lecture in progress: its first chunks are long past the cutoff, but the
     # newest one was written seconds ago
-    write_chunks(home / "LIVE_2026", [60 * MINUTE, 30 * MINUTE, 10 * MINUTE, 5])
+    write_chunks(recording_dir(home, "LIVE_2026"), [60 * MINUTE, 30 * MINUTE, 10 * MINUTE, 5])
 
-    assert is_streaming(RecordingTracker(), home / "LIVE_2026")
+    assert is_streaming(RecordingTracker(), recording_dir(home, "LIVE_2026"))
 
 
 def test_the_newest_chunk_is_picked_by_name_not_by_listing_order(home: Path):
     # chunk names are zero-padded to a fixed width, which is what makes the name order the
     # arrival order
-    track_dir = home / "LONG_2026" / "stream"
+    track_dir = recording_dir(home, "LONG_2026") / "stream"
     track_dir.mkdir(parents=True)
 
     for index, seconds in [(0, 60 * MINUTE), (9998, 20 * MINUTE), (9999, 5)]:
@@ -499,45 +501,46 @@ def test_the_newest_chunk_is_picked_by_name_not_by_listing_order(home: Path):
         chunk.write_bytes(b"chunk")
         age(chunk, seconds)
 
-    assert is_streaming(RecordingTracker(), home / "LONG_2026")
+    assert is_streaming(RecordingTracker(), recording_dir(home, "LONG_2026"))
 
 
 def test_after_a_restart_a_fresh_chunk_in_any_track_counts(home: Path):
     # the first seconds of a lecture, if its overlay chunks arrive before the main track's:
     # not renderable yet, but certainly live, and not to be purged from under the streamer
-    write_chunks(home / "LIVE_2026", [5], track="overlay")
+    write_chunks(recording_dir(home, "LIVE_2026"), [5], track="overlay")
 
-    assert is_streaming(RecordingTracker(), home / "LIVE_2026")
+    assert is_streaming(RecordingTracker(), recording_dir(home, "LIVE_2026"))
 
 
 def test_after_a_restart_a_track_without_chunks_does_not_hide_the_others(home: Path):
     # an upload that broke off before its first chunk was in leaves a track directory holding
     # nothing that counts as a chunk; the recording is still judged by the tracks that do
     # have some, rather than the listing falling over
-    write_chunks(home / "LIVE_2026", [5])
-    empty_track = home / "LIVE_2026" / "overlay"
+    write_chunks(recording_dir(home, "LIVE_2026"), [5])
+    empty_track = recording_dir(home, "LIVE_2026") / "overlay"
     empty_track.mkdir()
     (empty_track / "part.chunk.0000.k2x9q1zb").write_bytes(b"half a chunk")
 
-    assert is_streaming(RecordingTracker(), home / "LIVE_2026")
+    assert is_streaming(RecordingTracker(), recording_dir(home, "LIVE_2026"))
 
 
 def test_a_concatenation_left_behind_is_not_a_fresh_chunk(home: Path):
     # concat_chunks writes full.webm into the stream directory, after every chunk
-    recording_dir = abandon_recording(home, "GVS_2025")
-    (recording_dir / "stream" / "full.webm").write_bytes(b"concatenated")
+    recording_path = abandon_recording(home, "GVS_2025")
+    (recording_path / "stream" / "full.webm").write_bytes(b"concatenated")
 
-    assert not is_streaming(RecordingTracker(), recording_dir)
+    assert not is_streaming(RecordingTracker(), recording_path)
 
 
 @pytest.mark.parametrize("name", ["never_recorded", "notes.txt", "link"])
 def test_something_that_is_not_a_recording_is_not_live(home: Path, tmp_path: Path, name: str):
     # and asking does not fail: the listing asks about everything in the home directory
-    (home / "notes.txt").write_text("not a recording")
-    write_chunks(tmp_path / "victim", [5])
-    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+    stray(home, "notes.txt").write_text("not a recording", encoding="utf-8")
+    victim = recording_dir(tmp_path, "victim")
+    write_chunks(victim, [5])
+    stray(home, "link").symlink_to(victim, target_is_directory=True)
 
-    assert not is_streaming(RecordingTracker(), home / name)
+    assert not is_streaming(RecordingTracker(), recording_dir(home, name))
 
 
 def test_a_look_at_the_disk_does_not_overwrite_an_upload_that_finished_meanwhile(
@@ -561,9 +564,9 @@ def test_a_look_at_the_disk_does_not_overwrite_an_upload_that_finished_meanwhile
         side_effect=scan_while_a_chunk_arrives,
     )
 
-    assert is_streaming(tracker, home / "GVS_2025")
+    assert is_streaming(tracker, recording_dir(home, "GVS_2025"))
     # and the record keeps the upload, which a second look finds without scanning
-    assert is_streaming(tracker, home / "GVS_2025")
+    assert is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 # After a restart the render time is gone from memory as well. Without it, a recording whose
@@ -573,35 +576,35 @@ def test_a_look_at_the_disk_does_not_overwrite_an_upload_that_finished_meanwhile
 
 
 def test_after_a_restart_a_recording_rendered_since_its_last_chunk_is_not_live(home: Path):
-    write_chunks(home / "GVS_2025", [30, 20])
+    write_chunks(recording_dir(home, "GVS_2025"), [30, 20])
     finish_recording(home, "GVS_2025")
 
-    assert not is_streaming(RecordingTracker(), home / "GVS_2025")
+    assert not is_streaming(RecordingTracker(), recording_dir(home, "GVS_2025"))
 
 
 def test_after_a_restart_a_render_that_broke_off_counts_as_the_end_of_the_stream(home: Path):
     # the job was requested, so the lecture was over; ffmpeg had got as far as writing
-    write_chunks(home / "GVS_2025", [30, 20])
-    (home / "GVS_2025" / "presentation.part.webm").write_bytes(b"half a video")
+    write_chunks(recording_dir(home, "GVS_2025"), [30, 20])
+    (recording_dir(home, "GVS_2025") / "presentation.part.webm").write_bytes(b"half a video")
 
-    assert not is_streaming(RecordingTracker(), home / "GVS_2025")
+    assert not is_streaming(RecordingTracker(), recording_dir(home, "GVS_2025"))
 
 
 def test_after_a_restart_a_render_that_left_nothing_on_disk_does_not_end_the_stream(home: Path):
     # the accepted gap: a job that broke off before ffmpeg wrote anything leaves no trace, so
     # the recording counts as live until the grace period is over
-    write_chunks(home / "GVS_2025", [30, 20])
+    write_chunks(recording_dir(home, "GVS_2025"), [30, 20])
 
-    assert is_streaming(RecordingTracker(), home / "GVS_2025")
+    assert is_streaming(RecordingTracker(), recording_dir(home, "GVS_2025"))
 
 
 def test_after_a_restart_chunks_newer_than_the_last_render_are_live(home: Path):
     # a lecture streamed again under the name of an old one, whose output is still there
     finish_recording(home, "GVS_2025")
-    age(home / "GVS_2025" / "presentation.webm", 60 * MINUTE)
-    write_chunks(home / "GVS_2025", [5])
+    age(recording_dir(home, "GVS_2025") / "presentation.webm", 60 * MINUTE)
+    write_chunks(recording_dir(home, "GVS_2025"), [5])
 
-    assert is_streaming(RecordingTracker(), home / "GVS_2025")
+    assert is_streaming(RecordingTracker(), recording_dir(home, "GVS_2025"))
 
 
 def test_a_look_at_the_disk_does_not_overwrite_a_job_requested_meanwhile(
@@ -610,8 +613,8 @@ def test_a_look_at_the_disk_does_not_overwrite_a_job_requested_meanwhile(
     # the same race as for the upload: the estimate awaits the disk, and a job requested in
     # the middle of it is newer than anything the estimate can find
     finish_recording(home, "GVS_2025")
-    age(home / "GVS_2025" / "presentation.webm", 60 * MINUTE)
-    write_chunks(home / "GVS_2025", [5])
+    age(recording_dir(home, "GVS_2025") / "presentation.webm", 60 * MINUTE)
+    write_chunks(recording_dir(home, "GVS_2025"), [5])
     tracker = RecordingTracker()
     real_estimate = recordings._estimate_render_time_from_disk  # pyright: ignore[reportPrivateUsage]  # pylint: disable=protected-access
 
@@ -626,8 +629,8 @@ def test_a_look_at_the_disk_does_not_overwrite_a_job_requested_meanwhile(
         side_effect=estimate_while_a_job_arrives,
     )
 
-    assert not is_streaming(tracker, home / "GVS_2025")
-    assert not is_streaming(tracker, home / "GVS_2025")
+    assert not is_streaming(tracker, recording_dir(home, "GVS_2025"))
+    assert not is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 # A purge forgets what the tracker knew about the recording, so that a new recording of the
@@ -641,13 +644,13 @@ def test_a_purge_forgets_the_recording(home: Path):
     with tracker.claim_uploading(recording(home, "GVS_2025")):
         pass
     with tracker.claim_purging(recording(home, "GVS_2025")):
-        shutil.rmtree(home / "GVS_2025")
+        shutil.rmtree(recording_dir(home, "GVS_2025"))
 
     # the same name, recorded again without its chunks reaching the server yet: if the old
     # upload were still on record, it would count as live
-    (home / "GVS_2025").mkdir()
+    recording_dir(home, "GVS_2025").mkdir()
 
-    assert not is_streaming(tracker, home / "GVS_2025")
+    assert not is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 def test_a_purge_that_is_refused_forgets_nothing(home: Path):
@@ -660,7 +663,7 @@ def test_a_purge_that_is_refused_forgets_nothing(home: Path):
     with pytest.raises(RuntimeError), tracker.claim_purging(recording(home, "GVS_2025")):
         raise RuntimeError("refused")
 
-    assert is_streaming(tracker, home / "GVS_2025")
+    assert is_streaming(tracker, recording_dir(home, "GVS_2025"))
 
 
 @pytest.mark.parametrize("history", ["nothing", "uploaded", "rendered"])
@@ -678,7 +681,7 @@ def test_a_purge_succeeds_whatever_the_tracker_knew_beforehand(home: Path, histo
             pass
 
     with tracker.claim_purging(recording(home, "GVS_2025")):
-        shutil.rmtree(home / "GVS_2025")
+        shutil.rmtree(recording_dir(home, "GVS_2025"))
 
     assert tracker.activity(recording(home, "GVS_2025")) == RecordingActivity.NONE
 
@@ -688,7 +691,7 @@ def test_a_purge_succeeds_whatever_the_tracker_knew_beforehand(home: Path, histo
 
 def test_classify_reports_all_three_lines(home: Path):
     finish_recording(home, "GVS_2025", b"x" * 12345)
-    write_chunks(home / "GVS_2025", [5])
+    write_chunks(recording_dir(home, "GVS_2025"), [5])
     tracker = RecordingTracker()
 
     with tracker.claim_rendering(recording(home, "GVS_2025")):

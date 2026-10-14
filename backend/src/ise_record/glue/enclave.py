@@ -39,6 +39,7 @@ class Enclave:
     def __init__(self, user_digest: str | None, home_dir: Path) -> None:
         self._user_digest = user_digest
         self._home_dir = home_dir
+        self._recordings_dir = home_dir / "recordings"
         self._tracker = RecordingTracker()
         self._download_totp = DownloadTotpAuthority()
 
@@ -53,7 +54,7 @@ class Enclave:
 
     def recording_dir(self, recording: str) -> Path:
         """The path where a recording is stored in this enclave"""
-        return self._home_dir / recording
+        return self._recordings_dir / recording
 
     @contextmanager
     def _claim(
@@ -123,9 +124,12 @@ class Enclave:
     async def classify_all(self) -> list[RecordingInfo]:
         """Classify all recordings in this enclave for display/download in the frontend"""
         async with self._fs_lock.reader_lock:
+            if not await self._recordings_dir.is_dir():
+                return []
+
             return [
                 await self._tracker.classify(rec_dir)
-                async for rec_dir in self._home_dir.iterdir()
+                async for rec_dir in self._recordings_dir.iterdir()
                 if await rec_dir.is_dir(follow_symlinks=False)
             ]
 

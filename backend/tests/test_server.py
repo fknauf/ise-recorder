@@ -65,6 +65,9 @@ from .harness import (
     Provider,
     purge,
     purge_in_flight,
+    recording_dir,
+    stored_recordings,
+    stray,
     upload,
     upload_chunk_path,
     write_chunks,
@@ -120,7 +123,7 @@ def test_schedule_postprocessing(mocker: MockerFixture, client: TestClient, sett
     assert response.status_code == 202
     mock_add_task.assert_called_once_with(
         postprocessing_task,
-        settings.destdir / "foo",
+        recording_dir(settings.destdir, "foo"),
         # no SMTP in this deployment, so nobody to report to; see the tests below for who is
         None,
         settings.smtp,
@@ -277,9 +280,9 @@ def test_a_job_for_a_recording_that_cannot_be_rendered_is_refused(
     # no main stream, or nothing in it: postprocessing would only give up with
     # MAIN_STREAM_MISSING, so the request says so rather than accept a job that does nothing
     if track is None:
-        (Path(settings.destdir) / "foo" / "stream").mkdir(parents=True)
+        (recording_dir(settings.destdir, "foo") / "stream").mkdir(parents=True)
     else:
-        write_chunks(settings.destdir / "foo", [30 * 60], track=track)
+        write_chunks(recording_dir(settings.destdir, "foo"), [30 * 60], track=track)
     mock_add_task = mocker.patch("fastapi.BackgroundTasks.add_task")
 
     response = client.post(render_url("foo"), json={})
@@ -322,7 +325,7 @@ def test_chunk_upload(client: TestClient, settings: Settings):
     for ix, fname in [(0, "chunk.0000"), (42, "chunk.0042"), (9999, "chunk.9999")]:
         response = upload(client, None, index=ix, content=sample)
 
-        target_path = Path(settings.destdir) / "foo" / "stream" / fname
+        target_path = recording_dir(settings.destdir, "foo") / "stream" / fname
 
         # nothing to say back: the client knows what it sent, and where
         assert response.status_code == 204
@@ -336,7 +339,7 @@ def test_a_chunk_uploaded_again_replaces_the_first_copy(client: TestClient, sett
     assert upload(client, None, index=3, content=b"first try").status_code == 204
     assert upload(client, None, index=3, content=b"second try").status_code == 204
 
-    track = Path(settings.destdir) / "foo" / "stream"
+    track = recording_dir(settings.destdir, "foo") / "stream"
     assert sorted(p.name for p in track.iterdir()) == ["chunk.0003"]
     assert (track / "chunk.0003").read_bytes() == b"second try"
 
@@ -346,7 +349,7 @@ def test_a_chunk_larger_than_one_read_arrives_whole(client: TestClient, settings
     big = bytes(range(256)) * 4096
 
     assert upload(client, None, content=big).status_code == 204
-    assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0000").read_bytes() == big
+    assert (recording_dir(settings.destdir, "foo") / "stream" / "chunk.0000").read_bytes() == big
 
 
 def chunk_upload_scope(recording: str, index: int) -> Scope:
@@ -392,7 +395,7 @@ async def test_a_chunk_that_arrives_in_pieces_is_stored_whole(app: FastAPI, sett
     await app(chunk_upload_scope("foo", 0), receive, send)
 
     assert outgoing[0]["status"] == 204
-    chunk = Path(settings.destdir) / "foo" / "stream" / "chunk.0000"
+    chunk = recording_dir(settings.destdir, "foo") / "stream" / "chunk.0000"
     assert chunk.read_bytes() == b"first second third"
 
 
@@ -414,7 +417,7 @@ def test_chunk_upload_stores_a_non_latin_recording_name(
     response = upload(client, None, recording=recording, content=SAMPLE.read_bytes())
 
     assert response.status_code == 204
-    assert (Path(settings.destdir) / recording / "stream" / "chunk.0000").is_file()
+    assert (recording_dir(settings.destdir, recording) / "stream" / "chunk.0000").is_file()
 
 
 def test_chunk_upload_stores_a_decomposed_name_under_one_directory(
@@ -428,11 +431,11 @@ def test_chunk_upload_stores_a_decomposed_name_under_one_directory(
 
         assert response.status_code == 204
 
-    composed = Path(settings.destdir) / "\u00dcbung_2025" / "stream"
+    composed = recording_dir(settings.destdir, "\u00dcbung_2025") / "stream"
 
     assert (composed / "chunk.0000").is_file()
     assert (composed / "chunk.0001").is_file()
-    assert sorted(p.name for p in Path(settings.destdir).iterdir()) == ["\u00dcbung_2025"]
+    assert [p.name for p in stored_recordings(settings.destdir)] == ["\u00dcbung_2025"]
 
 
 def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, settings: Settings):
@@ -444,7 +447,7 @@ def test_chunk_upload_truncates_an_overlong_recording_name(client: TestClient, s
 
     assert response.status_code == 204
 
-    stored = list(Path(settings.destdir).iterdir())
+    stored = stored_recordings(settings.destdir)
 
     assert len(stored) == 1
     assert len(stored[0].name.encode("utf-8")) <= NAME_MAX_BYTES
@@ -496,13 +499,13 @@ def test_chunk_upload_with_more_digits(tmp_path: Path):
             assert response.status_code == status_code
 
             if fname is not None:
-                assert (tmp_path / "foo" / "stream" / fname).read_bytes() == sample
+                assert (recording_dir(tmp_path, "foo") / "stream" / fname).read_bytes() == sample
 
 
 def test_a_chunk_for_a_recording_that_is_rendering_is_kept(client: TestClient, settings: Settings):
     # a late chunk, or a retried one, may be the only copy there is; refusing it would lose it,
     # while a render that missed it can be repeated
-    write_chunks(settings.destdir / "foo", [0])
+    write_chunks(recording_dir(settings.destdir, "foo"), [0])
 
     with job_in_flight(client, settings.destdir, "foo"):
         response = upload(client, None, index=1)
@@ -510,7 +513,9 @@ def test_a_chunk_for_a_recording_that_is_rendering_is_kept(client: TestClient, s
         assert response.status_code == 204
         assert activity_of(client, settings.destdir, "foo") == RecordingActivity.RENDERING
 
-    assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0001").read_bytes() == b"payload"
+    assert (
+        recording_dir(settings.destdir, "foo") / "stream" / "chunk.0001"
+    ).read_bytes() == b"payload"
 
 
 @pytest.mark.asyncio
@@ -534,7 +539,7 @@ async def test_a_chunk_that_breaks_off_leaves_nothing_behind(
     with pytest.raises(ClientDisconnect):
         await app(chunk_upload_scope("foo", 3), receive, send)
 
-    assert not list((Path(settings.destdir) / "foo" / "stream").iterdir())
+    assert not list((recording_dir(settings.destdir, "foo") / "stream").iterdir())
     # and the broken upload does not keep the recording claimed
     assert activity_of(client, settings.destdir, "foo") == RecordingActivity.NONE
 
@@ -547,7 +552,7 @@ def test_other_recordings_still_take_chunks_while_one_is_rendering(
 
     with job_in_flight(client, settings.destdir, "bar"):
         assert upload(client, None).status_code == 204
-    assert (Path(settings.destdir) / "foo" / "stream" / "chunk.0000").is_file()
+    assert (recording_dir(settings.destdir, "foo") / "stream" / "chunk.0000").is_file()
 
 
 def test_cors_preflight_jobs_unconfigured(client: TestClient):
@@ -835,7 +840,9 @@ def test_a_job_runs_against_the_callers_own_recording(
 
     assert schedule(auth_client, token).status_code == 202
 
-    mock_postprocess.assert_called_once_with(tmp_path / DEFAULT_SUBJECT_DIGEST / "foo")
+    mock_postprocess.assert_called_once_with(
+        recording_dir(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
+    )
 
 
 def test_a_job_cannot_name_another_subjects_recording(
@@ -851,7 +858,7 @@ def test_a_job_cannot_name_another_subjects_recording(
     # a decoy at the destination root, so that this is the home directory being honored
     # rather than the recording merely being absent everywhere: an implementation that
     # resolved the name anywhere but under the caller's own home would find this one
-    (tmp_path / "foo" / "stream").mkdir(parents=True)
+    (recording_dir(tmp_path, "foo") / "stream").mkdir(parents=True)
 
     response = schedule(auth_client, provider.mint(sub="user-b"))
 
@@ -937,10 +944,10 @@ def test_the_listing_leaves_out_recordings_that_are_not_rendered(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     finish_recording(home, "rendered")
     # uploaded but never postprocessed
-    (home / "raw" / "stream").mkdir(parents=True)
+    (recording_dir(home, "raw") / "stream").mkdir(parents=True)
     # postprocessing that failed partway, which is left on disk deliberately
-    (home / "failed").mkdir(parents=True)
-    (home / "failed" / "presentation.part.webm").write_bytes(b"half")
+    recording_dir(home, "failed").mkdir(parents=True)
+    (recording_dir(home, "failed") / "presentation.part.webm").write_bytes(b"half")
 
     response = list_recordings(auth_client, provider.mint())
 
@@ -1273,7 +1280,7 @@ def test_a_valid_link_to_a_video_that_is_gone_is_not_found(
     finish_recording(home, "GVS_2025")
     server_list = list_recordings(auth_client, provider.mint()).json()
 
-    (home / "GVS_2025" / "presentation.webm").unlink()
+    (recording_dir(home, "GVS_2025") / "presentation.webm").unlink()
 
     assert follow_download(auth_client, entries(server_list, "completed")[0]).status_code == 404
 
@@ -1476,29 +1483,29 @@ def snapshot(root: Path | anyio.Path) -> dict[str, bytes]:
 
 def rendered_recording(home: Path | anyio.Path, name: str) -> Path:
     """A recording as it looks after a successful render: chunks, output, leftovers."""
-    recording_dir = Path(home) / name
-    write_chunks(recording_dir, [30 * 60, 29 * 60])
-    write_chunks(recording_dir, [30 * 60], track="overlay")
-    (recording_dir / "presentation.webm").write_bytes(b"the rendered lecture")
-    return recording_dir
+    path = recording_dir(home, name)
+    write_chunks(path, [30 * 60, 29 * 60])
+    write_chunks(path, [30 * 60], track="overlay")
+    (path / "presentation.webm").write_bytes(b"the rendered lecture")
+    return path
 
 
 def test_a_purge_deletes_the_whole_recording(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
-    recording_dir = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    recording_path = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
 
     response = purge(auth_client, provider.mint(), "GVS_2025")
 
     assert response.status_code == 204
-    assert not recording_dir.exists()
+    assert not recording_path.exists()
 
 
 def test_a_purge_leaves_everything_else_alone(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    rendered_recording(home, "GVS_2025")
+    purged = rendered_recording(home, "GVS_2025")
     rendered_recording(home, "PSU_2026")
     # the same name under another user, and a decoy at the destination root: a purge that
     # resolved the name anywhere but under the caller's own home would find one of these
@@ -1508,9 +1515,7 @@ def test_a_purge_leaves_everything_else_alone(
     before = snapshot(tmp_path)
     assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 204
 
-    expected = {
-        k: v for k, v in before.items() if not k.startswith(f"{DEFAULT_SUBJECT_DIGEST}/GVS_2025/")
-    }
+    expected = {k: v for k, v in before.items() if not (tmp_path / k).is_relative_to(purged)}
     assert snapshot(tmp_path) == expected
 
 
@@ -1574,11 +1579,11 @@ def test_an_unprocessed_recording_can_be_purged(
     auth_client: TestClient, provider: Provider, tmp_path: Path
 ):
     # the other card that offers Purge: a render that failed, with no output to show for it
-    recording_dir = abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
-    (recording_dir / "presentation.part.webm").write_bytes(b"half")
+    recording_path = abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    (recording_path / "presentation.part.webm").write_bytes(b"half")
 
     assert purge(auth_client, provider.mint(), "GVS_2025").status_code == 204
-    assert not recording_dir.exists()
+    assert not recording_path.exists()
 
 
 def test_a_decomposed_name_purges_the_composed_recording(
@@ -1586,10 +1591,10 @@ def test_a_decomposed_name_purges_the_composed_recording(
 ):
     # the same normalization as on upload and download, so the purge hits the recording the
     # lecturer saw rather than 404ing on a macOS client
-    recording_dir = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "\u00dcbung_2025")
+    recording_path = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "\u00dcbung_2025")
 
     assert purge(auth_client, provider.mint(), "U\u0308bung_2025").status_code == 204
-    assert not recording_dir.exists()
+    assert not recording_path.exists()
 
 
 def test_a_purge_is_logged_with_the_user_who_asked(
@@ -1665,7 +1670,7 @@ def test_a_recording_name_cannot_reach_outside_the_home_directory(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "GVS_2025")
     rendered_recording(tmp_path, "victim")
-    (home / ".hidden").mkdir()
+    stray(home, ".hidden").mkdir()
     before = snapshot(tmp_path)
 
     # sent as-is rather than through purge(), which would quote the tricks away
@@ -1685,13 +1690,13 @@ def test_a_symlink_in_the_home_directory_is_not_followed(
     # a link happens to point at
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "GVS_2025")
-    rendered_recording(tmp_path, "victim")
-    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+    victim = rendered_recording(tmp_path, "victim")
+    stray(home, "link").symlink_to(victim, target_is_directory=True)
     before = snapshot(tmp_path)
 
     assert purge(auth_client, provider.mint(), "link").status_code == 404
     assert snapshot(tmp_path) == before
-    assert (home / "link").is_symlink()
+    assert recording_dir(home, "link").is_symlink()
 
 
 def test_a_recording_that_is_rendering_cannot_be_purged(
@@ -1714,7 +1719,7 @@ def test_a_recording_that_is_still_being_streamed_cannot_be_purged(
 ):
     # the next chunk would recreate the directory and bring back half a recording
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
-    write_chunks(home / "LIVE_2026", [30 * 60, 5])
+    write_chunks(recording_dir(home, "LIVE_2026"), [30 * 60, 5])
     before = snapshot(tmp_path)
 
     assert purge(auth_client, provider.mint(), "LIVE_2026").status_code == 409
@@ -1909,7 +1914,7 @@ def test_a_chunk_for_a_recording_being_purged_is_refused(
     assert purge(auth_client, token, "foo").status_code == 204
 
     assert during[0].status_code == 409
-    assert not (home / "foo").exists()
+    assert not recording_dir(home, "foo").exists()
 
 
 def test_a_second_purge_of_the_same_recording_is_refused_rather_than_failing(
@@ -1946,13 +1951,15 @@ def test_a_job_arriving_while_the_purge_classifies_is_refused(
     home = tmp_path / DEFAULT_SUBJECT_DIGEST
     rendered_recording(home, "foo")
     token = provider.mint()
-    during = arriving_during(mocker, "is_dir", home / "foo", lambda: schedule(auth_client, token))
+    during = arriving_during(
+        mocker, "is_dir", recording_dir(home, "foo"), lambda: schedule(auth_client, token)
+    )
 
     assert purge(auth_client, token, "foo").status_code == 204
 
     assert during[0].status_code == 409
     mock_postprocess.assert_not_called()
-    assert not (home / "foo").exists()
+    assert not recording_dir(home, "foo").exists()
 
 
 def test_a_purge_arriving_while_the_job_looks_at_the_recording_is_refused(
@@ -1970,13 +1977,13 @@ def test_a_purge_arriving_while_the_job_looks_at_the_recording_is_refused(
     abandon_recording(home, "foo")
     token = provider.mint()
     during = arriving_during(
-        mocker, "is_dir", home / "foo", lambda: purge(auth_client, token, "foo")
+        mocker, "is_dir", recording_dir(home, "foo"), lambda: purge(auth_client, token, "foo")
     )
 
     assert schedule(auth_client, token).status_code == 202
 
     assert during[0].status_code == 409
-    assert (home / "foo" / "stream").is_dir()
+    assert (recording_dir(home, "foo") / "stream").is_dir()
 
 
 def test_the_listing_leaves_out_a_recording_while_it_is_purged(
@@ -2070,7 +2077,9 @@ def test_a_duplicate_job_arriving_while_the_first_looks_at_the_recording_starts_
     token = provider.mint()
     # into the first job's look at whether the recording is a directory; the duplicate looks
     # too, and that one goes ahead undisturbed
-    during = arriving_during(mocker, "is_dir", home / "foo", lambda: schedule(auth_client, token))
+    during = arriving_during(
+        mocker, "is_dir", recording_dir(home, "foo"), lambda: schedule(auth_client, token)
+    )
 
     assert schedule(auth_client, token).status_code == 202
 

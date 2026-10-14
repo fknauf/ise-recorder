@@ -37,6 +37,8 @@ from ..harness import (
     digest_of,
     finish_recording,
     MINUTE,
+    recording_dir,
+    stray,
     write_chunks,
 )
 
@@ -166,7 +168,7 @@ async def test_a_recording_that_is_still_streamed_is_not_offered_for_rerendering
     enclave: Enclave, home: Path
 ):
     # Rerender and Purge on a lecture that is still going would be the wrong buttons
-    write_chunks(home / "LIVE_2026", [5])
+    write_chunks(recording_dir(home, "LIVE_2026"), [5])
 
     assert await user_recordings_list(enclave) == []
 
@@ -187,10 +189,10 @@ async def test_a_recording_receiving_a_chunk_right_now_is_not_offered_for_rerend
 async def test_recordings_the_frontend_has_no_card_for_are_left_out(
     enclave: Enclave, home: Path, tmp_path: Path
 ):
-    write_chunks(home / "NO_MAIN_2025", [30 * MINUTE], track="overlay")
-    (home / "notes.txt").write_text("not a recording")
-    finish_recording(tmp_path, "victim")
-    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+    write_chunks(recording_dir(home, "NO_MAIN_2025"), [30 * MINUTE], track="overlay")
+    stray(home, "notes.txt").write_text("not a recording", encoding="utf-8")
+    victim = finish_recording(tmp_path, "victim")
+    stray(home, "link").symlink_to(victim, target_is_directory=True)
 
     assert await user_recordings_list(enclave) == []
 
@@ -267,7 +269,7 @@ async def test_the_listing_does_not_go_back_to_the_disk(
         "classify_all",
         return_value=[
             RecordingInfo(
-                path=anyio.Path(home / "PURGED_2025"),
+                path=anyio.Path(recording_dir(home, "PURGED_2025")),
                 activity=RecordingActivity.NONE,
                 disk_state=RecordingDiskState.FINISHED,
                 streaming=False,
@@ -312,8 +314,8 @@ async def test_a_finished_recording_is_purged(enclave: Enclave, home: Path):
 
     await purge_recording("DONE_2025", enclave, LECTURER)
 
-    assert not (home / "DONE_2025").exists()
-    assert (home / "OTHER_2025").exists()
+    assert not recording_dir(home, "DONE_2025").exists()
+    assert recording_dir(home, "OTHER_2025").exists()
 
 
 @pytest.mark.asyncio
@@ -322,17 +324,17 @@ async def test_a_failed_recording_is_purged(enclave: Enclave, home: Path):
 
     await purge_recording("FAILED_2025", enclave, LECTURER)
 
-    assert not (home / "FAILED_2025").exists()
+    assert not recording_dir(home, "FAILED_2025").exists()
 
 
 @pytest.mark.asyncio
 async def test_an_idle_recording_that_cannot_be_rendered_is_purged(enclave: Enclave, home: Path):
     # nothing will ever come of it, so getting rid of it is all that is left to do
-    write_chunks(home / "NO_MAIN_2025", [30 * 60], track="overlay")
+    write_chunks(recording_dir(home, "NO_MAIN_2025"), [30 * 60], track="overlay")
 
     await purge_recording("NO_MAIN_2025", enclave, LECTURER)
 
-    assert not (home / "NO_MAIN_2025").exists()
+    assert not recording_dir(home, "NO_MAIN_2025").exists()
 
 
 @pytest.mark.asyncio
@@ -342,10 +344,10 @@ async def test_a_recording_that_does_not_exist_is_a_404(enclave: Enclave):
 
 @pytest.mark.asyncio
 async def test_a_stray_file_is_a_404_and_stays(enclave: Enclave, home: Path):
-    (home / "notes.txt").write_text("not a recording")
+    stray(home, "notes.txt").write_text("not a recording", encoding="utf-8")
 
     assert await refusal(enclave, "notes.txt") == 404
-    assert (home / "notes.txt").exists()
+    assert recording_dir(home, "notes.txt").exists()
 
 
 @pytest.mark.asyncio
@@ -353,11 +355,11 @@ async def test_a_symlink_is_a_404_and_its_target_stays(
     enclave: Enclave, home: Path, tmp_path: Path
 ):
     # not a 409: "in use" would suggest trying again later
-    finish_recording(tmp_path, "victim")
-    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+    victim = finish_recording(tmp_path, "victim")
+    stray(home, "link").symlink_to(victim, target_is_directory=True)
 
     assert await refusal(enclave, "link") == 404
-    assert (tmp_path / "victim" / "presentation.webm").exists()
+    assert (victim / "presentation.webm").exists()
 
 
 @pytest.mark.asyncio
@@ -368,33 +370,33 @@ async def test_another_enclaves_job_does_not_block_a_purge(home: Path, tmp_path:
     with elsewhere.claim_rendering("FAILED_2025"):
         await purge_recording("FAILED_2025", Enclave(DIGEST, anyio.Path(home)), LECTURER)
 
-    assert not (home / "FAILED_2025").exists()
+    assert not recording_dir(home, "FAILED_2025").exists()
 
 
 @pytest.mark.asyncio
 async def test_a_recording_that_is_still_being_streamed_is_a_409(enclave: Enclave, home: Path):
     # the next chunk would recreate the directory and bring back half a recording
-    write_chunks(home / "LIVE_2026", [30 * 60, 5])
+    write_chunks(recording_dir(home, "LIVE_2026"), [30 * 60, 5])
 
     assert await refusal(enclave, "LIVE_2026") == 409
-    assert (home / "LIVE_2026").exists()
+    assert recording_dir(home, "LIVE_2026").exists()
 
 
 @pytest.mark.asyncio
 async def test_a_live_recording_without_a_main_stream_yet_is_a_409(enclave: Enclave, home: Path):
     # the same, in the first seconds of a lecture whose overlay chunks arrive first: it is
     # not renderable yet, which on its own would let it be purged
-    write_chunks(home / "LIVE_2026", [5], track="overlay")
+    write_chunks(recording_dir(home, "LIVE_2026"), [5], track="overlay")
 
     assert await refusal(enclave, "LIVE_2026") == 409
-    assert (home / "LIVE_2026").exists()
+    assert recording_dir(home, "LIVE_2026").exists()
 
 
 @pytest.mark.asyncio
 async def test_a_recording_whose_job_was_requested_is_no_longer_live(enclave: Enclave, home: Path):
     # the job request is the frontend saying the lecture is over, so the lecturer can purge
     # the recording straight away rather than wait out the grace period
-    write_chunks(home / "GVS_2025", [30 * 60, 5])
+    write_chunks(recording_dir(home, "GVS_2025"), [30 * 60, 5])
 
     with enclave.claim_upload("GVS_2025"):
         pass
@@ -403,7 +405,7 @@ async def test_a_recording_whose_job_was_requested_is_no_longer_live(enclave: En
 
     await purge_recording("GVS_2025", enclave, LECTURER)
 
-    assert not (home / "GVS_2025").exists()
+    assert not recording_dir(home, "GVS_2025").exists()
 
 
 @pytest.mark.asyncio
@@ -413,7 +415,7 @@ async def test_a_purge_without_a_user_is_a_401(enclave: Enclave, home: Path):
     finish_recording(home, "DONE_2025")
 
     assert await refusal(enclave, "DONE_2025", user_info=None) == 401
-    assert (home / "DONE_2025").exists()
+    assert recording_dir(home, "DONE_2025").exists()
 
 
 @pytest.mark.asyncio
@@ -508,7 +510,7 @@ async def test_the_claim_is_gone_after_a_refusal(setup: str, enclave: Enclave, h
     # a refused purge must not leave the recording locked against uploads and jobs until the
     # server restarts
     if setup == "streaming":
-        write_chunks(home / "GVS_2025", [5])
+        write_chunks(recording_dir(home, "GVS_2025"), [5])
 
     with pytest.raises(HTTPException):
         await purge_recording("GVS_2025", enclave, LECTURER)
@@ -539,4 +541,4 @@ async def test_another_recording_being_purged_does_not_block_a_purge(enclave: En
 
         assert enclave.activity("GONE_2025") == RecordingActivity.PURGING
 
-    assert not (home / "DONE_2025").exists()
+    assert not recording_dir(home, "DONE_2025").exists()

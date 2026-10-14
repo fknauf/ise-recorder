@@ -27,7 +27,14 @@ from ise_record.core.user_home import prepare_user_home_dir
 from ise_record.glue.enclave import Enclave, get_enclave, get_enclave_by_user_digest
 from ise_record.settings import Settings
 
-from ..harness import abandon_recording, alias_of, digest_of, finish_recording, home_entries
+from ..harness import (
+    abandon_recording,
+    alias_of,
+    digest_of,
+    finish_recording,
+    home_entries,
+    stray,
+)
 from .conftest import request_for
 
 
@@ -42,7 +49,7 @@ async def test_the_home_directory_is_prepared_under_destdir(
 ):
     enclave = await get_enclave(request_, auth_settings, user("abc", "lecturer"))
 
-    assert enclave.recording_dir("GVS_2025") == tmp_path / digest_of("abc") / "GVS_2025"
+    assert enclave.recording_dir("GVS_2025").is_relative_to(tmp_path / digest_of("abc"))
     assert home_entries(tmp_path) == {digest_of("abc"), alias_of("lecturer", digest_of("abc"))}
 
 
@@ -58,7 +65,7 @@ async def test_a_new_enclave_has_nothing_running(request_: Request, auth_setting
 async def test_an_open_deployment_shares_destdir(settings: Settings, tmp_path: Path):
     enclave = await get_enclave(request_for(settings), settings, None)
 
-    assert enclave.recording_dir("GVS_2025") == tmp_path / "GVS_2025"
+    assert enclave.recording_dir("GVS_2025").is_relative_to(tmp_path)
     assert enclave.user_digest() is None
     assert home_entries(tmp_path) == set()
 
@@ -256,9 +263,9 @@ def test_every_recording_in_the_home_directory_is_classified(tmp_path: Path):
     home = tmp_path / "home"
     finish_recording(home, "DONE_2025")
     abandon_recording(home, "FAILED_2025")
-    (home / "notes.txt").write_text("not a recording")
-    finish_recording(tmp_path, "victim")
-    (home / "link").symlink_to(tmp_path / "victim", target_is_directory=True)
+    stray(home, "notes.txt").write_text("not a recording", encoding="utf-8")
+    victim = finish_recording(tmp_path, "victim")
+    stray(home, "link").symlink_to(victim, target_is_directory=True)
     finish_recording(tmp_path / "elsewhere", "OTHER_2025")
     enclave = Enclave(digest_of("abc"), anyio.Path(home))
 
@@ -270,13 +277,46 @@ def test_every_recording_in_the_home_directory_is_classified(tmp_path: Path):
     ]
 
 
+# --- the home's own layout ---------------------------------------------------
+#
+# Recordings are kept in a directory of their own within the home, so the home can hold
+# other user-specific state without that state being taken for recordings, or recordings
+# for it. Everything else in this suite finds recordings through recording_dir and does not
+# care where that is; these pin the layout itself.
+
+
+def test_recordings_are_kept_in_a_directory_of_their_own(tmp_path: Path):
+    enclave = Enclave(digest_of("abc"), anyio.Path(tmp_path))
+
+    assert enclave.recording_dir("GVS_2025") == tmp_path / "recordings" / "GVS_2025"
+
+
+def test_the_rest_of_the_home_is_not_taken_for_recordings(tmp_path: Path):
+    # whatever else a home comes to hold, next to its recordings rather than among them
+    finish_recording(tmp_path, "DONE_2025")
+    (tmp_path / "state").mkdir()
+    (tmp_path / "settings.json").write_text("{}")
+    enclave = Enclave(digest_of("abc"), anyio.Path(tmp_path))
+
+    infos = anyio.run(enclave.classify_all)
+
+    assert [info.name for info in infos] == ["DONE_2025"]
+
+
+def test_a_home_without_any_recordings_yet_has_nothing_to_classify(tmp_path: Path):
+    # a user's first listing comes before their first upload, which is what makes the directory
+    enclave = Enclave(digest_of("abc"), anyio.Path(tmp_path))
+
+    assert anyio.run(enclave.classify_all) == []
+
+
 def test_a_purge_forgets_the_recordings_otp(enclave: Enclave, tmp_path: Path):
     # a link from an old listing must not download a new recording of the same name
     finish_recording(tmp_path, "GVS_2025")
     otp = enclave.generate_totp("GVS_2025")
 
     with enclave.claim_purging("GVS_2025"):
-        shutil.rmtree(tmp_path / "GVS_2025")
+        shutil.rmtree(enclave.recording_dir("GVS_2025"))
 
     assert not enclave.verify_totp(otp, "GVS_2025")
 

@@ -241,18 +241,31 @@ def upload(
     return client.put(chunk_url(recording, "stream", index), headers=headers, content=content)
 
 
+def recording_dir(user_home: Path | anyio.Path, recording: str) -> Path:
+    """
+    Where the enclave whose home is `user_home` keeps `recording`.
+
+    Asked of an Enclave rather than restated, unlike the directory scheme at the end of this
+    file: where a home directory is and what it is called is what many tests are about, but how a
+    home is laid out inside is the business of the few tests that say so. Everything else that
+    only needs a recording on disk, or has to find one, goes through here.
+    """
+    return Path(Enclave(None, anyio.Path(user_home)).recording_dir(recording))
+
+
 def upload_chunk_path(base_dir: Path, user_segment: str, index: int = 0) -> Path:
-    """Where `upload` puts its chunk, given the directory it is filed under."""
-    return base_dir / user_segment / "foo" / "stream" / f"chunk.{index:04d}"
+    """Where `upload` puts its chunk, given the directory its home is filed under."""
+    return recording_dir(base_dir / user_segment, "foo") / "stream" / f"chunk.{index:04d}"
 
 
 def finish_recording(
     user_home: Path | anyio.Path, recording: str, content: bytes = b"video"
-) -> None:
+) -> Path:
     """A recording whose postprocessing ran to completion."""
-    recording_dir = Path(user_home) / recording
-    recording_dir.mkdir(parents=True, exist_ok=True)
-    (recording_dir / "presentation.webm").write_bytes(content)
+    path = recording_dir(user_home, recording)
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "presentation.webm").write_bytes(content)
+    return path
 
 
 MINUTE = 60
@@ -264,11 +277,9 @@ def age(path: Path, seconds: float) -> None:
     os.utime(path, (then, then))
 
 
-def write_chunks(
-    recording_dir: Path | anyio.Path, ages: list[float], track: str = "stream"
-) -> None:
+def write_chunks(path: Path | anyio.Path, ages: list[float], track: str = "stream") -> None:
     """One chunk per entry, chunk.0000 first, each last written `age` seconds ago."""
-    track_dir = Path(recording_dir) / track
+    track_dir = Path(path) / track
     track_dir.mkdir(parents=True, exist_ok=True)
 
     for index, seconds in enumerate(ages):
@@ -279,9 +290,25 @@ def write_chunks(
 
 def abandon_recording(user_home: Path | anyio.Path, recording: str, minutes: float = 30) -> Path:
     """A recording whose last chunk arrived long enough ago that nobody is streaming it."""
-    recording_dir = Path(user_home) / recording
-    write_chunks(recording_dir, [(minutes + 2) * MINUTE, (minutes + 1) * MINUTE, minutes * MINUTE])
-    return recording_dir
+    path = recording_dir(user_home, recording)
+    write_chunks(path, [(minutes + 2) * MINUTE, (minutes + 1) * MINUTE, minutes * MINUTE])
+    return path
+
+
+def stored_recordings(user_home: Path | anyio.Path) -> list[Path]:
+    """Every entry among `user_home`'s recordings, as it lies on disk; none before the first."""
+    where = recording_dir(user_home, "any").parent
+    return sorted(where.iterdir()) if where.is_dir() else []
+
+
+def stray(user_home: Path | anyio.Path, name: str) -> Path:
+    """
+    Where something that is not a recording would sit among `user_home`'s recordings, with the
+    directory it sits in made. The test puts a file, a directory or a symlink there.
+    """
+    path = recording_dir(user_home, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def list_recordings(client: TestClient, token: str | None):
