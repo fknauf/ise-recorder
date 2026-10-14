@@ -1,6 +1,7 @@
 """
 FastAPI dependables to do with report sending
 """
+
 import logging
 from typing import Annotated
 

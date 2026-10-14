@@ -48,7 +48,7 @@ const PreviewCard = (
       </Stack>
     </Card>
   );
-}
+};
 /**
  * Previews section on the main page, basically a collection of preview cards for all active streams.
  */

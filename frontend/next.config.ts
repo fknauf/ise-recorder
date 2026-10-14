@@ -4,7 +4,9 @@ import { glob } from "glob";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   output: "standalone",
-  reactCompiler: true,
+  reactCompiler: {
+    panicThreshold: "all_errors"
+  },
   transpilePackages: [
     "@adobe/react-spectrum",
     "@react-spectrum/*",
@@ -36,7 +38,13 @@ const nextConfig: NextConfig = {
     ];
   },
   experimental: {
-    optimizePackageImports: ["@mantine/core", "@mantine/hooks"]
+    optimizePackageImports: [
+      "@mantine/core",
+      "@mantine/hooks",
+      "@mantine/modals",
+      "@mantine/notifications",
+      "@mantine/store"
+    ],
   }
 };
 

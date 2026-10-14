@@ -1,13 +1,16 @@
 import { defineConfig } from "oxlint";
-// import { oxlint } from 'oxc-config-mantine';
+// Import { oxlint } from 'oxc-config-mantine';
 
 export default defineConfig({
 //  ...oxlint,
   ignorePatterns: ["**/*.{mjs,cjs,js,d.ts,d.mts}", ".next"],
 
-  plugins: ["typescript", "unicorn", "import"],
+  plugins: ["typescript", "unicorn", "import", "react"],
 
-  // 2. Experimental JavaScript plugins (Alpha) goes here
+  categories: {
+    correctness: "error"
+  },
+
   jsPlugins: ["@stylistic/eslint-plugin"],
 
   rules: {
@@ -24,7 +27,7 @@ export default defineConfig({
     "@stylistic/dot-location": [ "warn", "property" ],
     "@stylistic/eol-last": "warn",
     "@stylistic/function-call-spacing": "warn",
-    "@stylistic/generator-star-spacing": [ "warn", { before: false, after: true } ],
+    "@stylistic/generator-star-spacing": [ "warn", { after: true, before: false } ],
     "@stylistic/indent": [ "warn", 2, { offsetTernaryExpressions: true } ],
     "@stylistic/jsx-child-element-spacing": "warn",
     "@stylistic/jsx-closing-bracket-location": "warn",
@@ -43,10 +46,10 @@ export default defineConfig({
     "@stylistic/jsx-tag-spacing": [
       "warn",
       {
-        closingSlash: "never",
-        beforeSelfClosing: "never",
         afterOpening: "never",
-        beforeClosing: "never"
+        beforeClosing: "never",
+        beforeSelfClosing: "never",
+        closingSlash: "never"
       }
     ],
     //      "@stylistic/jsx-wrap-multilines": "warn",
@@ -55,10 +58,10 @@ export default defineConfig({
       "warn",
       {
         overrides: {
-          if: { after: false },
           for: { after: false },
-          while: { after: false },
-          switch: { after: false }
+          if: { after: false },
+          switch: { after: false },
+          while: { after: false }
         }
       }
     ],
@@ -67,8 +70,8 @@ export default defineConfig({
       "warn",
       {
         enforce: [
-          { blankLine: "always", prev: "method", next: "*" },
-          { blankLine: "always", prev: "*", next: "method" }
+          { blankLine: "always", next: "*", prev: "method" },
+          { blankLine: "always", next: "method", prev: "*" }
         ]
       }
     ],
@@ -114,7 +117,7 @@ export default defineConfig({
     "@stylistic/semi-spacing": "warn",
     "@stylistic/semi-style": "warn",
     "@stylistic/space-before-blocks": "warn",
-    "@stylistic/space-before-function-paren": [ "warn", { named: "never", asyncArrow: "always", catch: "never" } ],
+    "@stylistic/space-before-function-paren": [ "warn", { asyncArrow: "always", catch: "never", named: "never" } ],
     "@stylistic/space-in-parens": "warn",
     "@stylistic/space-infix-ops": "warn",
     "@stylistic/space-unary-ops": "warn",

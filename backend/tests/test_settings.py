@@ -235,7 +235,10 @@ def test_the_whole_environment_is_read_where_it_belongs(monkeypatch: pytest.Monk
     assert (settings.smtp.server, settings.smtp.port) == ("mail.example.edu", 2525)
     # lowered, so a capital letter in the compose file does not stop every mail
     assert settings.smtp.allowed_domains == ("example.edu", "example.org")
-    assert settings.smtp.recipient_sources == (SmtpRecipientSource.OIDC, SmtpRecipientSource.REQUEST)
+    assert settings.smtp.recipient_sources == (
+        SmtpRecipientSource.OIDC,
+        SmtpRecipientSource.REQUEST,
+    )
 
 
 def test_a_relative_destdir_is_made_absolute_at_startup(monkeypatch: pytest.MonkeyPatch):
@@ -327,7 +330,10 @@ def test_reports_go_to_the_request_s_address_before_the_provider_s_by_default(
     settings = Settings()
 
     assert settings.smtp is not None
-    assert settings.smtp.recipient_sources == (SmtpRecipientSource.REQUEST, SmtpRecipientSource.OIDC)
+    assert settings.smtp.recipient_sources == (
+        SmtpRecipientSource.REQUEST,
+        SmtpRecipientSource.OIDC,
+    )
 
 
 @pytest.mark.parametrize("value", ["oidc", "request,oidc"])
