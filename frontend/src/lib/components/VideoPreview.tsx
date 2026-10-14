@@ -36,7 +36,7 @@ export function VideoPreview(
   };
 
   return (
-    <Stack>
+    <Stack gap="sm">
       <Card.Section>
         <video
           ref={attachStream}

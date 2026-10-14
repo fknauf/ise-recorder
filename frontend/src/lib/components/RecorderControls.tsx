@@ -13,7 +13,7 @@ import { useHydrated } from "../hooks/useHydrated";
 import { UserMenu } from "./UserMenu";
 import { useAppSession } from "./SessionProvider";
 import { ReactNode, useState } from "react";
-import { Button, Divider, Group, Input, Loader, Menu, TextInput } from "@mantine/core";
+import { Button, Divider, Group, Input, Loader, Menu, TextInput, useMantineTheme } from "@mantine/core";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -60,6 +60,8 @@ function RecordButton() {
     stopRecording
   } = useStartStopRecording();
 
+  const theme = useMantineTheme();
+
   switch(activeRecording.state) {
     case "idle":
       return (
@@ -102,7 +104,7 @@ function RecordButton() {
         <Button
           data-testid="rc-btn-record"
           disabled
-          leftSection={<Loader size="xs" role="progressbar"/>}
+          leftSection={<Loader size="xs" role="progressbar" color={theme.white}/>}
         >
           Stop Recording
         </Button>

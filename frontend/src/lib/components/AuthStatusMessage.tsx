@@ -28,7 +28,7 @@ export function AuthStatusMessage() {
     return (
       <Alert variant="outline" color="info" icon={<InfoIcon/>} title="Authentication Loading">
         <Group justify="center" align="center" gap="xs">
-          <Loader size="sm" role="progressbar" aria-label="Authenticating"/>
+          <Loader size="sm" role="progressbar" aria-label="Authenticating" color="info"/>
           <Text>Authenticating...</Text>
         </Group>
       </Alert>

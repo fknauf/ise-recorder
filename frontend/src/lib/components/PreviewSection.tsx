@@ -5,11 +5,12 @@ import { VideoPreview } from "./VideoPreview";
 import { AudioPreview } from "./AudioPreview";
 import { useMediaTracks } from "../hooks/useMediaTracks";
 import { useActiveRecording } from "../hooks/useActiveRecording";
-import { Card, CloseButton, Group, Stack, Text } from "@mantine/core";
+import { Card, CloseButton, Group, Stack, Text, Tooltip, useMantineTheme } from "@mantine/core";
 
 interface PreviewCardProps {
   label: string | undefined
   hasDisabledButtons: boolean
+  canvasWidth: number
   onRemove: () => void
   children: ReactNode
 }
@@ -22,25 +23,32 @@ const PreviewCard = (
   {
     label,
     hasDisabledButtons,
+    canvasWidth,
     onRemove,
     children
   }: Readonly<PreviewCardProps>
-) =>
-  <Card withBorder shadow="sm" padding="sm">
-    <Stack justify="flex-start" align="stretch">
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Text>{label}</Text>
-        <CloseButton
-          onClick={onRemove}
-          aria-label="Close"
-          data-testid="ps-btn-remove"
-          disabled={hasDisabledButtons}
-        />
-      </Group>
-      {children}
-    </Stack>
-  </Card>;
+) => {
+  const theme = useMantineTheme();
 
+  return (
+    <Card withBorder shadow="sm" padding="sm">
+      <Stack justify="flex-start" align="stretch" gap="sm">
+        <Group justify="space-between" align="flex-start" maw={canvasWidth} wrap="nowrap">
+          <Tooltip label={label} withArrow color={theme.primaryColor}>
+            <Text truncate="end">{label}</Text>
+          </Tooltip>
+          <CloseButton
+            onClick={onRemove}
+            aria-label="Close"
+            data-testid="ps-btn-remove"
+            disabled={hasDisabledButtons}
+          />
+        </Group>
+        {children}
+      </Stack>
+    </Card>
+  );
+}
 /**
  * Previews section on the main page, basically a collection of preview cards for all active streams.
  */
@@ -83,6 +91,7 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={label}
             hasDisabledButtons={hasDisabledButtons}
+            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <VideoPreview
@@ -104,6 +113,7 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={track.label}
             hasDisabledButtons={hasDisabledButtons}
+            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <AudioPreview
