@@ -257,7 +257,7 @@ function NonRenderableRecordingCard(
 
   return (
     <RecordingCard title={recording.name} testid="ss-card-not-renderable">
-      <Group flex="1 1 0" align="center">
+      <Group flex="1 1 0" justify="center" align="center">
         <Text>Not renderable.</Text>
       </Group>
       {
@@ -274,8 +274,7 @@ function NonRenderableRecordingCard(
           </Button>
       }
       <Button
-        flex="1 1 0"
-        miw="max-content"
+        fullWidth
         data-testid="ss-btn-purge"
         onClick={() => confirmPurge(recording.name, () => onPurge(recording.name))}
         leftSection={<TrashIcon/>}
