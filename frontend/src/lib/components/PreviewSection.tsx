@@ -10,7 +10,6 @@ import { Card, CloseButton, Group, Stack, Text, Tooltip, useMantineTheme } from 
 interface PreviewCardProps {
   label: string | undefined
   hasDisabledButtons: boolean
-  canvasWidth: number
   onRemove: () => void
   children: ReactNode
 }
@@ -23,7 +22,6 @@ const PreviewCard = (
   {
     label,
     hasDisabledButtons,
-    canvasWidth,
     onRemove,
     children
   }: Readonly<PreviewCardProps>
@@ -33,7 +31,7 @@ const PreviewCard = (
   return (
     <Card withBorder shadow="sm" padding="sm">
       <Stack justify="flex-start" align="stretch" gap="sm">
-        <Group justify="space-between" align="flex-start" maw={canvasWidth} wrap="nowrap">
+        <Group justify="space-between" align="flex-start" wrap="nowrap" style={{ contain: "inline-size" }}>
           <Tooltip label={label} withArrow color={theme.primaryColor}>
             <Text truncate="end">{label}</Text>
           </Tooltip>
@@ -91,7 +89,6 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={label}
             hasDisabledButtons={hasDisabledButtons}
-            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <VideoPreview
@@ -113,7 +110,6 @@ export function PreviewSection(
             key={`preview-card-${track.id}`}
             label={track.label}
             hasDisabledButtons={hasDisabledButtons}
-            canvasWidth={canvasWidth}
             onRemove={() => removeTrack(track)}
           >
             <AudioPreview

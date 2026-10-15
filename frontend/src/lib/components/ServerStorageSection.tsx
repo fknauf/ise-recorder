@@ -11,7 +11,7 @@ import { showError, showSuccess } from "../utils/notifications";
 import { ApiError } from "../utils/apiFetch";
 import { modals } from "@mantine/modals";
 import { Alert, Button, Group, Loader, Text, ThemeIcon } from "@mantine/core";
-import { BinaryIcon, DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon, WarningOctagonIcon } from "@phosphor-icons/react";
+import { DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon, WarningOctagonIcon } from "@phosphor-icons/react";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -65,9 +65,16 @@ function confirmPurge(
 }
 
 function ActionableRecordingCard(
-  { recordingName, rawDownloadUrl, testid, onPurge, children }:
-  Readonly<{
+  {
+    recordingName,
+    isFinished,
+    rawDownloadUrl,
+    testid,
+    onPurge,
+    children
+  }: Readonly<{
     recordingName: string
+    isFinished: boolean
     rawDownloadUrl: string | null
     testid: string
     onPurge: (recordingName: string) => void
@@ -93,6 +100,8 @@ function ActionableRecordingCard(
     setBusy(false);
   };
 
+  const secondaryButtonVariant = isFinished ? "outline" : "filled"
+
   return (
     <RecordingCard title={recordingName} testid={testid}>
       {children}
@@ -105,10 +114,10 @@ function ActionableRecordingCard(
             href={downloadHref(apiUrl, rawDownloadUrl)}
             w="100%"
             target="_blank"
-            leftSection={<BinaryIcon/>}
-            variant="outline"
+            leftSection={<DownloadIcon/>}
+            variant={secondaryButtonVariant}
           >
-            Raw data
+            Download raw recording
           </Button>
       }
 
@@ -120,7 +129,7 @@ function ActionableRecordingCard(
           disabled={busy}
           onClick={onRerender}
           leftSection={<RepeatIcon/>}
-          variant="outline"
+          variant={secondaryButtonVariant}
         >
           Rerender
         </Button>
@@ -156,6 +165,7 @@ function ProcessedRecordingCard(
   return (
     <ActionableRecordingCard
       recordingName={recording.name}
+      isFinished
       rawDownloadUrl={recording.rawDownloadUrl}
       onPurge={onPurge}
       testid="ss-card-completed"
@@ -189,7 +199,7 @@ function RenderingRecordingCard(
 
   return (
     <RecordingCard title={recording.name} testid="ss-card-rendering">
-      <Group align="center" justify="center" h="100%">
+      <Group align="center" justify="center" flex="1 1 0">
         <Loader role="progressbar" aria-label="Rendering"/>
         <Text>Rendering...</Text>
       </Group>
@@ -201,10 +211,10 @@ function RenderingRecordingCard(
             href={downloadHref(apiUrl, recording.rawDownloadUrl)}
             w="100%"
             target="_blank"
-            leftSection={<BinaryIcon/>}
+            leftSection={<DownloadIcon/>}
             variant="outline"
           >
-            Raw data
+            Download raw recording
           </Button>
       }
     </RecordingCard>
@@ -222,6 +232,7 @@ const UnprocessedRecordingCard = (
 ) =>
   <ActionableRecordingCard
     recordingName={recording.name}
+    isFinished={false}
     rawDownloadUrl={recording.rawDownloadUrl}
     onPurge={onPurge}
     testid="ss-card-unprocessed"
@@ -246,8 +257,9 @@ function NonRenderableRecordingCard(
 
   return (
     <RecordingCard title={recording.name} testid="ss-card-not-renderable">
-      <Text>Not renderable.</Text>
-
+      <Group flex="1 1 0" align="center">
+        <Text>Not renderable.</Text>
+      </Group>
       {
         recording.rawDownloadUrl !== null &&
           <Button
@@ -256,10 +268,9 @@ function NonRenderableRecordingCard(
             href={downloadHref(apiUrl, recording.rawDownloadUrl)}
             w="100%"
             target="_blank"
-            leftSection={<BinaryIcon/>}
-            variant="outline"
+            leftSection={<DownloadIcon/>}
           >
-            Raw data
+            Download raw recording
           </Button>
       }
       <Button
