@@ -57,6 +57,7 @@ The API is an HTTP API with the following endpoints under the configured route p
 | `/api/recordings/{name}/tracks/{track}/chunks/{index}` | PUT | Stream chunks of a media stream | recording name, track name, chunk index in the path, chunk data in the body |
 | `/api/recordings/{name}/render` | POST | Schedule postprocessing job | recording name, notification email address |
 | `/api/downloads/{user_digest}/{name}` | GET | Download recording | TOTP for the recording as returned from `/api/recordings` |
+| `/api/downloads/{user_digest}/{name}/raw` | GET | Download raw recording data | TOTP for the recording as returned from `/api/recordings` |
 | `/api/health` | GET | Monitoring | none |
 
 The `/api/recordings` GET endpoint retrieves a list of the user's (as identified by the bearer token in the HTTP
@@ -108,6 +109,10 @@ is an octet stream with the recording's binary data. This more or less follows t
 obtains a valid link from the `/api/recordings` GET endpoint and can use it to download the completed recording.
 The TOTP must be supplied as a GET parameter (i.e., `?totp=1234...`). See "Downloads" section below for details.
  Only available in authenticated deployments (will respond 403 otherwise).
+
+The `/api/downloads/{user_digest}/{name}/raw` GET endpoint is supplementary to the download endpoint: it allows the
+download of the raw (that is, unprocessed) recording data in a zip file. This is interesting when post-processing fails
+for some reason or the recording consists of only audio tracks.
 
 The `/api/health` endpoint returns HTTP status 200 and `{ "status": "healthy" }` as long as the server is running; it
 is useful for primitive monitoring such as docker health checks.
@@ -188,7 +193,8 @@ This backend uses ffmpeg command-line utilities for postprocessing. The process 
 
 Recordings are classified along three quasi-orthogonal axes:
 
-1. Activity: is the recording currently being rendered, purged, or accepting an upload?
+1. Activity: is the recording currently being rendered, purged, accepting an upload, or being zipped
+   into a raw-data download?
 2. Disk state: Does the recording exist? Is it renderable? Does it have a completed render?
 3. Is the recording still being streamed?
 
