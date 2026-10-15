@@ -237,7 +237,9 @@ const UnprocessedRecordingCard = (
     onPurge={onPurge}
     testid="ss-card-unprocessed"
   >
-    <Text>Postprocessing failed.</Text>
+    <Group flex="1 1 0" justify="center" align="center">
+      <Text>Postprocessing failed.</Text>
+    </Group>
   </ActionableRecordingCard>;
 
 function NonRenderableRecordingCard(
