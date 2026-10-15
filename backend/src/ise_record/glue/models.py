@@ -73,8 +73,9 @@ class ChunkLocation(ApiModel):
 class UnfinishedRecording(ApiModel):
     """Information needed to display a recording in the UI"""
 
-    state: Literal["rendering", "unprocessed"]
+    state: Literal["rendering", "unprocessed", "not-renderable"]
     name: str
+    raw_download_url: str | None
 
 
 class DownloadableRecording(ApiModel):
@@ -83,7 +84,8 @@ class DownloadableRecording(ApiModel):
     state: Literal["completed"]
     name: str
     size: int
-    download_url: str
+    download_url: str | None
+    raw_download_url: str | None
 
 
 RecordingResponse = Annotated[

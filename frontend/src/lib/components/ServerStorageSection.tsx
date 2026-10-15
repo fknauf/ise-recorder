@@ -11,7 +11,7 @@ import { showError, showSuccess } from "../utils/notifications";
 import { ApiError } from "../utils/apiFetch";
 import { modals } from "@mantine/modals";
 import { Alert, Button, Group, Loader, Text, ThemeIcon } from "@mantine/core";
-import { DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon, WarningOctagonIcon } from "@phosphor-icons/react";
+import { BinaryIcon, DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon, WarningOctagonIcon } from "@phosphor-icons/react";
 
 const mibFormatter = new Intl.NumberFormat(
   "en-us",
@@ -65,9 +65,10 @@ function confirmPurge(
 }
 
 function ActionableRecordingCard(
-  { recordingName, testid, onPurge, children }:
+  { recordingName, rawDownloadUrl, testid, onPurge, children }:
   Readonly<{
     recordingName: string
+    rawDownloadUrl: string | null
     testid: string
     onPurge: (recordingName: string) => void
     children: ReactNode
@@ -95,6 +96,21 @@ function ActionableRecordingCard(
   return (
     <RecordingCard title={recordingName} testid={testid}>
       {children}
+
+      {
+        rawDownloadUrl !== null &&
+          <Button
+            component="a"
+            download
+            href={downloadHref(apiUrl, rawDownloadUrl)}
+            w="100%"
+            target="_blank"
+            leftSection={<BinaryIcon/>}
+            variant="outline"
+          >
+            Raw data
+          </Button>
+      }
 
       <Group>
         <Button
@@ -137,50 +153,127 @@ function ProcessedRecordingCard(
     return null;
   }
 
-  const url = downloadHref(apiUrl, recording);
-
   return (
     <ActionableRecordingCard
       recordingName={recording.name}
+      rawDownloadUrl={recording.rawDownloadUrl}
       onPurge={onPurge}
       testid="ss-card-completed"
     >
-      <Button
-        component="a"
-        download
-        key={recording.name}
-        href={url}
-        w="100%"
-        target="_blank"
-        leftSection={<DownloadIcon/>}
-      >
-        Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)
-      </Button>
+      {
+        recording.downloadUrl !== null &&
+          <Button
+            component="a"
+            download
+            key={recording.name}
+            href={downloadHref(apiUrl, recording.downloadUrl)}
+            w="100%"
+            target="_blank"
+            leftSection={<DownloadIcon/>}
+          >
+            Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)
+          </Button>
+      }
     </ActionableRecordingCard>
   );
 }
 
-const RenderingRecordingCard = (
+function RenderingRecordingCard(
   { recording }: Readonly<{ recording: UnfinishedRecording }>
-) =>
-  <RecordingCard title={recording.name} testid="ss-card-rendering">
-    <Group align="center" justify="center" h="100%">
-      <Loader role="progressbar" aria-label="Rendering"/>
-      <Text>Rendering...</Text>
-    </Group>
-  </RecordingCard>;
-
-function UnprocessedRecordingCard(
-  { recording, onPurge }: Readonly<{ recording: UnfinishedRecording; onPurge: (recordingName: string) => void }>
 ) {
+  const { apiUrl } = useServerEnv();
+
+  if(apiUrl === undefined) {
+    return null;
+  }
+
   return (
-    <ActionableRecordingCard
-      recordingName={recording.name}
-      onPurge={onPurge}
-      testid="ss-card-unprocessed"
-    >
-      <Text>Postprocessing failed.</Text>
-    </ActionableRecordingCard>
+    <RecordingCard title={recording.name} testid="ss-card-rendering">
+      <Group align="center" justify="center" h="100%">
+        <Loader role="progressbar" aria-label="Rendering"/>
+        <Text>Rendering...</Text>
+      </Group>
+      {
+        recording.rawDownloadUrl !== null &&
+          <Button
+            component="a"
+            download
+            href={downloadHref(apiUrl, recording.rawDownloadUrl)}
+            w="100%"
+            target="_blank"
+            leftSection={<BinaryIcon/>}
+            variant="outline"
+          >
+            Raw data
+          </Button>
+      }
+    </RecordingCard>
+  );
+}
+
+const UnprocessedRecordingCard = (
+  {
+    recording,
+    onPurge
+  }: Readonly<{
+    recording: UnfinishedRecording
+    onPurge: (recordingName: string) => void
+  }>
+) =>
+  <ActionableRecordingCard
+    recordingName={recording.name}
+    rawDownloadUrl={recording.rawDownloadUrl}
+    onPurge={onPurge}
+    testid="ss-card-unprocessed"
+  >
+    <Text>Postprocessing failed.</Text>
+  </ActionableRecordingCard>;
+
+function NonRenderableRecordingCard(
+  {
+    recording,
+    onPurge
+  }: Readonly<{
+    recording: UnfinishedRecording
+    onPurge: (recordingName: string) => void
+  }>
+) {
+  const { apiUrl } = useServerEnv();
+
+  if(apiUrl === undefined) {
+    return null;
+  }
+
+  return (
+    <RecordingCard title={recording.name} testid="ss-card-not-renderable">
+      <Text>Not renderable.</Text>
+
+      {
+        recording.rawDownloadUrl !== null &&
+          <Button
+            component="a"
+            download
+            href={downloadHref(apiUrl, recording.rawDownloadUrl)}
+            w="100%"
+            target="_blank"
+            leftSection={<BinaryIcon/>}
+            variant="outline"
+          >
+            Raw data
+          </Button>
+      }
+      <Button
+        flex="1 1 0"
+        miw="max-content"
+        data-testid="ss-btn-purge"
+        onClick={() => confirmPurge(recording.name, () => onPurge(recording.name))}
+        leftSection={<TrashIcon/>}
+        color="warning"
+        variant="outline"
+      >
+        Purge
+      </Button>
+    </RecordingCard>
   );
 }
 
@@ -207,6 +300,8 @@ function AnyRecordingCard(
     return <RenderingRecordingCard recording={recording}/>;
   } else if(recording.state === "unprocessed") {
     return <UnprocessedRecordingCard recording={recording} onPurge={onPurge}/>;
+  } else if(recording.state === "not-renderable") {
+    return <NonRenderableRecordingCard recording={recording} onPurge={onPurge}/>;
   }
 
   return null;

@@ -33,6 +33,7 @@ from ..harness import (
     digest_of,
     finish_recording,
     home_entries,
+    link_parts,
     stray,
 )
 from .conftest import request_for
@@ -204,6 +205,21 @@ def test_a_refused_claim_answers_with_a_conflict(enclave: Enclave):
         assert excinfo.value.status_code == 409
 
 
+def test_a_raw_download_and_a_purge_turn_each_other_away_with_a_conflict(enclave: Enclave):
+    # the download would read chunks rmtree is taking away, and the purge would take them
+    with enclave.claim_purging("GVS_2025"):
+        with pytest.raises(HTTPException) as excinfo, enclave.claim_zipping("GVS_2025"):
+            pytest.fail("downloaded a recording being purged")
+
+        assert excinfo.value.status_code == 409
+
+    with enclave.claim_zipping("GVS_2025"):
+        with pytest.raises(HTTPException) as excinfo, enclave.claim_purging("GVS_2025"):
+            pytest.fail("purged a recording being downloaded")
+
+        assert excinfo.value.status_code == 409
+
+
 def test_a_refused_claim_leaves_the_claim_in_the_way_alone(enclave: Enclave):
     with enclave.claim_rendering("GVS_2025"):
         with pytest.raises(HTTPException), enclave.claim_purging("GVS_2025"):
@@ -237,6 +253,48 @@ def test_an_upload_through_the_facade_makes_the_recording_live(enclave: Enclave,
         pass
 
     assert anyio.run(enclave.streaming, "GVS_2025")
+
+
+# --- the download links ------------------------------------------------------
+#
+# Relative to the API root, so the server need not know where it is reachable; the digest is how
+# the download routes find the enclave without a token, and the OTP is checked against the
+# recording named next to it.
+
+
+def test_the_download_links_lead_to_the_recording_in_this_enclave(enclave: Enclave):
+    links = enclave.generate_download_links("GVS_2025")
+
+    segments, otp = link_parts(links.rendered)
+    raw_segments, raw_otp = link_parts(links.raw_data)
+    assert segments == ["downloads", digest_of("abc"), "GVS_2025"]
+    assert raw_segments == ["downloads", digest_of("abc"), "GVS_2025", "raw"]
+    # one OTP for both: the card shows the two links side by side, from the same listing
+    assert raw_otp == otp
+    assert enclave.verify_totp(otp, "GVS_2025")
+
+
+@pytest.mark.parametrize("name", ["Übung #3?_2025", "50%_&_more=2025", "机器学习_2025"])
+def test_a_name_that_is_special_in_a_url_is_encoded_in_both_links(enclave: Enclave, name: str):
+    # left as it is, a # would cut the link short, a ? would start the query early, a & or =
+    # would add to it, and a % would be taken for the start of an escape
+    links = enclave.generate_download_links(name)
+
+    segments, otp = link_parts(links.rendered)
+    raw_segments, raw_otp = link_parts(links.raw_data)
+    assert segments == ["downloads", digest_of("abc"), name]
+    assert raw_segments == ["downloads", digest_of("abc"), name, "raw"]
+    assert enclave.verify_totp(otp, name) and enclave.verify_totp(raw_otp, name)
+
+
+def test_an_open_deployment_has_no_download_links(mocker: MockerFixture, tmp_path: Path):
+    # a link naming no user would lead nowhere, and the download routes refuse to serve there
+    # anyway -- so no OTP is made either
+    enclave = Enclave(None, anyio.Path(tmp_path))
+    issued = mocker.spy(enclave, "generate_totp")
+
+    assert enclave.generate_download_links("GVS_2025") == (None, None)
+    issued.assert_not_called()
 
 
 def test_the_disk_state_is_read_from_the_home_directory(enclave: Enclave, tmp_path: Path):

@@ -5,13 +5,14 @@ import { wipeOpfs } from "../helpers/opfs";
 import { makeDevice } from "../helpers/media";
 import { AppStoreProvider } from "@/lib/hooks/useAppStore";
 import { Home } from "@/app/page";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MantineTestProvider } from "../helpers/mantine";
 import { notifications } from "@mantine/notifications";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { useAppSession } from "@/lib/components/SessionProvider";
 import { aServerEnv } from "../helpers/serverEnv";
+import { rawDownloadPath, rendering } from "../helpers/serverStorage";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -67,22 +68,26 @@ afterAll(cleanupBetweenTests);
  * Stands in for the backend: answers each request the way server.py does for its URL and
  * method. Every answer is a fresh Response, since a body can only be read once. A recording
  * whose render was requested shows up in the listing as rendering from then on.
+ *
+ * A backend without authentication has no user directory to link the raw tracks in, and says
+ * so with a null link; a request without a token stands in for that here.
  */
 function fakeBackend() {
-  const rendering: string[] = [];
+  const renderingNames: string[] = [];
   const recordingPath = /^\/api\/recordings\/([^/]+)/;
 
   return vi.fn(async (request: Request) => {
     const { pathname } = new URL(request.url);
     const recording = decodeURIComponent(recordingPath.exec(pathname)?.[1] ?? "");
+    const rawDownloadUrl = (name: string) => (request.headers.has("Authorization") ? rawDownloadPath(name) : null);
 
     if(request.method === "PUT" && (/^\/api\/recordings\/[^/]+\/tracks\/[^/]+\/chunks\/\d+$/).test(pathname)) {
       return new Response(null, { status: 204 });
     } else if(request.method === "POST" && (/^\/api\/recordings\/[^/]+\/render$/).test(pathname)) {
-      rendering.push(recording);
-      return Response.json({ state: "rendering", name: recording }, { status: 202 });
+      renderingNames.push(recording);
+      return Response.json(rendering(recording, rawDownloadUrl(recording)), { status: 202 });
     } else if(request.method === "GET" && pathname === "/api/recordings") {
-      return Response.json(rendering.map(name => ({ state: "rendering", name })));
+      return Response.json(renderingNames.map(name => rendering(name, rawDownloadUrl(name))));
     } else if(request.method === "DELETE" && (/^\/api\/recordings\/[^/]+$/).test(pathname)) {
       return new Response(null, { status: 204 });
     }
@@ -342,6 +347,10 @@ test("e2e recording a stream sends the access token to the server", async () => 
   expect(job.headers.get("Content-Type")).toBe("application/json");
   expect(job.headers.get("Authorization")).toBe("Bearer test-token");
   expect(await job.json()).toStrictEqual({ recipient: "speaker@example.com" });
+  // the new lecture's card offers its raw tracks while the video is rendering, from the link
+  // the listing handed out, below the configured backend
+  expect(within(screen.getByTestId("ss-card-rendering")).getByRole("link", { name: /raw data/i }))
+    .toHaveAttribute("href", `http://localhost:5000/api/${rawDownloadPath(recordingName)}`);
 });
 
 // --- the auto sign-in gate -------------------------------------------------

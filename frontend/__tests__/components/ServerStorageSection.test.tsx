@@ -13,6 +13,7 @@ import { SWRConfig } from "swr";
 import * as z from "zod";
 import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
 import { aServerEnv } from "../helpers/serverEnv";
+import { completed, downloadPath, notRenderable, rawDownloadPath, rendering, unprocessed, USER_DIGEST } from "../helpers/serverStorage";
 
 vi.mock("@/lib/hooks/useServerStorage");
 // the requests are mocked, but the URL builder is kept: which href the link carries is
@@ -43,7 +44,6 @@ vi.mock("@/lib/hooks/useServerEnv", () => ({
 }));
 
 const API_URL = "https://record.example.edu";
-const USER_DIGEST = "8f14e45fceea167a";
 
 const MiB = 2 ** 20;
 const LECTURER_EMAIL = "lecturer@example.edu";
@@ -59,15 +59,12 @@ type Listing = ServerStorageRecording[];
 const sorted = (listing: Listing) => listing.toSorted((a, b) => a.name.localeCompare(b.name));
 
 const LISTING: Listing = [
-  { state: "completed", name: "GVS_2025", size: 1.25 * MiB, downloadUrl: `downloads/${USER_DIGEST}/GVS_2025?totp=012345` },
-  { state: "completed", name: "PSU_2026", size: 3.5 * MiB, downloadUrl: `downloads/${USER_DIGEST}/PSU_2026?totp=987654` }
+  completed("GVS_2025", 1.25 * MiB, { downloadUrl: downloadPath("GVS_2025", "012345"), rawDownloadUrl: rawDownloadPath("GVS_2025", "012345") }),
+  completed("PSU_2026", 3.5 * MiB, { downloadUrl: downloadPath("PSU_2026", "987654"), rawDownloadUrl: rawDownloadPath("PSU_2026", "987654") })
 ];
 
 /** The listing with one recording gone from it, whichever kind it is. */
 const without = (listing: Listing, name: string): Listing => listing.filter(rec => rec.name !== name);
-
-const rendering = (name: string): ServerStorageRecording => ({ state: "rendering", name });
-const unprocessed = (name: string): ServerStorageRecording => ({ state: "unprocessed", name });
 
 interface SectionOptions {
   serverEnv?: ServerEnv
@@ -103,7 +100,7 @@ function renderSection(options: SectionOptions = {}) {
   });
 
   // what the backend answers an accepted rerender with: the recording's new state
-  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, name) => ({ state: "rendering", name }));
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, name) => rendering(name));
   rerender.mockResolvedValue(undefined);
   purge.mockResolvedValue(undefined);
 
@@ -132,6 +129,13 @@ const cards = () => screen.queryAllByTestId("ss-card-completed");
 const names = (cardList: HTMLElement[]) =>
   cardList.map(card => within(card).getByText(/_20\d\d$/).textContent);
 
+// A card can offer two links: the rendered video and a zip of the raw tracks. Neither has a
+// test id, so they are told apart by what they say.
+const downloadLink = (card: HTMLElement) => within(card).getByRole("link", { name: /download/i });
+const rawDataLink = (card: HTMLElement) => within(card).getByRole("link", { name: /raw data/i });
+const queryDownloadLink = (card: HTMLElement) => within(card).queryByRole("link", { name: /download/i });
+const queryRawDataLink = (card: HTMLElement) => within(card).queryByRole("link", { name: /raw data/i });
+
 test("each processed recording gets a card with its name and size", () => {
   renderSection();
 
@@ -146,7 +150,7 @@ test("each processed recording gets a card with its name and size", () => {
 test("the download link carries the user, the recording and its TOTP", () => {
   renderSection();
 
-  const link = within(cards()[0]).getByRole("link");
+  const link = downloadLink(cards()[0]);
 
   // A link cannot set an Authorization header, so the one-time password in the query
   // string is the whole of the authentication on this request. The backend hands over the
@@ -167,7 +171,7 @@ test("the download opens in a tab of its own", () => {
   // tab of its own it leaves the recorder alone, and a successful download closes the tab.
   renderSection();
 
-  expect(within(cards()[0]).getByRole("link")).toHaveAttribute("target", "_blank");
+  expect(downloadLink(cards()[0])).toHaveAttribute("target", "_blank");
 });
 
 test("a non-ASCII recording name reaches the backend percent-encoded", () => {
@@ -177,17 +181,10 @@ test("a non-ASCII recording name reaches the backend percent-encoded", () => {
   // round-trip test on the Python side pins from the other end. The link has to carry the
   // encoding through untouched.
   renderSection({
-    data: [
-      {
-        state: "completed",
-        name: "Übung_2025",
-        size: MiB,
-        downloadUrl: `downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}?totp=111111`
-      }
-    ]
+    data: [ completed("Übung_2025", MiB, { downloadUrl: `downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}?totp=111111` }) ]
   });
 
-  const link = within(cards()[0]).getByRole("link") as HTMLAnchorElement;
+  const link = downloadLink(cards()[0]) as HTMLAnchorElement;
 
   expect(new URL(link.href).pathname)
     .toBe(`/api/downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}`);
@@ -221,10 +218,11 @@ test("a recording that is still rendering gets a card that says so", () => {
 });
 
 test("a recording that is still rendering offers no download", () => {
-  // there is no file yet and no TOTP to put in the link, so anything clickable would 404
+  // there is no video yet, so a link to it would 404; the raw tracks are all there is
   renderSection({ data: [ rendering("ABC_2026") ] });
 
-  expect(within(renderingCards()[0]).queryByRole("link")).toBeNull();
+  expect(queryDownloadLink(renderingCards()[0])).toBeNull();
+  expect(within(renderingCards()[0]).getAllByRole("link")).toStrictEqual([ rawDataLink(renderingCards()[0]) ]);
   expect(within(renderingCards()[0]).queryByRole("button")).toBeNull();
 });
 
@@ -438,10 +436,11 @@ test("a recording whose postprocessing failed gets a card that says so", () => {
 });
 
 test("a recording whose postprocessing failed offers a rerender but no download", () => {
-  // there is no file to download; rendering it again is the only thing to offer
+  // there is no video to download; rendering it again is the only way to one
   renderSection({ data: [ unprocessed("OLD_2024") ] });
 
-  expect(within(unprocessedCards()[0]).queryByRole("link")).toBeNull();
+  expect(queryDownloadLink(unprocessedCards()[0])).toBeNull();
+  expect(within(unprocessedCards()[0]).getAllByRole("link")).toStrictEqual([ rawDataLink(unprocessedCards()[0]) ]);
   expect(rerenderButton(unprocessedCards()[0])).toBeEnabled();
 });
 
@@ -695,6 +694,130 @@ test("a rerender while a purge is in flight does not bring the purged card back"
 
   await waitFor(() => expect(names(renderingCards())).toContain("PSU_2026"));
   expect(names(cards())).toStrictEqual([]);
+});
+
+// --- recordings that cannot be rendered -----------------------------------
+//
+// A recording without a main display has nothing to render a video from, and the backend
+// refuses to try. All that is left to do with it is download its raw tracks or purge it.
+
+const notRenderableCards = () => screen.queryAllByTestId("ss-card-not-renderable");
+
+test("a recording that cannot be rendered gets a card that says so", () => {
+  renderSection({ data: sorted([ ...LISTING, notRenderable("AUD_2026") ]) });
+
+  expect(notRenderableCards()).toHaveLength(1);
+  expect(within(notRenderableCards()[0]).getByText("AUD_2026")).toBeInTheDocument();
+  expect(within(notRenderableCards()[0]).getByText("Not renderable.")).toBeInTheDocument();
+  // counted as none of the other kinds, and in the place the server lists it
+  expect(renderingCards()).toHaveLength(0);
+  expect(unprocessedCards()).toHaveLength(0);
+  expect(names(allCards())).toStrictEqual([ "AUD_2026", "GVS_2025", "PSU_2026" ]);
+  expect(allCards()[0]).toBe(notRenderableCards()[0]);
+});
+
+test("a recording that cannot be rendered offers no rerender and no download", () => {
+  // a rerender could only ever be refused, and there is no video to download
+  renderSection({ data: [ notRenderable("AUD_2026") ] });
+
+  const card = notRenderableCards()[0];
+
+  expect(within(card).queryByTestId("ss-btn-rerender")).toBeNull();
+  expect(queryDownloadLink(card)).toBeNull();
+  expect(purgeButton(card)).toBeEnabled();
+});
+
+test("a recording that cannot be rendered asks before it is purged", async () => {
+  renderSection({ data: [ notRenderable("AUD_2026") ] });
+
+  await askToPurge(notRenderableCards()[0]);
+
+  expect(within(dialog()).getByText(/AUD_2026/)).toBeInTheDocument();
+  expect(within(dialog()).getByText(/cannot be undone/)).toBeInTheDocument();
+
+  await userEvent.click(cancelButton());
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(purge).not.toHaveBeenCalled();
+});
+
+test("a recording that cannot be rendered is purged once confirmed", async () => {
+  await renderSectionWithCache(sorted([ ...LISTING, notRenderable("AUD_2026") ]));
+
+  await askToPurge(notRenderableCards()[0]);
+  await userEvent.click(confirmButton());
+
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith({ apiUrl: API_URL, getAccessToken }, "AUD_2026");
+  await waitFor(() => expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Purged AUD_2026"));
+  expect(notRenderableCards()).toHaveLength(0);
+  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+});
+
+// --- the raw tracks ---------------------------------------------------------
+//
+// Every recording the backend lists can be downloaded as the tracks it was recorded in, as a
+// zip, whether a video was rendered from them or not. Each kind of card has a link of its own
+// for it, so each is checked.
+
+const everyKind = [
+  {
+    kind: "a finished recording",
+    testid: "ss-card-completed",
+    make: (name: string, rawDownloadUrl: string | null) => completed(name, MiB, { rawDownloadUrl })
+  },
+  { kind: "a recording that is still rendering", testid: "ss-card-rendering", make: rendering },
+  { kind: "a recording whose postprocessing failed", testid: "ss-card-unprocessed", make: unprocessed },
+  { kind: "a recording that cannot be rendered", testid: "ss-card-not-renderable", make: notRenderable }
+];
+
+test.each(everyKind)("$kind offers its raw tracks from the link the backend handed out", ({ testid, make }) => {
+  renderSection({ data: [ make("Übung_2025", rawDownloadPath("Übung_2025", "424242")) ] });
+
+  const link = rawDataLink(screen.getByTestId(testid));
+
+  // resolved against the configured backend like the video's link, with the name's encoding
+  // carried through untouched
+  expect(link).toHaveAttribute(
+    "href",
+    `${API_URL}/api/downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}/raw?totp=424242`
+  );
+  expect(link).toHaveAttribute("download");
+});
+
+test.each(everyKind)("the raw tracks of $kind open in a tab of their own", ({ testid, make }) => {
+  // for the same reason as the video: a lapsed TOTP is answered with a JSON error, which must
+  // not replace the recorder
+  renderSection({ data: [ make("GVS_2025", rawDownloadPath("GVS_2025")) ] });
+
+  expect(rawDataLink(screen.getByTestId(testid))).toHaveAttribute("target", "_blank");
+});
+
+test.each(everyKind)("$kind offers no raw tracks when the backend hands out no link for them", ({ testid, make }) => {
+  // what a backend without authentication answers: there is no user directory to link to,
+  // and a link built from nothing would lead nowhere
+  renderSection({ data: [ make("GVS_2025", null) ] });
+
+  expect(screen.getByTestId(testid)).toBeInTheDocument();
+  expect(queryRawDataLink(screen.getByTestId(testid))).toBeNull();
+});
+
+test("a finished recording without a raw data link still offers its video", () => {
+  renderSection({ data: [ completed("GVS_2025", MiB, { rawDownloadUrl: null }) ] });
+
+  expect(downloadLink(cards()[0])).toHaveAttribute("href", `${API_URL}/api/${downloadPath("GVS_2025")}`);
+  expect(within(cards()[0]).getAllByRole("link")).toHaveLength(1);
+});
+
+test("a finished recording without a video link offers only its raw tracks", () => {
+  // the listing allows for it, though a backend that lists recordings at all always has a
+  // video link to hand out
+  renderSection({ data: [ completed("GVS_2025", MiB, { downloadUrl: null }) ] });
+
+  expect(queryDownloadLink(cards()[0])).toBeNull();
+  expect(within(cards()[0]).getAllByRole("link")).toStrictEqual([ rawDataLink(cards()[0]) ]);
+  // still finished: it can be rendered again or purged like any other
+  expect(rerenderButton(cards()[0])).toBeEnabled();
+  expect(purgeButton(cards()[0])).toBeEnabled();
 });
 
 test("nothing is rendered before the first listing arrives", () => {

@@ -38,7 +38,7 @@ const nextConfig: NextConfig = {
       "@mantine/modals",
       "@mantine/notifications",
       "@mantine/store"
-    ],
+    ]
   }
 };
 

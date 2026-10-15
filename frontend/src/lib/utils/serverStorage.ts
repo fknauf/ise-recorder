@@ -5,21 +5,23 @@ import * as z from "zod";
 
 z.config({ jitless: true });
 
-const RenderingRecordingSchema = z.object({
-  state: z.literal("rendering"),
-  name: z.string()
-});
+const UnfinishedRecordingSchema = (state: "rendering" | "unprocessed" | "not-renderable") =>
+  z.object({
+    state: z.literal(state),
+    name: z.string(),
+    rawDownloadUrl: z.string().nullable()
+  });
 
-const UnprocessedRecordingSchema = z.object({
-  state: z.literal("unprocessed"),
-  name: z.string()
-});
+const RenderingRecordingSchema = UnfinishedRecordingSchema("rendering");
+const UnprocessedRecordingSchema = UnfinishedRecordingSchema("unprocessed");
+const NonRenderableRecordingSchema = UnfinishedRecordingSchema("not-renderable");
 
 const DownloadableRecordingSchema = z.object({
   state: z.literal("completed"),
   name: z.string(),
   size: z.number(),
-  downloadUrl: z.string()
+  downloadUrl: z.string().nullable(),
+  rawDownloadUrl: z.string().nullable()
 });
 
 const ServerStorageRecordingSchema = z.discriminatedUnion(
@@ -27,6 +29,7 @@ const ServerStorageRecordingSchema = z.discriminatedUnion(
   [
     RenderingRecordingSchema,
     UnprocessedRecordingSchema,
+    NonRenderableRecordingSchema,
     DownloadableRecordingSchema
   ]);
 
@@ -34,8 +37,9 @@ const ServerStorageRecordingListSchema = z.array(ServerStorageRecordingSchema);
 
 type UnprocessedRecording = z.infer<typeof UnprocessedRecordingSchema>;
 type RenderingRecording = z.infer<typeof RenderingRecordingSchema>;
+type NonRenderableRecording = z.infer<typeof NonRenderableRecordingSchema>;
 
-export type UnfinishedRecording = UnprocessedRecording | RenderingRecording;
+export type UnfinishedRecording = UnprocessedRecording | RenderingRecording | NonRenderableRecording;
 export type DownloadableRecording = z.infer<typeof DownloadableRecordingSchema>;
 export type ServerStorageRecording = UnfinishedRecording | DownloadableRecording;
 
@@ -141,5 +145,5 @@ export async function uploadFile(
   }
 }
 
-export const downloadHref = (apiUrl: string, recording: DownloadableRecording) =>
-  new URL(recording.downloadUrl, new URL("api/", apiUrl)).href;
+export const downloadHref = (apiUrl: string, presignedUrl: string) =>
+  new URL(presignedUrl, new URL("api/", apiUrl)).href;

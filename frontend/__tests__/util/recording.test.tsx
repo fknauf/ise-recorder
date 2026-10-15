@@ -4,6 +4,7 @@ import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { render, screen } from "@testing-library/react";
 import { uploadChunk, schedulePostprocessing } from "@/lib/utils/serverStorage";
+import { rendering } from "../helpers/serverStorage";
 
 vi.mock("@/lib/utils/serverStorage");
 // recordLecture says how the job request went; a real toast would outlive the test
@@ -12,7 +13,7 @@ vi.mock("@/lib/utils/notifications");
 beforeEach(() => {
   // stand-ins for a backend that accepts everything
   vi.mocked(uploadChunk).mockResolvedValue();
-  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => ({ state: "rendering", name: recording }));
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => rendering(recording));
 });
 
 const accessToken = async () => "test-token";

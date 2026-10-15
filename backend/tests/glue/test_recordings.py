@@ -13,9 +13,10 @@ authentication -- lives in test_server.py.
 # pylint: disable=missing-function-docstring
 # pylint: disable=redefined-outer-name
 
+from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 import shutil
-from urllib.parse import parse_qs, unquote, urlsplit
 
 import anyio
 from fastapi import HTTPException
@@ -29,13 +30,18 @@ from ise_record.core.recordings import (
     RecordingInfo,
 )
 from ise_record.glue.enclave import Enclave
-from ise_record.glue.models import DownloadableRecording, RecordingResponse
+from ise_record.glue.models import (
+    DownloadableRecording,
+    RecordingResponse,
+    UnfinishedRecording,
+)
 from ise_record.glue.recordings import purge_recording, user_recordings_list
 
 from ..harness import (
     abandon_recording,
     digest_of,
     finish_recording,
+    link_parts,
     MINUTE,
     recording_dir,
     stray,
@@ -66,10 +72,15 @@ def completed(listing: list[RecordingResponse]) -> list[DownloadableRecording]:
     return [r for r in listing if isinstance(r, DownloadableRecording)]
 
 
-def link_parts(download_url: str) -> tuple[list[str], str]:
-    """The path segments of a download link, decoded, and the OTP it carries."""
-    link = urlsplit(download_url)
-    return [unquote(segment) for segment in link.path.split("/")], parse_qs(link.query)["totp"][0]
+def unfinished(listing: list[RecordingResponse]) -> list[UnfinishedRecording]:
+    return [r for r in listing if isinstance(r, UnfinishedRecording)]
+
+
+def not_renderable(home: Path, name: str) -> Path:
+    """A recording whose main stream never arrived, abandoned long enough ago to be idle."""
+    path = recording_dir(home, name)
+    write_chunks(path, [30 * MINUTE], track="overlay")
+    return path
 
 
 # --- the listing's response ------------------------------------------------
@@ -80,6 +91,7 @@ async def test_every_recording_is_listed_with_its_state(enclave: Enclave, home: 
     finish_recording(home, "DONE_2025", b"twelve bytes")
     abandon_recording(home, "FAILED_2025")
     abandon_recording(home, "BUSY_2025")
+    not_renderable(home, "NO_MAIN_2025")
 
     with enclave.claim_rendering("BUSY_2025"):
         listing = await user_recordings_list(enclave)
@@ -88,13 +100,15 @@ async def test_every_recording_is_listed_with_its_state(enclave: Enclave, home: 
         ("rendering", "BUSY_2025"),
         ("completed", "DONE_2025"),
         ("unprocessed", "FAILED_2025"),
+        ("not-renderable", "NO_MAIN_2025"),
     ]
     assert [r.size for r in completed(listing)] == [12]
-    # only the name for the others: nothing to size or download yet, and the Rerender button
-    # needs no more
-    assert {
-        r.name: set(r.model_dump()) for r in listing if not isinstance(r, DownloadableRecording)
-    } == {"BUSY_2025": {"state", "name"}, "FAILED_2025": {"state", "name"}}
+    # the name and the raw data for the others: there is no video to size or download yet, the
+    # Rerender button needs no more than the name, and the chunks are all there is to take away
+    assert {r.name: set(r.model_dump()) for r in unfinished(listing)} == {
+        name: {"state", "name", "rawDownloadUrl"}
+        for name in ["BUSY_2025", "FAILED_2025", "NO_MAIN_2025"]
+    }
 
 
 @pytest.mark.asyncio
@@ -189,12 +203,46 @@ async def test_a_recording_receiving_a_chunk_right_now_is_not_offered_for_rerend
 async def test_recordings_the_frontend_has_no_card_for_are_left_out(
     enclave: Enclave, home: Path, tmp_path: Path
 ):
-    write_chunks(recording_dir(home, "NO_MAIN_2025"), [30 * MINUTE], track="overlay")
+    # what is not a recording at all; a recording that cannot be rendered does get a card, for
+    # its raw data and the Purge button
     stray(home, "notes.txt").write_text("not a recording", encoding="utf-8")
     victim = finish_recording(tmp_path, "victim")
     stray(home, "link").symlink_to(victim, target_is_directory=True)
 
     assert await user_recordings_list(enclave) == []
+
+
+@pytest.mark.asyncio
+async def test_a_recording_without_a_main_stream_yet_that_is_still_streamed_is_left_out(
+    enclave: Enclave, home: Path
+):
+    # the first seconds of a lecture whose overlay chunks arrive first: not renderable yet, but
+    # no more done than any other lecture in progress
+    write_chunks(recording_dir(home, "LIVE_2026"), [5], track="overlay")
+
+    assert await user_recordings_list(enclave) == []
+
+
+SETUPS: dict[str, Callable[[Path, str], Path]] = {
+    "completed": finish_recording,
+    "unprocessed": abandon_recording,
+    "not-renderable": not_renderable,
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", SETUPS)
+async def test_a_recording_keeps_its_card_while_its_raw_data_is_downloaded(
+    enclave: Enclave, home: Path, state: str
+):
+    # the download changes nothing about the recording, and can take a while for a long lecture;
+    # the card vanishing meanwhile would look as if the download had deleted it
+    SETUPS[state](home, "GVS_2025")
+
+    with enclave.claim_zipping("GVS_2025"):
+        listing = await user_recordings_list(enclave)
+
+    assert states(listing) == [(state, "GVS_2025")]
 
 
 @pytest.mark.asyncio
@@ -233,6 +281,41 @@ async def test_every_completed_recording_gets_a_link_with_an_otp_for_itself(
 
 
 @pytest.mark.asyncio
+async def test_a_completed_recording_gets_a_raw_data_link_beside_its_video(
+    enclave: Enclave, home: Path
+):
+    # one OTP for both: the card shows the two links side by side, from the same listing
+    finish_recording(home, "GVS_2025")
+
+    (recording,) = completed(await user_recordings_list(enclave))
+
+    segments, otp = link_parts(recording.download_url)
+    raw_segments, raw_otp = link_parts(recording.raw_download_url)
+    assert raw_segments == [*segments, "raw"]
+    assert raw_otp == otp
+    assert enclave.verify_totp(raw_otp, "GVS_2025")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["unprocessed", "not-renderable", "rendering"])
+async def test_a_recording_without_a_video_gets_a_raw_data_link(
+    enclave: Enclave, home: Path, state: str
+):
+    # the chunks are all there is of these, and for one that cannot be rendered, all there will
+    # ever be
+    setup = not_renderable if state == "not-renderable" else abandon_recording
+    setup(home, "GVS_2025")
+
+    with enclave.claim_rendering("GVS_2025") if state == "rendering" else nullcontext():
+        (recording,) = unfinished(await user_recordings_list(enclave))
+
+    assert recording.state == state
+    segments, otp = link_parts(recording.raw_download_url)
+    assert segments == ["downloads", DIGEST, "GVS_2025", "raw"]
+    assert enclave.verify_totp(otp, "GVS_2025")
+
+
+@pytest.mark.asyncio
 async def test_a_name_that_is_special_in_a_url_is_encoded_in_the_link(enclave: Enclave, home: Path):
     # left as it is, the # would cut the link short, and the ? would start the query early
     finish_recording(home, "Übung #3?_2025")
@@ -242,6 +325,9 @@ async def test_a_name_that_is_special_in_a_url_is_encoded_in_the_link(enclave: E
     segments, otp = link_parts(recording.download_url)
     assert segments == ["downloads", DIGEST, "Übung #3?_2025"]
     assert enclave.verify_totp(otp, "Übung #3?_2025")
+    # and the raw-data link goes on past the name rather than being swallowed by it
+    raw_segments, _ = link_parts(recording.raw_download_url)
+    assert raw_segments == ["downloads", DIGEST, "Übung #3?_2025", "raw"]
 
 
 @pytest.mark.asyncio
@@ -284,17 +370,30 @@ async def test_the_listing_does_not_go_back_to_the_disk(
 
 
 @pytest.mark.asyncio
-async def test_rendering_and_unprocessed_recordings_get_no_otp(
+async def test_otps_are_issued_only_for_the_recordings_that_are_listed(
     mocker: MockerFixture, enclave: Enclave, home: Path
 ):
+    # an OTP is a way into the recording for anyone holding the link, so none is made for a
+    # recording the frontend gets no card for: one being streamed, taking a chunk, or purged
+    finish_recording(home, "DONE_2025")
     abandon_recording(home, "FAILED_2025")
     abandon_recording(home, "BUSY_2025")
+    not_renderable(home, "NO_MAIN_2025")
+    write_chunks(recording_dir(home, "LIVE_2026"), [5])
+    write_chunks(recording_dir(home, "LIVE_NO_MAIN_2026"), [5], track="overlay")
+    abandon_recording(home, "TAKING_A_CHUNK_2025")
+    finish_recording(home, "GONE_2025")
     issued = mocker.spy(enclave, "generate_totp")
 
-    with enclave.claim_rendering("BUSY_2025"):
-        await user_recordings_list(enclave)
+    with (
+        enclave.claim_rendering("BUSY_2025"),
+        enclave.claim_upload("TAKING_A_CHUNK_2025"),
+        enclave.claim_purging("GONE_2025"),
+    ):
+        listing = await user_recordings_list(enclave)
 
-    issued.assert_not_called()
+    assert [r.name for r in listing] == ["BUSY_2025", "DONE_2025", "FAILED_2025", "NO_MAIN_2025"]
+    assert sorted(call.args for call in issued.call_args_list) == [(r.name,) for r in listing]
 
 
 # --- purging ---------------------------------------------------------------

@@ -8,8 +8,9 @@ import { useLecture } from "@/lib/hooks/useLecture";
 import { gatherRecordingsList, getAllRecordingTracks } from "@/lib/utils/browserStorage";
 import { schedulePostprocessing, uploadFile } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
-import { showError, showSuccess } from "@/lib/utils/notifications";
+import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import { aServerEnv } from "../helpers/serverEnv";
+import { rendering } from "../helpers/serverStorage";
 
 // Sends a locally saved recording to the server under a name of its own, so it cannot mix
 // with whatever the live upload left there, and schedules its postprocessing. How a file is
@@ -40,7 +41,7 @@ beforeEach(() => {
   // the store persists part of itself, the list of unstreamed recordings among it
   localStorage.clear();
   vi.mocked(uploadFile).mockResolvedValue(undefined);
-  vi.mocked(schedulePostprocessing).mockResolvedValue({ state: "rendering", name: "GVS_2025-reupload" });
+  vi.mocked(schedulePostprocessing).mockResolvedValue(rendering("GVS_2025-reupload"));
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 0 });
 });
@@ -123,6 +124,27 @@ test("a job the backend refused is reported with what it said", async () => {
   expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
 
+test("a recording without a main display goes up whole but is not scheduled", async () => {
+  // Microphone and camera without slides: no "stream" track to render a video from, and the
+  // backend refuses such a job. The tracks are still worth having on the server, as raw data.
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0"), trackOf("overlay") ]);
+  const { result } = await renderReupload();
+
+  await act(() => result.current.upload.reupload());
+
+  expect(vi.mocked(uploadFile).mock.calls.map(([ , , recording, track ]) => [ recording, track ])).toStrictEqual([
+    [ "GVS_2025-reupload", "audio-0" ],
+    [ "GVS_2025-reupload", "overlay" ]
+  ]);
+  expect(schedulePostprocessing).not.toHaveBeenCalled();
+  // a notice rather than an error: the upload worked, there is just no video to make
+  expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("no main display"));
+  expect(showError).not.toHaveBeenCalled();
+  expect(showSuccess).not.toHaveBeenCalled();
+  expect(result.current.upload.isUploading).toBe(false);
+  expect(refreshServerStorage).toHaveBeenCalledOnce();
+});
+
 test("a job request that fails for a passing reason is tried again", async () => {
   // a backend in the middle of a restart answers 503 for a moment, and with every track up
   // already it is worth waiting out rather than sending the lecturer off to re-render
@@ -161,7 +183,7 @@ test("the job is only scheduled once every track is up", async () => {
   });
   vi.mocked(schedulePostprocessing).mockImplementation(async (_d, recording) => {
     order.push("schedule");
-    return { state: "rendering", name: recording };
+    return rendering(recording);
   });
   const { result } = await renderReupload();
 
@@ -394,6 +416,18 @@ test("a re-upload that blows up leaves the recording on the list", async () => {
 
   expect(result.current.unstreamed).toStrictEqual([ "GVS_2025" ]);
   error.mockRestore();
+});
+
+test("a re-upload without a main display still takes the recording off the list", async () => {
+  // every track is on the server, which is all there is to do for it: a render was never on
+  // offer, so re-uploading it would only get the same result again
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0") ]);
+  const { result } = await renderWithUnstreamed("GVS_2025", "PSU_2026");
+
+  await act(() => result.current.upload.reupload());
+
+  expect(schedulePostprocessing).not.toHaveBeenCalled();
+  expect(result.current.unstreamed).toStrictEqual([ "PSU_2026" ]);
 });
 
 test("a re-upload whose job request fails still takes the recording off the list", async () => {

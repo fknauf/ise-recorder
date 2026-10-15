@@ -6,7 +6,6 @@ rendering, and unprocessed/failed-postprocessing recordings.
 from collections.abc import Callable
 import logging
 from typing import NoReturn
-from urllib.parse import quote
 
 from fastapi import HTTPException, status
 
@@ -32,28 +31,41 @@ def _build_recording_response(info: RecordingInfo, enclave: Enclave) -> Recordin
         return None
 
     if info.activity == RecordingActivity.RENDERING:
-        return UnfinishedRecording.model_construct(state="rendering", name=info.name)
+        links = enclave.generate_download_links(info.name)
+
+        return UnfinishedRecording.model_construct(
+            state="rendering", name=info.name, raw_download_url=links.raw_data
+        )
 
     if (
         info.disk_state == RecordingDiskState.FINISHED
         and info.activity != RecordingActivity.PURGING
     ):
-        totp = enclave.generate_totp(info.name)
-        download_url = f"downloads/{enclave.user_digest()}/{quote(info.name, safe='')}?totp={totp}"
+        links = enclave.generate_download_links(info.name)
 
         return DownloadableRecording.model_construct(
             state="completed",
             name=info.name,
             size=info.size,
-            download_url=download_url,
+            download_url=links.rendered,
+            raw_download_url=links.raw_data,
         )
 
     if (
-        info.disk_state == RecordingDiskState.UNPROCESSED
-        and info.activity == RecordingActivity.NONE
+        info.disk_state in [RecordingDiskState.UNPROCESSED, RecordingDiskState.NOT_RENDERABLE]
+        and info.activity in [RecordingActivity.NONE, RecordingActivity.ZIPPING]
         and not info.streaming
     ):
-        return UnfinishedRecording.model_construct(state="unprocessed", name=info.name)
+        state = (
+            "unprocessed" if info.disk_state == RecordingDiskState.UNPROCESSED else "not-renderable"
+        )
+        links = enclave.generate_download_links(info.name)
+
+        return UnfinishedRecording.model_construct(
+            state=state,
+            name=info.name,
+            raw_download_url=links.raw_data,
+        )
 
     return None
 

@@ -9,7 +9,8 @@ In this module, that state is defined and exported as a fastapi dependable.
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 import shutil
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
+from urllib.parse import quote
 
 from aiorwlock import RWLock
 import anyio
@@ -29,6 +30,13 @@ from ise_record.core.recordings import (
 from ise_record.core.user_home import prepare_user_home_dir
 from ise_record.glue.auth import get_user_info
 from ise_record.settings import get_settings, Settings
+
+
+class DownloadLinks(NamedTuple):
+    """Download URLs for a recording"""
+
+    rendered: str | None
+    raw_data: str | None
 
 
 class Enclave:
@@ -93,6 +101,10 @@ class Enclave:
         """
         return self._claim(self._tracker.claim_uploading, recording, "accepting uploads")
 
+    def claim_zipping(self, recording: str) -> AbstractContextManager[None]:
+        """context manager that marks the recording as being zipped (in a raw-data download)"""
+        return self._claim(self._tracker.claim_zipping, recording, "downloadable")
+
     async def disk_state(self, recording: str) -> RecordingDiskState:
         """Determine the on-disk state of a recording"""
         async with self._fs_lock.reader_lock:
@@ -141,6 +153,23 @@ class Enclave:
     def generate_totp(self, recording: str) -> str:
         """Generate a TOTP for the download of a finished recording"""
         return self._download_totp.generate(recording)
+
+    def generate_download_links(self, recording: str) -> DownloadLinks:
+        """
+        Generate download links for the finished recording and raw data, with a TOTP attached.
+        
+        The finished-recording link may be aspirational, i.e. it is generated even if the finished
+        recording is unavailable. Caller decides from other information whether it can be used.
+        """
+        if self.user_digest() is None:
+            return DownloadLinks(None, None)
+
+        totp = self.generate_totp(recording)
+        base_url = f"downloads/{self.user_digest()}/{quote(recording, safe='')}"
+
+        return DownloadLinks(
+            rendered=f"{base_url}?totp={totp}", raw_data=f"{base_url}/raw?totp={totp}"
+        )
 
     def verify_totp(self, totp: str, recording: str) -> bool:
         """Verify a TOTP allows for the download of the specified recording"""

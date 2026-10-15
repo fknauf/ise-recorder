@@ -3,15 +3,17 @@ What the server knows about a recording, along three separate lines:
 
 - its disk state: finished, renderable but unprocessed, not renderable, or not there at all --
   read off the filesystem;
-- its activity: whether a render, a purge or chunk uploads have claimed it -- kept in memory,
-  and taken and released through the claims, which are what keep two of those from running
-  over each other;
+- its activity: whether a render, a purge, chunk uploads or raw-data downloads have claimed it
+  -- kept in memory, and taken and released through the claims, which are what keep two of
+  those from running over each other;
 - its liveness: whether it still looks like it is being streamed -- a guess from when its last
   chunk arrived, since nothing tells the server that a lecture has ended.
 
 The listing projects the three onto the state the frontend shows for each recording; the
 endpoints ask the line they care about directly. Both are in glue/test_recordings.py and
 test_server.py.
+
+And the raw-data download: the zip archive of a recording's chunks, streamed as it is written.
 """
 
 # pylint: disable=line-too-long
@@ -19,10 +21,14 @@ test_server.py.
 # pylint: disable=redefined-outer-name
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from datetime import datetime, timedelta
+from io import BytesIO
+from itertools import product
+import os
 from pathlib import Path
 import shutil
+from zipfile import ZIP_STORED, ZipFile
 
 import anyio
 import pytest
@@ -31,6 +37,7 @@ from pytest_mock import MockerFixture
 from ise_record.core import recordings
 from ise_record.core.recordings import (
     classify_disk_state,
+    raw_download_zipstream,
     RecordingActivity,
     RecordingBusy,
     RecordingDiskState,
@@ -238,6 +245,7 @@ CLAIMS = [
     pytest.param(RecordingTracker.claim_rendering, RecordingActivity.RENDERING, id="rendering"),
     pytest.param(RecordingTracker.claim_purging, RecordingActivity.PURGING, id="purging"),
     pytest.param(RecordingTracker.claim_uploading, RecordingActivity.UPLOADING, id="uploading"),
+    pytest.param(RecordingTracker.claim_zipping, RecordingActivity.ZIPPING, id="zipping"),
 ]
 
 
@@ -298,61 +306,114 @@ def test_another_trackers_claim_on_a_recording_of_the_same_name_changes_nothing(
         assert here.activity(recording(tmp_path / "b", "foo")) == RecordingActivity.NONE
 
 
-# What may run alongside what. Rendering and purging need the recording to themselves: a
-# purge would take the chunks away from under ffmpeg, a second render would write over the
-# first one's files. Uploads may run alongside anything but a purge, because a chunk that is
-# refused may be gone for good, while a render that missed it can be repeated.
+# What may run alongside what. A purge needs the recording to itself: it would take the files
+# away from under anything else, and a chunk would land in a directory rmtree is taking apart,
+# or bring it back. A render may not run beside a second one, which would write over its files,
+# nor start while a chunk is still being written, since it would read the track before the
+# chunk is in. Chunks may arrive while it runs, though: a chunk that is refused may be gone for
+# good, while a render that missed it can be repeated, and the upload writes it under a name
+# the render does not read until it is complete. A raw-data download reads only complete
+# chunks, which nothing but a purge takes away, so it goes alongside anything else.
 
-EXCLUSIVE_CLAIMS = [
-    pytest.param(RecordingTracker.claim_rendering, id="rendering"),
-    pytest.param(RecordingTracker.claim_purging, id="purging"),
+CLAIM_FOR: dict[RecordingActivity, Claim] = {
+    RecordingActivity.RENDERING: RecordingTracker.claim_rendering,
+    RecordingActivity.PURGING: RecordingTracker.claim_purging,
+    RecordingActivity.UPLOADING: RecordingTracker.claim_uploading,
+    RecordingActivity.ZIPPING: RecordingTracker.claim_zipping,
+}
+
+RENDERING = RecordingActivity.RENDERING
+PURGING = RecordingActivity.PURGING
+UPLOADING = RecordingActivity.UPLOADING
+ZIPPING = RecordingActivity.ZIPPING
+
+# the first claim holding the recording, and the second one asking for it
+REFUSED = [
+    (PURGING, PURGING),
+    (PURGING, RENDERING),
+    (PURGING, UPLOADING),
+    (PURGING, ZIPPING),
+    (RENDERING, PURGING),
+    (UPLOADING, PURGING),
+    (ZIPPING, PURGING),
+    (RENDERING, RENDERING),
+    (UPLOADING, RENDERING),
+]
+
+# the same, and which activity the recording shows while both hold it: the one that matters
+# most to the listing and to the claims that come after
+ALONGSIDE = [
+    (RENDERING, UPLOADING, RENDERING),
+    (RENDERING, ZIPPING, RENDERING),
+    (ZIPPING, RENDERING, RENDERING),
+    (UPLOADING, UPLOADING, UPLOADING),
+    (UPLOADING, ZIPPING, UPLOADING),
+    (ZIPPING, UPLOADING, UPLOADING),
+    (ZIPPING, ZIPPING, ZIPPING),
 ]
 
 
-@pytest.mark.parametrize("blocked", EXCLUSIVE_CLAIMS)
-@pytest.mark.parametrize("holding, activity", CLAIMS)
-def test_rendering_and_purging_need_the_recording_to_themselves(
-    home: Path, holding: Claim, activity: RecordingActivity, blocked: Claim
+def pair_id(holding: RecordingActivity, claiming: RecordingActivity) -> str:
+    return f"{claiming.name.lower()}-while-{holding.name.lower()}"
+
+
+def test_every_pair_of_claims_is_decided():
+    # an activity added later has to be placed against every other one, not just the ones
+    # someone thought of
+    decided = REFUSED + [(holding, claiming) for holding, claiming, _ in ALONGSIDE]
+
+    assert sorted(decided, key=str) == sorted(product(CLAIM_FOR, repeat=2), key=str)
+
+
+@pytest.mark.parametrize(
+    "holding, claiming", [pytest.param(*pair, id=pair_id(*pair)) for pair in REFUSED]
+)
+def test_a_claim_that_conflicts_with_the_one_holding_the_recording_is_refused(
+    home: Path, holding: RecordingActivity, claiming: RecordingActivity
 ):
     tracker = RecordingTracker()
 
-    with holding(tracker, recording(home, "foo")):
-        with pytest.raises(RecordingBusy) as excinfo, blocked(tracker, recording(home, "foo")):
+    with CLAIM_FOR[holding](tracker, recording(home, "foo")):
+        with (
+            pytest.raises(RecordingBusy) as excinfo,
+            CLAIM_FOR[claiming](tracker, recording(home, "foo")),
+        ):
             pytest.fail("claimed a recording that was already claimed")
 
         # the refusal says what is in the way
-        assert excinfo.value.state == activity
+        assert excinfo.value.state == holding
         # and the claim that was there first keeps the recording
-        assert tracker.activity(recording(home, "foo")) == activity
+        assert tracker.activity(recording(home, "foo")) == holding
+
+    # nor does the refusal leave anything behind: once the first claim is done, the recording
+    # is free, and the claim that was refused goes through
+    assert tracker.activity(recording(home, "foo")) == RecordingActivity.NONE
+    assert not tracker.activities
+
+    with CLAIM_FOR[claiming](tracker, recording(home, "foo")):
+        assert tracker.activity(recording(home, "foo")) == claiming
+
+
+@pytest.mark.parametrize(
+    "holding, claiming, shown",
+    [pytest.param(*case, id=pair_id(*case[:2])) for case in ALONGSIDE],
+)
+def test_a_claim_that_does_not_conflict_runs_alongside_the_one_holding_the_recording(
+    home: Path,
+    holding: RecordingActivity,
+    claiming: RecordingActivity,
+    shown: RecordingActivity,
+):
+    tracker = RecordingTracker()
+
+    with CLAIM_FOR[holding](tracker, recording(home, "foo")):
+        with CLAIM_FOR[claiming](tracker, recording(home, "foo")):
+            assert tracker.activity(recording(home, "foo")) == shown
+
+        # the second one done is not the first one done
+        assert tracker.activity(recording(home, "foo")) == holding
 
     assert tracker.activity(recording(home, "foo")) == RecordingActivity.NONE
-
-
-def test_an_upload_is_refused_while_the_recording_is_purged(home: Path):
-    # the chunk would land in a directory that rmtree is taking apart, or bring it back
-    tracker = RecordingTracker()
-
-    with tracker.claim_purging(recording(home, "foo")):
-        with (
-            pytest.raises(RecordingBusy) as excinfo,
-            tracker.claim_uploading(recording(home, "foo")),
-        ):
-            pytest.fail("uploaded into a recording being purged")
-
-        assert excinfo.value.state == RecordingActivity.PURGING
-
-
-def test_an_upload_is_accepted_while_the_recording_renders(home: Path):
-    # a late chunk is kept for a rerender rather than lost; the upload writes it under a
-    # name the render does not read until it is complete
-    tracker = RecordingTracker()
-
-    with tracker.claim_rendering(recording(home, "foo")):
-        with tracker.claim_uploading(recording(home, "foo")):
-            # the render in flight is what the listing and the other claims have to know about
-            assert tracker.activity(recording(home, "foo")) == RecordingActivity.RENDERING
-
-        assert tracker.activity(recording(home, "foo")) == RecordingActivity.RENDERING
 
 
 def test_uploads_run_alongside_each_other(home: Path):
@@ -367,6 +428,72 @@ def test_uploads_run_alongside_each_other(home: Path):
         assert tracker.activity(recording(home, "foo")) == RecordingActivity.UPLOADING
 
     assert tracker.activity(recording(home, "foo")) == RecordingActivity.NONE
+
+
+@pytest.mark.parametrize(
+    "claim", [CLAIM_FOR[UPLOADING], CLAIM_FOR[ZIPPING]], ids=["uploads", "zips"]
+)
+def test_a_purge_waits_for_the_last_of_several_claims_that_run_alongside_each_other(
+    home: Path, claim: Claim
+):
+    # two tabs downloading the same recording, or two tracks uploading their chunks: the first
+    # to finish must not let a purge take the directory away from under the other
+    tracker = RecordingTracker()
+
+    with claim(tracker, recording(home, "foo")):
+        with claim(tracker, recording(home, "foo")):
+            pass
+
+        with pytest.raises(RecordingBusy), tracker.claim_purging(recording(home, "foo")):
+            pytest.fail("purged a recording that was still claimed")
+
+    with tracker.claim_purging(recording(home, "foo")):
+        assert tracker.activity(recording(home, "foo")) == RecordingActivity.PURGING
+
+
+def test_the_activity_shown_is_the_weightiest_claim_still_held(home: Path):
+    # The listing reads this one activity: a render hides every other, a chunk arriving hides
+    # the card, and a download changes nothing about it. The claims are let go of in another
+    # order than they were taken, as requests that overlap do.
+    tracker = RecordingTracker()
+    render, download, chunk = ExitStack(), ExitStack(), ExitStack()
+    seen: list[RecordingActivity] = []
+
+    render.enter_context(tracker.claim_rendering(recording(home, "foo")))
+    download.enter_context(tracker.claim_zipping(recording(home, "foo")))
+    chunk.enter_context(tracker.claim_uploading(recording(home, "foo")))
+
+    for claim in [render, chunk, download]:
+        seen.append(tracker.activity(recording(home, "foo")))
+        claim.close()
+    seen.append(tracker.activity(recording(home, "foo")))
+
+    assert seen == [
+        RecordingActivity.RENDERING,
+        RecordingActivity.UPLOADING,
+        RecordingActivity.ZIPPING,
+        RecordingActivity.NONE,
+    ]
+
+
+@pytest.mark.parametrize("blows_up", [False, True], ids=["done", "blown-up"])
+@pytest.mark.parametrize("claim, activity", CLAIMS)
+def test_the_tracker_keeps_nothing_on_a_recording_nobody_holds(
+    home: Path, claim: Claim, activity: RecordingActivity, blows_up: bool
+):
+    # every chunk of every lecture takes a claim, so whatever the tracker kept per claim would
+    # grow for as long as the server runs
+    tracker = RecordingTracker()
+
+    with (
+        pytest.raises(RuntimeError) if blows_up else nullcontext(),
+        claim(tracker, recording(home, "foo")),
+    ):
+        assert tracker.activity(recording(home, "foo")) == activity
+        if blows_up:
+            raise RuntimeError("boom")
+
+    assert not tracker.activities
 
 
 def test_a_failed_upload_does_not_hold_the_recording(home: Path):
@@ -704,3 +831,150 @@ def test_classify_reports_all_three_lines(home: Path):
         streaming=False,
         size=12345,
     )
+
+
+# --- the raw-data download -----------------------------------------------------
+#
+# The chunks of a recording as they were uploaded, for a lecture the render could not make
+# anything of, or one the lecturer wants to cut differently. Streamed as the archive is
+# written, so that a lecture of several gigabytes never has to fit in memory or in a
+# temporary file.
+
+
+def raw_download(path: Path, **kwargs: int) -> list[bytes]:
+    """The pieces raw_download_zipstream hands to the response, in order."""
+
+    async def collect() -> list[bytes]:
+        return [piece async for piece in raw_download_zipstream(anyio.Path(path), **kwargs)]
+
+    return anyio.run(collect)
+
+
+def archive(pieces: list[bytes]) -> ZipFile:
+    return ZipFile(BytesIO(b"".join(pieces)))
+
+
+def write_file(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+@pytest.fixture
+def leftovers_recording(home: Path) -> Path:
+    """
+    A recording with chunks in two tracks, written out of order, an empty third track, and
+    everything else that ends up in a recording directory over its life.
+    """
+    path = recording_dir(home, "GVS_2025")
+    for index in [10, 0, 2]:
+        write_file(path / "stream" / f"chunk.{index:04d}", f"stream {index}".encode())
+    for index in [1, 0]:
+        write_file(path / "overlay" / f"chunk.{index:04d}", f"overlay {index}".encode())
+    (path / "audio-0").mkdir()
+
+    # an upload in progress, or one that broke off
+    write_file(path / "stream" / "part.chunk.0011.k2x9q1zb", b"half a chunk")
+    # what the render makes of the chunks, finished or not
+    write_file(path / "stream" / "full.webm", b"concatenated")
+    write_file(path / "presentation.webm", b"the rendered lecture")
+    write_file(path / "presentation.part.webm", b"half a video")
+    return path
+
+
+CHUNKS_IN_ARCHIVE = {
+    "GVS_2025/stream/chunk.0000",
+    "GVS_2025/stream/chunk.0002",
+    "GVS_2025/stream/chunk.0010",
+    "GVS_2025/overlay/chunk.0000",
+    "GVS_2025/overlay/chunk.0001",
+}
+
+
+def test_the_raw_download_is_a_zip_archive_of_the_chunks(leftovers_recording: Path):
+    zipped = archive(raw_download(leftovers_recording))
+
+    assert zipped.testzip() is None
+    # under the recording's name, track by track, so that it unpacks into one directory laid
+    # out like the one on the server -- rather than strewing chunk.0000s over the downloads
+    assert set(zipped.namelist()) == CHUNKS_IN_ARCHIVE
+    assert len(zipped.namelist()) == len(CHUNKS_IN_ARCHIVE)
+
+
+def test_the_raw_download_holds_nothing_but_complete_chunks(leftovers_recording: Path):
+    # a part file is a chunk still being uploaded, which the download may well run alongside;
+    # full.webm and the presentation are made from the chunks, and as large as all of them
+    # together, so they would double the download for nothing anybody asked for
+    names = archive(raw_download(leftovers_recording)).namelist()
+
+    assert not [name for name in names if "part" in name or name.endswith(".webm")]
+
+
+def test_each_tracks_chunks_are_in_the_order_they_were_recorded(leftovers_recording: Path):
+    # by name, which the zero padding makes the arrival order -- not the order the filesystem
+    # happens to list them in
+    names = archive(raw_download(leftovers_recording)).namelist()
+
+    assert [name for name in names if "/stream/" in name] == [
+        "GVS_2025/stream/chunk.0000",
+        "GVS_2025/stream/chunk.0002",
+        "GVS_2025/stream/chunk.0010",
+    ]
+    assert [name for name in names if "/overlay/" in name] == [
+        "GVS_2025/overlay/chunk.0000",
+        "GVS_2025/overlay/chunk.0001",
+    ]
+
+
+def test_every_chunk_arrives_byte_for_byte(leftovers_recording: Path):
+    zipped = archive(raw_download(leftovers_recording))
+
+    for name in CHUNKS_IN_ARCHIVE:
+        assert zipped.read(name) == (leftovers_recording.parent / name).read_bytes()
+    # stored rather than compressed: webm is compressed already, and deflating gigabytes of it
+    # would only cost the server time
+    assert {info.compress_type for info in zipped.infolist()} == {ZIP_STORED}
+
+
+READ_SIZE = 64 * 1024
+# a local file header with its zip64 extra field, the data descriptor of the entry before, and
+# a recording name of a few dozen bytes; the end of the archive, with the central directory of
+# the few entries here, is no larger
+HEADER_ALLOWANCE = 1024
+
+
+def test_a_chunk_larger_than_one_read_arrives_whole_without_being_held_in_memory(home: Path):
+    # Each piece is handed on as soon as it is read, so memory per download stays at about
+    # one read whatever the size of the chunks -- and of the lecture.
+    content = os.urandom(16 * READ_SIZE + 123)
+    write_file(recording_dir(home, "GVS_2025") / "stream" / "chunk.0000", content)
+
+    pieces = raw_download(recording_dir(home, "GVS_2025"), chunk=READ_SIZE)
+
+    assert archive(pieces).read("GVS_2025/stream/chunk.0000") == content
+    assert len(pieces) > len(content) // READ_SIZE
+    assert max(len(piece) for piece in pieces) <= READ_SIZE + HEADER_ALLOWANCE
+
+
+def test_a_recording_without_chunks_is_an_empty_archive(home: Path):
+    # the browser still gets a valid file to open, rather than one it cannot make sense of
+    recording_dir(home, "GVS_2025").mkdir(parents=True)
+    write_file(recording_dir(home, "GVS_2025") / "presentation.webm", b"the rendered lecture")
+
+    zipped = archive(raw_download(recording_dir(home, "GVS_2025")))
+
+    assert zipped.testzip() is None
+    assert zipped.namelist() == []
+
+
+def test_a_symlink_in_the_recording_is_not_followed_out_of_it(home: Path, tmp_path: Path):
+    # nothing in the app creates one, but if one turns up, the download must not become a way
+    # to read whatever it points at
+    path = recording_dir(home, "GVS_2025")
+    write_file(path / "stream" / "chunk.0000", b"stream 0")
+    write_file(tmp_path / "secret" / "chunk.0000", b"secret")
+    (path / "stream" / "chunk.0001").symlink_to(tmp_path / "secret" / "chunk.0000")
+    (path / "overlay").symlink_to(tmp_path / "secret", target_is_directory=True)
+
+    zipped = archive(raw_download(path))
+
+    assert zipped.namelist() == ["GVS_2025/stream/chunk.0000"]

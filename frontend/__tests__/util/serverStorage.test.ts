@@ -260,7 +260,8 @@ test.each([
 
 // --- scheduling postprocessing -----------------------------------------------
 
-const ACCEPTED_JOB = { state: "rendering", name: "FOO" };
+// with the link to the raw tracks, which can be downloaded while the job is running
+const ACCEPTED_JOB = { state: "rendering", name: "FOO", rawDownloadUrl: "downloads/8f14e45fceea167a/FOO/raw?totp=0123456789" };
 
 const acceptingServer = () =>
   vi.fn().mockImplementation(async () => Response.json(ACCEPTED_JOB, { status: 202 }));
@@ -291,7 +292,7 @@ test("schedule postprocessing without a recipient sends none", async () => {
 });
 
 test("the recording to postprocess is percent-encoded into the path", async () => {
-  window.fetch = vi.fn().mockImplementation(async () => Response.json({ state: "rendering", name: "Übung_2025" }, { status: 202 }));
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, name: "Übung_2025" }, { status: 202 }));
 
   await schedulePostprocessing(destination, "Übung_2025", undefined, undefined);
 
@@ -409,7 +410,27 @@ test("an accepted job the backend does not describe is an invalid response", asy
 test("an accepted job that is not rendering is an invalid response", async () => {
   // the listing knows unprocessed recordings, but a job the backend has just taken on is
   // rendering by definition; anything else means frontend and backend disagree
-  window.fetch = vi.fn().mockImplementation(async () => Response.json({ state: "unprocessed", name: "FOO" }, { status: 202 }));
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, state: "unprocessed" }, { status: 202 }));
+
+  const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined));
+
+  expect(error).toBeInstanceOf(ApiError);
+  expect((error as ApiError).kind).toBe("invalid-response");
+  expect((error as ApiError).cause).toBeInstanceOf(z.ZodError);
+});
+
+test("a job accepted by a backend without authentication has no raw data link", async () => {
+  // with no user directory to put in the path, there is no link to hand out
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, rawDownloadUrl: null }, { status: 202 }));
+
+  await expect(schedulePostprocessing(destination, "FOO", undefined, undefined))
+    .resolves.toStrictEqual({ ...ACCEPTED_JOB, rawDownloadUrl: null });
+});
+
+test("an accepted job that leaves out its raw data link is an invalid response", async () => {
+  // null is how the backend says there is none; a missing field means it speaks another version
+  const { rawDownloadUrl: _, ...withoutRawLink } = ACCEPTED_JOB;
+  window.fetch = vi.fn().mockImplementation(async () => Response.json(withoutRawLink, { status: 202 }));
 
   const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined));
 
@@ -494,12 +515,18 @@ test("postprocessing request requests a fresh access token for every attempt", a
 // --- the listing -------------------------------------------------------------
 //
 // What the processed recordings section shows. A completed recording comes with the path it
-// can be downloaded from; the others only have a name and the state they are in.
+// can be downloaded from; every recording, whatever state it is in, with the path its raw
+// tracks can be downloaded from.
 
 const LISTING = [
-  { state: "completed", name: "PSU_2026", size: 2048, downloadUrl: "downloads/8f14e45fceea167a/PSU_2026?totp=9876543210" },
-  { state: "rendering", name: "ABC_2026" },
-  { state: "unprocessed", name: "GVS_2025" }
+  {
+    state: "completed", name: "PSU_2026", size: 2048,
+    downloadUrl: "downloads/8f14e45fceea167a/PSU_2026?totp=9876543210",
+    rawDownloadUrl: "downloads/8f14e45fceea167a/PSU_2026/raw?totp=9876543210"
+  },
+  { state: "rendering", name: "ABC_2026", rawDownloadUrl: "downloads/8f14e45fceea167a/ABC_2026/raw?totp=1234567890" },
+  { state: "unprocessed", name: "GVS_2025", rawDownloadUrl: "downloads/8f14e45fceea167a/GVS_2025/raw?totp=5555555555" },
+  { state: "not-renderable", name: "XYZ_2024", rawDownloadUrl: "downloads/8f14e45fceea167a/XYZ_2024/raw?totp=7777777777" }
 ];
 
 test("the listing is fetched with one authenticated GET", async () => {
@@ -522,6 +549,19 @@ test("the listing resolves with the recordings the backend answered with", async
   await expect(fetchRecordings(destination)).resolves.toStrictEqual(LISTING);
 });
 
+test("a listing from a backend without authentication has no raw data links", async () => {
+  // with no user directory to put in the path, there is no link to hand out, and the card
+  // offers none rather than one that cannot work
+  const anonymous = [
+    { state: "rendering", name: "ABC_2026", rawDownloadUrl: null },
+    { state: "unprocessed", name: "GVS_2025", rawDownloadUrl: null },
+    { state: "not-renderable", name: "XYZ_2024", rawDownloadUrl: null }
+  ];
+  window.fetch = vi.fn().mockResolvedValue(Response.json(anonymous));
+
+  await expect(fetchRecordings(destination)).resolves.toStrictEqual(anonymous);
+});
+
 test("a listing with nothing in it is an empty array", async () => {
   window.fetch = vi.fn().mockResolvedValue(Response.json([]));
 
@@ -532,13 +572,19 @@ test.each([
   // what a backend not updated alongside the frontend answers
   [ "in the shape of the old /api/completed", { user: "u", recordings: [ { name: "x", size: 1024, totp: "1" } ] } ],
   [ "in the shape from before the API was reshaped", { user: "8f14e45fceea167a", completed: [], rendering: [], unprocessed: [] } ],
-  // the URL, TOTP included, is the whole of what the download link is built from
-  [ "with a completed recording that cannot be downloaded", [ { state: "completed", name: "PSU_2026", size: 2048 } ] ],
+  // the URL, TOTP included, is the whole of what the download link is built from; null would
+  // say there is none, a missing one that the backend speaks another version
+  [ "with a completed recording that leaves out its download link", [ { state: "completed", name: "PSU_2026", size: 2048, rawDownloadUrl: null } ] ],
   // the state is what picks the card, and there is none to pick for this one
-  [ "with a recording in a state the frontend does not know", [ { state: "archived", name: "PSU_2026" } ] ],
+  [ "with a recording in a state the frontend does not know", [ { state: "archived", name: "PSU_2026", rawDownloadUrl: null } ] ],
   // the name is what the Rerender button posts back as the job's recording
-  [ "with an unprocessed recording without a name", [ { state: "unprocessed" } ] ],
-  [ "with a rendering recording without a name", [ { state: "rendering" } ] ]
+  [ "with an unprocessed recording without a name", [ { state: "unprocessed", rawDownloadUrl: null } ] ],
+  [ "with a rendering recording without a name", [ { state: "rendering", rawDownloadUrl: null } ] ],
+  // the same goes for the raw data link: null where there is none, but never left out
+  [ "with a completed recording that leaves out its raw data link", [ { state: "completed", name: "PSU_2026", size: 2048, downloadUrl: "downloads/u/PSU_2026?totp=1" } ] ],
+  [ "with a rendering recording that leaves out its raw data link", [ { state: "rendering", name: "ABC_2026" } ] ],
+  [ "with an unprocessed recording that leaves out its raw data link", [ { state: "unprocessed", name: "GVS_2025" } ] ],
+  [ "with a recording that cannot be rendered and leaves out its raw data link", [ { state: "not-renderable", name: "XYZ_2024" } ] ]
 ])("a listing %s is an invalid response", async (_, listing) => {
   // the section tells the lecturer the backend speaks a different version, rather than
   // showing a listing it cannot make sense of
@@ -671,28 +717,36 @@ test("a backend that cannot be reached fails the purge with fetch's own error", 
 
 // --- downloading -------------------------------------------------------------
 //
-// The backend hands out a download path relative to its API, with the recording name already
-// encoded and the OTP in the query; the link only has to be put below the API.
-
-const completed = (downloadUrl: string) => ({ state: "completed" as const, name: "Übung_2025", size: 2048, downloadUrl });
+// The backend hands out download paths relative to its API, with the recording name already
+// encoded and the OTP in the query; the link only has to be put below the API. The video and
+// the raw tracks are two such paths, built into links the same way.
 
 test("the download URL is the backend's download path below the API", () => {
   const encodedName = encodeURIComponent("Übung_2025");
 
-  expect(downloadHref(API, completed(`downloads/8f14e45f/${encodedName}?totp=0123456789`)))
+  expect(downloadHref(API, `downloads/8f14e45f/${encodedName}?totp=0123456789`))
     .toBe(`${API}api/downloads/8f14e45f/${encodedName}?totp=0123456789`);
 });
 
 test("the recording name in the download URL is not encoded a second time", () => {
   // %C3%9C turning into %25C3%259C would ask the backend for a recording that does not exist
-  expect(downloadHref(API, completed("downloads/8f14e45f/%C3%9Cbung_2025?totp=0123456789")))
+  expect(downloadHref(API, "downloads/8f14e45f/%C3%9Cbung_2025?totp=0123456789"))
     .not.toContain("%25");
 });
 
 test("the download URL keeps a path prefix of the API URL", () => {
   // a backend behind a reverse proxy, under a path of its own
-  expect(downloadHref("https://example.com/ise/", completed("downloads/8f14e45f/PSU_2026?totp=0123456789")))
+  expect(downloadHref("https://example.com/ise/", "downloads/8f14e45f/PSU_2026?totp=0123456789"))
     .toBe("https://example.com/ise/api/downloads/8f14e45f/PSU_2026?totp=0123456789");
+});
+
+test("the raw data URL of a non-ASCII recording keeps its path prefix and its encoding", () => {
+  // the raw tracks sit one segment below the video, so the encoded name is in the middle of
+  // the path rather than at its end, and must still come out as the backend wrote it
+  const encodedName = encodeURIComponent("Übung_2025");
+
+  expect(downloadHref("https://example.com/ise/", `downloads/8f14e45f/${encodedName}/raw?totp=0123456789`))
+    .toBe(`https://example.com/ise/api/downloads/8f14e45f/${encodedName}/raw?totp=0123456789`);
 });
 
 // --- uploading a whole file in chunks --------------------------------------

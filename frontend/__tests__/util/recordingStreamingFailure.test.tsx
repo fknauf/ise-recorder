@@ -5,6 +5,7 @@ import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import { uploadChunk } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
+import { rendering } from "../helpers/serverStorage";
 
 /**
  * What a live recording does when its stream to the backend breaks.
@@ -151,7 +152,7 @@ const jobRequests = () =>
   vi.mocked(window.fetch).mock.calls.filter(([ input ]) => requestUrl(input).endsWith("/render"));
 
 /** What the backend says when it has taken on a job. */
-const jobAccepted = () => Response.json({ state: "rendering", name: "GVS" }, { status: 202 });
+const jobAccepted = () => Response.json(rendering("GVS"), { status: 202 });
 
 /** Output streams by file name, and which of them have finished closing. */
 let streams: Map<string, FileSystemWritableFileStream>;
@@ -506,6 +507,55 @@ test("a frontend-only deployment does not claim a job was scheduled", async () =
   expect(showSuccess).not.toHaveBeenCalled();
   expect(showMessage).not.toHaveBeenCalled();
   expect(showError).not.toHaveBeenCalled();
+});
+
+// --- a recording without a main display -----------------------------------
+//
+// Without a display or a camera there is no "stream" track to render a video from, only audio
+// files, and the backend refuses such a job. So none is requested: the chunks still go up, for
+// the raw tracks to be downloaded from the server, and the lecturer is told why no video comes.
+
+test("an audio-only recording streams its chunks but requests no render", async () => {
+  const audioContext = new AudioContext();
+
+  try {
+    const microphone = audioContext.createMediaStreamDestination().stream.getAudioTracks()[0];
+    const onStreamingFailed = vi.fn();
+    let stop = () => {};
+    let markStarted: () => void = () => {};
+    const started = new Promise<void>(resolve => markStarted = resolve);
+
+    const done = recordLecture(
+      { displayTracks: [], videoTracks: [], audioTracks: [ microphone ], mainDisplay: undefined, overlay: undefined },
+      "GVS", "lecturer@example.com", backend,
+      () => {},
+      (_name, stopFunction) => {
+        stop = stopFunction;
+        markStarted();
+      },
+      () => {}, () => {}, onStreamingFailed
+    );
+
+    await started;
+
+    await FakeMediaRecorder.instances[0].emit();
+    (await upload("audio-0", 0)).answer("ok");
+
+    stop();
+    (await upload("audio-0", 1)).answer("ok");
+    await done;
+
+    expect(uploadsSent()).toBe(2);
+    expect(jobRequests()).toHaveLength(0);
+    // a notice rather than an error: nothing went wrong, there is just no video to make
+    expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("no main display"));
+    expect(showError).not.toHaveBeenCalled();
+    expect(showSuccess).not.toHaveBeenCalled();
+    // every chunk arrived, so there is nothing to re-upload either
+    expect(onStreamingFailed).not.toHaveBeenCalled();
+  } finally {
+    await audioContext.close();
+  }
 });
 
 // --- streaming impeded from the start --------------------------------------

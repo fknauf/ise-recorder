@@ -1,7 +1,7 @@
 import useSWR, { useSWRConfig } from "swr";
 import { useAppSession } from "../components/SessionProvider";
 import { useServerEnv } from "./useServerEnv";
-import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording, UnfinishedRecording } from "../utils/serverStorage";
+import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "../utils/serverStorage";
 import { useLecture } from "./useLecture";
 
 const RECORDINGS_KEY = "/api/recordings";
@@ -57,11 +57,15 @@ export function useServerStorage() {
 
     const optimisticRerenderUpdate = (committed: ServerStorageRecording[] | undefined, displayed?: ServerStorageRecording[]) => {
       const current = displayed ?? committed ?? [];
-      const replacement: UnfinishedRecording = {
-        state: "rendering",
-        name: recordingName
-      };
-      return current.map(value => (value.name === recordingName ? replacement : value));
+      return current.map(value => (
+        value.name === recordingName
+          ? {
+              state: "rendering" as const,
+              name: value.name,
+              rawDownloadUrl: value.rawDownloadUrl
+            }
+          : value
+      ));
     };
 
     return mutate(async () => {

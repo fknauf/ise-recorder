@@ -13,11 +13,14 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, Callable, Iterator
+from contextlib import AbstractContextManager, nullcontext
+from io import BytesIO
 from pathlib import Path
 import shutil
 import threading
 from unittest.mock import ANY
 from urllib.parse import quote
+from zipfile import ZipFile
 
 import anyio
 from fastapi import FastAPI, HTTPException
@@ -30,9 +33,12 @@ from pytest_mock import MockerFixture
 from starlette.requests import ClientDisconnect
 from starlette.types import Message, Scope
 
+from ise_record.core.auth import UserInfo
 from ise_record.core.postprocess import Result, ResultReason
 from ise_record.core.recordings import RecordingActivity
+from ise_record.glue.enclave import Enclave
 from ise_record.glue.jobs import postprocessing_task
+from ise_record.glue.recordings import purge_recording
 from ise_record.server import (
     _get_request_exit_stacks,  # pyright: ignore[reportPrivateUsage]
     create_app,
@@ -53,10 +59,12 @@ from .harness import (
     digest_of,
     download_completed,
     download_parts,
+    download_raw,
     enclave_of,
     entries,
     finish_recording,
     follow_download,
+    follow_raw_download,
     home_entries,
     job_in_flight,
     list_recordings,
@@ -65,6 +73,7 @@ from .harness import (
     Provider,
     purge,
     purge_in_flight,
+    raw_download_parts,
     recording_dir,
     stored_recordings,
     stray,
@@ -147,7 +156,9 @@ def test_a_render_answers_with_the_recording_now_rendering(
 
     response = client.post(render_url("foo"), json={})
 
-    assert response.json() == {"state": "rendering", "name": "foo"}
+    # with no raw-data link in an open deployment: there is nobody to hand one to, and the
+    # download route refuses to serve there anyway
+    assert response.json() == {"state": "rendering", "name": "foo", "rawDownloadUrl": None}
 
 
 def test_a_render_answers_with_the_name_the_recording_is_stored_under(
@@ -161,7 +172,11 @@ def test_a_render_answers_with_the_name_the_recording_is_stored_under(
     response = client.post(render_url("U\u0308bung_2025"), json={})
 
     assert response.status_code == 202
-    assert response.json() == {"state": "rendering", "name": "\u00dcbung_2025"}
+    assert response.json() == {
+        "state": "rendering",
+        "name": "\u00dcbung_2025",
+        "rawDownloadUrl": None,
+    }
 
 
 # --- whom the report goes to ------------------------------------------------
@@ -352,27 +367,37 @@ def test_a_chunk_larger_than_one_read_arrives_whole(client: TestClient, settings
     assert (recording_dir(settings.destdir, "foo") / "stream" / "chunk.0000").read_bytes() == big
 
 
-def chunk_upload_scope(recording: str, index: int) -> Scope:
+def request_scope(
+    method: str, path: str, query_string: bytes = b"", spec_version: str | None = None
+) -> Scope:
     """
-    The ASGI scope of a chunk upload, for tests that talk ASGI to the app directly because they
-    need control over how the body arrives, which a TestClient hands over in one go.
+    The ASGI scope of a request, for tests that talk ASGI to the app directly because they need
+    control over how the body arrives or leaves, which a TestClient hands over in one go.
     """
-    path = chunk_url(recording, "stream", index)
+    asgi = (
+        {"version": "3.0"}
+        if spec_version is None
+        else {"version": "3.0", "spec_version": spec_version}
+    )
     return {
         "type": "http",
-        "asgi": {"version": "3.0"},
+        "asgi": asgi,
         "http_version": "1.1",
-        "method": "PUT",
+        "method": method,
         "scheme": "http",
         "path": path,
         "raw_path": path.encode(),
         "root_path": "",
-        "query_string": b"",
+        "query_string": query_string,
         "headers": [(b"host", b"testserver")],
         "client": ("127.0.0.1", 50000),
         "server": ("testserver", 80),
         "state": {},
     }
+
+
+def chunk_upload_scope(recording: str, index: int) -> Scope:
+    return request_scope("PUT", chunk_url(recording, "stream", index))
 
 
 @pytest.mark.asyncio
@@ -686,6 +711,7 @@ ENDPOINTS = [
     ("GET", "/api/recordings"),
     ("DELETE", "/api/recordings/foo"),
     ("GET", f"/api/downloads/{digest_of('abc')}/foo"),
+    ("GET", f"/api/downloads/{digest_of('abc')}/foo/raw"),
 ]
 
 
@@ -928,14 +954,14 @@ def test_the_listing_returns_the_recordings_with_size_and_a_download_link(
     ]
     # exactly the keys the frontend's schema expects, in its camelCase
     assert {frozenset(entry) for entry in data} == {
-        frozenset({"state", "name", "size", "downloadUrl"})
+        frozenset({"state", "name", "size", "downloadUrl", "rawDownloadUrl"})
     }
     # every link leads to its own recording, in the caller's enclave
     enclave = enclave_of(auth_client, home)
     for entry in data:
-        user_digest, recording, totp = download_parts(entry)
-        assert (user_digest, recording) == (DEFAULT_SUBJECT_DIGEST, entry["name"])
-        assert enclave.verify_totp(totp, entry["name"])
+        for user_digest, recording, totp in [download_parts(entry), raw_download_parts(entry)]:
+            assert (user_digest, recording) == (DEFAULT_SUBJECT_DIGEST, entry["name"])
+            assert enclave.verify_totp(totp, entry["name"])
 
 
 def test_the_listing_leaves_out_recordings_that_are_not_rendered(
@@ -991,6 +1017,7 @@ def test_the_listing_reports_each_recording_in_its_state(
     abandon_recording(home, "FAILED_2025")
     abandon_recording(home, "PSU_2026")
     abandon_recording(home, "ABC_2026")
+    write_chunks(recording_dir(home, "NO_MAIN_2025"), [30 * 60], track="overlay")
 
     with job_in_flight(auth_client, home, "PSU_2026"), job_in_flight(auth_client, home, "ABC_2026"):
         data = list_recordings(auth_client, provider.mint()).json()
@@ -999,10 +1026,15 @@ def test_the_listing_reports_each_recording_in_its_state(
     # without the sort
     assert names(data, "rendering") == ["ABC_2026", "PSU_2026"]
     assert names(data, "completed") == ["DONE_2025"]
-    # only the name for the others: there is nothing to download, and the Rerender button
-    # needs no more
     assert names(data, "unprocessed") == ["FAILED_2025"]
-    assert all(set(entry) == {"state", "name"} for entry in data if entry["state"] != "completed")
+    assert names(data, "not-renderable") == ["NO_MAIN_2025"]
+    # the name and the raw-data link for the others: there is no video to download, and the
+    # Rerender button needs no more than the name
+    assert all(
+        set(entry) == {"state", "name", "rawDownloadUrl"}
+        for entry in data
+        if entry["state"] != "completed"
+    )
 
 
 def test_the_listing_only_shows_the_callers_own_rendering_jobs(
@@ -1747,6 +1779,383 @@ def test_a_failing_filesystem_is_reported_without_details(
     assert any(r.exc_info is not None and r.exc_info[0] is PermissionError for r in caplog.records)
 
 
+# --- downloading the raw data ----------------------------------------------
+#
+# The chunks of a recording as a zip archive, for every card the listing shows: the lecture the
+# render could not make anything of, the one whose main stream never arrived, or one the
+# lecturer wants to cut differently. The link carries the same OTP as the video's, and is
+# checked the same way; which files go into the archive is raw_download_zipstream's business,
+# in core/test_recordings.py.
+
+
+def unzipped(content: bytes) -> ZipFile:
+    return ZipFile(BytesIO(content))
+
+
+def raw_archive(response: Response) -> ZipFile:
+    return unzipped(response.content)
+
+
+def test_the_raw_data_of_a_listed_recording_can_be_downloaded(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    path = rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    (path / "stream" / "part.chunk.0002.k2x9q1zb").write_bytes(b"half a chunk")
+    (path / "stream" / "full.webm").write_bytes(b"concatenated")
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    response = follow_raw_download(auth_client, entries(server_list, "completed")[0])
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert response.headers["content-disposition"] == "attachment; filename*=UTF-8''GVS_2025.zip"
+    zipped = raw_archive(response)
+    assert zipped.testzip() is None
+    # the chunks and nothing else: no upload in progress, and nothing the render made of them
+    assert sorted(zipped.namelist()) == [
+        "GVS_2025/overlay/chunk.0000",
+        "GVS_2025/stream/chunk.0000",
+        "GVS_2025/stream/chunk.0001",
+    ]
+    assert zipped.read("GVS_2025/stream/chunk.0001") == b"chunk"
+
+
+def unrenderable_recording(home: Path | anyio.Path, name: str) -> Path:
+    """A recording whose main stream never arrived, abandoned long enough ago to be idle."""
+    path = recording_dir(home, name)
+    write_chunks(path, [30 * 60], track="overlay")
+    return path
+
+
+def failed_recording(home: Path | anyio.Path, name: str) -> Path:
+    """A recording whose render broke off and left its partial output behind."""
+    path = abandon_recording(home, name)
+    (path / "presentation.part.webm").write_bytes(b"half")
+    return path
+
+
+@pytest.mark.parametrize(
+    "state, setup",
+    [
+        pytest.param("completed", rendered_recording, id="completed"),
+        pytest.param("unprocessed", failed_recording, id="unprocessed"),
+        pytest.param("not-renderable", unrenderable_recording, id="not-renderable"),
+        pytest.param("rendering", abandon_recording, id="rendering"),
+    ],
+)
+def test_every_card_offers_the_raw_data(
+    auth_client: TestClient,
+    provider: Provider,
+    tmp_path: Path,
+    state: str,
+    setup: Callable[[Path, str], Path],
+):
+    # a render in flight is no reason to wait either: it writes nothing the archive reads
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    path = setup(home, "GVS_2025")
+    rendering: AbstractContextManager[None] = (
+        job_in_flight(auth_client, home, "GVS_2025") if state == "rendering" else nullcontext()
+    )
+
+    with rendering:
+        (entry,) = list_recordings(auth_client, provider.mint()).json()
+        response = follow_raw_download(auth_client, entry)
+
+    assert entry["state"] == state
+    assert response.status_code == 200
+    assert sorted(raw_archive(response).namelist()) == sorted(
+        str(chunk.relative_to(path.parent)) for chunk in path.rglob("chunk.*")
+    )
+
+
+def test_a_raw_download_goes_ahead_while_the_recording_takes_a_chunk(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # a late chunk, or another tab streaming under the same name: the chunk is written under a
+    # name the archive does not read until it is complete, so neither has to wait
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    failed_recording(home, "GVS_2025")
+    (entry,) = list_recordings(auth_client, provider.mint()).json()
+
+    with enclave_of(auth_client, home).claim_upload("GVS_2025"):
+        response = follow_raw_download(auth_client, entry)
+
+        assert response.status_code == 200
+        assert activity_of(auth_client, home, "GVS_2025") == RecordingActivity.UPLOADING
+
+
+@pytest.mark.parametrize(
+    "recording",
+    [
+        "GVS_2025",
+        "Übung_3_2025",  # Latin with a diacritic
+        "机器学习_2025",  # Chinese
+    ],
+)
+def test_the_raw_data_is_saved_under_the_recordings_name(
+    recording: str, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # RFC 5987, so that a name that does not fit in a quoted ASCII filename arrives intact; and
+    # the archive unpacks into a directory of the same name
+    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, recording)
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    response = follow_raw_download(auth_client, entries(server_list, "completed")[0])
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        f"attachment; filename*=UTF-8''{quote(recording)}.zip"
+    )
+    assert {name.split("/")[0] for name in raw_archive(response).namelist()} == {recording}
+
+
+def test_the_raw_link_in_a_renders_answer_leads_to_the_chunks(
+    mocker: MockerFixture, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the frontend puts the answer in place of the card it had, link and all
+    mocker.patch("ise_record.glue.jobs.postprocess_recording", autospec=True)
+    abandon_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "foo")
+
+    answer = schedule(auth_client, provider.mint()).json()
+    response = follow_raw_download(auth_client, answer)
+
+    assert response.status_code == 200
+    assert sorted(raw_archive(response).namelist()) == [
+        "foo/stream/chunk.0000",
+        "foo/stream/chunk.0001",
+        "foo/stream/chunk.0002",
+    ]
+
+
+def test_a_raw_download_lets_go_of_the_recording_once_it_is_done(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # downloading and then purging is what a lecturer clearing out their old recordings does
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    token = provider.mint()
+    server_list = list_recordings(auth_client, token).json()
+
+    assert follow_raw_download(auth_client, entries(server_list, "completed")[0]).status_code == 200
+
+    assert activity_of(auth_client, home, "GVS_2025") == RecordingActivity.NONE
+    assert purge(auth_client, token, "GVS_2025").status_code == 204
+
+
+def test_the_raw_data_of_a_recording_being_purged_is_refused(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the archive would be read from a directory rmtree is taking apart, and come out broken
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    with purge_in_flight(auth_client, home, "GVS_2025"):
+        response = follow_raw_download(auth_client, entries(server_list, "completed")[0])
+
+        assert response.status_code == 409
+        # still the purge's: the refusal does not let go of a claim it never had
+        assert activity_of(auth_client, home, "GVS_2025") == RecordingActivity.PURGING
+
+
+def test_a_valid_raw_link_to_a_recording_that_is_gone_is_not_found(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the link was listed a minute ago, and an admin has since cleared the recording away; the
+    # OTP still checks out, but there is nothing to send -- and nothing left claimed after
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    server_list = list_recordings(auth_client, provider.mint()).json()
+
+    shutil.rmtree(recording_dir(home, "GVS_2025"))
+
+    assert follow_raw_download(auth_client, entries(server_list, "completed")[0]).status_code == 404
+    assert activity_of(auth_client, home, "GVS_2025") == RecordingActivity.NONE
+
+
+def test_raw_downloading_is_forbidden_without_authentication(
+    client: TestClient, settings: Settings
+):
+    # an unauthenticated deployment has one shared destdir and nobody to own a recording
+    rendered_recording(settings.destdir, "GVS_2025")
+
+    response = download_raw(client, "deadbeef", "GVS_2025", "0000000000")
+
+    assert response.status_code == 403
+    assert response.headers["content-type"] != "application/zip"
+
+
+def test_a_raw_link_with_a_wrong_totp_is_refused_like_one_for_a_user_nobody_has_seen(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # as for the video: both refusals look the same, so a guessed link says nothing about which
+    # lecturers used the server since it started
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(tmp_path / digest_of("nobody"), "GVS_2025")
+    list_recordings(auth_client, provider.mint())
+
+    wrong_totp = download_raw(auth_client, DEFAULT_SUBJECT_DIGEST, "GVS_2025", "0000000000")
+    unknown_user = download_raw(auth_client, digest_of("nobody"), "GVS_2025", "0000000000")
+
+    assert wrong_totp.status_code == unknown_user.status_code == 401
+    assert wrong_totp.json() == unknown_user.json()
+    # and nothing claimed by a request that was turned away
+    assert activity_of(auth_client, home, "GVS_2025") == RecordingActivity.NONE
+
+
+def test_a_totp_does_not_open_the_raw_data_of_another_recording(
+    auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    rendered_recording(home, "PSU_2026")
+    # never listed, so it never got an OTP of its own either
+    rendered_recording(home, "never_listed")
+    server_list = list_recordings(auth_client, provider.mint()).json()
+    user_digest, _, gvs_totp = raw_download_parts(entries(server_list, "completed")[0])
+
+    for recording in ["PSU_2026", "never_listed"]:
+        assert download_raw(auth_client, user_digest, recording, gvs_totp).status_code == 401
+
+
+def test_following_a_raw_download_link_makes_no_enclave(auth_client: TestClient):
+    # the download routes take no token, so anybody can make them look a digest up
+    download_raw(auth_client, digest_of("nobody"), "GVS_2025", "0000000000")
+
+    assert app_of(auth_client).state.enclaves == {}
+
+
+@pytest.mark.parametrize(
+    "user_digest, totp",
+    [
+        pytest.param("%2e%2e", None, id="dot-dot"),
+        pytest.param("not-hex", None, id="not-hex"),
+        pytest.param(DEFAULT_SUBJECT_DIGEST, "12ab", id="totp-not-digits"),
+    ],
+)
+def test_a_raw_link_that_does_not_parse_is_refused(
+    user_digest: str, totp: str | None, auth_client: TestClient, provider: Provider, tmp_path: Path
+):
+    # the digest is joined onto destdir, so anything but a lowercase hex digest has to be
+    # refused before it reaches the filesystem
+    rendered_recording(tmp_path / DEFAULT_SUBJECT_DIGEST, "GVS_2025")
+    server_list = list_recordings(auth_client, provider.mint()).json()
+    _, _, listed_totp = raw_download_parts(entries(server_list, "completed")[0])
+
+    response = download_raw(auth_client, user_digest, "GVS_2025", totp or listed_totp)
+
+    assert response.status_code == 422
+
+
+# The archive is written while it is sent, so the claim that keeps a purge away has to last until
+# the last byte is out -- or until the browser hangs up, after which it must not keep the
+# recording from being purged. A TestClient collects the whole body before it returns, so these
+# talk ASGI to the app directly and look at the recording from inside the server's send.
+
+LECTURER = UserInfo(sub=DEFAULT_SUBJECT, preferred_username="lecturer")
+
+
+def streaming_enclave(app: FastAPI, home: Path) -> Enclave:
+    """The caller's enclave, filed where the download route looks it up by digest."""
+    enclaves: dict[str | None, Enclave] = app.state.enclaves
+    return enclaves.setdefault(
+        DEFAULT_SUBJECT_DIGEST, Enclave(DEFAULT_SUBJECT_DIGEST, anyio.Path(home))
+    )
+
+
+def raw_download_scope(enclave: Enclave, recording: str, spec_version: str | None = None) -> Scope:
+    path = f"/api/downloads/{DEFAULT_SUBJECT_DIGEST}/{recording}/raw"
+    query = f"totp={enclave.generate_totp(recording)}".encode()
+    return request_scope("GET", path, query, spec_version)
+
+
+def body_pieces(sent: list[Message]) -> list[Message]:
+    return [message for message in sent if message["type"] == "http.response.body"]
+
+
+async def never() -> Message:
+    """The receive of a client that neither sends anything nor hangs up."""
+    await asyncio.Event().wait()
+    raise AssertionError("unreachable")
+
+
+@pytest.mark.asyncio
+async def test_a_recording_cannot_be_purged_while_its_raw_data_is_on_its_way(
+    auth_settings: Settings, tmp_path: Path
+):
+    app = create_app(auth_settings)
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    enclave = streaming_enclave(app, home)
+    sent: list[Message] = []
+    seen_mid_stream: list[tuple[RecordingActivity, int]] = []
+
+    async def send(message: Message) -> None:
+        if message["type"] == "http.response.body" and not body_pieces(sent):
+            with pytest.raises(HTTPException) as refused:
+                await purge_recording("GVS_2025", enclave, LECTURER)
+            seen_mid_stream.append((enclave.activity("GVS_2025"), refused.value.status_code))
+        sent.append(message)
+
+    await app(raw_download_scope(enclave, "GVS_2025"), never, send)
+
+    assert seen_mid_stream == [(RecordingActivity.ZIPPING, 409)]
+    # the download went through to the end, and the recording is still all there
+    pieces = body_pieces(sent)
+    assert len(pieces) > 2 and pieces[-1]["more_body"] is False
+    zipped = unzipped(b"".join(piece["body"] for piece in pieces))
+    assert zipped.testzip() is None and len(zipped.namelist()) == 3
+    assert enclave.activity("GVS_2025") == RecordingActivity.NONE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spec_version",
+    [
+        # uvicorn's: the server says so through receive, and drops what is sent after
+        pytest.param(None, id="disconnect-message"),
+        # ASGI 2.4: sending to a client that is gone fails
+        pytest.param("2.4", id="failed-send"),
+    ],
+)
+async def test_a_raw_download_the_browser_hangs_up_on_lets_go_of_the_recording(
+    auth_settings: Settings, tmp_path: Path, spec_version: str | None
+):
+    # a lecturer who cancels the download and then purges the recording
+    app = create_app(auth_settings)
+    home = tmp_path / DEFAULT_SUBJECT_DIGEST
+    rendered_recording(home, "GVS_2025")
+    enclave = streaming_enclave(app, home)
+    sent: list[Message] = []
+    hung_up = asyncio.Event()
+
+    async def receive() -> Message:
+        await hung_up.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        if hung_up.is_set():
+            if spec_version is not None:
+                raise OSError("connection reset by peer")
+            # the server would drop it; holding it up makes sure the hang-up is what ends the
+            # stream, rather than the stream outrunning it
+            await asyncio.Event().wait()
+        sent.append(message)
+        if message["type"] == "http.response.body":
+            assert enclave.activity("GVS_2025") == RecordingActivity.ZIPPING
+            hung_up.set()
+
+    with pytest.raises(ClientDisconnect) if spec_version is not None else nullcontext():
+        await app(raw_download_scope(enclave, "GVS_2025", spec_version), receive, send)
+
+    # cut short after the first piece
+    assert [piece["more_body"] for piece in body_pieces(sent)] == [True]
+    assert enclave.activity("GVS_2025") == RecordingActivity.NONE
+    await purge_recording("GVS_2025", enclave, LECTURER)
+    assert not recording_dir(home, "GVS_2025").exists()
+
+
 # --- what the job endpoint answers with ---------------------------------------
 
 
@@ -1760,7 +2169,11 @@ def test_a_scheduled_job_answers_with_the_recording_now_rendering(
     response = schedule(auth_client, provider.mint())
 
     assert response.status_code == 202
-    assert response.json() == {"state": "rendering", "name": "foo"}
+    assert response.json() == {"state": "rendering", "name": "foo", "rawDownloadUrl": ANY}
+    # and the card it replaces offered the raw data, so this one does as well
+    user_digest, recording, totp = raw_download_parts(response.json())
+    assert (user_digest, recording) == (DEFAULT_SUBJECT_DIGEST, "foo")
+    assert enclave_of(auth_client, tmp_path / DEFAULT_SUBJECT_DIGEST).verify_totp(totp, "foo")
 
 
 def test_a_duplicate_job_is_refused_without_disturbing_the_first(

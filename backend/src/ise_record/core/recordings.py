@@ -5,14 +5,14 @@ added to it.
 """
 
 import asyncio
-from collections import Counter
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 from enum import auto, Enum
 import os
 from typing import NamedTuple
+from zipfile import ZIP_STORED, ZipFile
 
 from anyio import Path
 
@@ -28,6 +28,7 @@ class RecordingActivity(Enum):
     RENDERING = auto()
     PURGING = auto()
     UPLOADING = auto()
+    ZIPPING = auto()
 
 
 class RecordingDiskState(Enum):
@@ -138,12 +139,106 @@ class RecordingBusy(Exception):
 
 
 @dataclass
+class RecordingActivityState:
+    """
+    Activity state of a recording: is rendering, being purged, accepting an upload or being zipped?
+
+    There are mildly complex exclusivity rules between those states, i.e.
+
+    - a recording that's busy with anything can't be purged
+    - a recording that's being purged can't do anything else
+    - a recording that's accepting an upload can't be rendered yet
+    """
+
+    busy_with: RecordingActivity = RecordingActivity.NONE
+    uploaders: int = 0
+    zippers: int = 0
+
+    def claim(self, activity: RecordingActivity) -> None:
+        """
+        Claim the recording for a particular activity. This will check whether the activity is
+        currently possible (throw otherwise) and update the state to reflect the activity for
+        which it was claimed.
+        """
+
+        assert activity != RecordingActivity.NONE
+
+        match activity:
+            # Purging conflicts with everything
+            case RecordingActivity.PURGING:
+                if self.busy_with != RecordingActivity.NONE:
+                    raise RecordingBusy(self.busy_with)
+                if self.uploaders > 0:
+                    raise RecordingBusy(RecordingActivity.UPLOADING)
+                if self.zippers > 0:
+                    raise RecordingBusy(RecordingActivity.ZIPPING)
+                self.busy_with = RecordingActivity.PURGING
+
+            # Rendering conflicts with purging but allows uploads and raw-data downloads
+            case RecordingActivity.RENDERING:
+                if self.busy_with != RecordingActivity.NONE:
+                    raise RecordingBusy(self.busy_with)
+                if self.uploaders > 0:
+                    raise RecordingBusy(RecordingActivity.UPLOADING)
+                self.busy_with = RecordingActivity.RENDERING
+
+            # Uploading conflicts with purging but not other uploads, raw-data downloads or
+            # rendering. This works because the upload uses temporary files that the zipping logic
+            # ignores.
+            case RecordingActivity.UPLOADING:
+                if self.busy_with == RecordingActivity.PURGING:
+                    raise RecordingBusy(RecordingActivity.PURGING)
+                self.uploaders += 1
+
+            # Zipping conflicts with purging but not other raw-data downloads, uploads or
+            # rendering.
+            case RecordingActivity.ZIPPING:
+                if self.busy_with == RecordingActivity.PURGING:
+                    raise RecordingBusy(RecordingActivity.PURGING)
+                self.zippers += 1
+
+    def release(self, activity: RecordingActivity) -> None:
+        """Signal that an activity has ended and update the state accordingly."""
+
+        match activity:
+            case RecordingActivity.ZIPPING:
+                assert self.zippers > 0
+                self.zippers -= 1
+
+            case RecordingActivity.UPLOADING:
+                assert self.uploaders > 0
+                self.uploaders -= 1
+
+            case _:
+                assert self.busy_with == activity
+                self.busy_with = RecordingActivity.NONE
+
+    def summary(self) -> RecordingActivity:
+        """
+        Summarize the activity state into one dominant activity.
+        
+        Used in the decision how to display the recording in the UI. For the purpose of this,
+        uploading and zipping are considered background activities, so everything else takes
+        precedence.
+        """
+        if self.busy_with != RecordingActivity.NONE:
+            return self.busy_with
+        if self.uploaders > 0:
+            return RecordingActivity.UPLOADING
+        if self.zippers > 0:
+            return RecordingActivity.ZIPPING
+
+        return RecordingActivity.NONE
+
+
+@dataclass
 class RecordingTracker:
     """Tracks activity/disk state/liveness of recordings"""
 
-    rendering: set[Path] = field(default_factory=set[Path])
-    purging: set[Path] = field(default_factory=set[Path])
-    uploaders: Counter[Path] = field(default_factory=Counter[Path])
+    activities: dict[Path, RecordingActivityState] = field(
+        default_factory=dict[Path, RecordingActivityState]
+    )
+
     last_upload_time: dict[Path, datetime | None] = field(
         default_factory=dict[Path, datetime | None]
     )
@@ -153,14 +248,11 @@ class RecordingTracker:
 
     def activity(self, recording_path: Path) -> RecordingActivity:
         """Returns whether a recording is currently performing an activity"""
-        if recording_path in self.rendering:
-            return RecordingActivity.RENDERING
-        if recording_path in self.purging:
-            return RecordingActivity.PURGING
-        if self.uploaders[recording_path] > 0:
-            return RecordingActivity.UPLOADING
+        activity = self.activities.get(recording_path)
 
-        return RecordingActivity.NONE
+        if activity is None:
+            return RecordingActivity.NONE
+        return activity.summary()
 
     async def streaming(self, recording_path: Path) -> bool:
         """
@@ -211,52 +303,104 @@ class RecordingTracker:
         )
 
     @contextmanager
-    def _claim(self, busy_set: set[Path], recording_path: Path) -> Generator[None]:
-        act = self.activity(recording_path)
+    def _claim(self, recording_path: Path, activity: RecordingActivity) -> Generator[None]:
+        state = self.activities.get(recording_path)
 
-        if act != RecordingActivity.NONE:
-            raise RecordingBusy(act)
+        if state is None:
+            state = RecordingActivityState()
+            self.activities[recording_path] = state
 
-        busy_set.add(recording_path)
+        state.claim(activity)
 
         try:
             yield
         finally:
-            busy_set.discard(recording_path)
+            state.release(activity)
+            if state.summary() == RecordingActivity.NONE:
+                self.activities.pop(recording_path, None)
 
     @contextmanager
     def claim_rendering(self, recording_path: Path) -> Generator[None]:
         """Claim a recording for rendering, to prevent other concurrent activities"""
-        with self._claim(self.rendering, recording_path):
+        with self._claim(recording_path, RecordingActivity.RENDERING):
             self.last_render_time[recording_path] = datetime.now(UTC)
             yield
 
     @contextmanager
     def claim_purging(self, recording_path: Path) -> Generator[None]:
         """Claim a recording for purging, to prevent other concurrent activities"""
-        with self._claim(self.purging, recording_path):
+        with self._claim(recording_path, RecordingActivity.PURGING):
             yield
             self.last_upload_time.pop(recording_path, None)
             self.last_render_time.pop(recording_path, None)
-            self.uploaders.pop(recording_path, 0)
 
     @contextmanager
-    def claim_uploading(self, recording_path: Path) -> Generator[RecordingActivity]:
+    def claim_uploading(self, recording_path: Path) -> Generator[None]:
         """Claim a recording for upload, to prevent other concurrent activities except uploads"""
-        state = self.activity(recording_path)
-
-        # Allow uploads in almost all cases to avoid data loss. A broken post-processing can be
-        # re-rendered later, a missing chunk cannot be replaced. But when purging it really makes
-        # no sense and would be quite difficult to handle.
-        if state != RecordingActivity.PURGING:
-            self.uploaders[recording_path] += 1
-        else:
-            raise RecordingBusy(state)
-
-        try:
-            yield state
+        with self._claim(recording_path, RecordingActivity.UPLOADING):
+            yield
             self.last_upload_time[recording_path] = datetime.now(UTC)
-        finally:
-            self.uploaders[recording_path] -= 1
-            if self.uploaders[recording_path] == 0:
-                self.uploaders.pop(recording_path, 0)
+
+    @contextmanager
+    def claim_zipping(self, recording_path: Path) -> Generator[None]:
+        """Claim a recording for zipping / raw data download"""
+        with self._claim(recording_path, RecordingActivity.ZIPPING):
+            yield
+
+
+class _MemorySink:
+    def __init__(self):
+        self.buf = bytearray()
+        self.offset = 0
+
+    def write(self, b: bytes) -> int:
+        """write a chunk of data to the sink"""
+        self.buf += b
+        self.offset += len(b)
+        return len(b)
+
+    def flush(self) -> None:
+        """dummy function to fulfill the IO contract"""
+
+    def close(self) -> None:
+        """dummy function to fulfill the IO contract"""
+
+    def tell(self) -> int:
+        """Tells how many bytes have been written so far"""
+        return self.offset
+
+    def drain(self) -> bytes:
+        """Take the current data buffer out of the sink and reset the buffer"""
+        out = bytes(self.buf)
+        self.buf.clear()
+        return out
+
+
+async def raw_download_zipstream(recording_dir: Path, chunk: int = 2 << 20) -> AsyncIterator[bytes]:
+    """
+    Create an iterator into which the raw chunks in the specified recording directory is streamed
+    """
+    sink = _MemorySink()
+
+    with ZipFile(sink, "w", compression=ZIP_STORED) as zf:
+        track_dirs = sorted([p async for p in recording_dir.iterdir()], key=lambda p: p.name)
+
+        for track_dir in track_dirs:
+            if not await track_dir.is_dir(follow_symlinks=False):
+                continue
+
+            chunk_files = sorted([p async for p in track_dir.glob("chunk.*")], key=lambda p: p.name)
+
+            for chunk_file in chunk_files:
+                if not await chunk_file.is_file(follow_symlinks=False):
+                    continue
+
+                name_in_archive = chunk_file.relative_to(recording_dir.parent).as_posix()
+
+                async with await chunk_file.open("rb") as src:
+                    with zf.open(name_in_archive, "w", force_zip64=True) as dst:
+                        while data := await src.read(chunk):
+                            dst.write(data)
+                            yield sink.drain()
+
+    yield sink.drain()

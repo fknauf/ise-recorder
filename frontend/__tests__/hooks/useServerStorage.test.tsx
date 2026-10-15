@@ -9,6 +9,7 @@ import { ServerStorageRecording } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
 import * as z from "zod";
 import { aServerEnv } from "../helpers/serverEnv";
+import { completed, downloadPath, notRenderable, rawDownloadPath, rendering, unprocessed } from "../helpers/serverStorage";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
@@ -34,21 +35,22 @@ type AppSession = ReturnType<typeof useAppSession>;
 const session = (getAccessToken: AppSession["getAccessToken"], isAuthenticated = true): AppSession =>
   anAppSession({ getAccessToken, isAuthenticated });
 
-const USER_DIGEST = "8f14e45fceea167a";
-
 /** The backend lists every recording in one array, whatever state it is in, sorted by name. */
 const sorted = (listing: ServerStorageRecording[]) => listing.toSorted((a, b) => a.name.localeCompare(b.name));
 
 const LISTING: ServerStorageRecording[] = [
-  { state: "rendering", name: "ABC_2026" },
-  { state: "completed", name: "GVS_2025", size: 1024, downloadUrl: `downloads/${USER_DIGEST}/GVS_2025?totp=012345` },
-  { state: "completed", name: "PSU_2026", size: 2048, downloadUrl: `downloads/${USER_DIGEST}/PSU_2026?totp=987654` },
-  { state: "unprocessed", name: "XYZ_2024" }
+  rendering("ABC_2026"),
+  completed("GVS_2025", 1024),
+  completed("PSU_2026", 2048, { downloadUrl: downloadPath("PSU_2026", "987654"), rawDownloadUrl: rawDownloadPath("PSU_2026", "987654") }),
+  unprocessed("XYZ_2024")
 ];
 
-/** The listing with one recording turned into a rendering one, in the place it already had. */
+/**
+ * The listing with one recording turned into a rendering one, in the place it already had and
+ * with the raw data link it already had: the raw tracks stay downloadable while it renders.
+ */
 const asRendering = (listing: ServerStorageRecording[], name: string): ServerStorageRecording[] =>
-  listing.map(rec => (rec.name === name ? { state: "rendering", name } : rec));
+  listing.map(rec => (rec.name === name ? rendering(name, rec.rawDownloadUrl) : rec));
 
 /**
  * SWR keeps one cache per provider, and it is global by default -- a listing fetched in
@@ -294,7 +296,7 @@ test("a JSON body with no string detail is left out rather than stringified", as
 test("a malformed listing is a failure rather than something to render", async () => {
   // size as a string is what a backend change would most plausibly produce, and it would
   // otherwise reach the MiB formatter as NaN
-  respondWith(() => jsonResponse([ { state: "completed", name: "x", size: "1024", downloadUrl: "downloads/u/x?totp=1" } ]));
+  respondWith(() => jsonResponse([ { ...completed("x", 1024), size: "1024" } ]));
 
   const { result } = renderServerStorageRecordings();
 
@@ -378,7 +380,7 @@ test("a refresh fetches the listing again without waiting for the poll", async (
   mockServerEnv.mockReturnValue(aServerEnv({ apiUrl: API_URL }));
   mockUseAppSession.mockReturnValue(session(async () => "test-token"));
 
-  const after = sorted([ ...LISTING, { state: "rendering", name: "NEW_2026" } ]);
+  const after = sorted([ ...LISTING, rendering("NEW_2026") ]);
 
   respondWith(() => jsonResponse(LISTING));
 
@@ -455,7 +457,7 @@ const requestsOf = (method: string) =>
 const purged = () => new Response(null, { status: 204 });
 
 /** What the backend answers an accepted rerender with: the recording's new state. */
-const accepted = (name: string) => () => jsonResponse({ state: "rendering", name }, 202);
+const accepted = (name: string) => () => jsonResponse(rendering(name), 202);
 
 /** The hook over LISTING, once that is in. */
 async function renderWithListing(listing = LISTING) {
@@ -517,7 +519,7 @@ test("a purge fetches the listing again rather than trusting its own guess", asy
   // meantime only comes along with the listing fetched after it
   const { result } = await renderWithListing();
 
-  const after = sorted([ ...LISTING.filter(rec => rec.name !== "PSU_2026"), { state: "rendering", name: "NEW_2026" } ]);
+  const after = sorted([ ...LISTING.filter(rec => rec.name !== "PSU_2026"), rendering("NEW_2026") ]);
 
   backend({ listing: () => jsonResponse(after), purge: purged });
 
@@ -634,7 +636,7 @@ test("a rerendered recording shows as rendering before the backend has answered"
 });
 
 test("a failed recording that is rerendered shows as rendering the same way", async () => {
-  const listing = sorted([ ...LISTING.filter(rec => rec.state === "completed"), { state: "rendering", name: "XYZ_2026" }, { state: "unprocessed", name: "OLD_2024" } ]);
+  const listing = sorted([ ...LISTING.filter(rec => rec.state === "completed"), rendering("XYZ_2026"), unprocessed("OLD_2024") ]);
   const { result } = await renderWithListing(listing);
 
   backend({});
@@ -645,6 +647,35 @@ test("a failed recording that is rerendered shows as rendering the same way", as
 
   await waitFor(() => expect(result.current.data).toStrictEqual(asRendering(listing, "OLD_2024")));
   expect(result.current.data?.filter(rec => rec.state === "unprocessed")).toStrictEqual([]);
+});
+
+test("a rerendered recording keeps the raw data link it had", async () => {
+  // the raw tracks do not go anywhere while the video is rendered, and the link the backend
+  // handed out for them still works -- the card offers it in the meantime too
+  const listing = [ completed("GVS_2025", 1024, { rawDownloadUrl: rawDownloadPath("GVS_2025", "424242") }) ];
+  const { result } = await renderWithListing(listing);
+
+  backend({});
+
+  act(() => {
+    void result.current.rerender("GVS_2025");
+  });
+
+  await waitFor(() => expect(result.current.data).toStrictEqual([ rendering("GVS_2025", rawDownloadPath("GVS_2025", "424242")) ]));
+});
+
+test("a rerendered recording without a raw data link stays without one", async () => {
+  // a backend without authentication has none to hand out, and the guess must not make one up
+  const listing = [ unprocessed("OLD_2024", null), notRenderable("AUD_2026", null) ];
+  const { result } = await renderWithListing(listing);
+
+  backend({});
+
+  act(() => {
+    void result.current.rerender("OLD_2024");
+  });
+
+  await waitFor(() => expect(result.current.data).toStrictEqual([ rendering("OLD_2024", null), notRenderable("AUD_2026", null) ]));
 });
 
 test("an accepted rerender fetches the listing again rather than trusting its own guess", async () => {

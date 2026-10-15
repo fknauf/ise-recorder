@@ -4,6 +4,7 @@ import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
 import { schedulePostprocessing, uploadChunk } from "@/lib/utils/serverStorage";
+import { rendering } from "../helpers/serverStorage";
 
 /**
  * What happens when a MediaRecorder refuses to start, e.g. with a NotSupportedError for a
@@ -97,7 +98,7 @@ async function recordBriefly(
 beforeEach(() => {
   // stand-ins for a backend that accepts everything
   vi.mocked(uploadChunk).mockResolvedValue();
-  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => ({ state: "rendering", name: recording }));
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => rendering(recording));
 
   streams = new Map();
   vi.mocked(openRecordingFileStream).mockImplementation(async (_recording, filename) => {

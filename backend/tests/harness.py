@@ -336,6 +336,23 @@ def download_parts(entry: dict[str, Any]) -> tuple[str, str, str]:
     return user_digest, recording, parse_qs(link.query)["totp"][0]
 
 
+def link_parts(url: str | None) -> tuple[list[str], str]:
+    """The path segments of a download link, decoded, and the OTP it carries."""
+    assert url is not None
+    link = urlsplit(url)
+    return [unquote(segment) for segment in link.path.split("/")], parse_qs(link.query)["totp"][0]
+
+
+def raw_download_parts(entry: dict[str, Any]) -> tuple[str, str, str]:
+    """The user digest, recording name and OTP a listed raw-data link carries, decoded."""
+    raw_download_url = entry["rawDownloadUrl"]
+    assert isinstance(raw_download_url, str)
+    segments, totp = link_parts(raw_download_url)
+    _downloads, user_digest, recording, raw = segments
+    assert raw == "raw"
+    return user_digest, recording, totp
+
+
 def follow_download(client: TestClient, entry: dict[str, Any]):
     """
     Follow a listed recording's download link, as the browser does when the lecturer clicks it.
@@ -344,6 +361,11 @@ def follow_download(client: TestClient, entry: dict[str, Any]):
     already knows; so does this.
     """
     return client.get(urljoin("/api/", entry["downloadUrl"]))
+
+
+def follow_raw_download(client: TestClient, entry: dict[str, Any]):
+    """Follow a listed recording's raw-data link, resolved against the API root like the other."""
+    return client.get(urljoin("/api/", entry["rawDownloadUrl"]))
 
 
 def app_of(client: TestClient) -> FastAPI:
@@ -420,6 +442,14 @@ def download_completed(client: TestClient, user_digest: str, recording: str, tot
     """Follow a download link put together by hand, for the links no listing hands out."""
     params = {"totp": totp} if totp is not None else None
     return client.get(f"/api/downloads/{user_digest}/{quote(recording, safe='')}", params=params)
+
+
+def download_raw(client: TestClient, user_digest: str, recording: str, totp: str | None):
+    """Follow a raw-data link put together by hand, for the links no listing hands out."""
+    params = {"totp": totp} if totp is not None else None
+    return client.get(
+        f"/api/downloads/{user_digest}/{quote(recording, safe='')}/raw", params=params
+    )
 
 
 # --- the directory scheme, restated ----------------------------------------

@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager, ExitStack
 from dataclasses import dataclass
 import logging
 from typing import Annotated
+from urllib.parse import quote
 
 import anyio
 from fastapi import (
@@ -23,13 +24,14 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import Field
 
 from ise_record.core.auth import UserInfo
 from ise_record.core.logconfig import setup_logging
 from ise_record.core.postprocess import OUTPUT_FILENAME
 from ise_record.core.recordings import (
+    raw_download_zipstream,
     RecordingDiskState,
 )
 from ise_record.glue.auth import get_user_info, load_oidc_client, OidcServerState
@@ -175,6 +177,8 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
             detail=f"Recording {recording} is not renderable",
         )
 
+    links = enclave.generate_download_links(recording)
+
     background_tasks.add_task(
         postprocessing_task,
         enclave.recording_dir(recording),
@@ -184,7 +188,9 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
         exit_stacks.handover(),
     )
 
-    return UnfinishedRecording.model_construct(state="rendering", name=recording)
+    return UnfinishedRecording.model_construct(
+        state="rendering", name=recording, raw_download_url=links.raw_data
+    )
 
 
 @router.get("/recordings", dependencies=[Depends(_require_auth_configured)])
@@ -226,6 +232,39 @@ async def download_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     return FileResponse(file_path, filename=f"{recording}.webm")
+
+
+# Claim as a dependency so the claim survives until the streaming response is finished
+async def _claimed_raw_recording_dir(
+    enclave: Annotated[Enclave | None, Depends(get_enclave_by_user_digest)],
+    recording: SafeRecording,
+    totp: Annotated[str, Field(pattern=r"\A[0-9]+\z")],
+) -> AsyncGenerator[anyio.Path]:
+    if enclave is None or not enclave.verify_totp(totp, recording):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    with enclave.claim_zipping(recording):
+        if await enclave.disk_state(recording) == RecordingDiskState.NONEXISTENT:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+        yield enclave.recording_dir(recording)
+
+
+@router.get(
+    "/downloads/{user_digest}/{recording}/raw", dependencies=[Depends(_require_auth_configured)]
+)
+async def download_raw_data_endpoint(
+    recording: SafeRecording,
+    recording_dir: Annotated[anyio.Path, Depends(_claimed_raw_recording_dir, scope="request")],
+) -> StreamingResponse:
+    """Endpoint for downloading the raw data of a recording that the active user owns"""
+    filename = f"{recording}.zip"
+
+    return StreamingResponse(
+        raw_download_zipstream(recording_dir),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 @router.get("/health")
