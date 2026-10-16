@@ -67,17 +67,19 @@ function confirmPurge(
 function ActionableRecordingCard(
   {
     recordingName,
-    isFinished,
     rawDownloadUrl,
+    isFinished,
+    isRenderable,
     testid,
     onPurge,
     children
   }: Readonly<{
     recordingName: string
-    isFinished: boolean
     rawDownloadUrl: string | null
+    isFinished?: boolean
+    isRenderable?: boolean
+    onPurge?: (recordingName: string) => void
     testid: string
-    onPurge: (recordingName: string) => void
     children: ReactNode
   }>
 ) {
@@ -100,8 +102,6 @@ function ActionableRecordingCard(
     setBusy(false);
   };
 
-  const secondaryButtonVariant = isFinished ? "outline" : "filled"
-
   return (
     <RecordingCard title={recordingName} testid={testid}>
       {children}
@@ -115,7 +115,7 @@ function ActionableRecordingCard(
             w="100%"
             target="_blank"
             leftSection={<DownloadIcon/>}
-            variant={secondaryButtonVariant}
+            variant={isFinished ? "outline" : "filled"}
           >
             Download raw recording
           </Button>
@@ -126,10 +126,10 @@ function ActionableRecordingCard(
           flex="1 1 0"
           miw="max-content"
           data-testid="ss-btn-rerender"
-          disabled={busy}
+          disabled={busy || !isRenderable}
           onClick={onRerender}
           leftSection={<RepeatIcon/>}
-          variant={secondaryButtonVariant}
+          variant={isFinished || !isRenderable ? "outline" : "filled"}
         >
           Rerender
         </Button>
@@ -137,8 +137,8 @@ function ActionableRecordingCard(
           flex="1 1 0"
           miw="max-content"
           data-testid="ss-btn-purge"
-          disabled={busy}
-          onClick={() => confirmPurge(recordingName, () => onPurge(recordingName))}
+          disabled={busy || onPurge === undefined}
+          onClick={onPurge !== undefined ? () => confirmPurge(recordingName, () => onPurge(recordingName)) : undefined}
           leftSection={<TrashIcon/>}
           color="warning"
           variant="outline"
@@ -166,6 +166,7 @@ function ProcessedRecordingCard(
     <ActionableRecordingCard
       recordingName={recording.name}
       isFinished
+      isRenderable
       rawDownloadUrl={recording.rawDownloadUrl}
       onPurge={onPurge}
       testid="ss-card-completed"
@@ -198,26 +199,16 @@ function RenderingRecordingCard(
   }
 
   return (
-    <RecordingCard title={recording.name} testid="ss-card-rendering">
+    <ActionableRecordingCard
+      recordingName={recording.name}
+      rawDownloadUrl={recording.rawDownloadUrl}
+      testid="ss-card-rendering"
+    >
       <Group align="center" justify="center" flex="1 1 0">
-        <Loader role="progressbar" aria-label="Rendering"/>
+        <Loader role="progressbar" aria-label="Rendering" size="sm"/>
         <Text>Rendering...</Text>
       </Group>
-      {
-        recording.rawDownloadUrl !== null &&
-          <Button
-            component="a"
-            download
-            href={downloadHref(apiUrl, recording.rawDownloadUrl)}
-            w="100%"
-            target="_blank"
-            leftSection={<DownloadIcon/>}
-            variant="outline"
-          >
-            Download raw recording
-          </Button>
-      }
-    </RecordingCard>
+    </ActionableRecordingCard>
   );
 }
 
@@ -232,7 +223,7 @@ const UnprocessedRecordingCard = (
 ) =>
   <ActionableRecordingCard
     recordingName={recording.name}
-    isFinished={false}
+    isRenderable
     rawDownloadUrl={recording.rawDownloadUrl}
     onPurge={onPurge}
     testid="ss-card-unprocessed"
@@ -258,34 +249,16 @@ function NonRenderableRecordingCard(
   }
 
   return (
-    <RecordingCard title={recording.name} testid="ss-card-not-renderable">
+    <ActionableRecordingCard
+      recordingName={recording.name}
+      rawDownloadUrl={recording.rawDownloadUrl}
+      onPurge={onPurge}
+      testid="ss-card-nonrenderable"
+    >
       <Group flex="1 1 0" justify="center" align="center">
         <Text>Not renderable.</Text>
       </Group>
-      {
-        recording.rawDownloadUrl !== null &&
-          <Button
-            component="a"
-            download
-            href={downloadHref(apiUrl, recording.rawDownloadUrl)}
-            w="100%"
-            target="_blank"
-            leftSection={<DownloadIcon/>}
-          >
-            Download raw recording
-          </Button>
-      }
-      <Button
-        fullWidth
-        data-testid="ss-btn-purge"
-        onClick={() => confirmPurge(recording.name, () => onPurge(recording.name))}
-        leftSection={<TrashIcon/>}
-        color="warning"
-        variant="outline"
-      >
-        Purge
-      </Button>
-    </RecordingCard>
+    </ActionableRecordingCard>
   );
 }
 
