@@ -129,12 +129,20 @@ const cards = () => screen.queryAllByTestId("ss-card-completed");
 const names = (cardList: HTMLElement[]) =>
   cardList.map(card => within(card).getByText(/_20\d\d$/).textContent);
 
-// A card can offer two links: the rendered video and a zip of the raw tracks. Neither has a
-// test id, so they are told apart by what they say.
-const downloadLink = (card: HTMLElement) => within(card).getByRole("link", { name: /download/i });
-const rawDataLink = (card: HTMLElement) => within(card).getByRole("link", { name: /raw data/i });
-const queryDownloadLink = (card: HTMLElement) => within(card).queryByRole("link", { name: /download/i });
-const queryRawDataLink = (card: HTMLElement) => within(card).queryByRole("link", { name: /raw data/i });
+// A card can offer two links: the rendered video and a zip of the raw tracks. Both say
+// "download", so the raw one is found by its test id and the video is whichever link is left.
+const RAW_DATA_TESTID = "ss-btn-download-raw";
+const videoLinks = (card: HTMLElement) =>
+  within(card).queryAllByRole("link")
+    .filter(link => link.dataset.testid !== RAW_DATA_TESTID);
+const downloadLink = (card: HTMLElement) => {
+  const links = videoLinks(card);
+  expect(links).toHaveLength(1);
+  return links[0];
+};
+const queryDownloadLink = (card: HTMLElement) => videoLinks(card)[0] ?? null;
+const rawDataLink = (card: HTMLElement) => within(card).getByTestId(RAW_DATA_TESTID);
+const queryRawDataLink = (card: HTMLElement) => within(card).queryByTestId(RAW_DATA_TESTID);
 
 test("each processed recording gets a card with its name and size", () => {
   renderSection();
@@ -223,7 +231,15 @@ test("a recording that is still rendering offers no download", () => {
 
   expect(queryDownloadLink(renderingCards()[0])).toBeNull();
   expect(within(renderingCards()[0]).getAllByRole("link")).toStrictEqual([ rawDataLink(renderingCards()[0]) ]);
-  expect(within(renderingCards()[0]).queryByRole("button")).toBeNull();
+});
+
+test("a recording that is still rendering shows the controls of the others, but none of them work", () => {
+  // the cards keep one layout whatever the state; a second job for a recording that is already
+  // rendering would be refused, and so would pulling its chunks out from under the render
+  renderSection({ data: [ rendering("ABC_2026") ] });
+
+  expect(within(renderingCards()[0]).getByTestId("ss-btn-rerender")).toBeDisabled();
+  expect(within(renderingCards()[0]).getByTestId("ss-btn-purge")).toBeDisabled();
 });
 
 test("the rendering cards sit among the finished ones in the order the server lists them", () => {
@@ -531,7 +547,16 @@ test("finished and failed recordings offer a purge, rendering ones do not", () =
   cards().forEach(card => expect(purgeButton(card)).toBeEnabled());
   unprocessedCards().forEach(card => expect(purgeButton(card)).toBeEnabled());
   // deleting it would pull the chunks out from under the render; the backend refuses too
-  expect(within(renderingCards()[0]).queryByTestId("ss-btn-purge")).toBeNull();
+  expect(purgeButton(renderingCards()[0])).toBeDisabled();
+});
+
+test("pressing the disabled purge of a rendering recording asks nothing and sends nothing", async () => {
+  renderSection({ data: [ rendering("ABC_2026") ] });
+
+  await userEvent.click(purgeButton(renderingCards()[0]));
+
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(purge).not.toHaveBeenCalled();
 });
 
 test("the purge button asks first and sends nothing", async () => {
@@ -701,7 +726,7 @@ test("a rerender while a purge is in flight does not bring the purged card back"
 // A recording without a main display has nothing to render a video from, and the backend
 // refuses to try. All that is left to do with it is download its raw tracks or purge it.
 
-const notRenderableCards = () => screen.queryAllByTestId("ss-card-not-renderable");
+const notRenderableCards = () => screen.queryAllByTestId("ss-card-nonrenderable");
 
 test("a recording that cannot be rendered gets a card that says so", () => {
   renderSection({ data: sorted([ ...LISTING, notRenderable("AUD_2026") ]) });
@@ -722,9 +747,17 @@ test("a recording that cannot be rendered offers no rerender and no download", (
 
   const card = notRenderableCards()[0];
 
-  expect(within(card).queryByTestId("ss-btn-rerender")).toBeNull();
+  expect(rerenderButton(card)).toBeDisabled();
   expect(queryDownloadLink(card)).toBeNull();
   expect(purgeButton(card)).toBeEnabled();
+});
+
+test("pressing the disabled rerender of a recording that cannot be rendered schedules nothing", async () => {
+  renderSection({ data: [ notRenderable("AUD_2026") ] });
+
+  await userEvent.click(rerenderButton(notRenderableCards()[0]));
+
+  expect(rerender).not.toHaveBeenCalled();
 });
 
 test("a recording that cannot be rendered asks before it is purged", async () => {
@@ -767,7 +800,7 @@ const everyKind = [
   },
   { kind: "a recording that is still rendering", testid: "ss-card-rendering", make: rendering },
   { kind: "a recording whose postprocessing failed", testid: "ss-card-unprocessed", make: unprocessed },
-  { kind: "a recording that cannot be rendered", testid: "ss-card-not-renderable", make: notRenderable }
+  { kind: "a recording that cannot be rendered", testid: "ss-card-nonrenderable", make: notRenderable }
 ];
 
 test.each(everyKind)("$kind offers its raw tracks from the link the backend handed out", ({ testid, make }) => {

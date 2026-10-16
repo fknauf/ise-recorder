@@ -109,15 +109,16 @@ function ActionableRecordingCard(
       {
         rawDownloadUrl !== null &&
           <Button
+            fullWidth
+            data-testid="ss-btn-download-raw"
             component="a"
-            download
             href={downloadHref(apiUrl, rawDownloadUrl)}
-            w="100%"
+            download
             target="_blank"
             leftSection={<DownloadIcon/>}
             variant={isFinished ? "outline" : "filled"}
           >
-            Download raw recording
+            Download raw data
           </Button>
       }
 
@@ -189,28 +190,19 @@ function ProcessedRecordingCard(
   );
 }
 
-function RenderingRecordingCard(
+const RenderingRecordingCard = (
   { recording }: Readonly<{ recording: UnfinishedRecording }>
-) {
-  const { apiUrl } = useServerEnv();
-
-  if(apiUrl === undefined) {
-    return null;
-  }
-
-  return (
-    <ActionableRecordingCard
-      recordingName={recording.name}
-      rawDownloadUrl={recording.rawDownloadUrl}
-      testid="ss-card-rendering"
-    >
-      <Group align="center" justify="center" flex="1 1 0">
-        <Loader role="progressbar" aria-label="Rendering" size="sm"/>
-        <Text>Rendering...</Text>
-      </Group>
-    </ActionableRecordingCard>
-  );
-}
+) =>
+  <ActionableRecordingCard
+    recordingName={recording.name}
+    rawDownloadUrl={recording.rawDownloadUrl}
+    testid="ss-card-rendering"
+  >
+    <Group align="center" justify="center" flex="1 1 0">
+      <Loader role="progressbar" aria-label="Rendering" size="sm"/>
+      <Text>Rendering...</Text>
+    </Group>
+  </ActionableRecordingCard>;
 
 const UnprocessedRecordingCard = (
   {
@@ -233,7 +225,7 @@ const UnprocessedRecordingCard = (
     </Group>
   </ActionableRecordingCard>;
 
-function NonRenderableRecordingCard(
+const NonRenderableRecordingCard = (
   {
     recording,
     onPurge
@@ -241,26 +233,17 @@ function NonRenderableRecordingCard(
     recording: UnfinishedRecording
     onPurge: (recordingName: string) => void
   }>
-) {
-  const { apiUrl } = useServerEnv();
-
-  if(apiUrl === undefined) {
-    return null;
-  }
-
-  return (
-    <ActionableRecordingCard
-      recordingName={recording.name}
-      rawDownloadUrl={recording.rawDownloadUrl}
-      onPurge={onPurge}
-      testid="ss-card-nonrenderable"
-    >
-      <Group flex="1 1 0" justify="center" align="center">
-        <Text>Not renderable.</Text>
-      </Group>
-    </ActionableRecordingCard>
-  );
-}
+) =>
+  <ActionableRecordingCard
+    recordingName={recording.name}
+    rawDownloadUrl={recording.rawDownloadUrl}
+    onPurge={onPurge}
+    testid="ss-card-nonrenderable"
+  >
+    <Group flex="1 1 0" justify="center" align="center">
+      <Text>Not renderable.</Text>
+    </Group>
+  </ActionableRecordingCard>;
 
 function AnyRecordingCard(
   { recording }:
