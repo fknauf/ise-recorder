@@ -48,74 +48,128 @@ precisely, so the number of chunks per stream will drift slightly over time.
 
 ## API
 
-The API is an HTTP API with the following endpoints under the configured route prefix:
+The API is an HTTP API broadly following CRUD conventions. File downloads are handled in a pre-signed
+link pattern. Most endpoints support authentication with a Bearer token in the HTTP `Authorization` header,
+which is to say they'll require authentication only in authenticated deployments. Some endpoints are only
+available in authenticated deployments; these will respond 403 to an unauthorized request in unauthenticated
+deployments.
 
-| Endpoint | Method | Purpose | Parameters |
-| - | - | - | - |
-| `/api/recordings` | GET | Retrieve list of user's recordings | none, needs auth |
-| `/api/recordings/{name}` | DELETE | Purge recording from server | none, needs auth |
-| `/api/recordings/{name}/tracks/{track}/chunks/{index}` | PUT | Stream chunks of a media stream | recording name, track name, chunk index in the path, chunk data in the body |
-| `/api/recordings/{name}/render` | POST | Schedule postprocessing job | recording name, notification email address |
-| `/api/downloads/{user_digest}/{name}` | GET | Download recording | TOTP for the recording as returned from `/api/recordings` |
-| `/api/downloads/{user_digest}/{name}/raw` | GET | Download raw recording data | TOTP for the recording as returned from `/api/recordings` |
-| `/api/health` | GET | Monitoring | none |
 
-The `/api/recordings` GET endpoint retrieves a list of the user's (as identified by the bearer token in the HTTP
-`Authorization` header) recordings. Only available in authenticated deployments (will respond 403 otherwise). Each
-recording has a name and a state (completed, rendering or unprocessed), and completed recordings also have a size
-and a pre-signed, relative download link that's valid for a short while. The frontend is supposed to append this to
-the api base url. See the "Downloads" section below for details and an explanation why this is necessary. The shape
-of the response is thus
+### Overview
 
-```json
-[
+The following endpoints exist under the configured route prefix:
+
+| Endpoint | Methods | Purpose |
+| - | - | - |
+| `/api/recordings` | GET | List user's recordings |
+| `/api/recordings/{name}` | DELETE | Purge a recording |
+| `/api/recordings/{name}/tracks/{track}/chunks/{index}` | PUT | stream chunks of media |
+| `/api/recordings/{name}/render` | POST | Schedule post-processing |
+| `/api/downloads/{user_digest}/{name}` | GET | Download post-processed video |
+| `/api/downloads/{user_digest}/{name}/raw` | GET | Download raw data |
+| `/api/health` | GET | Monitoring |
+
+### Descriptions
+
+* `/api/recordings`
+
+    | Method | Parameters | Auth |
+    | - | - | - |
+    | GET | none | required |
+
+    Retrieve list of the signed-in user's recordings, including state, size, and  pre-signed link fragments
+    for download and raw-data download, as far as they're applicable. The frontend is supposed to append the
+    link fragments to the api base url. The response body is a list of JSON objects shaped like
+
+    ```json
+    [
+        {
+            "name": "PSU_2026-10-13T23.26.12.729Z",
+            "state": "rendering"
+        },
+        {
+            "name": "PSU_2026-10-06T23.26.12.729Z",
+            "state": "completed",
+            "size": 123456789,
+            "downloadUrl": "downloads/123...def/PSU_2026-10-06T23.26.12.729Z?totp=1234567890"
+        }
+    ]
+    ```
+
+* `/api/recordings/{name}`
+
+    | Method | Parameters | Auth |
+    | - | - | - |
+    | DELETE | none | required |
+
+    Purges the recording named `{name}` and returns an empty body. This deletes both the rendered
+    recording (if available) and the raw chunk data, so it's quite final. May fail with 404 (not
+    found) or 409 (busy, e.g. recording is being rendered).
+
+* `/api/recordings/{name}/tracks/{track}/chunks/{index}`
+
+    | Method | Parameters | Auth |
+    | - | - | - |
+    | PUT | recording name, track name, chunk index, chunk data | supported |
+
+    For streaming chunks of media. It follows the expected PUT semantics in that it's idempotent:
+    If a chunk is uploaded twice, the logical state on the server remains unchanged. Recording name,
+    track name and chunk index are supplied in the path (as is CRUD convention), the request
+    body is the chunk binary data as an octet stream. The response body is empty.
+
+* `/api/recordings/{name}/render`
+
+    | Method | Parameters | Auth |
+    | - | - | - |
+    | POST | recording name, notification email address | supported |
+
+    Schedules post-processing of a recording. Accepts a JSON object (with `Content-Type: application/json`)
+    in the body shaped like
+
+    ```json
     {
-        "name": "PSU_2026-10-13T23.26.12.729Z",
-        "state": "rendering"
-    },
-    {
-        "name": "PSU_2026-10-06T23.26.12.729Z",
-        "state": "completed",
-        "size": 123456789,
-        "downloadUrl": "downloads/123...def/PSU_2026-10-06T23.26.12.729Z?totp=1234567890"
+        "recipient": "lecturer@uni.edu"
     }
-]
-```
+    ```
 
-The `/api/recordings/{name}` DELETE endpoint purges the recording named `{name}` and returns an empty body. This deletes
-both the rendered recording (if available) and the raw chunk data, so it's quite final. May fail with 404 (not found) or
-409 (busy, e.g. recording is being rendered). Only available in authenticated deployments (will respond 403 otherwise).
+    where `recipient` is optional. This address is used to send completion reports iff `request` is configured in
+    `settings.smtp.recipient_sources`. On success, the endpoint returns in its body the new state of the rendering
+    recording in the same shape as an element of the `/api/recordings` list. May return HTTP status 404 (recording
+    does not exist), 422 (not renderable) or 409 (busy).
 
-The `/api/recordings/{name}/tracks/{track}/chunks/{index}` PUT endpoint is for streaming chunk data. It follows the
-expected PUT semantics in that it's idempotent: If a chunk is uploaded twice, the logical state on the server remains
-unchanged. Recording name, track name and chunk index are supplied in the path (as is CRUD convention), the request
-body is the chunk binary data as an octet stream. The response body is empty.
+* `/api/downloads/{user_digest}/{name}`
 
-The `/api/recordings/{name}/render` endpoint accepts a JSON object (with `Content-Type: application/json`) in the body shaped like
+    | Method | Parameters | Auth |
+    | - | - | - |
+    | GET | user, recording name, TOTP as returned from `/api/recordings` | required |
 
-```json
-{
-    "recipient": "lecturer@uni.edu"
-}
-```
+    For downloads of completed (post-processed) recordings. The response body is an octet stream with the recording's
+    binary data. This more or less follows the presigned URL pattern: the user obtains a valid link from the
+    `/api/recordings` GET endpoint and can use it to download the completed recording.
+    
+    The user digest corresponds to the user's home directory name, and the recording name must be one of the recordings
+    in that user's home. The TOTP is supplied as a GET parameter (i.e., `?totp=1234...`). See "Downloads" section below
+    for details.
 
-where `recipient` is optional. This address is used to send completion reports if `request` is configured in
-`settings.smtp.recipient_sources`. On success, the endpoint returns in its body the new state of the rendering
-recording in the same shape as an element of the `/api/recordings` list. May return HTTP status 404 (recording
-does not exist), 422 (not renderable) or 409 (busy).
+* `/api/downloads/{user_digest}/{name}/raw`
 
-The `/api/downloads/{user_digest}/{name}` GET endpoint is for downloads of completed recordings, so the response body
-is an octet stream with the recording's binary data. This more or less follows the presigned URL pattern: the user
-obtains a valid link from the `/api/recordings` GET endpoint and can use it to download the completed recording.
-The TOTP must be supplied as a GET parameter (i.e., `?totp=1234...`). See "Downloads" section below for details.
- Only available in authenticated deployments (will respond 403 otherwise).
+    | Method | Parameters | Auth |
+    | - | - | - |
+    | GET | user, recording name, TOTP as returned from `/api/recordings` | required |
 
-The `/api/downloads/{user_digest}/{name}/raw` GET endpoint is supplementary to the download endpoint: it allows the
-download of the raw (that is, unprocessed) recording data in a zip file. This is interesting when post-processing fails
-for some reason or the recording consists of only audio tracks.
+    Supplementary to the download endpoint: it allows the download of the raw (that is, unprocessed) recording data in
+    a zip file. This is interesting when post-processing fails for some reason or the recording consists of only audio
+    tracks.
 
-The `/api/health` endpoint returns HTTP status 200 and `{ "status": "healthy" }` as long as the server is running; it
-is useful for primitive monitoring such as docker health checks.
+* `/api/health`
+
+    | Method | Parameters | Auth |
+    | - | - | - |
+    | GET | none | no |
+
+    The `/api/health` endpoint returns HTTP status 200 and `{ "status": "healthy" }` as long as the server is running; it
+    is useful for primitive monitoring such as docker health checks. It doesn't require authentication even in
+    authenticated deployments.
 
 ## Where to find what
 
