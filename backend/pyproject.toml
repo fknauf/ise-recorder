@@ -11,7 +11,7 @@ dependencies = [
     "fastapi~=0.143",
     "httpx2~=2.13",
     "pathvalidate~=3.3",
-    "pydantic-settings~=2.15",
+    "pydantic-settings~=2.16",
     "PyJWT[crypto]~=2.15",
     "PyOTP~=2.10",
     "uvicorn~=0.54",
@@ -21,14 +21,14 @@ dependencies = [
 test = [
     "pytest~=9.1",
     "pytest-asyncio~=1.4",
-    "pytest-mock~=3.15",
+    "pytest-mock~=3.16",
 ]
 
 dev = [
     { include-group = "test" },
     "fastapi[standard]",
-    "pylint~=4.0",
-    "ruff~=0.16"
+    "pylint~=4.1",
+    "ruff~=0.17"
 ]
 
 [build-system]
