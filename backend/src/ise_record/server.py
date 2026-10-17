@@ -44,6 +44,7 @@ from ise_record.glue.models import (
     ChunkLocation,
     RecordingResponse,
     SafeRecording,
+    ServerHealth,
     UnfinishedRecording,
 )
 from ise_record.glue.recordings import purge_recording, user_recordings_list
@@ -269,10 +270,10 @@ async def download_raw_data_endpoint(
 
 
 @router.get("/health")
-def health_check_endpoint():
+def health_check_endpoint() -> ServerHealth:
     """Endpoint for container health checks"""
     logger.debug("health check requested")
-    return {"status": "healthy"}
+    return ServerHealth(status="healthy")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

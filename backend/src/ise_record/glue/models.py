@@ -91,3 +91,6 @@ class DownloadableRecording(ApiModel):
 RecordingResponse = Annotated[
     UnfinishedRecording | DownloadableRecording, Field(discriminator="state")
 ]
+
+class ServerHealth(BaseModel):
+    status: Literal["healthy"]
