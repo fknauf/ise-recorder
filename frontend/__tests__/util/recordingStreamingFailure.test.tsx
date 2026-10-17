@@ -5,7 +5,7 @@ import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import { uploadChunk } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
-import { rendering } from "../helpers/serverStorage";
+import { notRenderable, rendering } from "../helpers/serverStorage";
 
 /**
  * What a live recording does when its stream to the backend breaks.
@@ -512,10 +512,12 @@ test("a frontend-only deployment does not claim a job was scheduled", async () =
 // --- a recording without a main display -----------------------------------
 //
 // Without a display or a camera there is no "stream" track to render a video from, only audio
-// files, and the backend refuses such a job. So none is requested: the chunks still go up, for
-// the raw tracks to be downloaded from the server, and the lecturer is told why no video comes.
+// files. The job is requested all the same: the backend starts no render for it, but the
+// request tells it the recording has stopped streaming, so its raw tracks show up in the
+// listing at once rather than after the backend's grace period.
 
-test("an audio-only recording streams its chunks but requests no render", async () => {
+test("an audio-only recording streams its chunks and ends with a job request", async () => {
+  window.fetch = vi.fn().mockImplementation(async () => Response.json(notRenderable("GVS"), { status: 202 }));
   const audioContext = new AudioContext();
 
   try {
@@ -546,11 +548,11 @@ test("an audio-only recording streams its chunks but requests no render", async 
     await done;
 
     expect(uploadsSent()).toBe(2);
-    expect(jobRequests()).toHaveLength(0);
-    // a notice rather than an error: nothing went wrong, there is just no video to make
-    expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("no main display"));
+    expect(jobRequests()).toHaveLength(1);
+    // the upload is what there was to do, and it worked; no render is promised
+    expect(showSuccess).toHaveBeenCalledExactlyOnceWith(expect.not.stringContaining("postprocessing"));
+    expect(showMessage).not.toHaveBeenCalled();
     expect(showError).not.toHaveBeenCalled();
-    expect(showSuccess).not.toHaveBeenCalled();
     // every chunk arrived, so there is nothing to re-upload either
     expect(onStreamingFailed).not.toHaveBeenCalled();
   } finally {

@@ -289,11 +289,12 @@ def test_schedule_postprocessing_error(
 
 
 @pytest.mark.parametrize("track", ["overlay", None])
-def test_a_job_for_a_recording_that_cannot_be_rendered_is_refused(
+def test_a_job_for_a_recording_that_cannot_be_rendered_starts_no_render(
     mocker: MockerFixture, client: TestClient, settings: Settings, track: str | None
 ):
     # no main stream, or nothing in it: postprocessing would only give up with
-    # MAIN_STREAM_MISSING, so the request says so rather than accept a job that does nothing
+    # MAIN_STREAM_MISSING, so no job is started. The request is still accepted, because it is
+    # how the frontend says the recording has stopped streaming; the answer says what became of it
     if track is None:
         (recording_dir(settings.destdir, "foo") / "stream").mkdir(parents=True)
     else:
@@ -302,7 +303,8 @@ def test_a_job_for_a_recording_that_cannot_be_rendered_is_refused(
 
     response = client.post(render_url("foo"), json={})
 
-    assert response.status_code == 422
+    assert response.status_code == 202
+    assert response.json() == {"state": "not-renderable", "name": "foo", "rawDownloadUrl": None}
     mock_add_task.assert_not_called()
     assert activity_of(client, settings.destdir, "foo") == RecordingActivity.NONE
 
@@ -1035,6 +1037,30 @@ def test_the_listing_reports_each_recording_in_its_state(
         for entry in data
         if entry["state"] != "completed"
     )
+
+
+def test_an_audio_only_recording_is_listed_as_soon_as_its_job_is_requested(
+    auth_client: TestClient, provider: Provider
+):
+    # a recording that is still streaming is left out of the listing for a grace period. One
+    # without a main display gets no render, but its job request still ends the streaming, so
+    # the lecturer finds its raw data straight away rather than minutes later
+    token = provider.mint()
+    headers = {"Authorization": f"Bearer {token}"}
+    assert (
+        auth_client.put(chunk_url("foo", "audio-0"), headers=headers, content=b"x").status_code
+        == 204
+    )
+
+    assert list_recordings(auth_client, token).json() == []
+
+    response = schedule(auth_client, token)
+
+    assert response.status_code == 202
+    assert response.json()["state"] == "not-renderable"
+    # with a raw-data link into the caller's own directory, the same as the listing's
+    assert raw_download_parts(response.json())[:2] == (DEFAULT_SUBJECT_DIGEST, "foo")
+    assert names(list_recordings(auth_client, token).json(), "not-renderable") == ["foo"]
 
 
 def test_the_listing_only_shows_the_callers_own_rendering_jobs(

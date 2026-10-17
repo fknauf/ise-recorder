@@ -35,7 +35,7 @@ class RecordingDiskState(Enum):
     """Current disk state of a recording"""
 
     NONEXISTENT = auto()
-    FINISHED = auto()
+    COMPLETED = auto()
     UNPROCESSED = auto()
     NOT_RENDERABLE = auto()
 
@@ -67,7 +67,7 @@ async def classify_disk_state(recording_path: Path) -> tuple[RecordingDiskState,
     output_path = recording_path / OUTPUT_FILENAME
     if await output_path.is_file():
         output_info = await output_path.stat()
-        return RecordingDiskState.FINISHED, output_info.st_size
+        return RecordingDiskState.COMPLETED, output_info.st_size
 
     main_track_dir = recording_path / MAIN_TRACK_NAME
     if (
@@ -216,7 +216,7 @@ class RecordingActivityState:
     def summary(self) -> RecordingActivity:
         """
         Summarize the activity state into one dominant activity.
-        
+
         Used in the decision how to display the recording in the UI. For the purpose of this,
         uploading and zipping are considered background activities, so everything else takes
         precedence.

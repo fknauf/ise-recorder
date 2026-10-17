@@ -376,20 +376,23 @@ export async function recordLecture(
       clearTimeout(stopTimer);
 
       if(apiDest !== undefined) {
-        if(jobs.some(job => job.trackTitle === "stream")) {
-          try {
-            await withRetries(() => schedulePostprocessing(apiDest, recordingName, lecturerEmail, postRetryPolicy.abortSignal), postRetryPolicy);
+        try {
+          const response = await withRetries(() => schedulePostprocessing(apiDest, recordingName, lecturerEmail, postRetryPolicy.abortSignal), postRetryPolicy);
+
+          if(response.state === "rendering") {
             showSuccess(`Scheduled postprocessing for recording "${recordingName}"`);
-          } catch(e) {
-            if(streamingAbort.signal.aborted) {
-              showMessage("Post-processing could not be scheduled because streaming was impeded.");
-            } else {
-              const message = e instanceof Error ? e.message : "unknown error";
-              showError(`Failed to schedule postprocessing: ${message}. The recording was streamed to backend and will be available for re-rendering soon.`);
-            }
+          } else {
+            // audio-only recording: the schedule-call only marked the recording as no-longer-streaming;
+            // actual post-processing is not possible.
+            showSuccess("Finished uploading.");
           }
-        } else {
-          showMessage("Post-processing could not be scheduled because there's no main display.");
+        } catch(e) {
+          if(streamingAbort.signal.aborted) {
+            showMessage("Post-processing could not be scheduled because streaming was impeded.");
+          } else {
+            const message = e instanceof Error ? e.message : "unknown error";
+            showError(`Failed to schedule postprocessing: ${message}. The recording was streamed to backend and will be available for re-rendering soon.`);
+          }
         }
       }
     } catch(e) {

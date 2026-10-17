@@ -135,7 +135,7 @@ The following endpoints exist under the configured route prefix:
     where `recipient` is optional. This address is used to send completion reports iff `request` is configured in
     `settings.smtp.recipient_sources`. On success, the endpoint returns in its body the new state of the rendering
     recording in the same shape as an element of the `/api/recordings` list. May return HTTP status 404 (recording
-    does not exist), 422 (not renderable) or 409 (busy).
+    does not exist) or 409 (busy).
 
 * `/api/downloads/{user_digest}/{name}`
 
@@ -267,7 +267,7 @@ Disk state is read, as the name suggests, from the recording's on-disk state. If
 directory does not exist (or is not a directory), the recording is considered *nonexistent*. If it
 exists and there is a file `presentation.webm`, the recording is considered *completed*. If it is not
 completed and its directory is in a state that postprocessing would not be able to handle, recording
-is *unrenderable*, and otherwise it is *unprocessed*.
+is *not-renderable*, and otherwise it is *unprocessed*.
 
 Streaming state is determined by the upload time of the last chunk in a recording and the last time
 a render was scheduled for it. If the last uploaded chunk is older than two minutes or if a render

@@ -157,7 +157,7 @@ class Enclave:
     def generate_download_links(self, recording: str) -> DownloadLinks:
         """
         Generate download links for the finished recording and raw data, with a TOTP attached.
-        
+
         The finished-recording link may be aspirational, i.e. it is generated even if the finished
         recording is unavailable. Caller decides from other information whether it can be used.
         """

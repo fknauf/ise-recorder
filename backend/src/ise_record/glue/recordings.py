@@ -38,7 +38,7 @@ def _build_recording_response(info: RecordingInfo, enclave: Enclave) -> Recordin
         )
 
     if (
-        info.disk_state == RecordingDiskState.FINISHED
+        info.disk_state == RecordingDiskState.COMPLETED
         and info.activity != RecordingActivity.PURGING
     ):
         links = enclave.generate_download_links(info.name)

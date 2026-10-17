@@ -407,10 +407,17 @@ test("an accepted job the backend does not describe is an invalid response", asy
   expect((error as ApiError).cause).toBeInstanceOf(z.ZodError);
 });
 
-test("an accepted job that is not rendering is an invalid response", async () => {
-  // the listing knows unprocessed recordings, but a job the backend has just taken on is
-  // rendering by definition; anything else means frontend and backend disagree
-  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, state: "unprocessed" }, { status: 202 }));
+test("a job for a recording the backend cannot render reports it as such", async () => {
+  // no main display: the backend starts no render, but takes the request as the end of the
+  // upload and says what the recording is now
+  const answer = { ...ACCEPTED_JOB, state: "not-renderable" };
+  window.fetch = vi.fn().mockImplementation(async () => Response.json(answer, { status: 202 }));
+
+  await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined)).resolves.toStrictEqual(answer);
+});
+
+test("an accepted job in a state the backend does not know is an invalid response", async () => {
+  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, state: "streaming" }, { status: 202 }));
 
   const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined));
 

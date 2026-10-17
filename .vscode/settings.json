@@ -122,6 +122,7 @@
         "unstub",
         "unvalidated",
         "uploaders",
+        "urandom",
         "usecase",
         "userinfo",
         "uvicorn",

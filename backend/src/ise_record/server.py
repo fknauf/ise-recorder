@@ -171,13 +171,14 @@ async def schedule_job_endpoint(  # pylint: disable=too-many-arguments,too-many-
             detail=f"Recording {recording} does not exist",
         )
 
-    if disk_state == RecordingDiskState.NOT_RENDERABLE:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Recording {recording} is not renderable",
-        )
-
     links = enclave.generate_download_links(recording)
+
+    if disk_state == RecordingDiskState.NOT_RENDERABLE:
+        # audio-only recording: Rendering makes no sense, so this only registers that the recording
+        # is no longer streaming.
+        return UnfinishedRecording(
+            state="not-renderable", name=recording, raw_download_url=links.raw_data
+        )
 
     background_tasks.add_task(
         postprocessing_task,

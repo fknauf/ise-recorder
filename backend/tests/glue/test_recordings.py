@@ -357,7 +357,7 @@ async def test_the_listing_does_not_go_back_to_the_disk(
             RecordingInfo(
                 path=anyio.Path(recording_dir(home, "PURGED_2025")),
                 activity=RecordingActivity.NONE,
-                disk_state=RecordingDiskState.FINISHED,
+                disk_state=RecordingDiskState.COMPLETED,
                 streaming=False,
                 size=12345,
             )

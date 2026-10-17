@@ -1,6 +1,6 @@
 import { useAppSession } from "../components/SessionProvider";
 import { getAllRecordingTracks } from "../utils/browserStorage";
-import { showError, showMessage, showSuccess } from "../utils/notifications";
+import { showError, showSuccess } from "../utils/notifications";
 import { ApiDestination, defaultRetryPolicy, RetryPolicy, withRetries } from "../utils/apiFetch";
 import { uploadFile, schedulePostprocessing } from "../utils/serverStorage";
 import { useAppStore } from "./useAppStore";
@@ -71,15 +71,18 @@ export function useReupload(recordingName: string) {
         // re-upload then, just re-render.
         completed = true;
 
-        if(trackBlobs.some(b => b.trackName === "stream")) {
-          try {
-            await withRetries(() => schedulePostprocessing(destination, uploadName, lecturerEmail, undefined), retryPolicy);
+        try {
+          const response = await withRetries(() => schedulePostprocessing(destination, uploadName, lecturerEmail, undefined), retryPolicy);
+
+          if(response.state === "rendering") {
             showSuccess(`Scheduled postprocessing for recording "${uploadName}"`);
-          } catch(e) {
-            showError("Failed to schedule postprocessing", e);
+          } else {
+            // audio-only recording: the schedule-call only marked the recording as no-longer-streaming;
+            // actual post-processing is not possible.
+            showSuccess("Finished uploading.");
           }
-        } else {
-          showMessage("Post-processing could not be scheduled because there's no main display.");
+        } catch(e) {
+          showError("Failed to schedule postprocessing", e);
         }
       }
     } catch(e) {

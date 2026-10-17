@@ -69,7 +69,7 @@ export async function schedulePostprocessing(
   recording: string,
   recipient: string | undefined,
   abortSignal: AbortSignal | undefined
-): Promise<UnfinishedRecording> {
+): Promise<ServerStorageRecording> {
   abortSignal?.throwIfAborted();
 
   const urlPath = `api/recordings/${encodeURIComponent(recording)}/render`;
@@ -87,7 +87,7 @@ export async function schedulePostprocessing(
     signal: abortSignal
   };
 
-  return await apiFetchData(destination, urlPath, request, RenderingRecordingSchema);
+  return await apiFetchData(destination, urlPath, request, ServerStorageRecordingSchema);
 }
 
 export async function fetchRecordings(

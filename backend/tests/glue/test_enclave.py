@@ -309,7 +309,7 @@ def test_the_disk_state_is_read_from_the_home_directory(enclave: Enclave, tmp_pa
         ]
 
     assert anyio.run(disk_states) == [
-        RecordingDiskState.FINISHED,
+        RecordingDiskState.COMPLETED,
         RecordingDiskState.UNPROCESSED,
         RecordingDiskState.NONEXISTENT,
     ]
@@ -330,7 +330,7 @@ def test_every_recording_in_the_home_directory_is_classified(tmp_path: Path):
     infos = anyio.run(enclave.classify_all)
 
     assert sorted((info.name, info.disk_state) for info in infos) == [
-        ("DONE_2025", RecordingDiskState.FINISHED),
+        ("DONE_2025", RecordingDiskState.COMPLETED),
         ("FAILED_2025", RecordingDiskState.UNPROCESSED),
     ]
 

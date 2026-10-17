@@ -10,7 +10,7 @@ import { schedulePostprocessing, uploadFile } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import { aServerEnv } from "../helpers/serverEnv";
-import { rendering } from "../helpers/serverStorage";
+import { notRenderable, rendering } from "../helpers/serverStorage";
 
 // Sends a locally saved recording to the server under a name of its own, so it cannot mix
 // with whatever the live upload left there, and schedules its postprocessing. How a file is
@@ -75,8 +75,8 @@ async function renderReupload(recordingName = "GVS_2025") {
 const destination = expect.objectContaining({ apiUrl: "http://localhost:5000/", getAccessToken });
 
 const failed = new ApiError("HTTP 507: disk full", "http", 507, "disk full");
-// not worth trying again: the backend has looked at the recording and will not render it
-const refused = new ApiError("HTTP 422: Recording GVS_2025-reupload is not renderable", "http", 422, "Recording GVS_2025-reupload is not renderable");
+// not worth trying again: the backend has looked for the recording and not found it
+const refused = new ApiError("HTTP 404: Recording GVS_2025-reupload does not exist", "http", 404, "Recording GVS_2025-reupload does not exist");
 
 test("every track goes up under a name of its own, then the job is scheduled", async () => {
   vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("overlay"), trackOf("stream") ]);
@@ -124,10 +124,12 @@ test("a job the backend refused is reported with what it said", async () => {
   expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
 
-test("a recording without a main display goes up whole but is not scheduled", async () => {
-  // Microphone and camera without slides: no "stream" track to render a video from, and the
-  // backend refuses such a job. The tracks are still worth having on the server, as raw data.
+test("a recording without a main display goes up whole and ends with a job request", async () => {
+  // Microphone and camera without slides: no "stream" track to render a video from, so the
+  // backend starts no render. The job request still tells it the upload is over, so the raw
+  // data is listed straight away.
   vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0"), trackOf("overlay") ]);
+  vi.mocked(schedulePostprocessing).mockResolvedValue(notRenderable("GVS_2025-reupload"));
   const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
@@ -136,11 +138,11 @@ test("a recording without a main display goes up whole but is not scheduled", as
     [ "GVS_2025-reupload", "audio-0" ],
     [ "GVS_2025-reupload", "overlay" ]
   ]);
-  expect(schedulePostprocessing).not.toHaveBeenCalled();
-  // a notice rather than an error: the upload worked, there is just no video to make
-  expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("no main display"));
+  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-reupload", "lecturer@example.edu", undefined);
+  // the upload is what there was to do, and it worked; no render is promised
+  expect(showSuccess).toHaveBeenCalledExactlyOnceWith(expect.not.stringContaining("postprocessing"));
+  expect(showMessage).not.toHaveBeenCalled();
   expect(showError).not.toHaveBeenCalled();
-  expect(showSuccess).not.toHaveBeenCalled();
   expect(result.current.upload.isUploading).toBe(false);
   expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
@@ -422,11 +424,11 @@ test("a re-upload without a main display still takes the recording off the list"
   // every track is on the server, which is all there is to do for it: a render was never on
   // offer, so re-uploading it would only get the same result again
   vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0") ]);
+  vi.mocked(schedulePostprocessing).mockResolvedValue(notRenderable("GVS_2025-reupload"));
   const { result } = await renderWithUnstreamed("GVS_2025", "PSU_2026");
 
   await act(() => result.current.upload.reupload());
 
-  expect(schedulePostprocessing).not.toHaveBeenCalled();
   expect(result.current.unstreamed).toStrictEqual([ "PSU_2026" ]);
 });
 

@@ -116,7 +116,7 @@ def test_a_rendered_recording_is_finished_with_the_size_of_its_video(home: Path)
     finish_recording(home, "GVS_2025", b"x" * 12345)
 
     assert anyio.run(classify_disk_state, recording(home, "GVS_2025")) == (
-        RecordingDiskState.FINISHED,
+        RecordingDiskState.COMPLETED,
         12345,
     )
 
@@ -827,7 +827,7 @@ def test_classify_reports_all_three_lines(home: Path):
     assert info == RecordingInfo(
         path=recording(home, "GVS_2025"),
         activity=RecordingActivity.RENDERING,
-        disk_state=RecordingDiskState.FINISHED,
+        disk_state=RecordingDiskState.COMPLETED,
         streaming=False,
         size=12345,
     )
