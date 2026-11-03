@@ -6,10 +6,10 @@ requires-python = "~=3.14"
 dependencies = [
     "aiorwlock~=1.5",
     "aiosmtplib~=5.1",
-    "anyio~=4.15",
+    "anyio~=4.16",
     "email-validator~=2.3",
-    "fastapi~=0.143",
-    "httpx2~=2.13",
+    "fastapi~=0.162",
+    "httpx2~=2.16",
     "pathvalidate~=3.3",
     "pydantic-settings~=2.16",
     "PyJWT[crypto]~=2.15",
@@ -19,9 +19,9 @@ dependencies = [
 
 [dependency-groups]
 test = [
-    "pytest~=9.1",
+    "pytest~=9.2",
     "pytest-asyncio~=1.4",
-    "pytest-mock~=3.16",
+    "pytest-mock~=3.17",
 ]
 
 dev = [
@@ -42,6 +42,7 @@ build-backend = "setuptools.build_meta"
 addopts = [
     "--import-mode=importlib",
 ]
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     # An anyio.Path method called without await hands back a coroutine, which is truthy, so an
     # `if not path.exists()` or an `assert path.is_file()` just goes on as if it held. Python only
