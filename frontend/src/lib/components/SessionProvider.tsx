@@ -48,13 +48,8 @@ function sessionStaleAtMillis(user: User | null | undefined, maxAge: number | un
   return staleAt > user.profile.iat * 1000 ? staleAt : 0;
 }
 
-function useIsStale(
-  user: User | null | undefined,
-  maxAge: number | undefined
-) {
-  const staleAt = sessionStaleAtMillis(user, maxAge);
-
-  const subscribe = (onChange: () => void) => {
+const subscribeToStaleness = (staleAt: number | undefined) =>
+  (onChange: () => void) => {
     if(staleAt === undefined) {
       return () => {};
     }
@@ -84,8 +79,14 @@ function useIsStale(
     };
   };
 
+function useIsStale(
+  user: User | null | undefined,
+  maxAge: number | undefined
+) {
+  const staleAt = sessionStaleAtMillis(user, maxAge);
+
   return useSyncExternalStore(
-    subscribe,
+    subscribeToStaleness(staleAt),
     () => staleAt !== undefined && Date.now() >= staleAt,
     () => false
   );

@@ -8,6 +8,15 @@ import { useLecture } from "./useLecture";
 import { useRefreshServerStorage } from "./useServerStorage";
 import { useServerEnv } from "./useServerEnv";
 
+function progressAccumulator(totalBytes: number, report: (percent: number) => void) {
+  let transferred = 0;
+
+  return (sentBytes: number) => {
+    transferred += sentBytes;
+    report(transferred / totalBytes * 100);
+  };
+}
+
 export function useReupload(recordingName: string) {
   const { apiUrl } = useServerEnv();
   const { getAccessToken } = useAppSession();
@@ -46,10 +55,7 @@ export function useReupload(recordingName: string) {
       const totalBytes = Math.max(1, trackBlobs.reduce((acc, cur) => acc + cur.file.size, 0));
       let transferred = 0;
 
-      const signalProgress = (sentBytes: number) => {
-        transferred += sentBytes;
-        signalManualUploadProgress(recordingName, transferred / totalBytes * 100);
-      };
+      const signalProgress = progressAccumulator(totalBytes, percent => signalManualUploadProgress(recordingName, percent));
 
       const uploadTracks = async () => {
         for(const { trackName, file } of trackBlobs) {
