@@ -92,6 +92,8 @@ RecordingResponse = Annotated[
     UnfinishedRecording | DownloadableRecording, Field(discriminator="state")
 ]
 
+
 class ServerHealth(BaseModel):
     """Possible value for health status in the monitoring endpoint"""
+
     status: Literal["healthy"]
