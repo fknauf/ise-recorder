@@ -28,7 +28,7 @@
     "swr": "^2.5.1",
     "validator": "^13.15.35",
     "zod": "^4.6.7",
-    "zustand": "^5.0.16"
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
@@ -48,7 +48,7 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "lodash": "^4.18.1",
     "oxc-config-mantine": "^1.0.3",
-    "oxlint": "^1.91.0",
+    "oxlint": "^1.92.0",
     "postcss": "^8.5.32",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",

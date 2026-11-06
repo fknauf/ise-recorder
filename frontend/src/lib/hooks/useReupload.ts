@@ -53,7 +53,6 @@ export function useReupload(recordingName: string) {
       const trackBlobs = await getAllRecordingTracks(recordingName);
       // max(1, ...) to avoid division by zero. If all files are empty, the progress indicator is meaningless, anyway.
       const totalBytes = Math.max(1, trackBlobs.reduce((acc, cur) => acc + cur.file.size, 0));
-      let transferred = 0;
 
       const signalProgress = progressAccumulator(totalBytes, percent => signalManualUploadProgress(recordingName, percent));
 
