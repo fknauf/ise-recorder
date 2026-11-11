@@ -1,11 +1,11 @@
-import { defineConfig } from "vitest/config";
-import type { Plugin } from "vite";
-import react from "@vitejs/plugin-react";
-import { transformAsync } from "@babel/core";
 import { fileURLToPath } from "node:url";
-import { isCompilableSource, reactCompilerOptions } from "./scripts/reactCompiler.mjs";
+import { transformAsync } from "@babel/core";
+import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
+import type { Plugin } from "vite";
+import { defineConfig } from "vitest/config";
 import { listenForFileDownload } from "./__tests__/command-download.mjs";
+import { isCompilableSource, reactCompilerOptions } from "./scripts/reactCompiler.mjs";
 
 /**
  * Run the React Compiler over src/ the way `next build` does.
@@ -32,19 +32,19 @@ function reactCompiler(): Plugin {
     async transform(code, id) {
       const file = id.split("?")[0];
 
-      if(!isCompilableSource(file)) {
+      if (!isCompilableSource(file)) {
         return null;
       }
 
       const result = await transformAsync(code, {
         ...reactCompilerOptions(file),
-        sourceMaps: true
+        sourceMaps: true,
       });
 
       return result?.code === undefined || result.code === null
         ? null
         : { code: result.code, map: result.map };
-    }
+    },
   };
 }
 
@@ -53,15 +53,21 @@ export default defineConfig({
     tsconfigPaths: true,
     alias: {
       // see the stub for why this is safe
-      "server-only": fileURLToPath(new URL("./__tests__/stubs/server-only.ts", import.meta.url))
-    }
+      "server-only": fileURLToPath(new URL("./__tests__/stubs/server-only.ts", import.meta.url)),
+    },
   },
   optimizeDeps: {
     // react/compiler-runtime needs to be pulled in manually because vitest scans the code
     // for deps before it's compiled, when it doesn't depend on react/compiler-runtime yet.
-    include: [ "next/server", "validator/es/lib/isURL", "validator/es/lib/isInt", "react/compiler-runtime", "react-dom/server" ]
+    include: [
+      "next/server",
+      "validator/es/lib/isURL",
+      "validator/es/lib/isInt",
+      "react/compiler-runtime",
+      "react-dom/server",
+    ],
   },
-  plugins: [ reactCompiler(), react() ],
+  plugins: [reactCompiler(), react()],
   test: {
     projects: [
       {
@@ -82,28 +88,28 @@ export default defineConfig({
                 browser: "chromium",
                 viewport: {
                   width: 1920,
-                  height: 1080
-                }
+                  height: 1080,
+                },
               },
               {
                 name: "firefox",
                 browser: "firefox",
                 viewport: {
                   width: 1920,
-                  height: 1080
-                }
-              }
+                  height: 1080,
+                },
+              },
             ],
             commands: {
-              listenForFileDownload
-            }
+              listenForFileDownload,
+            },
           },
           mockReset: true,
-          include: [ "__tests__/**/*.test.{ts,tsx}" ],
-          exclude: [ "__tests__/build/**" ],
-          setupFiles: [ "__tests__/setup.ts" ],
-          globals: true
-        }
+          include: ["__tests__/**/*.test.{ts,tsx}"],
+          exclude: ["__tests__/build/**"],
+          setupFiles: ["__tests__/setup.ts"],
+          globals: true,
+        },
       },
       {
         // checks about the build itself, which need node: a filesystem and babel. No
@@ -111,10 +117,10 @@ export default defineConfig({
         test: {
           name: "build",
           environment: "node",
-          include: [ "__tests__/build/**/*.test.ts" ],
-          globals: true
-        }
-      }
-    ]
-  }
+          include: ["__tests__/build/**/*.test.ts"],
+          globals: true,
+        },
+      },
+    ],
+  },
 });

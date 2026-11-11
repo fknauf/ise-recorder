@@ -1,19 +1,19 @@
 "use client";
 import "@mantine/notifications/styles.css";
 import { Accordion, Group, Stack } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
+import { useAutoSignin } from "react-oidc-context";
+import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
+import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
+import { ColorModeToggle } from "@/lib/components/ColorModeToggle";
+import { GithubLink } from "@/lib/components/GithubLink";
+import { PreviewSection } from "@/lib/components/PreviewSection";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
 import { RecorderControls, UnlabelledRow } from "@/lib/components/RecorderControls";
-import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
-import { PreviewSection } from "@/lib/components/PreviewSection";
-import { GithubLink } from "@/lib/components/GithubLink";
-import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
-import { useAutoSignin } from "react-oidc-context";
-import { useAppSession } from "@/lib/components/SessionProvider";
-import { useHydrated } from "@/lib/hooks/useHydrated";
 import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
+import { useAppSession } from "@/lib/components/SessionProvider";
 import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
-import { Notifications } from "@mantine/notifications";
-import { ColorModeToggle } from "@/lib/components/ColorModeToggle";
+import { useHydrated } from "@/lib/hooks/useHydrated";
 
 function AutoSignin() {
   useAutoSignin();
@@ -26,27 +26,25 @@ export function Home() {
 
   return (
     <Stack justify="center">
-      {
-        hydrated && autoSignin && <AutoSignin/>
-      }
+      {hydrated && autoSignin && <AutoSignin />}
       <Group justify="center" gap={64} align="flex-start">
-        <RecorderControls/>
+        <RecorderControls />
         <UnlabelledRow>
-          <ColorModeToggle/>
-          <GithubLink/>
+          <ColorModeToggle />
+          <GithubLink />
         </UnlabelledRow>
       </Group>
       <Group justify="center" align="flex-start">
-        <AuthStatusMessage/>
-        <StreamingImpededWarning/>
-        <QuotaWarning thresholdBytes={2 ** 30}/>
+        <AuthStatusMessage />
+        <StreamingImpededWarning />
+        <QuotaWarning thresholdBytes={2 ** 30} />
       </Group>
-      <PreviewSection canvasWidth={384} canvasHeight={216}/>
+      <PreviewSection canvasWidth={384} canvasHeight={216} />
       <Accordion multiple defaultValue={["saved", "processed"]}>
-        <BrowserStorageSection id="saved"/>
-        <ServerStorageSection id="processed"/>
+        <BrowserStorageSection id="saved" />
+        <ServerStorageSection id="processed" />
       </Accordion>
-      <Notifications limit={3} position="bottom-center"/>
+      <Notifications limit={3} position="bottom-center" />
     </Stack>
   );
 }

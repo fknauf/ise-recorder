@@ -1,5 +1,5 @@
-import { ReactNode } from "react";
 import { Accordion } from "@mantine/core";
+import { ReactNode } from "react";
 
 /** The id to give the section under test, so that ExpandedSection opens it. */
 export const SECTION_ID = "section-under-test";
@@ -12,7 +12,8 @@ export const SECTION_ID = "section-under-test";
  * button" check passes whether the button is there or not. Wrapping it here keeps the tests
  * about the section's content independent of how the page arranges and collapses it.
  */
-export const ExpandedSection = ({ children }: Readonly<{ children: ReactNode }>) =>
-  <Accordion multiple defaultValue={[ SECTION_ID ]}>
+export const ExpandedSection = ({ children }: Readonly<{ children: ReactNode }>) => (
+  <Accordion multiple defaultValue={[SECTION_ID]}>
     {children}
-  </Accordion>;
+  </Accordion>
+);

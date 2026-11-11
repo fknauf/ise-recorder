@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { canvasVideoTrack } from "../helpers/media";
-import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
+import { canvasVideoTrack } from "../helpers/media";
 
 /**
  * What happens when a MediaRecorder fails part way through a lecture, e.g. because its
@@ -27,10 +27,10 @@ vi.mock("@/lib/utils/notifications");
 const destination: RecordingDestination = {
   apiUrl: undefined,
   impeded: false,
-  getAccessToken: async () => undefined
+  getAccessToken: async () => undefined,
 };
 
-const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const FINAL_CHUNK_BYTES = 123;
 const STOP_CHUNK_BYTES = 456;
@@ -53,12 +53,12 @@ class FakeMediaRecorder {
 
   /** Per spec, a no-op on a recorder that is already inactive -- which a failed one is. */
   stop() {
-    if(this.state === "inactive") {
+    if (this.state === "inactive") {
       return;
     }
 
     this.state = "inactive";
-    void this.fire([ () => this.flush(STOP_CHUNK_BYTES), () => this.onstop?.(new Event("stop")) ]);
+    void this.fire([() => this.flush(STOP_CHUNK_BYTES), () => this.onstop?.(new Event("stop"))]);
   }
 
   /** Test-only: give out the way the spec says a failing recorder does. */
@@ -67,16 +67,16 @@ class FakeMediaRecorder {
     return this.fire([
       () => this.onerror?.(new ErrorEvent("error", { message })),
       () => this.flush(FINAL_CHUNK_BYTES),
-      () => this.onstop?.(new Event("stop"))
+      () => this.onstop?.(new Event("stop")),
     ]);
   }
 
   private flush(bytes: number) {
-    this.ondataavailable?.({ data: new Blob([ new Uint8Array(bytes) ]) } as BlobEvent);
+    this.ondataavailable?.({ data: new Blob([new Uint8Array(bytes)]) } as BlobEvent);
   }
 
   private async fire(events: (() => void)[]) {
-    for(const event of events) {
+    for (const event of events) {
       await nextTask();
       event();
     }
@@ -89,8 +89,8 @@ const OriginalMediaRecorder = window.MediaRecorder;
 let streams: Map<string, FileSystemWritableFileStream>;
 
 interface Outcome {
-  written: [ string, number ][]
-  finished: boolean
+  written: [string, number][];
+  finished: boolean;
 }
 
 /**
@@ -101,18 +101,26 @@ async function recordWithFailingOverlay(): Promise<Outcome> {
   const display = canvasVideoTrack();
   const camera = canvasVideoTrack();
   const bundle: RecordingTrackBundle = {
-    displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
-    mainDisplay: display, overlay: camera
+    displayTracks: [display],
+    videoTracks: [camera],
+    audioTracks: [],
+    mainDisplay: display,
+    overlay: camera,
   };
 
-  const written: [ string, number ][] = [];
+  const written: [string, number][] = [];
   let finished = false;
 
   await recordLecture(
-    bundle, "GVS", "lecturer@example.com", destination,
+    bundle,
+    "GVS",
+    "lecturer@example.com",
+    destination,
     () => {},
     async (_name, stop) => {
-      const overlayRecorder = FakeMediaRecorder.instances.find(recorder => recorder.stream.getTracks().includes(camera));
+      const overlayRecorder = FakeMediaRecorder.instances.find((recorder) =>
+        recorder.stream.getTracks().includes(camera),
+      );
       await overlayRecorder!.fail("encoder gave out");
 
       // give the chunk loop time to do whatever it is going to do with that
@@ -120,12 +128,12 @@ async function recordWithFailingOverlay(): Promise<Outcome> {
       stop();
     },
     (_name, filename, size) => {
-      written.push([ filename, size ]);
+      written.push([filename, size]);
     },
     () => {
       finished = true;
     },
-    () => {}
+    () => {},
   );
 
   return { written, finished };
@@ -139,7 +147,7 @@ beforeEach(() => {
   vi.mocked(openRecordingFileStream).mockImplementation(async (_recording, filename) => {
     const stream = {
       write: vi.fn(async () => {}),
-      close: vi.fn(async () => {})
+      close: vi.fn(async () => {}),
     } as unknown as FileSystemWritableFileStream;
 
     streams.set(filename, stream);
@@ -157,7 +165,7 @@ afterEach(() => {
 test("the data a failing recorder hands over on its way out is still saved", async () => {
   const outcome = await recordWithFailingOverlay();
 
-  expect(outcome.written).toContainEqual([ "overlay.webm", FINAL_CHUNK_BYTES ]);
+  expect(outcome.written).toContainEqual(["overlay.webm", FINAL_CHUNK_BYTES]);
 }, 5000);
 
 test("a failing recorder is reported, with its track and the reason", async () => {
@@ -172,15 +180,15 @@ test("a failing recorder is reported, with its track and the reason", async () =
 test("the other tracks record on after one of them fails", async () => {
   const outcome = await recordWithFailingOverlay();
 
-  expect(outcome.written).toContainEqual([ "stream.webm", STOP_CHUNK_BYTES ]);
+  expect(outcome.written).toContainEqual(["stream.webm", STOP_CHUNK_BYTES]);
 }, 5000);
 
 test("a recording with a failed track still comes to an end", async () => {
   const outcome = await recordWithFailingOverlay();
 
   expect(outcome.finished).toBe(true);
-  expect([ ...streams.keys() ].sort()).toStrictEqual([ "overlay.webm", "stream.webm" ]);
-  for(const stream of streams.values()) {
+  expect([...streams.keys()].sort()).toStrictEqual(["overlay.webm", "stream.webm"]);
+  for (const stream of streams.values()) {
     expect(stream.close).toHaveBeenCalled();
   }
 }, 5000);

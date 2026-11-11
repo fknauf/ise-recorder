@@ -1,33 +1,42 @@
 "use client";
 
-import { useAppSession } from "./SessionProvider";
-import { useServerEnv } from "../hooks/useServerEnv";
-import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
-import { useServerStorage } from "../hooks/useServerStorage";
-import * as z from "zod";
-import { DownloadableRecording, downloadHref, ServerStorageRecording, UnfinishedRecording } from "../utils/serverStorage";
-import { ReactNode, useState } from "react";
-import { showError, showSuccess } from "../utils/notifications";
-import { ApiError } from "../utils/apiFetch";
-import { modals } from "@mantine/modals";
 import { Alert, Button, Group, Loader, Text, ThemeIcon } from "@mantine/core";
-import { DownloadIcon, RepeatIcon, TrashIcon, WarningIcon, CloudIcon, WarningOctagonIcon } from "@phosphor-icons/react";
+import { modals } from "@mantine/modals";
+import {
+  DownloadIcon,
+  RepeatIcon,
+  TrashIcon,
+  WarningIcon,
+  CloudIcon,
+  WarningOctagonIcon,
+} from "@phosphor-icons/react";
+import { ReactNode, useState } from "react";
+import * as z from "zod";
+import { useServerEnv } from "../hooks/useServerEnv";
+import { useServerStorage } from "../hooks/useServerStorage";
+import { ApiError } from "../utils/apiFetch";
+import { showError, showSuccess } from "../utils/notifications";
+import {
+  DownloadableRecording,
+  downloadHref,
+  ServerStorageRecording,
+  UnfinishedRecording,
+} from "../utils/serverStorage";
+import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
+import { useAppSession } from "./SessionProvider";
 
-const mibFormatter = new Intl.NumberFormat(
-  "en-us",
-  {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false
-  }
-);
+const mibFormatter = new Intl.NumberFormat("en-us", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  useGrouping: false,
+});
 
 function prettifyError(error: unknown) {
-  if(error instanceof ApiError && error.cause instanceof z.ZodError) {
+  if (error instanceof ApiError && error.cause instanceof z.ZodError) {
     return z.prettifyError(error.cause);
   }
 
-  if(error instanceof Error) {
+  if (error instanceof Error) {
     return error.message;
   }
 
@@ -37,57 +46,56 @@ function prettifyError(error: unknown) {
 function confirmPurge(
   recordingName: string,
   onConfirm: () => void,
-  onCancel: () => void = () => {}
+  onCancel: () => void = () => {},
 ) {
   modals.openConfirmModal({
     title: "Confirm Purge",
-    children:
+    children: (
       <Group wrap="nowrap" align="flex-start">
         <ThemeIcon variant="outline" color="warning" size="lg" radius="xl">
-          <WarningIcon/>
+          <WarningIcon />
         </ThemeIcon>
         <Text>
-          You are about to permanently delete the recording <strong>{recordingName}</strong> from the server.
-          This cannot be undone. Are you sure?
+          You are about to permanently delete the recording <strong>{recordingName}</strong> from
+          the server. This cannot be undone. Are you sure?
         </Text>
-      </Group>,
+      </Group>
+    ),
     labels: {
       confirm: "Purge",
-      cancel: "Cancel"
+      cancel: "Cancel",
     },
-    confirmProps: { "data-testid": "ss-btn-purgeconfirm", "color": "error" },
+    confirmProps: { "data-testid": "ss-btn-purgeconfirm", color: "error" },
     cancelProps: { "data-testid": "ss-btn-purgecancel", "data-autofocus": true },
     onConfirm,
     onCancel,
     centered: true,
-    size: "lg"
+    size: "lg",
   });
 }
 
-function ActionableRecordingCard(
-  {
-    recordingName,
-    rawDownloadUrl,
-    isFinished,
-    isRenderable,
-    testid,
-    onPurge,
-    children
-  }: Readonly<{
-    recordingName: string
-    rawDownloadUrl: string | null
-    isFinished?: boolean
-    isRenderable?: boolean
-    onPurge?: (recordingName: string) => void
-    testid: string
-    children: ReactNode
-  }>
-) {
+function ActionableRecordingCard({
+  recordingName,
+  rawDownloadUrl,
+  isFinished,
+  isRenderable,
+  testid,
+  onPurge,
+  children,
+}: Readonly<{
+  recordingName: string;
+  rawDownloadUrl: string | null;
+  isFinished?: boolean;
+  isRenderable?: boolean;
+  onPurge?: (recordingName: string) => void;
+  testid: string;
+  children: ReactNode;
+}>) {
   const { apiUrl } = useServerEnv();
   const { rerender } = useServerStorage();
-  const [ busy, setBusy ] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  if(apiUrl === undefined) {
+  if (apiUrl === undefined) {
     return null;
   }
 
@@ -96,7 +104,7 @@ function ActionableRecordingCard(
     try {
       await rerender(recordingName);
       showSuccess(`Re-rendering scheduled for ${recordingName}`);
-    } catch(e) {
+    } catch (e) {
       showError(`Unable to schedule re-rendering for ${recordingName}`, e);
     }
     setBusy(false);
@@ -106,21 +114,20 @@ function ActionableRecordingCard(
     <RecordingCard title={recordingName} testid={testid}>
       {children}
 
-      {
-        rawDownloadUrl !== null &&
-          <Button
-            fullWidth
-            data-testid="ss-btn-download-raw"
-            component="a"
-            href={downloadHref(apiUrl, rawDownloadUrl)}
-            download
-            target="_blank"
-            leftSection={<DownloadIcon/>}
-            variant={isFinished ? "outline" : "filled"}
-          >
-            Download raw data
-          </Button>
-      }
+      {rawDownloadUrl !== null && (
+        <Button
+          fullWidth
+          data-testid="ss-btn-download-raw"
+          component="a"
+          href={downloadHref(apiUrl, rawDownloadUrl)}
+          download
+          target="_blank"
+          leftSection={<DownloadIcon />}
+          variant={isFinished ? "outline" : "filled"}
+        >
+          Download raw data
+        </Button>
+      )}
 
       <Group>
         <Button
@@ -129,7 +136,7 @@ function ActionableRecordingCard(
           data-testid="ss-btn-rerender"
           disabled={busy || !isRenderable}
           onClick={onRerender}
-          leftSection={<RepeatIcon/>}
+          leftSection={<RepeatIcon />}
           variant={isFinished || !isRenderable ? "outline" : "filled"}
         >
           Rerender
@@ -139,8 +146,12 @@ function ActionableRecordingCard(
           miw="max-content"
           data-testid="ss-btn-purge"
           disabled={busy || onPurge === undefined}
-          onClick={onPurge !== undefined ? () => confirmPurge(recordingName, () => onPurge(recordingName)) : undefined}
-          leftSection={<TrashIcon/>}
+          onClick={
+            onPurge !== undefined
+              ? () => confirmPurge(recordingName, () => onPurge(recordingName))
+              : undefined
+          }
+          leftSection={<TrashIcon />}
           color="warning"
           variant="outline"
         >
@@ -151,15 +162,16 @@ function ActionableRecordingCard(
   );
 }
 
-function ProcessedRecordingCard(
-  { recording, onPurge }: Readonly<{
-    recording: DownloadableRecording
-    onPurge: (recordingName: string) => void
-  }>
-) {
+function ProcessedRecordingCard({
+  recording,
+  onPurge,
+}: Readonly<{
+  recording: DownloadableRecording;
+  onPurge: (recordingName: string) => void;
+}>) {
   const { apiUrl } = useServerEnv();
 
-  if(apiUrl === undefined) {
+  if (apiUrl === undefined) {
     return null;
   }
 
@@ -172,47 +184,43 @@ function ProcessedRecordingCard(
       onPurge={onPurge}
       testid="ss-card-completed"
     >
-      {
-        recording.downloadUrl !== null &&
-          <Button
-            component="a"
-            download
-            key={recording.name}
-            href={downloadHref(apiUrl, recording.downloadUrl)}
-            w="100%"
-            target="_blank"
-            leftSection={<DownloadIcon/>}
-          >
-            Download ({mibFormatter.format(recording.size / (2 ** 20))} MiB)
-          </Button>
-      }
+      {recording.downloadUrl !== null && (
+        <Button
+          component="a"
+          download
+          key={recording.name}
+          href={downloadHref(apiUrl, recording.downloadUrl)}
+          w="100%"
+          target="_blank"
+          leftSection={<DownloadIcon />}
+        >
+          Download ({mibFormatter.format(recording.size / 2 ** 20)} MiB)
+        </Button>
+      )}
     </ActionableRecordingCard>
   );
 }
 
-const RenderingRecordingCard = (
-  { recording }: Readonly<{ recording: UnfinishedRecording }>
-) =>
+const RenderingRecordingCard = ({ recording }: Readonly<{ recording: UnfinishedRecording }>) => (
   <ActionableRecordingCard
     recordingName={recording.name}
     rawDownloadUrl={recording.rawDownloadUrl}
     testid="ss-card-rendering"
   >
     <Group align="center" justify="center" flex="1 1 0">
-      <Loader role="progressbar" aria-label="Rendering" size="sm"/>
+      <Loader role="progressbar" aria-label="Rendering" size="sm" />
       <Text>Rendering...</Text>
     </Group>
-  </ActionableRecordingCard>;
+  </ActionableRecordingCard>
+);
 
-const UnprocessedRecordingCard = (
-  {
-    recording,
-    onPurge
-  }: Readonly<{
-    recording: UnfinishedRecording
-    onPurge: (recordingName: string) => void
-  }>
-) =>
+const UnprocessedRecordingCard = ({
+  recording,
+  onPurge,
+}: Readonly<{
+  recording: UnfinishedRecording;
+  onPurge: (recordingName: string) => void;
+}>) => (
   <ActionableRecordingCard
     recordingName={recording.name}
     isRenderable
@@ -223,17 +231,16 @@ const UnprocessedRecordingCard = (
     <Group flex="1 1 0" justify="center" align="center">
       <Text>Postprocessing failed.</Text>
     </Group>
-  </ActionableRecordingCard>;
+  </ActionableRecordingCard>
+);
 
-const NonRenderableRecordingCard = (
-  {
-    recording,
-    onPurge
-  }: Readonly<{
-    recording: UnfinishedRecording
-    onPurge: (recordingName: string) => void
-  }>
-) =>
+const NonRenderableRecordingCard = ({
+  recording,
+  onPurge,
+}: Readonly<{
+  recording: UnfinishedRecording;
+  onPurge: (recordingName: string) => void;
+}>) => (
   <ActionableRecordingCard
     recordingName={recording.name}
     rawDownloadUrl={recording.rawDownloadUrl}
@@ -243,33 +250,33 @@ const NonRenderableRecordingCard = (
     <Group flex="1 1 0" justify="center" align="center">
       <Text>Not renderable.</Text>
     </Group>
-  </ActionableRecordingCard>;
+  </ActionableRecordingCard>
+);
 
-function AnyRecordingCard(
-  { recording }:
-  Readonly<{
-    recording: ServerStorageRecording
-  }>
-) {
+function AnyRecordingCard({
+  recording,
+}: Readonly<{
+  recording: ServerStorageRecording;
+}>) {
   const { purge } = useServerStorage();
 
   const onPurge = async () => {
     try {
       await purge(recording.name);
       showSuccess(`Purged ${recording.name}`);
-    } catch(e) {
+    } catch (e) {
       showError(`Failed to purge ${recording.name}`, e);
     }
   };
 
-  if(recording.state === "completed") {
-    return <ProcessedRecordingCard recording={recording} onPurge={onPurge}/>;
-  } else if(recording.state === "rendering") {
-    return <RenderingRecordingCard recording={recording}/>;
-  } else if(recording.state === "unprocessed") {
-    return <UnprocessedRecordingCard recording={recording} onPurge={onPurge}/>;
-  } else if(recording.state === "not-renderable") {
-    return <NonRenderableRecordingCard recording={recording} onPurge={onPurge}/>;
+  if (recording.state === "completed") {
+    return <ProcessedRecordingCard recording={recording} onPurge={onPurge} />;
+  } else if (recording.state === "rendering") {
+    return <RenderingRecordingCard recording={recording} />;
+  } else if (recording.state === "unprocessed") {
+    return <UnprocessedRecordingCard recording={recording} onPurge={onPurge} />;
+  } else if (recording.state === "not-renderable") {
+    return <NonRenderableRecordingCard recording={recording} onPurge={onPurge} />;
   }
 
   return null;
@@ -280,25 +287,30 @@ function ServerStorageSectionImpl({ id }: Readonly<{ id: string }>) {
 
   const sectionTitle = "Server-Side Processed Recordings";
 
-  if(error !== undefined) {
+  if (error !== undefined) {
     return (
       <RecordingCardSection id={id} title={sectionTitle}>
-        <Alert variant="light" color="error" icon={<WarningOctagonIcon/>} title="Error fetching list of processed recordings">
+        <Alert
+          variant="light"
+          color="error"
+          icon={<WarningOctagonIcon />}
+          title="Error fetching list of processed recordings"
+        >
           {prettifyError(error)}
         </Alert>
       </RecordingCardSection>
     );
   }
 
-  if(data === undefined || data.length === 0) {
+  if (data === undefined || data.length === 0) {
     return null;
   }
 
   return (
-    <RecordingCardSection id={id} title={sectionTitle} icon={<CloudIcon/>}>
-      {
-        data.map(rec => <AnyRecordingCard key={rec.name} recording={rec}/>)
-      }
+    <RecordingCardSection id={id} title={sectionTitle} icon={<CloudIcon />}>
+      {data.map((rec) => (
+        <AnyRecordingCard key={rec.name} recording={rec} />
+      ))}
     </RecordingCardSection>
   );
 }
@@ -307,11 +319,9 @@ export function ServerStorageSection({ id }: Readonly<{ id: string }>) {
   const { isAuthenticated, isExpired } = useAppSession();
   const { apiUrl } = useServerEnv();
 
-  if(apiUrl === undefined || !isAuthenticated || isExpired) {
+  if (apiUrl === undefined || !isAuthenticated || isExpired) {
     return null;
   }
 
-  return (
-    <ServerStorageSectionImpl id={id}/>
-  );
+  return <ServerStorageSectionImpl id={id} />;
 }

@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { AudioPreview } from "@/lib/components/AudioPreview";
 import { InPreviewCard } from "../helpers/mantine";
 
@@ -11,14 +11,14 @@ import { InPreviewCard } from "../helpers/mantine";
  */
 
 interface DrawnLine {
-  x: number
-  y: number
-  strokeStyle: string
+  x: number;
+  y: number;
+  strokeStyle: string;
 }
 
 interface CanvasSpy {
-  lines: DrawnLine[]
-  clears: number
+  lines: DrawnLine[];
+  clears: number;
 }
 
 let canvasSpy: CanvasSpy;
@@ -28,23 +28,25 @@ let closedContexts: number;
 
 /** Make the analyser report exactly these bytes, so drawing is a pure function of them. */
 function stubAnalyser(frequencyBytes: number[], timeDomainBytes: number[]) {
-  vi.spyOn(AnalyserNode.prototype, "getByteFrequencyData")
-    .mockImplementation((array: Uint8Array) => {
+  vi.spyOn(AnalyserNode.prototype, "getByteFrequencyData").mockImplementation(
+    (array: Uint8Array) => {
       array.set(frequencyBytes.slice(0, array.length));
-    });
+    },
+  );
 
-  vi.spyOn(AnalyserNode.prototype, "getByteTimeDomainData")
-    .mockImplementation((array: Uint8Array) => {
+  vi.spyOn(AnalyserNode.prototype, "getByteTimeDomainData").mockImplementation(
+    (array: Uint8Array) => {
       array.fill(timeDomainBytes[0] ?? 128);
       timeDomainBytes.slice(0, array.length).forEach((value, index) => {
         array[index] = value;
       });
-    });
+    },
+  );
 }
 
 /** Silence: every frequency bin empty, time domain sitting at the midpoint. */
 const SILENT_FREQUENCIES = Array.from<number>({ length: 256 }).fill(0);
-const CENTRED_TIME_DOMAIN = [ 128 ];
+const CENTRED_TIME_DOMAIN = [128];
 
 beforeEach(() => {
   canvasSpy = { lines: [], clears: 0 };
@@ -61,19 +63,19 @@ beforeEach(() => {
   ) {
     const context = originalGetContext.apply(this, args) as CanvasRenderingContext2D | null;
 
-    if(context === null || args[0] !== "2d") {
+    if (context === null || args[0] !== "2d") {
       return context;
     }
 
     return new Proxy(context, {
       get(target, property) {
-        if(property === "lineTo") {
+        if (property === "lineTo") {
           return (x: number, y: number) => {
             canvasSpy.lines.push({ x, y, strokeStyle: String(target.strokeStyle) });
           };
         }
 
-        if(property === "clearRect") {
+        if (property === "clearRect") {
           return () => {
             canvasSpy.clears += 1;
           };
@@ -84,7 +86,7 @@ beforeEach(() => {
       },
       set(target, property, value) {
         return Reflect.set(target, property, value);
-      }
+      },
     });
   } as HTMLCanvasElement["getContext"]);
 
@@ -118,14 +120,16 @@ function audioTrack(): { track: MediaStreamTrack; dispose: () => Promise<void> }
   const destination = context.createMediaStreamDestination();
   return {
     track: destination.stream.getAudioTracks()[0],
-    dispose: () => context.close()
+    dispose: () => context.close(),
   };
 }
 
 /** Render, let the 30fps loop paint at least once, and hand back the render result. */
 async function renderPreview() {
   const { track, dispose } = audioTrack();
-  const rendered = render(<AudioPreview track={track} width={256} height={100}/>, { wrapper: InPreviewCard });
+  const rendered = render(<AudioPreview track={track} width={256} height={100} />, {
+    wrapper: InPreviewCard,
+  });
 
   await vi.waitFor(() => expect(canvasSpy.lines.length).toBeGreaterThan(0), { timeout: 2000 });
 
@@ -146,8 +150,12 @@ afterEach(() => {
 
 test("bar height scales with the level in each frequency bin", async () => {
   // a ramp across the bins: later bins are louder, so their bars must reach higher
-  stubAnalyser(Array.from<number>({ length: 256 }).fill(0)
-    .map((_, index) => index), CENTRED_TIME_DOMAIN);
+  stubAnalyser(
+    Array.from<number>({ length: 256 })
+      .fill(0)
+      .map((_, index) => index),
+    CENTRED_TIME_DOMAIN,
+  );
 
   const { dispose } = await renderPreview();
 
@@ -175,7 +183,7 @@ test("a silent input draws a flat baseline rather than nothing at all", async ()
   try {
     const firstFrame = canvasSpy.lines.slice(0, 256);
     // every bar is zero-height, so the user still sees the canvas is live
-    expect(firstFrame.every(line => line.y === 100)).toBe(true);
+    expect(firstFrame.every((line) => line.y === 100)).toBe(true);
   } finally {
     dispose();
   }
@@ -186,7 +194,7 @@ test("clipping audio is drawn in the warning colour", async () => {
   document.body.style.setProperty(WARNING, "rgb(9, 8, 7)");
 
   // a sample pinned near the rail is what clipping looks like in the time domain
-  stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [ 251 ]);
+  stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [251]);
 
   const { dispose } = await renderPreview();
 
@@ -201,7 +209,7 @@ test("audio within range is drawn in the foreground colour", async () => {
   document.body.style.setProperty(FOREGROUND, "rgb(1, 2, 3)");
   document.body.style.setProperty(WARNING, "rgb(9, 8, 7)");
 
-  stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [ 130 ]);
+  stubAnalyser(Array.from<number>({ length: 256 }).fill(120), [130]);
 
   const { dispose } = await renderPreview();
 
@@ -249,8 +257,8 @@ test("re-rendering with the same track reuses the audio graph", async () => {
   try {
     const createdBefore = audioContexts.length;
     const closedBefore = closedContexts;
-    rerender(<AudioPreview track={track} width={256} height={100}/>);
-    rerender(<AudioPreview track={track} width={256} height={100}/>);
+    rerender(<AudioPreview track={track} width={256} height={100} />);
+    rerender(<AudioPreview track={track} width={256} height={100} />);
 
     // The React Compiler memoises attachRenderLoop on `track`, so its identity survives a
     // re-render and React leaves the ref attached. Otherwise the graph is torn down and
@@ -263,7 +271,7 @@ test("re-rendering with the same track reuses the audio graph", async () => {
     // fails, which is what made a redundant useCallback here look load-bearing.
     expect({
       created: audioContexts.length - createdBefore,
-      closed: closedContexts - closedBefore
+      closed: closedContexts - closedBefore,
     }).toStrictEqual({ created: 0, closed: 0 });
   } finally {
     dispose();
@@ -280,7 +288,7 @@ test("switching to a different track rebuilds the graph on the new one", async (
     const createdBefore = audioContexts.length;
     const closedBefore = closedContexts;
 
-    rerender(<AudioPreview track={replacement.track} width={256} height={100}/>);
+    rerender(<AudioPreview track={replacement.track} width={256} height={100} />);
 
     // the other half of the contract: reuse must not go so far that a track change is
     // ignored, or the preview would keep drawing the microphone the user just swapped away
@@ -304,7 +312,7 @@ test("unmounting closes the AudioContext and stops the render loop", async () =>
     expect(closedContexts).toBe(closedBefore + 1);
 
     const drawnAtUnmount = canvasSpy.lines.length;
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // the 30fps interval would have painted several more frames by now
     expect(canvasSpy.lines.length).toBe(drawnAtUnmount);

@@ -1,19 +1,19 @@
-import { beforeEach, expect, test, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
-import { RecordingFileList } from "@/lib/utils/browserStorage";
 import userEvent from "@testing-library/user-event";
-import { MantineTestProvider } from "../helpers/mantine";
+import { useEffect } from "react";
+import { beforeEach, expect, test, vi } from "vitest";
+import { BrowserStorageSection } from "@/lib/components/BrowserStorageSection";
 import { useActiveRecording } from "@/lib/hooks/useActiveRecording";
+import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
 import { useReupload } from "@/lib/hooks/useReupload";
-import { downloadFile, gatherRecordingsList } from "@/lib/utils/browserStorage";
-import { ServerEnv } from "@/lib/utils/serverEnv";
-import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { AppStoreState } from "@/lib/store/store";
-import { useEffect } from "react";
-import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
+import { RecordingFileList } from "@/lib/utils/browserStorage";
+import { downloadFile, gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
+import { ServerEnv } from "@/lib/utils/serverEnv";
+import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
+import { MantineTestProvider } from "../helpers/mantine";
 import { aServerEnv } from "../helpers/serverEnv";
 
 vi.mock("@/lib/hooks/useActiveRecording");
@@ -24,14 +24,14 @@ vi.mock("@/lib/utils/notifications");
 
 const mockServerEnv = vi.fn<() => ServerEnv>();
 vi.mock("@/lib/hooks/useServerEnv", () => ({
-  useServerEnv: () => mockServerEnv()
+  useServerEnv: () => mockServerEnv(),
 }));
 
 // Only the two fields the card decides on. An anonymous deployment by default, which never
 // needs a sign-in, so the tests that are not about the session are not affected by it.
 const mockSession = vi.fn<() => { authRequired: boolean; isAuthenticated: boolean }>();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockSession()
+  useAppSession: () => mockSession(),
 }));
 
 // Progress of running re-uploads by recording name, as the store would hold it. What the
@@ -56,11 +56,11 @@ let store: AppStoreState;
  * and doing it in the render body is a lint error.
  */
 function StoreHandle() {
-  const state = useAppStore(s => s);
+  const state = useAppStore((s) => s);
 
   useEffect(() => {
     store = state;
-  }, [ state ]);
+  }, [state]);
 
   return null;
 }
@@ -79,12 +79,12 @@ async function renderSection() {
   render(
     <MantineTestProvider>
       <AppStoreProvider serverEnv={aServerEnv()}>
-        <StoreHandle/>
+        <StoreHandle />
         <ExpandedSection>
-          <BrowserStorageSection id={SECTION_ID}/>
+          <BrowserStorageSection id={SECTION_ID} />
         </ExpandedSection>
       </AppStoreProvider>
-    </MantineTestProvider>
+    </MantineTestProvider>,
   );
 
   // the quota comes from the same look at storage, and is undefined until it has landed
@@ -104,10 +104,10 @@ beforeEach(() => {
   mockServerEnv.mockReturnValue(aServerEnv());
   mockSession.mockReturnValue({ authRequired: false, isAuthenticated: false });
   reuploadProgress = new Map();
-  vi.mocked(useReupload).mockImplementation(recordingName => ({
+  vi.mocked(useReupload).mockImplementation((recordingName) => ({
     isUploading: reuploadProgress.has(recordingName),
     progress: reuploadProgress.get(recordingName),
-    reupload: async () => reupload(recordingName)
+    reupload: async () => reupload(recordingName),
   }));
 });
 
@@ -120,27 +120,27 @@ const RECORDINGS: RecordingFileList[] = [
     files: [
       {
         name: "stream.webm",
-        size: 1.23 * MiB
-      }
-    ]
+        size: 1.23 * MiB,
+      },
+    ],
   },
   {
     name: "BAR_2025-12-11T214230.418Z",
     files: [
       {
         name: "stream.webm",
-        size: 2.34 * MiB
+        size: 2.34 * MiB,
       },
       {
         name: "overlay.webm",
-        size: 3.45 * MiB
+        size: 3.45 * MiB,
       },
       {
         name: "audio-0.webm",
-        size: undefined
-      }
-    ]
-  }
+        size: undefined,
+      },
+    ],
+  },
 ];
 
 test("BrowserStorageSection displays recordings and reacts to clicks", async () => {
@@ -150,14 +150,14 @@ test("BrowserStorageSection displays recordings and reacts to clicks", async () 
   const onDownload = vi.mocked(downloadFile);
 
   vi.mocked(useActiveRecording).mockReturnValue({
-    state: "idle"
+    state: "idle",
   });
 
   vi.mocked(useBrowserStorage).mockReturnValue({
     quota: undefined,
     usage: undefined,
     savedRecordings: recordings,
-    removeSavedRecording: onRemove
+    removeSavedRecording: onRemove,
   });
 
   const user = userEvent.setup();
@@ -201,14 +201,14 @@ test("BrowserStorageSection displays recordings and reacts to clicks", async () 
 
 test("BrowserStorageSection is empty when there are no recordings", async () => {
   vi.mocked(useActiveRecording).mockReturnValue({
-    state: "idle"
+    state: "idle",
   });
 
   vi.mocked(useBrowserStorage).mockReturnValue({
     quota: undefined,
     usage: undefined,
     savedRecordings: [],
-    removeSavedRecording: vi.fn()
+    removeSavedRecording: vi.fn(),
   });
 
   await renderSection();
@@ -227,14 +227,14 @@ test("BrowserStorageSection disables buttons for the active recording", async ()
   vi.mocked(useActiveRecording).mockReturnValue({
     state: "recording",
     name: "BAR_2025-12-11T214230.418Z",
-    stop: vi.fn()
+    stop: vi.fn(),
   });
 
   vi.mocked(useBrowserStorage).mockReturnValue({
     quota: undefined,
     usage: undefined,
     savedRecordings: recordings,
-    removeSavedRecording: onRemove
+    removeSavedRecording: onRemove,
   });
 
   const user = userEvent.setup();
@@ -260,7 +260,7 @@ test("BrowserStorageSection disables buttons for the active recording", async ()
 
   const barDownloads = downloadButtons(srCards[1]);
   expect(barDownloads).toHaveLength(3);
-  for(const download of barDownloads) {
+  for (const download of barDownloads) {
     expect(download).toBeDisabled();
   }
   expect(removeButton(srCards[1])).toBeDisabled();
@@ -268,7 +268,7 @@ test("BrowserStorageSection disables buttons for the active recording", async ()
   onDownload.mockClear();
   onRemove.mockClear();
 
-  for(const download of barDownloads) {
+  for (const download of barDownloads) {
     await user.click(download);
   }
   expect(onDownload).not.toHaveBeenCalled();
@@ -283,14 +283,14 @@ test("BrowserStorageSection disables buttons for the active recording", async ()
 // this is where the button appears and when it can be pressed.
 
 const TWO_RECORDINGS: RecordingFileList[] = [
-  { name: "FOO_2025-12-11T213822.748Z", files: [ { name: "stream.webm", size: 2 ** 20 } ] },
-  { name: "BAR_2025-12-11T214230.418Z", files: [ { name: "stream.webm", size: 2 ** 20 } ] }
+  { name: "FOO_2025-12-11T213822.748Z", files: [{ name: "stream.webm", size: 2 ** 20 }] },
+  { name: "BAR_2025-12-11T214230.418Z", files: [{ name: "stream.webm", size: 2 ** 20 }] },
 ];
 
 async function renderWithBackend(
   activeRecording: ReturnType<typeof useActiveRecording> = { state: "idle" },
   removeSavedRecording: (name: string) => Promise<void> = vi.fn(),
-  recordings: RecordingFileList[] = TWO_RECORDINGS
+  recordings: RecordingFileList[] = TWO_RECORDINGS,
 ) {
   mockServerEnv.mockReturnValue(aServerEnv({ apiUrl: "https://record.example.edu" }));
   vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
@@ -298,7 +298,7 @@ async function renderWithBackend(
     quota: undefined,
     usage: undefined,
     savedRecordings: recordings,
-    removeSavedRecording
+    removeSavedRecording,
   });
   vi.mocked(gatherRecordingsList).mockResolvedValue(recordings);
 
@@ -322,7 +322,7 @@ test("without a backend, nothing is offered for re-upload", async () => {
     quota: undefined,
     usage: undefined,
     savedRecordings: TWO_RECORDINGS,
-    removeSavedRecording: vi.fn()
+    removeSavedRecording: vi.fn(),
   });
 
   await renderSection();
@@ -332,7 +332,11 @@ test("without a backend, nothing is offered for re-upload", async () => {
 
 test("the recording that is being made cannot be re-uploaded", async () => {
   // its files are still being written, so the upload would send half a recording
-  const cards = await renderWithBackend({ state: "recording", name: "BAR_2025-12-11T214230.418Z", stop: vi.fn() });
+  const cards = await renderWithBackend({
+    state: "recording",
+    name: "BAR_2025-12-11T214230.418Z",
+    stop: vi.fn(),
+  });
 
   expect(reuploadButton(cards[1])).toBeDisabled();
   expect(reuploadButton(cards[0])).toBeEnabled();
@@ -344,7 +348,7 @@ test("nothing can be re-uploaded while signed out of a deployment that requires 
 
   const cards = await renderWithBackend();
 
-  for(const card of cards) {
+  for (const card of cards) {
     expect(reuploadButton(card)).toBeDisabled();
     await userEvent.click(reuploadButton(card));
   }
@@ -366,7 +370,7 @@ test("a signed-in user can re-upload in a deployment that requires sign-in", asy
 test("a recording cannot be re-uploaded again while its re-upload is running", async () => {
   // a second press would upload into the same directory the first one is writing to, and
   // schedule a second job for it
-  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 0 ] ]);
+  reuploadProgress = new Map([["BAR_2025-12-11T214230.418Z", 0]]);
 
   const cards = await renderWithBackend();
 
@@ -379,17 +383,20 @@ test("a recording cannot be re-uploaded again while its re-upload is running", a
 });
 
 test("a running re-upload shows how far it has got", async () => {
-  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+  reuploadProgress = new Map([["BAR_2025-12-11T214230.418Z", 42]]);
 
   const cards = await renderWithBackend();
 
-  expect(within(uploadingIndicator(cards[1])).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+  expect(within(uploadingIndicator(cards[1])).getByRole("progressbar")).toHaveAttribute(
+    "aria-valuenow",
+    "42",
+  );
   expect(within(cards[0]).queryByTestId("bs-ind-uploading")).toBeNull();
 });
 
 test("a recording cannot be removed while its re-upload is running", async () => {
   // the upload reads the local files as it goes, so they have to outlive it
-  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+  reuploadProgress = new Map([["BAR_2025-12-11T214230.418Z", 42]]);
   const onRemove = vi.fn();
 
   const cards = await renderWithBackend({ state: "idle" }, onRemove);
@@ -403,11 +410,11 @@ test("a recording cannot be removed while its re-upload is running", async () =>
 
 test("the downloads stay available while a re-upload is running", async () => {
   // they read the same local files the upload does, which is harmless
-  reuploadProgress = new Map([ [ "BAR_2025-12-11T214230.418Z", 42 ] ]);
+  reuploadProgress = new Map([["BAR_2025-12-11T214230.418Z", 42]]);
 
   const cards = await renderWithBackend();
 
-  const [ download ] = downloadButtons(cards[1]);
+  const [download] = downloadButtons(cards[1]);
   expect(download).toBeEnabled();
   await userEvent.click(download);
   expect(downloadFile).toHaveBeenLastCalledWith("BAR_2025-12-11T214230.418Z", "stream.webm");
@@ -423,14 +430,14 @@ test("a card keeps its height while its re-upload runs", async () => {
   const recording = TWO_RECORDINGS[1];
 
   const cardHeight = async () => {
-    await renderWithBackend({ state: "idle" }, vi.fn(), [ recording ]);
+    await renderWithBackend({ state: "idle" }, vi.fn(), [recording]);
     const height = screen.getByTestId("bs-card-recording").getBoundingClientRect().height;
     cleanup();
     return height;
   };
 
   const idle = await cardHeight();
-  reuploadProgress = new Map([ [ recording.name, 42 ] ]);
+  reuploadProgress = new Map([[recording.name, 42]]);
   const uploading = await cardHeight();
 
   expect(uploading).toBe(idle);
@@ -458,7 +465,7 @@ async function renderWithUnstreamed(unstreamed: string[], removeSavedRecording =
   const cards = await renderWithBackend({ state: "idle" }, removeSavedRecording);
 
   act(() => {
-    for(const name of unstreamed) {
+    for (const name of unstreamed) {
       store.markUnstreamed(name);
     }
   });
@@ -468,7 +475,7 @@ async function renderWithUnstreamed(unstreamed: string[], removeSavedRecording =
 
 test("deleting a recording that never reached the backend asks first and deletes nothing", async () => {
   const onRemove = vi.fn();
-  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+  const cards = await renderWithUnstreamed(["BAR_2025-12-11T214230.418Z"], onRemove);
 
   await askToDelete(cards[1]);
 
@@ -479,7 +486,10 @@ test("deleting a recording that never reached the backend asks first and deletes
 
 test("confirming deletes that one recording and closes the dialog", async () => {
   const onRemove = vi.fn();
-  const cards = await renderWithUnstreamed([ "FOO_2025-12-11T213822.748Z", "BAR_2025-12-11T214230.418Z" ], onRemove);
+  const cards = await renderWithUnstreamed(
+    ["FOO_2025-12-11T213822.748Z", "BAR_2025-12-11T214230.418Z"],
+    onRemove,
+  );
 
   await askToDelete(cards[1]);
   await userEvent.click(confirmButton());
@@ -490,7 +500,7 @@ test("confirming deletes that one recording and closes the dialog", async () => 
 
 test("the dialog starts on Cancel, so a stray Enter keeps the recording", async () => {
   const onRemove = vi.fn();
-  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+  const cards = await renderWithUnstreamed(["BAR_2025-12-11T214230.418Z"], onRemove);
 
   await askToDelete(cards[1]);
   await waitFor(() => expect(cancelButton()).toHaveFocus());
@@ -501,11 +511,11 @@ test("the dialog starts on Cancel, so a stray Enter keeps the recording", async 
 });
 
 test.each([
-  [ "cancelling", () => userEvent.click(cancelButton()) ],
-  [ "escape", () => userEvent.keyboard("{Escape}") ]
+  ["cancelling", () => userEvent.click(cancelButton())],
+  ["escape", () => userEvent.keyboard("{Escape}")],
 ])("%s closes the dialog, deletes nothing, and the next delete asks again", async (_, backOut) => {
   const onRemove = vi.fn();
-  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+  const cards = await renderWithUnstreamed(["BAR_2025-12-11T214230.418Z"], onRemove);
 
   await askToDelete(cards[1]);
   await backOut();
@@ -522,7 +532,7 @@ test.each([
 test("recordings that did reach the backend are still deleted without a question", async () => {
   // the question is about that one recording, not about every card next to it
   const onRemove = vi.fn();
-  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+  const cards = await renderWithUnstreamed(["BAR_2025-12-11T214230.418Z"], onRemove);
 
   await userEvent.click(removeButton(cards[0]));
 
@@ -533,7 +543,7 @@ test("recordings that did reach the backend are still deleted without a question
 test("a recording that has since been re-uploaded is deleted without a question", async () => {
   // the backend has it now, so the browser's copy is no longer the only one
   const onRemove = vi.fn();
-  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], onRemove);
+  const cards = await renderWithUnstreamed(["BAR_2025-12-11T214230.418Z"], onRemove);
 
   act(() => store.signalManualUploadFinished("BAR_2025-12-11T214230.418Z", true));
   await userEvent.click(removeButton(cards[1]));
@@ -547,12 +557,20 @@ test("a recording that has since been re-uploaded is deleted without a question"
 test("a confirmed delete that fails is reported", async () => {
   // the dialog is gone by then, so a toast is the only place left to say so
   const failure = new DOMException("the file is open elsewhere", "NoModificationAllowedError");
-  const cards = await renderWithUnstreamed([ "BAR_2025-12-11T214230.418Z" ], vi.fn().mockRejectedValue(failure));
+  const cards = await renderWithUnstreamed(
+    ["BAR_2025-12-11T214230.418Z"],
+    vi.fn().mockRejectedValue(failure),
+  );
 
   await askToDelete(cards[1]);
   await userEvent.click(confirmButton());
 
-  await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining("BAR_2025-12-11T214230.418Z"), failure));
+  await waitFor(() =>
+    expect(showError).toHaveBeenCalledWith(
+      expect.stringContaining("BAR_2025-12-11T214230.418Z"),
+      failure,
+    ),
+  );
 });
 
 test("a download that fails is reported", async () => {
@@ -563,7 +581,9 @@ test("a download that fails is reported", async () => {
 
   await userEvent.click(downloadButtons(cards[0])[0]);
 
-  await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining("stream.webm"), failure));
+  await waitFor(() =>
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining("stream.webm"), failure),
+  );
 });
 
 test("a delete without a question that fails is reported", async () => {
@@ -574,5 +594,10 @@ test("a delete without a question that fails is reported", async () => {
 
   await userEvent.click(removeButton(cards[0]));
 
-  await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining("FOO_2025-12-11T213822.748Z"), failure));
+  await waitFor(() =>
+    expect(showError).toHaveBeenCalledWith(
+      expect.stringContaining("FOO_2025-12-11T213822.748Z"),
+      failure,
+    ),
+  );
 });

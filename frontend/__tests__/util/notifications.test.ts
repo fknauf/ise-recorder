@@ -1,5 +1,5 @@
-import { beforeEach, expect, test, vi } from "vitest";
 import { notifications } from "@mantine/notifications";
+import { beforeEach, expect, test, vi } from "vitest";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 
 // Everywhere else this module is mocked, so these are the only tests of what a toast says.
@@ -40,7 +40,7 @@ test("every kind of toast goes away by itself", () => {
   showMessage("Postprocessing scheduled for GVS_2025");
 
   // false would keep it up until it is clicked away
-  for(const call of [ 0, 1, 2 ]) {
+  for (const call of [0, 1, 2]) {
     expect(shown(call).autoClose).toBeGreaterThan(0);
   }
 });
@@ -51,5 +51,5 @@ test("errors, successes and plain messages look different from each other", () =
   showSuccess("Purged GVS_2025");
   showMessage("Postprocessing scheduled for GVS_2025");
 
-  expect(new Set([ shown(0).color, shown(1).color, shown(2).color ]).size).toBe(3);
+  expect(new Set([shown(0).color, shown(1).color, shown(2).color]).size).toBe(3);
 });

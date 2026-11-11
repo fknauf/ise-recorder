@@ -1,22 +1,22 @@
-import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { SWRConfig } from "swr";
-import { anAppSession } from "../helpers/session";
-import { wipeOpfs } from "../helpers/opfs";
-import { makeDevice } from "../helpers/media";
-import { AppStoreProvider } from "@/lib/hooks/useAppStore";
-import { Home } from "@/app/page";
+import { notifications } from "@mantine/notifications";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MantineTestProvider } from "../helpers/mantine";
-import { notifications } from "@mantine/notifications";
-import { gatherRecordingsList } from "@/lib/utils/browserStorage";
+import { SWRConfig } from "swr";
+import { afterAll, beforeEach, expect, test, vi } from "vitest";
+import { Home } from "@/app/page";
 import { useAppSession } from "@/lib/components/SessionProvider";
+import { AppStoreProvider } from "@/lib/hooks/useAppStore";
+import { gatherRecordingsList } from "@/lib/utils/browserStorage";
+import { MantineTestProvider } from "../helpers/mantine";
+import { makeDevice } from "../helpers/media";
+import { wipeOpfs } from "../helpers/opfs";
 import { aServerEnv } from "../helpers/serverEnv";
 import { rawDownloadPath, rendering } from "../helpers/serverStorage";
+import { anAppSession } from "../helpers/session";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockUseAppSession()
+  useAppSession: () => mockUseAppSession(),
 }));
 
 // These tests are about what the page does and what the uploader sends, not about the
@@ -30,7 +30,7 @@ vi.mock("react-oidc-context", () => ({
   useAutoSignin: () => {
     oidc.autoSigninCalls += 1;
     return { isLoading: false, isAuthenticated: true, error: undefined };
-  }
+  },
 }));
 
 type AppSession = ReturnType<typeof useAppSession>;
@@ -39,7 +39,7 @@ const anonymousSession = anAppSession({
   authRequired: false,
   isAuthenticated: false,
   userName: undefined,
-  getAccessToken: async () => undefined
+  getAccessToken: async () => undefined,
 });
 
 const authenticatedSession = anAppSession();
@@ -79,16 +79,20 @@ function fakeBackend() {
   return vi.fn(async (request: Request) => {
     const { pathname } = new URL(request.url);
     const recording = decodeURIComponent(recordingPath.exec(pathname)?.[1] ?? "");
-    const rawDownloadUrl = (name: string) => (request.headers.has("Authorization") ? rawDownloadPath(name) : null);
+    const rawDownloadUrl = (name: string) =>
+      request.headers.has("Authorization") ? rawDownloadPath(name) : null;
 
-    if(request.method === "PUT" && (/^\/api\/recordings\/[^/]+\/tracks\/[^/]+\/chunks\/\d+$/).test(pathname)) {
+    if (
+      request.method === "PUT" &&
+      /^\/api\/recordings\/[^/]+\/tracks\/[^/]+\/chunks\/\d+$/.test(pathname)
+    ) {
       return new Response(null, { status: 204 });
-    } else if(request.method === "POST" && (/^\/api\/recordings\/[^/]+\/render$/).test(pathname)) {
+    } else if (request.method === "POST" && /^\/api\/recordings\/[^/]+\/render$/.test(pathname)) {
       renderingNames.push(recording);
       return Response.json(rendering(recording, rawDownloadUrl(recording)), { status: 202 });
-    } else if(request.method === "GET" && pathname === "/api/recordings") {
-      return Response.json(renderingNames.map(name => rendering(name, rawDownloadUrl(name))));
-    } else if(request.method === "DELETE" && (/^\/api\/recordings\/[^/]+$/).test(pathname)) {
+    } else if (request.method === "GET" && pathname === "/api/recordings") {
+      return Response.json(renderingNames.map((name) => rendering(name, rawDownloadUrl(name))));
+    } else if (request.method === "DELETE" && /^\/api\/recordings\/[^/]+$/.test(pathname)) {
       return new Response(null, { status: 204 });
     }
 
@@ -100,14 +104,15 @@ function fakeBackend() {
  * The page as the app mounts it, with an SWR cache of its own: SWR's default cache is global,
  * so without this a test would start out with whatever listing the one before it fetched.
  */
-const page = () =>
+const page = () => (
   <MantineTestProvider>
     <AppStoreProvider serverEnv={aServerEnv({ apiUrl: "http://localhost:5000/" })}>
       <SWRConfig value={{ provider: () => new Map() }}>
-        <Home/>
+        <Home />
       </SWRConfig>
     </AppStoreProvider>
-  </MantineTestProvider>;
+  </MantineTestProvider>
+);
 
 /** Just the page, for the tests that only care about what it decides to render. */
 function renderHome(session: AppSession) {
@@ -128,14 +133,14 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
   let x = 0;
 
   const animate = (canvas: HTMLCanvasElement | null) => {
-    if(canvas === null) {
+    if (canvas === null) {
       return;
     }
 
     const renderFunction = () => {
       const ctx = canvas.getContext("2d");
 
-      if(ctx === null) {
+      if (ctx === null) {
         return;
       }
 
@@ -157,20 +162,20 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
   const tree = render(
     <>
       {page()}
-      <canvas width={384} height={216} data-testid="display-src" ref={animate}/>
-      <canvas width={384} height={216} data-testid="video-src" ref={animate}/>
-    </>
+      <canvas width={384} height={216} data-testid="display-src" ref={animate} />
+      <canvas width={384} height={216} data-testid="video-src" ref={animate} />
+    </>,
   );
 
   const mockDevices: MediaDeviceInfo[] = [
     makeDevice("aaa", "AAA", "videoinput", "Webcam Model T"),
-    makeDevice("bbb", "BBB", "audioinput", "Webcam Microphone")
+    makeDevice("bbb", "BBB", "audioinput", "Webcam Microphone"),
   ];
 
-  const displaySrc = await screen.findByTestId("display-src") as HTMLCanvasElement;
+  const displaySrc = (await screen.findByTestId("display-src")) as HTMLCanvasElement;
   const displayStream = displaySrc.captureStream();
 
-  const videoSrc = await screen.findByTestId("video-src") as HTMLCanvasElement;
+  const videoSrc = (await screen.findByTestId("video-src")) as HTMLCanvasElement;
   const videoStream = videoSrc.captureStream();
 
   const audioCtx = new AudioContext();
@@ -193,7 +198,7 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
   // await act(() => audioCtx.resume());
 
   const audioStream = audioDest.stream;
-  const mediaStream = new MediaStream([ ...videoStream.getTracks(), ...audioStream.getTracks() ]);
+  const mediaStream = new MediaStream([...videoStream.getTracks(), ...audioStream.getTracks()]);
 
   expect(mediaStream.getAudioTracks().length).toBe(1);
   expect(mediaStream.getVideoTracks().length).toBe(1);
@@ -234,7 +239,7 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
     expect(tree.getByText("Stop Recording")).not.toBeDisabled();
   });
 
-  await act(() => new Promise(resolve => setTimeout(resolve, 2000)));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 2000)));
   await user.click(tree.getByText("Stop Recording"));
 
   await waitFor(() => {
@@ -252,14 +257,17 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
   // change. The name is also on the recording's card, which is not an alert; the banners are,
   // but none of them names a recording that streamed without trouble.
   await waitFor(
-    () => expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes(recordingName))).toBe(true),
-    { timeout: 8000 }
+    () =>
+      expect(
+        screen.getAllByRole("alert").some((alert) => alert.textContent?.includes(recordingName)),
+      ).toBe(true),
+    { timeout: 8000 },
   );
 
   // When signed in, the end of the recording also refreshes the server-side listing without
   // waiting for it. Its answer now includes the new recording, so the server storage section
   // re-renders whenever that answer arrives -- outside act unless something waits for it here.
-  if(session.isAuthenticated) {
+  if (session.isAuthenticated) {
     await screen.findByTestId("ss-card-rendering");
   }
 
@@ -277,8 +285,7 @@ async function recordAStream(session: AppSession, lectureTitle: string) {
 }
 
 /** Every request the page sent, in order. apiFetch sends each as a single Request. */
-const requests = () =>
-  vi.mocked(window.fetch).mock.calls.map(([ request ]) => request as Request);
+const requests = () => vi.mocked(window.fetch).mock.calls.map(([request]) => request as Request);
 
 /**
  * How many requests went to one endpoint. Counted per endpoint rather than in total: how many
@@ -286,12 +293,17 @@ const requests = () =>
  * Each chunk has a URL of its own, so those are matched by pattern.
  */
 const requestsTo = (url: string | RegExp) =>
-  requests().filter(request => (typeof url === "string" ? request.url === url : url.test(request.url))).length;
+  requests().filter((request) =>
+    typeof url === "string" ? request.url === url : url.test(request.url),
+  ).length;
 
 const chunkUrl = (recordingName: string) =>
-  new RegExp(`^http://localhost:5000/api/recordings/${RegExp.escape(recordingName)}/tracks/[^/]+/chunks/\\d+$`);
+  new RegExp(
+    `^http://localhost:5000/api/recordings/${RegExp.escape(recordingName)}/tracks/[^/]+/chunks/\\d+$`,
+  );
 
-const renderUrl = (recordingName: string) => `http://localhost:5000/api/recordings/${recordingName}/render`;
+const renderUrl = (recordingName: string) =>
+  `http://localhost:5000/api/recordings/${recordingName}/render`;
 
 test("e2e recording a stream works", async () => {
   const recordingName = await recordAStream(anonymousSession, "FOO_101");
@@ -302,14 +314,19 @@ test("e2e recording a stream works", async () => {
   // not signed in, so there is no listing to fetch
   expect(requestsTo("http://localhost:5000/api/recordings")).toBe(0);
 
-  const chunks = requests().filter(request => chunkUrl(recordingName).test(request.url));
-  expect(chunks.every(chunk => chunk.method === "PUT")).toBe(true);
+  const chunks = requests().filter((request) => chunkUrl(recordingName).test(request.url));
+  expect(chunks.every((chunk) => chunk.method === "PUT")).toBe(true);
   // between them rather than each: a track's last chunk, or all of stream.webm on chromium
   // (see recordAStream), can be empty
-  expect((await Promise.all(chunks.map(chunk => chunk.blob()))).reduce((acc, blob) => acc + blob.size, 0)).toBeGreaterThan(0);
+  expect(
+    (await Promise.all(chunks.map((chunk) => chunk.blob()))).reduce(
+      (acc, blob) => acc + blob.size,
+      0,
+    ),
+  ).toBeGreaterThan(0);
 
   // the recording is named by the URL; the body only says who gets the report
-  const job = requests().find(request => request.url === renderUrl(recordingName))!;
+  const job = requests().find((request) => request.url === renderUrl(recordingName))!;
   expect(job.method).toBe("POST");
   expect(job.headers.get("Content-Type")).toBe("application/json");
   expect(await job.json()).toStrictEqual({ recipient: "speaker@example.com" });
@@ -326,31 +343,42 @@ test("e2e recording a stream sends the access token to the server", async () => 
   // At least twice rather than exactly: SWR also refetches when the window regains focus.
   expect(requestsTo("http://localhost:5000/api/recordings")).toBeGreaterThanOrEqual(2);
 
-  const urls = requests().map(request => request.url);
+  const urls = requests().map((request) => request.url);
 
   // after the job, not merely somewhere: a refresh before it would find nothing rendering
-  expect(urls.lastIndexOf("http://localhost:5000/api/recordings"))
-    .toBeGreaterThan(urls.indexOf(renderUrl(recordingName)));
+  expect(urls.lastIndexOf("http://localhost:5000/api/recordings")).toBeGreaterThan(
+    urls.indexOf(renderUrl(recordingName)),
+  );
 
-  const listing = requests().find(request => request.url === "http://localhost:5000/api/recordings")!;
+  const listing = requests().find(
+    (request) => request.url === "http://localhost:5000/api/recordings",
+  )!;
   expect(listing.method).toBe("GET");
   expect(listing.headers.get("Accept")).toBe("application/json");
   expect(listing.headers.get("Authorization")).toBe("Bearer test-token");
 
-  const chunks = requests().filter(request => chunkUrl(recordingName).test(request.url));
-  expect(chunks.every(chunk => chunk.method === "PUT")).toBe(true);
-  expect(chunks.every(chunk => chunk.headers.get("Authorization") === "Bearer test-token")).toBe(true);
-  expect((await Promise.all(chunks.map(chunk => chunk.blob()))).reduce((acc, blob) => acc + blob.size, 0)).toBeGreaterThan(0);
+  const chunks = requests().filter((request) => chunkUrl(recordingName).test(request.url));
+  expect(chunks.every((chunk) => chunk.method === "PUT")).toBe(true);
+  expect(chunks.every((chunk) => chunk.headers.get("Authorization") === "Bearer test-token")).toBe(
+    true,
+  );
+  expect(
+    (await Promise.all(chunks.map((chunk) => chunk.blob()))).reduce(
+      (acc, blob) => acc + blob.size,
+      0,
+    ),
+  ).toBeGreaterThan(0);
 
-  const job = requests().find(request => request.url === renderUrl(recordingName))!;
+  const job = requests().find((request) => request.url === renderUrl(recordingName))!;
   expect(job.method).toBe("POST");
   expect(job.headers.get("Content-Type")).toBe("application/json");
   expect(job.headers.get("Authorization")).toBe("Bearer test-token");
   expect(await job.json()).toStrictEqual({ recipient: "speaker@example.com" });
   // the new lecture's card offers its raw tracks while the video is rendering, from the link
   // the listing handed out, below the configured backend
-  expect(within(screen.getByTestId("ss-card-rendering")).getByRole("link", { name: /raw data/i }))
-    .toHaveAttribute("href", `http://localhost:5000/api/${rawDownloadPath(recordingName)}`);
+  expect(
+    within(screen.getByTestId("ss-card-rendering")).getByRole("link", { name: /raw data/i }),
+  ).toHaveAttribute("href", `http://localhost:5000/api/${rawDownloadPath(recordingName)}`);
 });
 
 // --- the auto sign-in gate -------------------------------------------------

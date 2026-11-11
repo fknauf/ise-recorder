@@ -1,9 +1,9 @@
-import { expect, test, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
-import { VideoPreview } from "@/lib/components/VideoPreview";
 import userEvent from "@testing-library/user-event";
-import { InPreviewCard } from "../helpers/mantine";
 import { useEffect, useState } from "react";
+import { expect, test, vi } from "vitest";
+import { VideoPreview } from "@/lib/components/VideoPreview";
+import { InPreviewCard } from "../helpers/mantine";
 
 test("VideoPreview displays video track", async () => {
   const width = 640;
@@ -13,7 +13,7 @@ test("VideoPreview displays video track", async () => {
   let setPreviewTrack: (track: MediaStreamTrack) => void = () => {};
 
   const TestComponent = () => {
-    const [ track, setTrack ] = useState<MediaStreamTrack>();
+    const [track, setTrack] = useState<MediaStreamTrack>();
 
     useEffect(() => {
       setPreviewTrack = setTrack;
@@ -21,8 +21,7 @@ test("VideoPreview displays video track", async () => {
 
     return (
       <InPreviewCard>
-        {
-          track &&
+        {track && (
           <VideoPreview
             track={track}
             width={width}
@@ -33,33 +32,27 @@ test("VideoPreview displays video track", async () => {
             onToggleMainDisplay={() => {}}
             onToggleOverlay={() => {}}
           />
-        }
+        )}
         {
           // Apparently the only way to extract image data from video elements and image files in Javascript is
           // to render them to a canvas and extract from there. This strikes me as extremely silly API design,
           // but I'll just have to deal with it, won't I.
         }
-        <canvas
-          width={width}
-          height={height}
-          data-testid="test-img-snapshot-extractor"
-        />
-        <canvas
-          width={width}
-          height={height}
-          data-testid="test-img-srcimage-extractor"
-        />
+        <canvas width={width} height={height} data-testid="test-img-snapshot-extractor" />
+        <canvas width={width} height={height} data-testid="test-img-srcimage-extractor" />
       </InPreviewCard>
     );
   };
 
-  render(<TestComponent/>);
+  render(<TestComponent />);
 
   // extract image data from source file
   const srcImageResponse = await fetch(srcImageUrl);
   const srcImageBlob = await srcImageResponse.blob();
   const srcImageBitmap = await createImageBitmap(srcImageBlob);
-  const srcImageCanvas = await screen.findByTestId("test-img-srcimage-extractor") as HTMLCanvasElement;
+  const srcImageCanvas = (await screen.findByTestId(
+    "test-img-srcimage-extractor",
+  )) as HTMLCanvasElement;
   const srcImageContext = srcImageCanvas.getContext("2d") as CanvasRenderingContext2D;
   srcImageContext?.drawImage(srcImageBitmap, 0, 0);
   const srcImageData = srcImageContext?.getImageData(0, 0, width, height, { colorSpace: "srgb" });
@@ -67,14 +60,16 @@ test("VideoPreview displays video track", async () => {
   const stream = srcImageCanvas.captureStream(30);
   act(() => setPreviewTrack(stream.getVideoTracks()[0]));
 
-  const display = await screen.findByRole("img") as HTMLVideoElement;
+  const display = (await screen.findByRole("img")) as HTMLVideoElement;
   await display.play();
 
   expect(display.width).toBe(width);
   expect(display.height).toBe(height);
 
   // extract image data from video preview
-  const snapshotCanvas = await screen.findByTestId("test-img-snapshot-extractor") as HTMLCanvasElement;
+  const snapshotCanvas = (await screen.findByTestId(
+    "test-img-snapshot-extractor",
+  )) as HTMLCanvasElement;
   const snapshotContext = snapshotCanvas.getContext("2d") as CanvasRenderingContext2D;
   snapshotContext?.drawImage(display, 0, 0, width, height);
   const snapshotData = snapshotContext?.getImageData(0, 0, width, height, { colorSpace: "srgb" });
@@ -96,7 +91,7 @@ test("VideoPreview handles user input", async () => {
   let setPreviewTrack: (track: MediaStreamTrack) => void = () => {};
 
   const TestComponent = () => {
-    const [ track, setTrack ] = useState<MediaStreamTrack>();
+    const [track, setTrack] = useState<MediaStreamTrack>();
 
     useEffect(() => {
       setPreviewTrack = setTrack;
@@ -104,8 +99,7 @@ test("VideoPreview handles user input", async () => {
 
     return (
       <InPreviewCard>
-        {
-          track &&
+        {track && (
           <VideoPreview
             track={track}
             width={384}
@@ -116,19 +110,15 @@ test("VideoPreview handles user input", async () => {
             onToggleMainDisplay={onToggleMainDisplay}
             onToggleOverlay={onToggleOverlay}
           />
-        }
-        <canvas
-          width={384}
-          height={192}
-          data-testid="track-src"
-        />
+        )}
+        <canvas width={384} height={192} data-testid="track-src" />
       </InPreviewCard>
     );
   };
 
-  render(<TestComponent/>);
+  render(<TestComponent />);
 
-  const trackSrc = await screen.findByTestId("track-src") as HTMLCanvasElement;
+  const trackSrc = (await screen.findByTestId("track-src")) as HTMLCanvasElement;
   const stream = trackSrc.captureStream();
   const track = stream.getVideoTracks()[0];
 
@@ -153,7 +143,7 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
   let setPreviewTrack: (track: MediaStreamTrack) => void = () => {};
 
   const TestComponent = () => {
-    const [ track, setTrack ] = useState<MediaStreamTrack>();
+    const [track, setTrack] = useState<MediaStreamTrack>();
 
     useEffect(() => {
       setPreviewTrack = setTrack;
@@ -161,8 +151,7 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
 
     return (
       <InPreviewCard>
-        {
-          track &&
+        {track && (
           <VideoPreview
             track={track}
             width={384}
@@ -173,19 +162,15 @@ test("VideoPreview doesn't handle user input when disabled", async () => {
             onToggleMainDisplay={onToggleMainDisplay}
             onToggleOverlay={onToggleOverlay}
           />
-        }
-        <canvas
-          width={384}
-          height={192}
-          data-testid="track-src"
-        />
+        )}
+        <canvas width={384} height={192} data-testid="track-src" />
       </InPreviewCard>
     );
   };
 
-  render(<TestComponent/>);
+  render(<TestComponent />);
 
-  const trackSrc = await screen.findByTestId("track-src") as HTMLCanvasElement;
+  const trackSrc = (await screen.findByTestId("track-src")) as HTMLCanvasElement;
   const stream = trackSrc.captureStream();
   const track = stream.getVideoTracks()[0];
 

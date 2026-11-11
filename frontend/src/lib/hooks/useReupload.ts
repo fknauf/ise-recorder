@@ -1,19 +1,19 @@
 import { useAppSession } from "../components/SessionProvider";
+import { ApiDestination, defaultRetryPolicy, RetryPolicy, withRetries } from "../utils/apiFetch";
 import { getAllRecordingTracks } from "../utils/browserStorage";
 import { showError, showSuccess } from "../utils/notifications";
-import { ApiDestination, defaultRetryPolicy, RetryPolicy, withRetries } from "../utils/apiFetch";
 import { uploadFile, schedulePostprocessing } from "../utils/serverStorage";
 import { useAppStore } from "./useAppStore";
 import { useLecture } from "./useLecture";
-import { useRefreshServerStorage } from "./useServerStorage";
 import { useServerEnv } from "./useServerEnv";
+import { useRefreshServerStorage } from "./useServerStorage";
 
 function progressAccumulator(totalBytes: number, report: (percent: number) => void) {
   let transferred = 0;
 
   return (sentBytes: number) => {
     transferred += sentBytes;
-    report(transferred / totalBytes * 100);
+    report((transferred / totalBytes) * 100);
   };
 }
 
@@ -21,14 +21,14 @@ export function useReupload(recordingName: string) {
   const { apiUrl } = useServerEnv();
   const { getAccessToken } = useAppSession();
   const { lecturerEmail } = useLecture();
-  const progress = useAppStore(state => state.reuploadProgress.get(recordingName));
+  const progress = useAppStore((state) => state.reuploadProgress.get(recordingName));
 
-  const signalManualUploadProgress = useAppStore(state => state.signalManualUploadProgress);
-  const signalManualUploadFinished = useAppStore(state => state.signalManualUploadFinished);
+  const signalManualUploadProgress = useAppStore((state) => state.signalManualUploadProgress);
+  const signalManualUploadFinished = useAppStore((state) => state.signalManualUploadFinished);
   const refreshProcessedRecordings = useRefreshServerStorage();
 
   const reupload = async () => {
-    if(apiUrl === undefined) {
+    if (apiUrl === undefined) {
       console.warn(`Attempted reupload of ${recordingName}, but no backend is configured`);
       return;
     }
@@ -38,13 +38,13 @@ export function useReupload(recordingName: string) {
     const uploadName = `${recordingName}-reupload`;
     const destination: ApiDestination = {
       apiUrl,
-      getAccessToken
+      getAccessToken,
     };
 
     const retryPolicy: RetryPolicy = {
       ...defaultRetryPolicy,
       retries: 3,
-      initialWaitMillis: 10000
+      initialWaitMillis: 10000,
     };
 
     let completed = false;
@@ -52,15 +52,20 @@ export function useReupload(recordingName: string) {
     try {
       const trackBlobs = await getAllRecordingTracks(recordingName);
       // max(1, ...) to avoid division by zero. If all files are empty, the progress indicator is meaningless, anyway.
-      const totalBytes = Math.max(1, trackBlobs.reduce((acc, cur) => acc + cur.file.size, 0));
+      const totalBytes = Math.max(
+        1,
+        trackBlobs.reduce((acc, cur) => acc + cur.file.size, 0),
+      );
 
-      const signalProgress = progressAccumulator(totalBytes, percent => signalManualUploadProgress(recordingName, percent));
+      const signalProgress = progressAccumulator(totalBytes, (percent) =>
+        signalManualUploadProgress(recordingName, percent),
+      );
 
       const uploadTracks = async () => {
-        for(const { trackName, file } of trackBlobs) {
+        for (const { trackName, file } of trackBlobs) {
           try {
             await uploadFile(destination, file, uploadName, trackName, retryPolicy, signalProgress);
-          } catch(e) {
+          } catch (e) {
             showError(`Failed manual upload of ${uploadName} track ${trackName}`, e);
             return false;
           }
@@ -69,28 +74,31 @@ export function useReupload(recordingName: string) {
         return true;
       };
 
-      if(trackBlobs.length === 0) {
+      if (trackBlobs.length === 0) {
         showError(`Nothing to upload for ${recordingName}`);
-      } else if(await uploadTracks()) {
+      } else if (await uploadTracks()) {
         // report ok if all tracks are uploaded even if post-processing can't be scheduled. User doesn't need to
         // re-upload then, just re-render.
         completed = true;
 
         try {
-          const response = await withRetries(() => schedulePostprocessing(destination, uploadName, lecturerEmail, undefined), retryPolicy);
+          const response = await withRetries(
+            () => schedulePostprocessing(destination, uploadName, lecturerEmail, undefined),
+            retryPolicy,
+          );
 
-          if(response.state === "rendering") {
+          if (response.state === "rendering") {
             showSuccess(`Scheduled postprocessing for recording "${uploadName}"`);
           } else {
             // audio-only recording: the schedule-call only marked the recording as no-longer-streaming;
             // actual post-processing is not possible.
             showSuccess("Finished uploading.");
           }
-        } catch(e) {
+        } catch (e) {
           showError("Failed to schedule postprocessing", e);
         }
       }
-    } catch(e) {
+    } catch (e) {
       console.error(`Unexpected error during manual upload of ${uploadName}`, e);
       showError(`Manual upload of ${uploadName} failed`, e);
     }
@@ -102,6 +110,6 @@ export function useReupload(recordingName: string) {
   return {
     isUploading: progress !== undefined,
     progress,
-    reupload
+    reupload,
   };
 }

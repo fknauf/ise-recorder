@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { wipeOpfs } from "../helpers/opfs";
-import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
-import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { gatherRecordingsList } from "@/lib/utils/browserStorage";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { uploadChunk, schedulePostprocessing } from "@/lib/utils/serverStorage";
+import { wipeOpfs } from "../helpers/opfs";
 import { rendering } from "../helpers/serverStorage";
 
 vi.mock("@/lib/utils/serverStorage");
@@ -13,7 +13,9 @@ vi.mock("@/lib/utils/notifications");
 beforeEach(() => {
   // stand-ins for a backend that accepts everything
   vi.mocked(uploadChunk).mockResolvedValue();
-  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => rendering(recording));
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) =>
+    rendering(recording),
+  );
 });
 
 const accessToken = async () => "test-token";
@@ -32,7 +34,7 @@ test("recordLecture does nothing when there are no tracks", async () => {
   const destination: RecordingDestination = {
     apiUrl: "http://example.com",
     impeded: false,
-    getAccessToken: accessToken
+    getAccessToken: accessToken,
   };
 
   const trackBundle: RecordingTrackBundle = {
@@ -40,14 +42,20 @@ test("recordLecture does nothing when there are no tracks", async () => {
     videoTracks: [],
     audioTracks: [],
     mainDisplay: undefined,
-    overlay: undefined
+    overlay: undefined,
   };
 
   await recordLecture(
     trackBundle,
-    "FOO", "lecturer@example.com",
+    "FOO",
+    "lecturer@example.com",
     destination,
-    onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed);
+    onStarting,
+    onStarted,
+    onChunkWritten,
+    onFinished,
+    onStreamingFailed,
+  );
 
   expect(onStarting).not.toHaveBeenCalled();
   expect(onStarted).not.toHaveBeenCalled();
@@ -58,7 +66,7 @@ test("recordLecture does nothing when there are no tracks", async () => {
 
 test("recordLecture records lectures", async () => {
   const animate = (canvas: HTMLCanvasElement | null) => {
-    if(canvas === null) {
+    if (canvas === null) {
       return;
     }
 
@@ -67,7 +75,7 @@ test("recordLecture records lectures", async () => {
     const renderFunction = () => {
       const ctx = canvas.getContext("2d");
 
-      if(ctx === null) {
+      if (ctx === null) {
         return;
       }
 
@@ -86,13 +94,13 @@ test("recordLecture records lectures", async () => {
 
   render(
     <>
-      <canvas width={384} height={192} data-testid="scr" ref={animate}/>
-      <canvas width={384} height={192} data-testid="vid" ref={animate}/>
-    </>
+      <canvas width={384} height={192} data-testid="scr" ref={animate} />
+      <canvas width={384} height={192} data-testid="vid" ref={animate} />
+    </>,
   );
 
-  const scrCanvas = await screen.findByTestId("scr") as HTMLCanvasElement;
-  const vidCanvas = await screen.findByTestId("vid") as HTMLCanvasElement;
+  const scrCanvas = (await screen.findByTestId("scr")) as HTMLCanvasElement;
+  const vidCanvas = (await screen.findByTestId("vid")) as HTMLCanvasElement;
 
   const scrStream = scrCanvas.captureStream();
   const vidStream = vidCanvas.captureStream();
@@ -109,11 +117,9 @@ test("recordLecture records lectures", async () => {
   const onStarting = vi.fn().mockImplementation((name: string) => {
     recordingName = name;
   });
-  const onStarted = vi.fn().mockImplementation(
-    (name: string, stopFn: () => void) => {
-      stopRecording = stopFn;
-    }
-  );
+  const onStarted = vi.fn().mockImplementation((name: string, stopFn: () => void) => {
+    stopRecording = stopFn;
+  });
   const onChunkWritten = vi.fn();
   const onFinished = vi.fn();
   const onStreamingFailed = vi.fn();
@@ -125,22 +131,28 @@ test("recordLecture records lectures", async () => {
     videoTracks,
     audioTracks: [],
     mainDisplay,
-    overlay
+    overlay,
   };
 
   const destination: RecordingDestination = {
     apiUrl: "http://example.com",
     impeded: false,
-    getAccessToken: accessToken
+    getAccessToken: accessToken,
   };
 
   const renderPromise = recordLecture(
     trackBundle,
-    "FOO", "lecturer@example.com",
+    "FOO",
+    "lecturer@example.com",
     destination,
-    onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed);
+    onStarting,
+    onStarted,
+    onChunkWritten,
+    onFinished,
+    onStreamingFailed,
+  );
 
-  await new Promise(resolve => setTimeout(resolve, 6000));
+  await new Promise((resolve) => setTimeout(resolve, 6000));
   stopRecording();
 
   await renderPromise;
@@ -164,11 +176,44 @@ test("recordLecture records lectures", async () => {
   const apiDestination = { apiUrl: destination.apiUrl, getAccessToken: accessToken };
 
   expect(vi.mocked(uploadChunk)).toHaveBeenCalledTimes(4);
-  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "stream", 0, expect.any(AbortSignal));
-  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "stream", 1, expect.any(AbortSignal));
-  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "overlay", 0, expect.any(AbortSignal));
-  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(apiDestination, expect.any(Blob), recordingName, "overlay", 1, expect.any(AbortSignal));
-  expect(vi.mocked(schedulePostprocessing)).toHaveBeenCalledWith(apiDestination, recordingName, "lecturer@example.com", expect.any(AbortSignal));
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(
+    apiDestination,
+    expect.any(Blob),
+    recordingName,
+    "stream",
+    0,
+    expect.any(AbortSignal),
+  );
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(
+    apiDestination,
+    expect.any(Blob),
+    recordingName,
+    "stream",
+    1,
+    expect.any(AbortSignal),
+  );
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(
+    apiDestination,
+    expect.any(Blob),
+    recordingName,
+    "overlay",
+    0,
+    expect.any(AbortSignal),
+  );
+  expect(vi.mocked(uploadChunk)).toHaveBeenCalledWith(
+    apiDestination,
+    expect.any(Blob),
+    recordingName,
+    "overlay",
+    1,
+    expect.any(AbortSignal),
+  );
+  expect(vi.mocked(schedulePostprocessing)).toHaveBeenCalledWith(
+    apiDestination,
+    recordingName,
+    "lecturer@example.com",
+    expect.any(AbortSignal),
+  );
   // every chunk arrived, so there is nothing to re-upload
   expect(onStreamingFailed).not.toHaveBeenCalled();
 });

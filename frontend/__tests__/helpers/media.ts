@@ -15,7 +15,15 @@ export function canvasVideoTrack(width = 64, height = 48): MediaStreamTrack {
 }
 
 /** A device the way enumerateDevices reports one. */
-export const makeDevice = (deviceId: string, groupId: string, kind: MediaDeviceKind, label: string): MediaDeviceInfo => ({
-  deviceId, groupId, kind, label,
-  toJSON: () => JSON.stringify({ deviceId, groupId, kind, label })
+export const makeDevice = (
+  deviceId: string,
+  groupId: string,
+  kind: MediaDeviceKind,
+  label: string,
+): MediaDeviceInfo => ({
+  deviceId,
+  groupId,
+  kind,
+  label,
+  toJSON: () => JSON.stringify({ deviceId, groupId, kind, label }),
 });

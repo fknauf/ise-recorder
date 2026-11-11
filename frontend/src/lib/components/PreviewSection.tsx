@@ -1,37 +1,40 @@
 "use client";
 
-import { ReactNode } from "react";
-import { VideoPreview } from "./VideoPreview";
-import { AudioPreview } from "./AudioPreview";
-import { useMediaTracks } from "../hooks/useMediaTracks";
-import { useActiveRecording } from "../hooks/useActiveRecording";
 import { Card, CloseButton, Group, Stack, Text, Tooltip, useMantineTheme } from "@mantine/core";
+import { ReactNode } from "react";
+import { useActiveRecording } from "../hooks/useActiveRecording";
+import { useMediaTracks } from "../hooks/useMediaTracks";
+import { AudioPreview } from "./AudioPreview";
+import { VideoPreview } from "./VideoPreview";
 
 interface PreviewCardProps {
-  label: string | undefined
-  hasDisabledButtons: boolean
-  onRemove: () => void
-  children: ReactNode
+  label: string | undefined;
+  hasDisabledButtons: boolean;
+  onRemove: () => void;
+  children: ReactNode;
 }
 
 /**
  * Preview card, i.e. the frame around a video or audio preview. Consists of a frame, title, and a "remove" button.
  * The actual preview is passed in as a child node.
  */
-const PreviewCard = (
-  {
-    label,
-    hasDisabledButtons,
-    onRemove,
-    children
-  }: Readonly<PreviewCardProps>
-) => {
+const PreviewCard = ({
+  label,
+  hasDisabledButtons,
+  onRemove,
+  children,
+}: Readonly<PreviewCardProps>) => {
   const theme = useMantineTheme();
 
   return (
     <Card withBorder shadow="sm" padding="sm">
       <Stack justify="flex-start" align="stretch" gap="sm">
-        <Group justify="space-between" align="flex-start" wrap="nowrap" style={{ contain: "inline-size" }}>
+        <Group
+          justify="space-between"
+          align="flex-start"
+          wrap="nowrap"
+          style={{ contain: "inline-size" }}
+        >
           <Tooltip label={label} withArrow color={theme.primaryColor}>
             <Text truncate="end">{label}</Text>
           </Tooltip>
@@ -51,16 +54,11 @@ const PreviewCard = (
  * Previews section on the main page, basically a collection of preview cards for all active streams.
  */
 export interface PreviewSectionProps {
-  canvasWidth: number
-  canvasHeight: number
+  canvasWidth: number;
+  canvasHeight: number;
 }
 
-export function PreviewSection(
-  {
-    canvasWidth,
-    canvasHeight
-  }: Readonly<PreviewSectionProps>
-) {
+export function PreviewSection({ canvasWidth, canvasHeight }: Readonly<PreviewSectionProps>) {
   const {
     displayTracks,
     videoTracks,
@@ -69,7 +67,7 @@ export function PreviewSection(
     overlay,
     selectMainDisplay,
     selectOverlay,
-    removeTrack
+    removeTrack,
   } = useMediaTracks();
 
   const activeRecording = useActiveRecording();
@@ -82,9 +80,9 @@ export function PreviewSection(
         // Screen capture tracks have confusing labels in chromium, so for them we just show a
         // generic label. Webcams provide the device name, which is useful to show to the user.
         [
-          ...displayTracks.map((track, ix) => [ track, `Screen capture ${ix}` ] as const),
-          ...videoTracks.map(track => [ track, track.label ] as const)
-        ].map(([ track, label ]) =>
+          ...displayTracks.map((track, ix) => [track, `Screen capture ${ix}`] as const),
+          ...videoTracks.map((track) => [track, track.label] as const),
+        ].map(([track, label]) => (
           <PreviewCard
             key={`preview-card-${track.id}`}
             label={label}
@@ -98,28 +96,24 @@ export function PreviewSection(
               switchesDisabled={hasDisabledButtons}
               isMainDisplay={mainDisplay === track}
               isOverlay={overlay === track}
-              onToggleMainDisplay={isSelected => selectMainDisplay(isSelected ? track : undefined)}
-              onToggleOverlay={isSelected => selectOverlay(isSelected ? track : undefined)}
+              onToggleMainDisplay={(isSelected) =>
+                selectMainDisplay(isSelected ? track : undefined)
+              }
+              onToggleOverlay={(isSelected) => selectOverlay(isSelected ? track : undefined)}
             />
           </PreviewCard>
-        )
+        ))
       }
-      {
-        audioTracks.map(track =>
-          <PreviewCard
-            key={`preview-card-${track.id}`}
-            label={track.label}
-            hasDisabledButtons={hasDisabledButtons}
-            onRemove={() => removeTrack(track)}
-          >
-            <AudioPreview
-              track={track}
-              width={canvasWidth}
-              height={canvasHeight}
-            />
-          </PreviewCard>
-        )
-      }
+      {audioTracks.map((track) => (
+        <PreviewCard
+          key={`preview-card-${track.id}`}
+          label={track.label}
+          hasDisabledButtons={hasDisabledButtons}
+          onRemove={() => removeTrack(track)}
+        >
+          <AudioPreview track={track} width={canvasWidth} height={canvasHeight} />
+        </PreviewCard>
+      ))}
     </Group>
   );
 }

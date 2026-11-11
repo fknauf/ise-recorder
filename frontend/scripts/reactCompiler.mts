@@ -14,7 +14,7 @@ export const SOURCE_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
 
 /** Whether the React Compiler is meant to look at this file at all. */
 export function isCompilableSource(file: string): boolean {
-  return file.startsWith(SOURCE_ROOT) && (/\.tsx?$/).test(file);
+  return file.startsWith(SOURCE_ROOT) && /\.tsx?$/.test(file);
 }
 
 /**
@@ -31,13 +31,10 @@ export function reactCompilerOptions(file: string): TransformOptions {
     // the jsx plugin must stay off for .ts: it makes `<Type>value` assertions, which
     // browserStorage.ts uses, parse as an unclosed JSX element
     parserOpts: {
-      plugins: file.endsWith(".tsx") ? [ "jsx", "typescript" ] : [ "typescript" ]
+      plugins: file.endsWith(".tsx") ? ["jsx", "typescript"] : ["typescript"],
     },
     plugins: [
-      [
-        "babel-plugin-react-compiler",
-        { environment: { enableNameAnonymousFunctions: false } }
-      ]
-    ]
+      ["babel-plugin-react-compiler", { environment: { enableNameAnonymousFunctions: false } }],
+    ],
   };
 }

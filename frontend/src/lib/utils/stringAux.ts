@@ -3,13 +3,13 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme
 export function utf8ByteLength(cluster: string) {
   let bytes = 0;
 
-  for(const c of cluster) {
+  for (const c of cluster) {
     const codePoint = c.codePointAt(0) ?? 0;
-    if(codePoint < 0x80) {
+    if (codePoint < 0x80) {
       bytes += 1;
-    } else if(codePoint < 0x800) {
+    } else if (codePoint < 0x800) {
       bytes += 2;
-    } else if(codePoint < 0x10000) {
+    } else if (codePoint < 0x10000) {
       bytes += 3;
     } else {
       bytes += 4;
@@ -31,16 +31,16 @@ export function graphemeAwareTruncateToBytes(str: string, maxBytes: number) {
   const maxClusters = Math.floor(maxBytes / 3);
 
   // Can't be longer than maxBytes after UTF-8 encoding, so no need to inspect.
-  if(str.length < maxClusters) {
+  if (str.length < maxClusters) {
     return str;
   }
 
   let bytes = 0;
 
-  for(const { segment, index } of graphemeSegmenter.segment(str)) {
+  for (const { segment, index } of graphemeSegmenter.segment(str)) {
     const segmentBytes = utf8ByteLength(segment);
 
-    if(bytes + segmentBytes > maxBytes) {
+    if (bytes + segmentBytes > maxBytes) {
       return str.slice(0, index);
     }
 

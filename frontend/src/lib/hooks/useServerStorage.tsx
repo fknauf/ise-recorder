@@ -1,8 +1,13 @@
 import useSWR, { useSWRConfig } from "swr";
 import { useAppSession } from "../components/SessionProvider";
-import { useServerEnv } from "./useServerEnv";
-import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "../utils/serverStorage";
+import {
+  fetchRecordings,
+  purgeRecording,
+  schedulePostprocessing,
+  ServerStorageRecording,
+} from "../utils/serverStorage";
 import { useLecture } from "./useLecture";
+import { useServerEnv } from "./useServerEnv";
 
 const RECORDINGS_KEY = "/api/recordings";
 
@@ -21,20 +26,23 @@ export function useServerStorage() {
       refreshWhenHidden: false,
       refreshWhenOffline: false,
       shouldRetryOnError: true,
-      errorRetryInterval: 5000
-    }
+      errorRetryInterval: 5000,
+    },
   );
 
   const refresh = () => mutate();
 
   const purge = async (recordingName: string) => {
-    if(apiUrl === undefined) {
+    if (apiUrl === undefined) {
       return undefined;
     }
 
-    const optimisticPurgeUpdate = (committed: ServerStorageRecording[] | undefined, displayed?: ServerStorageRecording[]) => {
+    const optimisticPurgeUpdate = (
+      committed: ServerStorageRecording[] | undefined,
+      displayed?: ServerStorageRecording[],
+    ) => {
       const current = displayed ?? committed ?? [];
-      return current.filter(value => value.name !== recordingName);
+      return current.filter((value) => value.name !== recordingName);
     };
 
     return await mutate(
@@ -45,38 +53,48 @@ export function useServerStorage() {
         optimisticData: optimisticPurgeUpdate,
         populateCache: false,
         revalidate: true,
-        rollbackOnError: true
-      }
+        rollbackOnError: true,
+      },
     );
   };
 
   const rerender = (recordingName: string) => {
-    if(apiUrl === undefined) {
+    if (apiUrl === undefined) {
       return undefined;
     }
 
-    const optimisticRerenderUpdate = (committed: ServerStorageRecording[] | undefined, displayed?: ServerStorageRecording[]) => {
+    const optimisticRerenderUpdate = (
+      committed: ServerStorageRecording[] | undefined,
+      displayed?: ServerStorageRecording[],
+    ) => {
       const current = displayed ?? committed ?? [];
-      return current.map(value => (
+      return current.map((value) =>
         value.name === recordingName
           ? {
               state: "rendering" as const,
               name: value.name,
-              rawDownloadUrl: value.rawDownloadUrl
+              rawDownloadUrl: value.rawDownloadUrl,
             }
-          : value
-      ));
+          : value,
+      );
     };
 
-    return mutate(async () => {
-      await schedulePostprocessing({ apiUrl, getAccessToken }, recordingName, lecturerEmail, undefined);
-    },
-    {
-      optimisticData: optimisticRerenderUpdate,
-      populateCache: false,
-      rollbackOnError: true,
-      revalidate: true
-    });
+    return mutate(
+      async () => {
+        await schedulePostprocessing(
+          { apiUrl, getAccessToken },
+          recordingName,
+          lecturerEmail,
+          undefined,
+        );
+      },
+      {
+        optimisticData: optimisticRerenderUpdate,
+        populateCache: false,
+        rollbackOnError: true,
+        revalidate: true,
+      },
+    );
   };
 
   return { data, error, isLoading, isValidating, refresh, rerender, purge };

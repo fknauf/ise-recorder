@@ -1,7 +1,7 @@
 "use client";
 
-import { ApiDestination, apiFetchData, apiFetchVoid, RetryPolicy, withRetries } from "./apiFetch";
 import * as z from "zod";
+import { ApiDestination, apiFetchData, apiFetchVoid, RetryPolicy, withRetries } from "./apiFetch";
 
 z.config({ jitless: true });
 
@@ -9,7 +9,7 @@ const UnfinishedRecordingSchema = (state: "rendering" | "unprocessed" | "not-ren
   z.object({
     state: z.literal(state),
     name: z.string(),
-    rawDownloadUrl: z.string().nullable()
+    rawDownloadUrl: z.string().nullable(),
   });
 
 const RenderingRecordingSchema = UnfinishedRecordingSchema("rendering");
@@ -21,17 +21,15 @@ const DownloadableRecordingSchema = z.object({
   name: z.string(),
   size: z.number(),
   downloadUrl: z.string().nullable(),
-  rawDownloadUrl: z.string().nullable()
+  rawDownloadUrl: z.string().nullable(),
 });
 
-const ServerStorageRecordingSchema = z.discriminatedUnion(
-  "state",
-  [
-    RenderingRecordingSchema,
-    UnprocessedRecordingSchema,
-    NonRenderableRecordingSchema,
-    DownloadableRecordingSchema
-  ]);
+const ServerStorageRecordingSchema = z.discriminatedUnion("state", [
+  RenderingRecordingSchema,
+  UnprocessedRecordingSchema,
+  NonRenderableRecordingSchema,
+  DownloadableRecordingSchema,
+]);
 
 const ServerStorageRecordingListSchema = z.array(ServerStorageRecordingSchema);
 
@@ -39,7 +37,10 @@ type UnprocessedRecording = z.infer<typeof UnprocessedRecordingSchema>;
 type RenderingRecording = z.infer<typeof RenderingRecordingSchema>;
 type NonRenderableRecording = z.infer<typeof NonRenderableRecordingSchema>;
 
-export type UnfinishedRecording = UnprocessedRecording | RenderingRecording | NonRenderableRecording;
+export type UnfinishedRecording =
+  | UnprocessedRecording
+  | RenderingRecording
+  | NonRenderableRecording;
 export type DownloadableRecording = z.infer<typeof DownloadableRecordingSchema>;
 export type ServerStorageRecording = UnfinishedRecording | DownloadableRecording;
 
@@ -49,7 +50,7 @@ export async function uploadChunk(
   recording: string,
   track: string,
   index: number,
-  abortSignal: AbortSignal | undefined
+  abortSignal: AbortSignal | undefined,
 ): Promise<void> {
   abortSignal?.throwIfAborted();
 
@@ -58,7 +59,7 @@ export async function uploadChunk(
   const request: RequestInit = {
     method: "PUT",
     body: chunk,
-    signal: abortSignal
+    signal: abortSignal,
   };
 
   await apiFetchVoid(destination, urlPath, request);
@@ -68,36 +69,36 @@ export async function schedulePostprocessing(
   destination: ApiDestination,
   recording: string,
   recipient: string | undefined,
-  abortSignal: AbortSignal | undefined
+  abortSignal: AbortSignal | undefined,
 ): Promise<ServerStorageRecording> {
   abortSignal?.throwIfAborted();
 
   const urlPath = `api/recordings/${encodeURIComponent(recording)}/render`;
 
   const data = {
-    recipient
+    recipient,
   };
 
   const request: RequestInit = {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(data),
-    signal: abortSignal
+    signal: abortSignal,
   };
 
   return await apiFetchData(destination, urlPath, request, ServerStorageRecordingSchema);
 }
 
 export async function fetchRecordings(
-  destination: ApiDestination
+  destination: ApiDestination,
 ): Promise<ServerStorageRecording[]> {
   const request: RequestInit = {
     method: "GET",
     headers: {
-      Accept: "application/json"
-    }
+      Accept: "application/json",
+    },
   };
 
   const urlPath = "api/recordings";
@@ -107,12 +108,12 @@ export async function fetchRecordings(
 
 export async function purgeRecording(
   destination: ApiDestination,
-  recordingName: string
+  recordingName: string,
 ): Promise<void> {
   const urlPath = `api/recordings/${encodeURIComponent(recordingName)}`;
 
   const request: RequestInit = {
-    method: "DELETE"
+    method: "DELETE",
   };
 
   return await apiFetchVoid(destination, urlPath, request);
@@ -124,22 +125,15 @@ export async function uploadFile(
   recording: string,
   track: string,
   retryPolicy: RetryPolicy,
-  signalProgress: (bytesSent: number) => void = () => {}
+  signalProgress: (bytesSent: number) => void = () => {},
 ): Promise<void> {
   const CHUNK_SIZE = 4 * 2 ** 20;
 
-  for(let index = 0, offset = 0; offset < file.size; ++index, offset += CHUNK_SIZE) {
+  for (let index = 0, offset = 0; offset < file.size; ++index, offset += CHUNK_SIZE) {
     const chunk = file.slice(offset, offset + CHUNK_SIZE);
     await withRetries(
-      () => uploadChunk(
-        destination,
-        chunk,
-        recording,
-        track,
-        index,
-        retryPolicy.abortSignal
-      ),
-      retryPolicy
+      () => uploadChunk(destination, chunk, recording, track, index, retryPolicy.abortSignal),
+      retryPolicy,
     );
     signalProgress(chunk.size);
   }

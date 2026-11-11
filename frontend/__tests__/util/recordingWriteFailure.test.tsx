@@ -1,8 +1,8 @@
 import { expect, test, vi } from "vitest";
-import { canvasVideoTrack } from "../helpers/media";
-import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
+import { canvasVideoTrack } from "../helpers/media";
 
 /**
  * What happens when the OPFS refuses a write -- in practice, an exhausted browser
@@ -21,7 +21,7 @@ vi.mock("@/lib/utils/notifications");
 const destination: RecordingDestination = {
   apiUrl: undefined,
   impeded: false,
-  getAccessToken: async () => undefined
+  getAccessToken: async () => undefined,
 };
 
 /** A writable stream that rejects every write, the way an exhausted quota would. */
@@ -30,14 +30,14 @@ function failingStream() {
     write: vi.fn(async () => {
       throw new Error("quota exceeded");
     }),
-    close: vi.fn(async () => {})
+    close: vi.fn(async () => {}),
   } as unknown as FileSystemWritableFileStream;
 }
 
 function workingStream() {
   return {
     write: vi.fn(async () => {}),
-    close: vi.fn(async () => {})
+    close: vi.fn(async () => {}),
   } as unknown as FileSystemWritableFileStream;
 }
 
@@ -48,20 +48,26 @@ function workingStream() {
 async function recordOneChunk(onChunkWritten: (name: string, file: string, size: number) => void) {
   const display = canvasVideoTrack();
   const bundle: RecordingTrackBundle = {
-    displayTracks: [ display ], videoTracks: [], audioTracks: [],
-    mainDisplay: display, overlay: undefined
+    displayTracks: [display],
+    videoTracks: [],
+    audioTracks: [],
+    mainDisplay: display,
+    overlay: undefined,
   };
 
   await recordLecture(
-    bundle, "GVS", "lecturer@example.com", destination,
+    bundle,
+    "GVS",
+    "lecturer@example.com",
+    destination,
     () => {},
     async (_name, stop) => {
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 300));
       stop();
     },
     onChunkWritten,
     () => {},
-    () => {}
+    () => {},
   );
 }
 
@@ -82,7 +88,7 @@ test("a failed write is surfaced to the user rather than only logged", async () 
 
   expect(vi.mocked(showError)).toHaveBeenCalledWith(
     expect.stringContaining("stream.webm"),
-    expect.any(Error)
+    expect.any(Error),
   );
 });
 
@@ -108,6 +114,6 @@ test("a successful write is counted", async () => {
   expect(onChunkWritten).toHaveBeenCalledWith(
     expect.any(String),
     "stream.webm",
-    expect.any(Number)
+    expect.any(Number),
   );
 });

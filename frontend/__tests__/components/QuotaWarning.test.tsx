@@ -1,8 +1,8 @@
-import { expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { expect, test, vi } from "vitest";
 import { QuotaWarning } from "@/lib/components/QuotaWarning";
-import { MantineTestProvider } from "../helpers/mantine";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
+import { MantineTestProvider } from "../helpers/mantine";
 
 vi.mock("@/lib/hooks/useBrowserStorage");
 
@@ -15,18 +15,20 @@ test("QuotaWarning shows up if quota is critical", async () => {
     quota: quota,
     usage: usage,
     savedRecordings: [],
-    removeSavedRecording: vi.fn()
+    removeSavedRecording: vi.fn(),
   });
 
   render(
     <MantineTestProvider>
-      <QuotaWarning thresholdBytes={2 ** 30}/>
-    </MantineTestProvider>
+      <QuotaWarning thresholdBytes={2 ** 30} />
+    </MantineTestProvider>,
   );
 
   await screen.findByRole("alert");
 
-  expect(screen.getByRole("alert")).toHaveTextContent("Browser storage running low: 9216 MiB of 10240 MiB used.");
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Browser storage running low: 9216 MiB of 10240 MiB used.",
+  );
 });
 
 test("QuotaWarning doesn't show up if quota is not critical", async () => {
@@ -38,13 +40,13 @@ test("QuotaWarning doesn't show up if quota is not critical", async () => {
     quota: quota,
     usage: usage,
     savedRecordings: [],
-    removeSavedRecording: vi.fn()
+    removeSavedRecording: vi.fn(),
   });
 
   render(
     <MantineTestProvider>
-      <QuotaWarning thresholdBytes={2 ** 30}/>
-    </MantineTestProvider>
+      <QuotaWarning thresholdBytes={2 ** 30} />
+    </MantineTestProvider>,
   );
 
   const quotaWarning = screen.queryByRole("alert");
@@ -59,13 +61,13 @@ test("QuotaWarning doesn't show up if quota is unknown", async () => {
     quota: undefined,
     usage: undefined,
     savedRecordings: [],
-    removeSavedRecording: vi.fn()
+    removeSavedRecording: vi.fn(),
   });
 
   render(
     <MantineTestProvider>
-      <QuotaWarning thresholdBytes={2 ** 30}/>
-    </MantineTestProvider>
+      <QuotaWarning thresholdBytes={2 ** 30} />
+    </MantineTestProvider>,
   );
 
   const quotaWarning = screen.queryByRole("alert");

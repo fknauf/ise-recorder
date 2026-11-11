@@ -4,11 +4,9 @@ import { ServerEnv } from "@/lib/utils/serverEnv";
 import { aServerEnv } from "./serverEnv";
 
 /** A wrapper for renderHook that gives the hook a fresh app store, behind the given deployment. */
-export const appStoreWrapper = (serverEnv: Partial<ServerEnv> = { apiUrl: "http://localhost:5000" }) =>
+export const appStoreWrapper = (
+  serverEnv: Partial<ServerEnv> = { apiUrl: "http://localhost:5000" },
+) =>
   function AppStoreWrapper({ children }: Readonly<{ children: ReactNode }>) {
-    return (
-      <AppStoreProvider serverEnv={aServerEnv(serverEnv)}>
-        {children}
-      </AppStoreProvider>
-    );
+    return <AppStoreProvider serverEnv={aServerEnv(serverEnv)}>{children}</AppStoreProvider>;
   };

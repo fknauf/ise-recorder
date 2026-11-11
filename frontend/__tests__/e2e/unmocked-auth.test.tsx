@@ -1,9 +1,9 @@
-import { expect, test } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MantineTestProvider } from "../helpers/mantine";
-import { AppStoreProvider } from "@/lib/hooks/useAppStore";
-import { SessionProvider } from "@/lib/components/SessionProvider";
+import { expect, test } from "vitest";
 import { Home } from "@/app/page";
+import { SessionProvider } from "@/lib/components/SessionProvider";
+import { AppStoreProvider } from "@/lib/hooks/useAppStore";
+import { MantineTestProvider } from "../helpers/mantine";
 import { aServerEnv } from "../helpers/serverEnv";
 
 /**
@@ -26,10 +26,10 @@ test("an unauthenticated deployment renders with the real react-oidc-context", a
     <MantineTestProvider>
       <AppStoreProvider serverEnv={serverEnv}>
         <SessionProvider serverEnv={serverEnv}>
-          <Home/>
+          <Home />
         </SessionProvider>
       </AppStoreProvider>
-    </MantineTestProvider>
+    </MantineTestProvider>,
   );
 
   // If a react-oidc-context hook runs on the anonymous path, this render throws and the
@@ -44,10 +44,10 @@ test("an unauthenticated deployment shows no authentication UI", async () => {
     <MantineTestProvider>
       <AppStoreProvider serverEnv={serverEnv}>
         <SessionProvider serverEnv={serverEnv}>
-          <Home/>
+          <Home />
         </SessionProvider>
       </AppStoreProvider>
-    </MantineTestProvider>
+    </MantineTestProvider>,
   );
 
   await screen.findByText("Start Recording");

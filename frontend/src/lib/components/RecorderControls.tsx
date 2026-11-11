@@ -1,19 +1,34 @@
 "use client";
 
-import { MicrophoneIcon, MonitorIcon, RecordIcon, StopIcon, VideoCameraIcon } from "@phosphor-icons/react";
-import isEmail from "validator/es/lib/isEmail";
-import { createDeviceKey } from "../store/store";
-import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
-import { useMediaDevices } from "../hooks/useMediaDevices";
-import { useLecture } from "../hooks/useLecture";
-import { ActiveRecording } from "../store/store";
-import { useMediaTracks } from "../hooks/useMediaTracks";
-import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
-import { useHydrated } from "../hooks/useHydrated";
-import { UserMenu } from "./UserMenu";
-import { useAppSession } from "./SessionProvider";
+import {
+  Button,
+  Divider,
+  Group,
+  Input,
+  Loader,
+  Menu,
+  TextInput,
+  useMantineTheme,
+} from "@mantine/core";
+import {
+  MicrophoneIcon,
+  MonitorIcon,
+  RecordIcon,
+  StopIcon,
+  VideoCameraIcon,
+} from "@phosphor-icons/react";
 import { ReactNode, useState } from "react";
-import { Button, Divider, Group, Input, Loader, Menu, TextInput, useMantineTheme } from "@mantine/core";
+import isEmail from "validator/es/lib/isEmail";
+import { useActiveRecording, useStartStopRecording } from "../hooks/useActiveRecording";
+import { useHydrated } from "../hooks/useHydrated";
+import { useLecture } from "../hooks/useLecture";
+import { useMediaDevices } from "../hooks/useMediaDevices";
+import { useMediaTracks } from "../hooks/useMediaTracks";
+import { createDeviceKey } from "../store/store";
+import { ActiveRecording } from "../store/store";
+import { normalizeLectureTitle, sanitizeLectureTitle } from "../utils/recording";
+import { useAppSession } from "./SessionProvider";
+import { UserMenu } from "./UserMenu";
 
 export type RecorderState = ActiveRecording["state"];
 
@@ -21,11 +36,11 @@ function validateLectureTitle(lectureTitle: string): string | undefined {
   const normalizedTitle = normalizeLectureTitle(lectureTitle);
   const sanitizedTitle = sanitizeLectureTitle(lectureTitle);
 
-  if(sanitizedTitle === "" && normalizedTitle !== "") {
+  if (sanitizedTitle === "" && normalizedTitle !== "") {
     return "sanitizes to empty string";
   }
 
-  if(sanitizedTitle !== normalizedTitle) {
+  if (sanitizedTitle !== normalizedTitle) {
     return `sanitizes to ${sanitizedTitle}`;
   }
 
@@ -33,14 +48,15 @@ function validateLectureTitle(lectureTitle: string): string | undefined {
 }
 
 const validateEmail = (email: string | undefined) =>
-  (email === undefined || email.trim() === "" || isEmail(email)
+  email === undefined || email.trim() === "" || isEmail(email)
     ? undefined
-    : "invalid e-mail address");
+    : "invalid e-mail address";
 
-export const UnlabelledRow = ({ children }: Readonly<{ children: ReactNode }>) =>
+export const UnlabelledRow = ({ children }: Readonly<{ children: ReactNode }>) => (
   <Input.Wrapper label={" "} labelElement="div" labelProps={{ "aria-hidden": true }}>
     <Group align="flex-start">{children}</Group>
-  </Input.Wrapper>;
+  </Input.Wrapper>
+);
 
 function RecordButton() {
   // The design is very human.
@@ -53,16 +69,17 @@ function RecordButton() {
   const mediaTracks = useMediaTracks();
 
   const hydrated = useHydrated();
-  const noTracksConfigured = mediaTracks.displayTracks.length + mediaTracks.videoTracks.length + mediaTracks.audioTracks.length === 0;
+  const noTracksConfigured =
+    mediaTracks.displayTracks.length +
+      mediaTracks.videoTracks.length +
+      mediaTracks.audioTracks.length ===
+    0;
 
-  const {
-    startRecording,
-    stopRecording
-  } = useStartStopRecording();
+  const { startRecording, stopRecording } = useStartStopRecording();
 
   const theme = useMantineTheme();
 
-  switch(activeRecording.state) {
+  switch (activeRecording.state) {
     case "idle":
       return (
         // need hydration check here to work around a Firefox limitation: On a soft reload, Firefox's
@@ -73,7 +90,7 @@ function RecordButton() {
           data-testid="rc-btn-record"
           onClick={startRecording}
           disabled={hydrated && noTracksConfigured}
-          leftSection={<RecordIcon/>}
+          leftSection={<RecordIcon />}
         >
           Start Recording
         </Button>
@@ -81,21 +98,13 @@ function RecordButton() {
     case "starting":
     case "preparing":
       return (
-        <Button
-          data-testid="rc-btn-record"
-          disabled
-          leftSection={<StopIcon/>}
-        >
+        <Button data-testid="rc-btn-record" disabled leftSection={<StopIcon />}>
           Stop Recording
         </Button>
       );
     case "recording":
       return (
-        <Button
-          data-testid="rc-btn-record"
-          onClick={stopRecording}
-          leftSection={<StopIcon/>}
-        >
+        <Button data-testid="rc-btn-record" onClick={stopRecording} leftSection={<StopIcon />}>
           Stop Recording
         </Button>
       );
@@ -104,7 +113,7 @@ function RecordButton() {
         <Button
           data-testid="rc-btn-record"
           disabled
-          leftSection={<Loader size="xs" role="progressbar" color={theme.white}/>}
+          leftSection={<Loader size="xs" role="progressbar" color={theme.white} />}
         >
           Stop Recording
         </Button>
@@ -122,13 +131,8 @@ function RecordButton() {
  * Controls are disabled (except for the "stop recording" button) while a recording is underway.
  */
 export function RecorderControls() {
-  const {
-    lectureTitle,
-    lecturerEmail,
-    isLecturerEmailUsed,
-    setLectureTitle,
-    setLecturerEmail
-  } = useLecture();
+  const { lectureTitle, lecturerEmail, isLecturerEmailUsed, setLectureTitle, setLecturerEmail } =
+    useLecture();
 
   const activeRecording = useActiveRecording();
 
@@ -138,44 +142,44 @@ export function RecorderControls() {
     openDisplayStream,
     openVideoStream,
     openAudioStream,
-    refreshMediaDevices
+    refreshMediaDevices,
   } = useMediaDevices();
 
   const { authRequired } = useAppSession();
 
-  const [ videoMenuOpen, setVideoMenuOpen ] = useState(false);
-  const [ audioMenuOpen, setAudioMenuOpen ] = useState(false);
+  const [videoMenuOpen, setVideoMenuOpen] = useState(false);
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
 
   const hasDisabledTrackControls = activeRecording.state !== "idle";
 
-  const onMenuOpenChangeHandler = (setOpen: (isOpen: boolean) => void) => async (isOpen: boolean) => {
-    setOpen(isOpen);
+  const onMenuOpenChangeHandler =
+    (setOpen: (isOpen: boolean) => void) => async (isOpen: boolean) => {
+      setOpen(isOpen);
 
-    if(isOpen) {
-      const effect = await refreshMediaDevices();
+      if (isOpen) {
+        const effect = await refreshMediaDevices();
 
-      // if the refresh handler added video/audio tracks, that means the browser asked for permission
-      // and we took that as the main user action. In that case, the user doesn't need the menu anymore,
-      // may not even recognize that it's still open, and needs to click twice on whatever he does next
-      // to close the menu and only then actually register the desired action. So in that case, close
-      // the menu here so the user is in a more expected state.
-      if(effect === "added-tracks") {
-        setOpen(false);
+        // if the refresh handler added video/audio tracks, that means the browser asked for permission
+        // and we took that as the main user action. In that case, the user doesn't need the menu anymore,
+        // may not even recognize that it's still open, and needs to click twice on whatever he does next
+        // to close the menu and only then actually register the desired action. So in that case, close
+        // the menu here so the user is in a more expected state.
+        if (effect === "added-tracks") {
+          setOpen(false);
+        }
       }
-    }
-  };
+    };
 
   const titleError = validateLectureTitle(lectureTitle);
   const emailError = validateEmail(lecturerEmail);
 
   return (
     <Group wrap="wrap" align="flex-start">
-      {
-        authRequired &&
-          <UnlabelledRow>
-            <UserMenu/>
-          </UnlabelledRow>
-      }
+      {authRequired && (
+        <UnlabelledRow>
+          <UserMenu />
+        </UnlabelledRow>
+      )}
 
       <TextInput
         label="Lecture Title"
@@ -183,53 +187,77 @@ export function RecorderControls() {
         value={lectureTitle}
         disabled={hasDisabledTrackControls}
         error={titleError}
-        onChange={event => setLectureTitle(event.currentTarget.value)}
+        onChange={(event) => setLectureTitle(event.currentTarget.value)}
         h={61}
         autoFocus
       />
 
-      {
-        isLecturerEmailUsed &&
-          <TextInput
-            label="e-Mail"
-            data-testid="rc-txt-email"
-            value={lecturerEmail}
-            disabled={hasDisabledTrackControls}
-            error={emailError}
-            onChange={event => setLecturerEmail(event.currentTarget.value)}
-            h={61}
-          />
-      }
+      {isLecturerEmailUsed && (
+        <TextInput
+          label="e-Mail"
+          data-testid="rc-txt-email"
+          value={lecturerEmail}
+          disabled={hasDisabledTrackControls}
+          error={emailError}
+          onChange={(event) => setLecturerEmail(event.currentTarget.value)}
+          h={61}
+        />
+      )}
 
       <UnlabelledRow>
         <Group>
-          <Divider orientation="vertical"/>
+          <Divider orientation="vertical" />
 
-          <Button onClick={openDisplayStream} disabled={hasDisabledTrackControls} data-testid="rc-btn-addscreen" leftSection={<MonitorIcon/>}>
+          <Button
+            onClick={openDisplayStream}
+            disabled={hasDisabledTrackControls}
+            data-testid="rc-btn-addscreen"
+            leftSection={<MonitorIcon />}
+          >
             Add Screen/Window
           </Button>
 
           <Menu opened={videoMenuOpen} onChange={onMenuOpenChangeHandler(setVideoMenuOpen)}>
             <Menu.Target>
-              <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addvideo" leftSection={<VideoCameraIcon/>}>Add Video Source</Button>
+              <Button
+                disabled={hasDisabledTrackControls}
+                data-testid="rc-btn-addvideo"
+                leftSection={<VideoCameraIcon />}
+              >
+                Add Video Source
+              </Button>
             </Menu.Target>
             <Menu.Dropdown>
-              { videoDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openVideoStream(dev)}>{dev.label}</Menu.Item>) }
+              {videoDevices.map((dev) => (
+                <Menu.Item key={createDeviceKey(dev)} onClick={() => openVideoStream(dev)}>
+                  {dev.label}
+                </Menu.Item>
+              ))}
             </Menu.Dropdown>
           </Menu>
 
           <Menu opened={audioMenuOpen} onChange={onMenuOpenChangeHandler(setAudioMenuOpen)}>
             <Menu.Target>
-              <Button disabled={hasDisabledTrackControls} data-testid="rc-btn-addaudio" leftSection={<MicrophoneIcon/>}>Add Audio Source</Button>
+              <Button
+                disabled={hasDisabledTrackControls}
+                data-testid="rc-btn-addaudio"
+                leftSection={<MicrophoneIcon />}
+              >
+                Add Audio Source
+              </Button>
             </Menu.Target>
             <Menu.Dropdown>
-              { audioDevices.map(dev => <Menu.Item key={createDeviceKey(dev)} onClick={() => openAudioStream(dev)}>{dev.label}</Menu.Item>) }
+              {audioDevices.map((dev) => (
+                <Menu.Item key={createDeviceKey(dev)} onClick={() => openAudioStream(dev)}>
+                  {dev.label}
+                </Menu.Item>
+              ))}
             </Menu.Dropdown>
           </Menu>
 
-          <Divider orientation="vertical"/>
+          <Divider orientation="vertical" />
 
-          <RecordButton/>
+          <RecordButton />
         </Group>
       </UnlabelledRow>
     </Group>

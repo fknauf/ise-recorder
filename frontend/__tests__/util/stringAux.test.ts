@@ -26,33 +26,33 @@ const utf8 = new TextEncoder();
 const CORPUS = [
   "",
   "GVS",
-  "Übung 3",                    // 2-byte
-  "机器学习",                     // 3-byte, one code point per cluster
-  "\u{20000}\u{20001}",         // 4-byte, CJK ext B: two code units per code point
-  "a\u{20000}b",                // astral between BMP neighbours
-  "हिन्दी",                       // 6 code points, 3 clusters
-  "कि॒॑",                         // one cluster, 4 code points, 12 bytes
-  "\u{1F468}\u200d\u{1F4BB}",   // emoji ZWJ sequence: one cluster, 11 bytes
+  "Übung 3", // 2-byte
+  "机器学习", // 3-byte, one code point per cluster
+  "\u{20000}\u{20001}", // 4-byte, CJK ext B: two code units per code point
+  "a\u{20000}b", // astral between BMP neighbours
+  "हिन्दी", // 6 code points, 3 clusters
+  "कि॒॑", // one cluster, 4 code points, 12 bytes
+  "\u{1F468}\u200d\u{1F4BB}", // emoji ZWJ sequence: one cluster, 11 bytes
   "ภาษาไทย",
-  "한국어"
+  "한국어",
 ];
 /* eslint-enable @stylistic/no-multi-spaces */
 
 // --- utf8ByteLength ---------------------------------------------------------
 
-test.each(CORPUS)("utf8ByteLength(%j) agrees with TextEncoder", str => {
+test.each(CORPUS)("utf8ByteLength(%j) agrees with TextEncoder", (str) => {
   expect(utf8ByteLength(str)).toBe(utf8.encode(str).length);
 });
 
 /* eslint-disable @stylistic/no-multi-spaces -- aligned for legibility */
 test.each([
-  [ "\u007f", 1 ],  // last 1-byte code point
-  [ "\u0080", 2 ],  // first 2-byte
-  [ "\u07ff", 2 ],  // last 2-byte
-  [ "\u0800", 3 ],  // first 3-byte
-  [ "\uffff", 3 ],  // last 3-byte
-  [ "\u{10000}", 4 ],  // first 4-byte
-  [ "\u{10FFFF}", 4 ]  // last code point there is
+  ["\u007f", 1], // last 1-byte code point
+  ["\u0080", 2], // first 2-byte
+  ["\u07ff", 2], // last 2-byte
+  ["\u0800", 3], // first 3-byte
+  ["\uffff", 3], // last 3-byte
+  ["\u{10000}", 4], // first 4-byte
+  ["\u{10FFFF}", 4], // last code point there is
 ])("utf8ByteLength(%j) is %i at the width boundary", (str, expected) => {
   expect(utf8ByteLength(str)).toBe(expected);
 });
@@ -66,8 +66,8 @@ test("an astral character counts four bytes, not six", () => {
 });
 
 test.each([
-  [ "lead", "\uD840" ],
-  [ "trail", "\uDC00" ]
+  ["lead", "\uD840"],
+  ["trail", "\uDC00"],
 ])("an unpaired %s surrogate is counted the way TextEncoder encodes it", (_half, surrogate) => {
   // an unpaired surrogate has no UTF-8 encoding; TextEncoder substitutes U+FFFD, which is
   // three bytes, and the < 0x10000 branch happens to agree. Pinned because the agreement is
@@ -77,24 +77,27 @@ test.each([
 
 // --- graphemeAwareTruncateToBytes -------------------------------------------
 
-test.each(CORPUS)("a string that already fits is returned unchanged: %j", str => {
+test.each(CORPUS)("a string that already fits is returned unchanged: %j", (str) => {
   expect(graphemeAwareTruncateToBytes(str, 192)).toBe(str);
 });
 
 test.each([
-  [ "ascii", "a".repeat(300), 192, 192 ],
-  [ "han", "机".repeat(100), 64, 64 ],
-  [ "astral", "\u{20000}".repeat(100), 96, 48 ],
-  [ "devanagari", "हि".repeat(100), 64, 32 ],
-  [ "emoji zwj", "\u{1F468}\u200d\u{1F4BB}".repeat(100), 85, 17 ]
-])("%s truncates to the budget, not to a code unit or cluster count", (_name, str, units, clusters) => {
-  const truncated = graphemeAwareTruncateToBytes(str, 192);
-  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  ["ascii", "a".repeat(300), 192, 192],
+  ["han", "机".repeat(100), 64, 64],
+  ["astral", "\u{20000}".repeat(100), 96, 48],
+  ["devanagari", "हि".repeat(100), 64, 32],
+  ["emoji zwj", "\u{1F468}\u200d\u{1F4BB}".repeat(100), 85, 17],
+])(
+  "%s truncates to the budget, not to a code unit or cluster count",
+  (_name, str, units, clusters) => {
+    const truncated = graphemeAwareTruncateToBytes(str, 192);
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-  expect(truncated.length).toBe(units);
-  expect([ ...segmenter.segment(truncated) ].length).toBe(clusters);
-  expect(utf8.encode(truncated).length).toBeLessThanOrEqual(192);
-});
+    expect(truncated.length).toBe(units);
+    expect([...segmenter.segment(truncated)].length).toBe(clusters);
+    expect(utf8.encode(truncated).length).toBeLessThanOrEqual(192);
+  },
+);
 
 test("the budget, not the cluster count, is what bounds the result", () => {
   // 64 clusters is a comfortable title length and, here, a 768-byte directory name: this
@@ -102,7 +105,7 @@ test("the budget, not the cluster count, is what bounds the result", () => {
   // why an earlier draft carried a maxTitleGraphemes of 64 and was byte-unsafe anyway.
   const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
   const heavy = "कि॒॑".repeat(80);
-  const clustersOf = (str: string) => [ ...segmenter.segment(str) ].map(({ segment }) => segment);
+  const clustersOf = (str: string) => [...segmenter.segment(str)].map(({ segment }) => segment);
 
   const sixtyFourClusters = clustersOf(heavy).slice(0, 64);
 
@@ -114,17 +117,28 @@ test("the budget, not the cluster count, is what bounds the result", () => {
   expect(clustersOf(truncated).length).toBe(16);
 });
 
-test.each([ 0, 1, 3, 11, 64, 192, 1024 ])("nothing exceeds a budget of %i bytes", maxBytes => {
-  for(const str of [ ...CORPUS, "a".repeat(300), "机".repeat(100), "\u{20000}".repeat(100), "कि॒॑".repeat(80) ]) {
-    expect(utf8ByteLength(graphemeAwareTruncateToBytes(str, maxBytes))).toBeLessThanOrEqual(maxBytes);
+test.each([0, 1, 3, 11, 64, 192, 1024])("nothing exceeds a budget of %i bytes", (maxBytes) => {
+  for (const str of [
+    ...CORPUS,
+    "a".repeat(300),
+    "机".repeat(100),
+    "\u{20000}".repeat(100),
+    "कि॒॑".repeat(80),
+  ]) {
+    expect(utf8ByteLength(graphemeAwareTruncateToBytes(str, maxBytes))).toBeLessThanOrEqual(
+      maxBytes,
+    );
   }
 });
 
-test.each([ 0, 1, 3, 11, 64, 192 ])("the result is always a prefix of the input at %i bytes", maxBytes => {
-  for(const str of [ ...CORPUS, "a".repeat(300), "\u{20000}".repeat(100), "कि॒॑".repeat(80) ]) {
-    expect(str.startsWith(graphemeAwareTruncateToBytes(str, maxBytes))).toBe(true);
-  }
-});
+test.each([0, 1, 3, 11, 64, 192])(
+  "the result is always a prefix of the input at %i bytes",
+  (maxBytes) => {
+    for (const str of [...CORPUS, "a".repeat(300), "\u{20000}".repeat(100), "कि॒॑".repeat(80)]) {
+      expect(str.startsWith(graphemeAwareTruncateToBytes(str, maxBytes))).toBe(true);
+    }
+  },
+);
 
 test("a surrogate pair straddling the cut survives whole", () => {
   // the regression this function was written for. 63 ASCII characters put an astral
@@ -136,32 +150,36 @@ test("a surrogate pair straddling the cut survives whole", () => {
   expect(new TextDecoder().decode(utf8.encode(truncated))).toBe(truncated);
 });
 
-test.each([ 0, 1, 2, 3, 4, 5, 64, 65, 66, 67, 191, 192, 193 ])(
+test.each([0, 1, 2, 3, 4, 5, 64, 65, 66, 67, 191, 192, 193])(
   "a cut at %i bytes never orphans half a surrogate pair",
-  maxBytes => {
+  (maxBytes) => {
     // encode/decode is the check that matters: an orphaned half becomes U+FFFD on the way
     // out, so a round trip that comes back unchanged is proof there was no orphan. U+FFFD
     // is not a word character and would be rejected by the backend for the whole lecture.
     const astral = "\u{20000}".repeat(50);
     const mixed = "a\u{20000}b\u{20001}c".repeat(30);
 
-    for(const str of [ astral, mixed ]) {
+    for (const str of [astral, mixed]) {
       const truncated = graphemeAwareTruncateToBytes(str, maxBytes);
 
       expect(new TextDecoder().decode(utf8.encode(truncated))).toBe(truncated);
       expect(truncated).not.toContain("�");
     }
-  }
+  },
 );
 
 test("a cluster is never split across the cut", () => {
   // a Devanagari matra or a Thai vowel sign orphaned from its base renders as a dotted
   // circle, and a ZWJ sequence cut mid-way turns into two unrelated emoji
   const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  const clustersOf = (str: string) => [ ...segmenter.segment(str) ].map(({ segment }) => segment);
+  const clustersOf = (str: string) => [...segmenter.segment(str)].map(({ segment }) => segment);
 
-  for(const str of [ "हिन्दी व्याकरण ".repeat(20), "\u{1F468}\u200d\u{1F4BB}".repeat(40), "ที่ ".repeat(60) ]) {
-    for(const maxBytes of [ 0, 7, 64, 123, 192 ]) {
+  for (const str of [
+    "हिन्दी व्याकरण ".repeat(20),
+    "\u{1F468}\u200d\u{1F4BB}".repeat(40),
+    "ที่ ".repeat(60),
+  ]) {
+    for (const maxBytes of [0, 7, 64, 123, 192]) {
       const truncated = clustersOf(graphemeAwareTruncateToBytes(str, maxBytes));
 
       expect(truncated).toEqual(clustersOf(str).slice(0, truncated.length));
@@ -181,7 +199,7 @@ test("the early exit agrees with the loop it skips", () => {
   // the function returns without segmenting when the input is under maxBytes/3 code units,
   // on the grounds that a code unit is at most three UTF-8 bytes. If that shortcut is ever
   // wrong it is wrong silently, so it is checked against the budget either side of its edge
-  for(const length of [ 62, 63, 64, 65 ]) {
+  for (const length of [62, 63, 64, 65]) {
     const ascii = "a".repeat(length);
 
     expect(graphemeAwareTruncateToBytes(ascii, 192)).toBe(ascii);

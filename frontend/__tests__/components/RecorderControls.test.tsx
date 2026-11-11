@@ -1,18 +1,18 @@
-import { expect, test, vi } from "vitest";
-import { makeDevice } from "../helpers/media";
-import { anAppSession } from "../helpers/session";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { expect, test, vi } from "vitest";
 import { RecorderControls } from "@/lib/components/RecorderControls";
-import { MantineTestProvider } from "../helpers/mantine";
-import { useServerEnv } from "@/lib/hooks/useServerEnv";
-import { useLecture } from "@/lib/hooks/useLecture";
+import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
+import { useLecture } from "@/lib/hooks/useLecture";
 import { RefreshEffect, useMediaDevices } from "@/lib/hooks/useMediaDevices";
 import { useMediaTracks } from "@/lib/hooks/useMediaTracks";
+import { useServerEnv } from "@/lib/hooks/useServerEnv";
 import { ActiveRecording } from "@/lib/store/store";
-import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
+import { MantineTestProvider } from "../helpers/mantine";
+import { makeDevice } from "../helpers/media";
 import { aServerEnv } from "../helpers/serverEnv";
+import { anAppSession } from "../helpers/session";
 
 vi.mock("@/lib/hooks/useServerEnv");
 vi.mock("@/lib/hooks/useLecture");
@@ -22,7 +22,7 @@ vi.mock("@/lib/hooks/useMediaTracks");
 // The session is the real, anonymous one unless a test says otherwise: the controls only ask
 // whether sign-in is required, which is a question about the session rather than about the
 // OpenID library behind it.
-vi.mock("@/lib/components/SessionProvider", async importOriginal => {
+vi.mock("@/lib/components/SessionProvider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/components/SessionProvider")>();
   return { ...actual, useAppSession: vi.fn(actual.useAppSession) };
 });
@@ -35,9 +35,9 @@ vi.mock("@/lib/components/SessionProvider", async importOriginal => {
 const aTrack = () => ({}) as MediaStreamTrack;
 
 interface ConfiguredTracks {
-  displayTracks?: MediaStreamTrack[]
-  videoTracks?: MediaStreamTrack[]
-  audioTracks?: MediaStreamTrack[]
+  displayTracks?: MediaStreamTrack[];
+  videoTracks?: MediaStreamTrack[];
+  audioTracks?: MediaStreamTrack[];
 }
 
 function setupMockHooks(
@@ -49,7 +49,7 @@ function setupMockHooks(
   activeRecording: ActiveRecording,
   // defaults to something recordable: these tests are about the other controls, and an
   // empty default would silently disable the start button underneath all of them
-  tracks: ConfiguredTracks = { displayTracks: [ aTrack() ] }
+  tracks: ConfiguredTracks = { displayTracks: [aTrack()] },
 ) {
   const setLectureTitle = vi.fn();
   const setLecturerEmail = vi.fn();
@@ -71,14 +71,14 @@ function setupMockHooks(
     lecturerEmail: isLecturerEmailUsed ? lecturerEmail : undefined,
     isLecturerEmailUsed,
     setLectureTitle,
-    setLecturerEmail
+    setLecturerEmail,
   });
 
   vi.mocked(useActiveRecording).mockReturnValue(activeRecording);
 
   vi.mocked(useStartStopRecording).mockReturnValue({
     startRecording,
-    stopRecording
+    stopRecording,
   });
 
   vi.mocked(useMediaTracks).mockReturnValue({
@@ -89,7 +89,7 @@ function setupMockHooks(
     overlay: undefined,
     selectMainDisplay: vi.fn(),
     selectOverlay: vi.fn(),
-    removeTrack: vi.fn()
+    removeTrack: vi.fn(),
   });
 
   vi.mocked(useMediaDevices).mockReturnValue({
@@ -98,7 +98,7 @@ function setupMockHooks(
     refreshMediaDevices,
     openDisplayStream,
     openVideoStream,
-    openAudioStream
+    openAudioStream,
   });
 
   return {
@@ -109,7 +109,7 @@ function setupMockHooks(
     refreshMediaDevices,
     openDisplayStream,
     openVideoStream,
-    openAudioStream
+    openAudioStream,
   };
 }
 
@@ -117,9 +117,9 @@ function renderControls() {
   render(
     <MantineTestProvider>
       <SessionProvider serverEnv={aServerEnv()}>
-        <RecorderControls/>
+        <RecorderControls />
       </SessionProvider>
-    </MantineTestProvider>
+    </MantineTestProvider>,
   );
 }
 
@@ -128,7 +128,7 @@ function renderControls() {
 const titleField = () => screen.getByTestId("rc-txt-title") as HTMLInputElement;
 const emailField = () => screen.queryByTestId("rc-txt-email") as HTMLInputElement | null;
 const recordButton = () => screen.getByTestId("rc-btn-record");
-const TRACK_BUTTONS = [ "rc-btn-addscreen", "rc-btn-addvideo", "rc-btn-addaudio" ];
+const TRACK_BUTTONS = ["rc-btn-addscreen", "rc-btn-addvideo", "rc-btn-addaudio"];
 
 const setupIdle = (lectureTitle = "PSU", lecturerEmail = "lecturer@vss.uni-hannover.de") =>
   setupMockHooks("http://localhost:8000", lectureTitle, lecturerEmail, [], [], { state: "idle" });
@@ -139,24 +139,47 @@ test.each([
   { activeRecording: { state: "idle" }, editable: true, recordEnabled: true },
   // the transitional states take no input: a second press could start or stop twice
   { activeRecording: { state: "preparing" }, editable: false, recordEnabled: false },
-  { activeRecording: { state: "starting", name: "PSU_TIMESTAMP" }, editable: false, recordEnabled: false },
-  { activeRecording: { state: "recording", name: "PSU_TIMESTAMP", stop: () => {} }, editable: false, recordEnabled: true },
-  { activeRecording: { state: "stopping", name: "PSU_TIMESTAMP" }, editable: false, recordEnabled: false }
+  {
+    activeRecording: { state: "starting", name: "PSU_TIMESTAMP" },
+    editable: false,
+    recordEnabled: false,
+  },
+  {
+    activeRecording: { state: "recording", name: "PSU_TIMESTAMP", stop: () => {} },
+    editable: false,
+    recordEnabled: true,
+  },
+  {
+    activeRecording: { state: "stopping", name: "PSU_TIMESTAMP" },
+    editable: false,
+    recordEnabled: false,
+  },
 ] as { activeRecording: ActiveRecording; editable: boolean; recordEnabled: boolean }[])(
   "RecorderControls while $activeRecording.state",
   async ({ activeRecording, editable, recordEnabled }) => {
-    setupMockHooks("http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [], [], activeRecording);
+    setupMockHooks(
+      "http://localhost:8000",
+      "PSU",
+      "lecturer@vss.uni-hannover.de",
+      [],
+      [],
+      activeRecording,
+    );
     renderControls();
 
     expect(titleField().value).toBe("PSU");
     expect(emailField()?.value).toBe("lecturer@vss.uni-hannover.de");
 
     // the title and the tracks belong to the recording once it is under way
-    for(const control of [ titleField(), emailField(), ...TRACK_BUTTONS.map(id => screen.getByTestId(id)) ]) {
+    for (const control of [
+      titleField(),
+      emailField(),
+      ...TRACK_BUTTONS.map((id) => screen.getByTestId(id)),
+    ]) {
       expect(control?.matches(":disabled")).toBe(!editable);
     }
     expect(recordButton().matches(":disabled")).toBe(!recordEnabled);
-  }
+  },
 );
 
 test("RecorderControls hides the e-mail field when the lecture has no use for an address", () => {
@@ -200,8 +223,12 @@ test("RecorderControls starts a recording", async () => {
 
 test("RecorderControls stops the recording", async () => {
   const callbacks = setupMockHooks(
-    "http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [], [],
-    { state: "recording", name: "PSU_TIMESTAMP", stop: vi.fn() }
+    "http://localhost:8000",
+    "PSU",
+    "lecturer@vss.uni-hannover.de",
+    [],
+    [],
+    { state: "recording", name: "PSU_TIMESTAMP", stop: vi.fn() },
   );
   renderControls();
 
@@ -223,36 +250,58 @@ test("RecorderControls asks for a screen to capture", async () => {
 test.each([
   {
     button: "rc-btn-addvideo",
-    devices: { video: [ makeDevice("c1", "1", "videoinput", "Camera 1"), makeDevice("c2", "2", "videoinput", "Camera 2") ], audio: [] },
+    devices: {
+      video: [
+        makeDevice("c1", "1", "videoinput", "Camera 1"),
+        makeDevice("c2", "2", "videoinput", "Camera 2"),
+      ],
+      audio: [],
+    },
     pick: 0,
     opens: "openVideoStream",
-    with: { groupId: "1", deviceId: "c1" }
+    with: { groupId: "1", deviceId: "c1" },
   },
   {
     button: "rc-btn-addaudio",
-    devices: { video: [], audio: [ makeDevice("m1", "1", "audioinput", "Microphone 1"), makeDevice("m2", "2", "audioinput", "Microphone 2") ] },
+    devices: {
+      video: [],
+      audio: [
+        makeDevice("m1", "1", "audioinput", "Microphone 1"),
+        makeDevice("m2", "2", "audioinput", "Microphone 2"),
+      ],
+    },
     pick: 1,
     opens: "openAudioStream",
-    with: { groupId: "2", deviceId: "m2" }
-  }
-] as const)("RecorderControls lists the devices behind $button and opens the one picked", async ({ button, devices, pick, opens, with: uid }) => {
-  const callbacks = setupMockHooks(
-    "http://localhost:8000", "PSU", "lecturer@vss.uni-hannover.de", [ ...devices.video ], [ ...devices.audio ], { state: "idle" }
-  );
-  renderControls();
-  const user = userEvent.setup();
+    with: { groupId: "2", deviceId: "m2" },
+  },
+] as const)(
+  "RecorderControls lists the devices behind $button and opens the one picked",
+  async ({ button, devices, pick, opens, with: uid }) => {
+    const callbacks = setupMockHooks(
+      "http://localhost:8000",
+      "PSU",
+      "lecturer@vss.uni-hannover.de",
+      [...devices.video],
+      [...devices.audio],
+      { state: "idle" },
+    );
+    renderControls();
+    const user = userEvent.setup();
 
-  await user.click(screen.getByTestId(button));
-  expect(callbacks.refreshMediaDevices).toHaveBeenCalledOnce();
+    await user.click(screen.getByTestId(button));
+    expect(callbacks.refreshMediaDevices).toHaveBeenCalledOnce();
 
-  // the menu offers the devices by the names the browser gives them
-  const menu = await screen.findAllByRole("menuitem");
-  expect(menu.map(item => item.textContent)).toStrictEqual([ ...devices.video, ...devices.audio ].map(dev => dev.label));
+    // the menu offers the devices by the names the browser gives them
+    const menu = await screen.findAllByRole("menuitem");
+    expect(menu.map((item) => item.textContent)).toStrictEqual(
+      [...devices.video, ...devices.audio].map((dev) => dev.label),
+    );
 
-  await user.click(menu[pick]);
-  // the device itself may be handed over; what matters is that it names the one picked
-  expect(callbacks[opens]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(uid));
-});
+    await user.click(menu[pick]);
+    // the device itself may be handed over; what matters is that it names the one picked
+    expect(callbacks[opens]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(uid));
+  },
+);
 
 test("RecorderControls hands typed lecture data to the store", async () => {
   const callbacks = setupIdle();
@@ -265,7 +314,9 @@ test("RecorderControls hands typed lecture data to the store", async () => {
   expect(callbacks.setLectureTitle).toHaveBeenCalledExactlyOnceWith("PSU2");
 
   await user.type(emailField() as HTMLInputElement, "2");
-  expect(callbacks.setLecturerEmail).toHaveBeenCalledExactlyOnceWith("lecturer@vss.uni-hannover.de2");
+  expect(callbacks.setLecturerEmail).toHaveBeenCalledExactlyOnceWith(
+    "lecturer@vss.uni-hannover.de2",
+  );
 });
 
 // --- what the fields accept -------------------------------------------------
@@ -274,9 +325,9 @@ test("RecorderControls hands typed lecture data to the store", async () => {
 // from what was typed. The rule itself is sanitizeLectureTitle's, in util/recordingName.test.ts.
 
 test.each([
-  [ "an ordinary title", "PSU" ],
-  [ "a title with spaces, which become underscores", "Übung 3" ],
-  [ "no title at all", "" ]
+  ["an ordinary title", "PSU"],
+  ["a title with spaces, which become underscores", "Übung 3"],
+  ["no title at all", ""],
 ])("RecorderControls accepts %s", (_label, title) => {
   setupIdle(title);
   renderControls();
@@ -300,15 +351,15 @@ test("RecorderControls flags a title that would leave nothing of itself", () => 
 });
 
 test.each([
-  [ "an address", "lecturer@example.edu", true ],
+  ["an address", "lecturer@example.edu", true],
   // nobody gets a report then, which is a choice the lecturer is free to make
-  [ "nothing", "", true ],
-  [ "something that is not an address", "lecturer at example dot edu", false ]
+  ["nothing", "", true],
+  ["something that is not an address", "lecturer at example dot edu", false],
 ])("RecorderControls takes %s for the e-mail", (_label, email, valid) => {
   setupIdle("PSU", email);
   renderControls();
 
-  if(valid) {
+  if (valid) {
     expect(emailField()).toBeValid();
   } else {
     expect(emailField()).toBeInvalid();
@@ -331,7 +382,7 @@ const renderIdleWith = (tracks: ConfiguredTracks) => {
     [],
     [],
     { state: "idle" },
-    tracks
+    tracks,
   );
 
   renderControls();
@@ -344,9 +395,9 @@ test("RecorderControls disables start when nothing is configured", () => {
 });
 
 test.each([
-  [ "a screen capture", { displayTracks: [ aTrack() ] } ],
-  [ "a camera", { videoTracks: [ aTrack() ] } ],
-  [ "a microphone alone", { audioTracks: [ aTrack() ] } ]
+  ["a screen capture", { displayTracks: [aTrack()] }],
+  ["a camera", { videoTracks: [aTrack()] }],
+  ["a microphone alone", { audioTracks: [aTrack()] }],
 ])("RecorderControls enables start with %s", (_label, tracks) => {
   // an audio-only recording is a legitimate lecture, so any single track counts
   renderIdleWith(tracks);
@@ -364,7 +415,7 @@ test.each([
 
 const DEVICE_MENUS = [
   { button: "rc-btn-addvideo", device: "Camera 1", kind: "videoinput" },
-  { button: "rc-btn-addaudio", device: "Microphone 1", kind: "audioinput" }
+  { button: "rc-btn-addaudio", device: "Microphone 1", kind: "audioinput" },
 ] as const;
 
 function renderWithDeviceMenus() {
@@ -374,22 +425,25 @@ function renderWithDeviceMenus() {
     "http://localhost:8000",
     "PSU",
     "lecturer@vss.uni-hannover.de",
-    [ device("Camera 1", "videoinput") ],
-    [ device("Microphone 1", "audioinput") ],
-    { state: "idle" }
+    [device("Camera 1", "videoinput")],
+    [device("Microphone 1", "audioinput")],
+    { state: "idle" },
   );
 
   // the refresh settles when the test says so, so the menu can be looked at on either side
   let settleRefresh: (effect: RefreshEffect) => void = () => {};
-  callbacks.refreshMediaDevices.mockImplementation(() => new Promise<RefreshEffect>(resolve => {
-    settleRefresh = resolve;
-  }));
+  callbacks.refreshMediaDevices.mockImplementation(
+    () =>
+      new Promise<RefreshEffect>((resolve) => {
+        settleRefresh = resolve;
+      }),
+  );
 
   renderControls();
 
   return {
     callbacks,
-    settle: (effect: RefreshEffect) => act(async () => settleRefresh(effect))
+    settle: (effect: RefreshEffect) => act(async () => settleRefresh(effect)),
   };
 }
 
@@ -398,45 +452,54 @@ function renderWithDeviceMenus() {
 // long enough that a menu on its way out would still pass for an open one.
 const menuTrigger = (button: string) => screen.getByTestId(button);
 
-test.each(DEVICE_MENUS)("the menu behind $button closes once the refresh added the devices picked in the prompt", async ({ button, device }) => {
-  const { settle } = renderWithDeviceMenus();
-  const user = userEvent.setup();
+test.each(DEVICE_MENUS)(
+  "the menu behind $button closes once the refresh added the devices picked in the prompt",
+  async ({ button, device }) => {
+    const { settle } = renderWithDeviceMenus();
+    const user = userEvent.setup();
 
-  await user.click(menuTrigger(button));
-  expect(await screen.findByRole("menuitem", { name: device })).toBeInTheDocument();
+    await user.click(menuTrigger(button));
+    expect(await screen.findByRole("menuitem", { name: device })).toBeInTheDocument();
 
-  await settle("added-tracks");
+    await settle("added-tracks");
 
-  expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "false");
-  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-});
+    expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  },
+);
 
-test.each(DEVICE_MENUS)("the menu behind $button stays open after a refresh that only listed devices", async ({ button, device }) => {
-  // permissions were already there, so the menu is how the user picks a device
-  const { settle } = renderWithDeviceMenus();
-  const user = userEvent.setup();
+test.each(DEVICE_MENUS)(
+  "the menu behind $button stays open after a refresh that only listed devices",
+  async ({ button, device }) => {
+    // permissions were already there, so the menu is how the user picks a device
+    const { settle } = renderWithDeviceMenus();
+    const user = userEvent.setup();
 
-  await user.click(menuTrigger(button));
-  await settle("just-refreshed");
+    await user.click(menuTrigger(button));
+    await settle("just-refreshed");
 
-  expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "true");
-  // the menu fades in, so it may not be in the DOM yet even though it is open
-  expect(await screen.findByRole("menuitem", { name: device })).toBeInTheDocument();
-});
+    expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "true");
+    // the menu fades in, so it may not be in the DOM yet even though it is open
+    expect(await screen.findByRole("menuitem", { name: device })).toBeInTheDocument();
+  },
+);
 
-test.each(DEVICE_MENUS)("the menu behind $button stays shut if the user closed it before the refresh settled", async ({ button }) => {
-  // the refresh may wait on a permission prompt for as long as the user takes; the menu
-  // is theirs to close in the meantime, and nothing coming back afterwards reopens it
-  const { settle } = renderWithDeviceMenus();
-  const user = userEvent.setup();
+test.each(DEVICE_MENUS)(
+  "the menu behind $button stays shut if the user closed it before the refresh settled",
+  async ({ button }) => {
+    // the refresh may wait on a permission prompt for as long as the user takes; the menu
+    // is theirs to close in the meantime, and nothing coming back afterwards reopens it
+    const { settle } = renderWithDeviceMenus();
+    const user = userEvent.setup();
 
-  await user.click(menuTrigger(button));
-  await screen.findByRole("menu");
-  await user.keyboard("{Escape}");
-  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await user.click(menuTrigger(button));
+    await screen.findByRole("menu");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
-  await settle("just-refreshed");
+    await settle("just-refreshed");
 
-  expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "false");
-  expect(screen.queryByRole("menu")).toBeNull();
-});
+    expect(menuTrigger(button)).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menu")).toBeNull();
+  },
+);

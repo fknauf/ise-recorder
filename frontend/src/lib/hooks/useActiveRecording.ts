@@ -1,12 +1,12 @@
 "use client";
 
-import { useAppStore } from "./useAppStore";
-import { RecordingDestination, recordLecture } from "../utils/recording";
-import { useLecture } from "./useLecture";
-import { useServerEnv } from "./useServerEnv";
-import { useMediaTracks } from "./useMediaTracks";
-import { showError } from "../utils/notifications";
 import { SessionTransition, useAppSession } from "../components/SessionProvider";
+import { showError } from "../utils/notifications";
+import { RecordingDestination, recordLecture } from "../utils/recording";
+import { useAppStore } from "./useAppStore";
+import { useLecture } from "./useLecture";
+import { useMediaTracks } from "./useMediaTracks";
+import { useServerEnv } from "./useServerEnv";
 import { useRefreshServerStorage } from "./useServerStorage";
 
 function preventClosing(e: BeforeUnloadEvent) {
@@ -17,45 +17,36 @@ function preventClosing(e: BeforeUnloadEvent) {
 const streamingDestination = (
   apiUrl: string | undefined,
   sessionState: SessionTransition,
-  getAccessToken: () => Promise<string | undefined>
-): RecordingDestination =>
-  ({
-    apiUrl,
-    impeded: apiUrl !== undefined && sessionState === "cannot-stream",
-    getAccessToken
-  });
+  getAccessToken: () => Promise<string | undefined>,
+): RecordingDestination => ({
+  apiUrl,
+  impeded: apiUrl !== undefined && sessionState === "cannot-stream",
+  getAccessToken,
+});
 
-export const useActiveRecording = () => useAppStore(state => state.activeRecording);
+export const useActiveRecording = () => useAppStore((state) => state.activeRecording);
 
 export function useStartStopRecording() {
-  const selectFromStore = useAppStore(state => state.selectFromStore);
-  const setActiveRecording = useAppStore(state => state.setActiveRecording);
-  const resetFileSizeOverrides = useAppStore(state => state.resetFileSizeOverrides);
-  const updateBrowserStorage = useAppStore(state => state.updateBrowserStorage);
-  const updateQuotaInformation = useAppStore(state => state.updateQuotaInformation);
-  const overrideFileSize = useAppStore(state => state.overrideFileSize);
+  const selectFromStore = useAppStore((state) => state.selectFromStore);
+  const setActiveRecording = useAppStore((state) => state.setActiveRecording);
+  const resetFileSizeOverrides = useAppStore((state) => state.resetFileSizeOverrides);
+  const updateBrowserStorage = useAppStore((state) => state.updateBrowserStorage);
+  const updateQuotaInformation = useAppStore((state) => state.updateQuotaInformation);
+  const overrideFileSize = useAppStore((state) => state.overrideFileSize);
   const refreshProcessedRecordings = useRefreshServerStorage();
-  const markUnstreamed = useAppStore(state => state.markUnstreamed);
+  const markUnstreamed = useAppStore((state) => state.markUnstreamed);
 
-  const {
-    lectureTitle,
-    lecturerEmail
-  } = useLecture();
+  const { lectureTitle, lecturerEmail } = useLecture();
 
   const trackBundle = useMediaTracks();
 
-  const {
-    apiUrl
-  } = useServerEnv();
+  const { apiUrl } = useServerEnv();
 
-  const {
-    getAccessToken,
-    expandSession
-  } = useAppSession();
+  const { getAccessToken, expandSession } = useAppSession();
 
   const startRecording = async () => {
-    const activeRecording = selectFromStore(state => state.activeRecording);
-    if(activeRecording.state !== "idle") {
+    const activeRecording = selectFromStore((state) => state.activeRecording);
+    if (activeRecording.state !== "idle") {
       return;
     }
 
@@ -67,7 +58,7 @@ export function useStartStopRecording() {
       const onStarting = (recordingName: string) => {
         setActiveRecording({
           state: "starting",
-          name: recordingName
+          name: recordingName,
         });
         // Prevent accidental closing of the tab while recording
         window.addEventListener("beforeunload", preventClosing);
@@ -77,14 +68,14 @@ export function useStartStopRecording() {
         setActiveRecording({
           state: "recording",
           name: recordingName,
-          stop: stopFunction
+          stop: stopFunction,
         });
 
         await updateBrowserStorage();
       };
 
       const onChunkWritten = (recordingName: string, filename: string, chunkSize: number) => {
-        overrideFileSize(recordingName, filename, oldSize => oldSize + chunkSize);
+        overrideFileSize(recordingName, filename, (oldSize) => oldSize + chunkSize);
         // no need to await, we can continue before the quota warning updates
         updateQuotaInformation();
       };
@@ -101,11 +92,16 @@ export function useStartStopRecording() {
 
       await recordLecture(
         trackBundle,
-        lectureTitle, lecturerEmail,
+        lectureTitle,
+        lecturerEmail,
         streamingDestination(apiUrl, sessionState, getAccessToken),
-        onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed
+        onStarting,
+        onStarted,
+        onChunkWritten,
+        onFinished,
+        onStreamingFailed,
       );
-    } catch(e) {
+    } catch (e) {
       showError("Recording failed", e);
     }
 
@@ -113,9 +109,9 @@ export function useStartStopRecording() {
   };
 
   const stopRecording = () => {
-    const current = selectFromStore(state => state.activeRecording);
+    const current = selectFromStore((state) => state.activeRecording);
 
-    if(current.state === "recording") {
+    if (current.state === "recording") {
       current.stop();
       setActiveRecording({ name: current.name, state: "stopping" });
     } else {
@@ -125,6 +121,6 @@ export function useStartStopRecording() {
 
   return {
     startRecording,
-    stopRecording
+    stopRecording,
   };
 }

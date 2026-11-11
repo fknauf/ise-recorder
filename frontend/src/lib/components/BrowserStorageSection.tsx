@@ -2,57 +2,64 @@
 
 import { Button, Group, RingProgress, Text, ThemeIcon } from "@mantine/core";
 import { modals } from "@mantine/modals";
-import { TrashIcon, DownloadIcon, CloudArrowUpIcon, WarningIcon, BrowserIcon } from "@phosphor-icons/react";
-import { downloadFile, RecordingFileList } from "../utils/browserStorage";
+import {
+  TrashIcon,
+  DownloadIcon,
+  CloudArrowUpIcon,
+  WarningIcon,
+  BrowserIcon,
+} from "@phosphor-icons/react";
+import { useActiveRecording } from "../hooks/useActiveRecording";
+import { useAppStore } from "../hooks/useAppStore";
 import { useBrowserStorage } from "../hooks/useBrowserStorage";
 import { useReupload } from "../hooks/useReupload";
-import { useActiveRecording } from "../hooks/useActiveRecording";
-import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
 import { useServerEnv } from "../hooks/useServerEnv";
-import { useAppSession } from "./SessionProvider";
-import { useAppStore } from "../hooks/useAppStore";
+import { downloadFile, RecordingFileList } from "../utils/browserStorage";
 import { showError } from "../utils/notifications";
+import { RecordingCard, RecordingCardSection } from "./RecordingCardSection";
+import { useAppSession } from "./SessionProvider";
 
-const mibFormatter = new Intl.NumberFormat(
-  "en-us",
-  {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false
-  }
-);
+const mibFormatter = new Intl.NumberFormat("en-us", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  useGrouping: false,
+});
 
 function confirmDelete(
   recordingName: string,
   onConfirm: () => void,
-  onCancel: () => void = () => {}
+  onCancel: () => void = () => {},
 ) {
   modals.openConfirmModal({
     title: "Confirm Delete",
-    children:
+    children: (
       <Group wrap="nowrap" align="flex-start">
         <ThemeIcon variant="outline" color="warning" size="lg" radius="xl">
-          <WarningIcon/>
+          <WarningIcon />
         </ThemeIcon>
         <Text>
-          You are about to delete the raw recording <strong>{recordingName}</strong> from your browser.
-          This recording has not been uploaded to the backend. Are you sure?
+          You are about to delete the raw recording <strong>{recordingName}</strong> from your
+          browser. This recording has not been uploaded to the backend. Are you sure?
         </Text>
-      </Group>,
+      </Group>
+    ),
     labels: {
       confirm: "Delete",
-      cancel: "Cancel"
+      cancel: "Cancel",
     },
-    confirmProps: { "data-testid": "bs-btn-deleteconfirm", "color": "error" },
+    confirmProps: { "data-testid": "bs-btn-deleteconfirm", color: "error" },
     cancelProps: { "data-testid": "bs-btn-deletecancel", "data-autofocus": true },
     onConfirm,
     onCancel,
     centered: true,
-    size: "lg"
+    size: "lg",
   });
 }
 
-function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: RecordingFileList; onDelete: (recordingName: string) => void }>) {
+function SavedRecordingCard({
+  recording,
+  onDelete,
+}: Readonly<{ recording: RecordingFileList; onDelete: (recordingName: string) => void }>) {
   const { apiUrl } = useServerEnv();
   const activeRecording = useActiveRecording();
   const { isUploading, progress, reupload } = useReupload(recording.name);
@@ -66,84 +73,71 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
   const onDownload = async (filename: string) => {
     try {
       await downloadFile(recording.name, filename);
-    } catch(e) {
+    } catch (e) {
       showError(`Failed download of ${recording.name}/${filename}`, e);
     }
   };
 
   return (
-    <RecordingCard
-      title={recording.name}
-      testid="bs-card-recording"
-    >
+    <RecordingCard title={recording.name} testid="bs-card-recording">
       <Button.Group orientation="vertical">
-        {
-          recording.files.map(({ name, size }) =>
-            <Button
-              key={`download-${name}`}
-              disabled={isRecording}
-              onClick={() => onDownload(name)}
-              data-testid="bs-btn-download"
-              leftSection={<DownloadIcon/>}
-            >
-              {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}
-            </Button>
-          )
-        }
+        {recording.files.map(({ name, size }) => (
+          <Button
+            key={`download-${name}`}
+            disabled={isRecording}
+            onClick={() => onDownload(name)}
+            data-testid="bs-btn-download"
+            leftSection={<DownloadIcon />}
+          >
+            {name} {size !== undefined && `(${mibFormatter.format(size / 2 ** 20)} MiB)`}
+          </Button>
+        ))}
       </Button.Group>
-      {
-        isUploading
-          ? <Group
-              justify="center"
-              align="center"
-              data-testid="bs-ind-uploading"
-              h={36}
-              gap="xs"
+      {isUploading ? (
+        <Group justify="center" align="center" data-testid="bs-ind-uploading" h={36} gap="xs">
+          <RingProgress
+            size={38}
+            thickness={4}
+            sections={[{ value: progress ?? 0, color: "info" }]}
+            role="progressbar"
+            aria-label="Uploading"
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          />
+          <Text>Uploading...</Text>
+        </Group>
+      ) : (
+        <Group>
+          {apiUrl !== undefined ? (
+            <Button
+              key="upload"
+              data-testid="bs-btn-reupload"
+              flex="1 1 0"
+              miw="max-content"
+              onClick={reupload}
+              disabled={uploadDisabled}
+              leftSection={<CloudArrowUpIcon />}
+              variant="outline"
             >
-              <RingProgress
-                size={38}
-                thickness={4}
-                sections={[{ value: progress ?? 0, color: "info" }]}
-                role="progressbar"
-                aria-label="Uploading"
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              />
-              <Text>Uploading...</Text>
-            </Group>
-          : <Group>
-              {
-                apiUrl !== undefined
-                  ? <Button
-                      key="upload"
-                      data-testid="bs-btn-reupload"
-                      flex="1 1 0"
-                      miw="max-content"
-                      onClick={reupload}
-                      disabled={uploadDisabled}
-                      leftSection={<CloudArrowUpIcon/>}
-                      variant="outline"
-                    >
-                    Re-upload
-                    </Button>
-                  : null
-              }
-              <Button
-                key="delete"
-                data-testid="bs-btn-delete"
-                flex="1 1 0"
-                miw="max-content"
-                onClick={() => onDelete(recording.name)}
-                disabled={deleteDisabled}
-                leftSection={<TrashIcon/>}
-                color="warning"
-                variant="outline"
-              >
-                Delete
-              </Button>
-            </Group>
-      }
+              Re-upload
+            </Button>
+          ) : null}
+          <Button
+            key="delete"
+            data-testid="bs-btn-delete"
+            flex="1 1 0"
+            miw="max-content"
+            onClick={() => onDelete(recording.name)}
+            disabled={deleteDisabled}
+            leftSection={<TrashIcon />}
+            color="warning"
+            variant="outline"
+          >
+            Delete
+          </Button>
+        </Group>
+      )}
     </RecordingCard>
   );
 }
@@ -156,22 +150,22 @@ function SavedRecordingCard({ recording, onDelete }: Readonly<{ recording: Recor
  */
 export function BrowserStorageSection({ id }: Readonly<{ id: string }>) {
   const { removeSavedRecording, savedRecordings } = useBrowserStorage();
-  const unstreamedRecordings = useAppStore(state => state.unstreamedRecordings);
+  const unstreamedRecordings = useAppStore((state) => state.unstreamedRecordings);
 
-  if(savedRecordings.length === 0) {
+  if (savedRecordings.length === 0) {
     return null;
   }
 
   const doDeleteRecording = async (recordingName: string) => {
     try {
       await removeSavedRecording(recordingName);
-    } catch(e) {
+    } catch (e) {
       showError(`Failed to delete ${recordingName}`, e);
     }
   };
 
   const onDelete = async (recordingName: string) => {
-    if(unstreamedRecordings.includes(recordingName)) {
+    if (unstreamedRecordings.includes(recordingName)) {
       confirmDelete(recordingName, () => doDeleteRecording(recordingName));
     } else {
       await doDeleteRecording(recordingName);
@@ -179,16 +173,14 @@ export function BrowserStorageSection({ id }: Readonly<{ id: string }>) {
   };
 
   return (
-    <RecordingCardSection id={id} title="Browser-Local Raw Recordings" icon={<BrowserIcon/>}>
-      {
-        savedRecordings.map(rec =>
-          <SavedRecordingCard
-            key={`saved-recording-${rec.name}`}
-            recording={rec}
-            onDelete={onDelete}
-          />
-        )
-      }
+    <RecordingCardSection id={id} title="Browser-Local Raw Recordings" icon={<BrowserIcon />}>
+      {savedRecordings.map((rec) => (
+        <SavedRecordingCard
+          key={`saved-recording-${rec.name}`}
+          recording={rec}
+          onDelete={onDelete}
+        />
+      ))}
     </RecordingCardSection>
   );
 }

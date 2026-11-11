@@ -17,10 +17,10 @@ export function proxy(request: NextRequest) {
 
   let oidcSrc = "";
 
-  if(process.env.ISE_RECORD_OIDC_PROVIDER_URL !== undefined) {
+  if (process.env.ISE_RECORD_OIDC_PROVIDER_URL !== undefined) {
     try {
       oidcSrc = new URL(process.env.ISE_RECORD_OIDC_PROVIDER_URL).origin;
-    } catch(e) {
+    } catch (e) {
       console.error("Malformed OIDC provider URL", e);
     }
   }
@@ -44,16 +44,14 @@ export function proxy(request: NextRequest) {
     ${isHttps ? "upgrade-insecure-requests;" : ""}
   `;
   // Replace newline characters and spaces
-  const contentSecurityPolicyHeaderValue = cspHeader
-    .replace(/\s{2,}/g, " ")
-    .trim();
+  const contentSecurityPolicyHeaderValue = cspHeader.replace(/\s{2,}/g, " ").trim();
 
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
 
   const response = NextResponse.next({
     request: {
-      headers: requestHeaders
-    }
+      headers: requestHeaders,
+    },
   });
   response.headers.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
 
@@ -61,11 +59,11 @@ export function proxy(request: NextRequest) {
   // pages, which send no COOP; a COOP here would count as a mismatch, cut the popup off from
   // the app (window.opener null in the popup, popup.closed true in the app), and make
   // popupAbortOnClose throw away sign-ins that just succeeded.
-  if(request.nextUrl.pathname !== "/auth/callback") {
+  if (request.nextUrl.pathname !== "/auth/callback") {
     response.headers.set("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
   }
 
-  if(process.env.ISE_RECORD_OIDC_PROVIDER_URL === undefined) {
+  if (process.env.ISE_RECORD_OIDC_PROVIDER_URL === undefined) {
     // No need to embed the OIDC provider -> might as well be strict.
     response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
   }
@@ -85,8 +83,8 @@ export const config = {
       source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" }
-      ]
-    }
-  ]
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
+  ],
 };

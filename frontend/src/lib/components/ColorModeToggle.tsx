@@ -1,9 +1,9 @@
 "use client";
 
-import { MoonIcon, SunIcon } from "@phosphor-icons/react";
 import { ActionIcon, Box } from "@mantine/core";
 import { useMantineColorScheme, useComputedColorScheme } from "@mantine/core";
 import { useColorScheme } from "@mantine/hooks";
+import { MoonIcon, SunIcon } from "@phosphor-icons/react";
 
 export function ColorModeToggle() {
   const { setColorScheme, clearColorScheme } = useMantineColorScheme();
@@ -12,7 +12,7 @@ export function ColorModeToggle() {
 
   const toggleColorScheme = () => {
     const next = computedColorScheme === "dark" ? "light" : "dark";
-    if(next === os) {
+    if (next === os) {
       clearColorScheme();
     } else {
       setColorScheme(next);
@@ -29,8 +29,8 @@ export function ColorModeToggle() {
       data-testid="cm-btn-toggle"
       onClick={toggleColorScheme}
     >
-      <Box component={SunIcon} lightHidden style={{ width: "70%", height: "70%" }}/>
-      <Box component={MoonIcon} darkHidden style={{ width: "70%", height: "70%" }}/>
+      <Box component={SunIcon} lightHidden style={{ width: "70%", height: "70%" }} />
+      <Box component={MoonIcon} darkHidden style={{ width: "70%", height: "70%" }} />
     </ActionIcon>
   );
 }

@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { canvasVideoTrack } from "../helpers/media";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
-import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SessionTransition, useAppSession } from "@/lib/components/SessionProvider";
 import { useActiveRecording, useStartStopRecording } from "@/lib/hooks/useActiveRecording";
-import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
+import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { ServerEnv } from "@/lib/utils/serverEnv";
+import { canvasVideoTrack } from "../helpers/media";
 import { aServerEnv } from "../helpers/serverEnv";
 
 // recordLecture is mocked so the tests can drive its UI callbacks directly. This hook's
@@ -21,26 +21,30 @@ vi.mock("@/lib/utils/browserStorage");
 // here it only matters that finishing a recording asks for it
 const refreshServerStorage = vi.fn();
 vi.mock("@/lib/hooks/useServerStorage", () => ({
-  useRefreshServerStorage: () => refreshServerStorage
+  useRefreshServerStorage: () => refreshServerStorage,
 }));
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockUseAppSession()
+  useAppSession: () => mockUseAppSession(),
 }));
 
 type AppSession = ReturnType<typeof useAppSession>;
 
 interface CapturedRecording {
-  trackBundle: RecordingTrackBundle
-  lectureTitle: string
-  lecturerEmail: string | undefined
-  destination: RecordingDestination
-  onStarting: (recordingName: string) => Promise<void> | void
-  onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void
-  onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void
-  onFinished: (recordingName: string) => Promise<void> | void
-  onStreamingFailed: (recordingName: string) => void
+  trackBundle: RecordingTrackBundle;
+  lectureTitle: string;
+  lecturerEmail: string | undefined;
+  destination: RecordingDestination;
+  onStarting: (recordingName: string) => Promise<void> | void;
+  onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void;
+  onChunkWritten: (
+    recordingName: string,
+    filename: string,
+    chunkSize: number,
+  ) => Promise<void> | void;
+  onFinished: (recordingName: string) => Promise<void> | void;
+  onStreamingFailed: (recordingName: string) => void;
 }
 
 let captured: CapturedRecording | undefined;
@@ -49,7 +53,7 @@ let releaseRecordLecture: (() => void) | undefined;
 const makeTokenSource = (
   authRequired: boolean,
   token: string | undefined,
-  sessionResult: SessionTransition = "can-stream"
+  sessionResult: SessionTransition = "can-stream",
 ): AppSession => ({
   authRequired,
   autoSignin: false,
@@ -63,26 +67,28 @@ const makeTokenSource = (
   signout: vi.fn(async () => {}),
   interactiveSignin: vi.fn(async () => {}),
   reauthenticate: vi.fn(async () => {}),
-  expandSession: vi.fn(async (): Promise<SessionTransition> => sessionResult)
+  expandSession: vi.fn(async (): Promise<SessionTransition> => sessionResult),
 });
 
 async function renderRecorder(
   tokenSource: AppSession,
-  env: Partial<ServerEnv> = { apiUrl: "http://localhost:5000" }
+  env: Partial<ServerEnv> = { apiUrl: "http://localhost:5000" },
 ) {
   const serverEnv = aServerEnv(env);
   mockUseAppSession.mockReturnValue(tokenSource);
 
-  const wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
-    <AppStoreProvider serverEnv={serverEnv}>
-      {children}
-    </AppStoreProvider>;
+  const wrapper = ({ children }: Readonly<{ children: ReactNode }>) => (
+    <AppStoreProvider serverEnv={serverEnv}>{children}</AppStoreProvider>
+  );
 
-  const rendered = renderHook(() => ({
-    ...useStartStopRecording(),
-    activeRecording: useActiveRecording(),
-    store: useAppStore(state => state)
-  }), { wrapper });
+  const rendered = renderHook(
+    () => ({
+      ...useStartStopRecording(),
+      activeRecording: useActiveRecording(),
+      store: useAppStore((state) => state),
+    }),
+    { wrapper },
+  );
 
   // The provider gathers browser storage when it mounts, and that lands a few ticks later.
   // Waiting for it here keeps it inside act and ahead of the test: a test that finished
@@ -113,19 +119,35 @@ beforeEach(() => {
   vi.mocked(gatherRecordingsList).mockResolvedValue([]);
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 1234 });
 
-  vi.mocked(recordLecture).mockImplementation(async (
-    trackBundle, lectureTitle, lecturerEmail, destination,
-    onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed
-  ) => {
-    captured = {
-      trackBundle, lectureTitle, lecturerEmail, destination,
-      onStarting, onStarted, onChunkWritten, onFinished, onStreamingFailed
-    };
+  vi.mocked(recordLecture).mockImplementation(
+    async (
+      trackBundle,
+      lectureTitle,
+      lecturerEmail,
+      destination,
+      onStarting,
+      onStarted,
+      onChunkWritten,
+      onFinished,
+      onStreamingFailed,
+    ) => {
+      captured = {
+        trackBundle,
+        lectureTitle,
+        lecturerEmail,
+        destination,
+        onStarting,
+        onStarted,
+        onChunkWritten,
+        onFinished,
+        onStreamingFailed,
+      };
 
-    await new Promise<void>(resolve => {
-      releaseRecordLecture = resolve;
-    });
-  });
+      await new Promise<void>((resolve) => {
+        releaseRecordLecture = resolve;
+      });
+    },
+  );
 });
 
 afterEach(async () => {
@@ -152,7 +174,7 @@ test("useStartStopRecording starts idle", async () => {
 test("startRecording hands the lecture details and tracks to recordLecture", async () => {
   const { result } = await renderRecorder(makeTokenSource(false, undefined));
 
-  const displayTracks = [ canvasVideoTrack() ];
+  const displayTracks = [canvasVideoTrack()];
 
   act(() => {
     result.current.store.setLectureTitle("GVS");
@@ -177,7 +199,7 @@ test("startRecording is a no-op while a recording is already active", async () =
     result.current.store.setActiveRecording({
       state: "recording",
       name: "ALREADY_RUNNING",
-      stop: vi.fn()
+      stop: vi.fn(),
     });
   });
 
@@ -250,7 +272,7 @@ test("a recording whose streaming failed is listed for re-upload", async () => {
     call.onStreamingFailed("REC_1");
   });
 
-  expect(result.current.store.unstreamedRecordings).toStrictEqual([ "REC_1" ]);
+  expect(result.current.store.unstreamedRecordings).toStrictEqual(["REC_1"]);
 });
 
 // --- state machine ---------------------------------------------------------
@@ -326,21 +348,23 @@ test("the unload guard is armed while starting and disarmed when finished", asyn
     await call.onStarting("REC_1");
   });
 
-  const armed = addListener.mock.calls.filter(([ event ]) => event === "beforeunload");
+  const armed = addListener.mock.calls.filter(([event]) => event === "beforeunload");
   expect(armed.length).toBe(1);
 
   await act(async () => {
     await call.onFinished("REC_1");
   });
 
-  const disarmed = removeListener.mock.calls.filter(([ event ]) => event === "beforeunload");
+  const disarmed = removeListener.mock.calls.filter(([event]) => event === "beforeunload");
   expect(disarmed.length).toBe(1);
   // the same handler must come off again, or the guard would outlive the recording
   expect(disarmed[0][1]).toBe(armed[0][1]);
 });
 
 test("arriving chunks accumulate into the file size overrides and refresh the quota", async () => {
-  vi.mocked(gatherRecordingsList).mockResolvedValue([{ name: "REC_1", files: [ { name: "stream.webm", size: 0 } ] }]);
+  vi.mocked(gatherRecordingsList).mockResolvedValue([
+    { name: "REC_1", files: [{ name: "stream.webm", size: 0 }] },
+  ]);
 
   const { result } = await renderRecorder(makeTokenSource(false, undefined));
   const call = await startAndCapture(result.current.startRecording);
@@ -356,8 +380,9 @@ test("arriving chunks accumulate into the file size overrides and refresh the qu
   });
 
   await waitFor(() => {
-    expect(result.current.store.adjustedSavedRecordings)
-      .toStrictEqual([ { name: "REC_1", files: [ { name: "stream.webm", size: 350 } ] } ]);
+    expect(result.current.store.adjustedSavedRecordings).toStrictEqual([
+      { name: "REC_1", files: [{ name: "stream.webm", size: 350 }] },
+    ]);
   });
 
   expect(navigator.storage.estimate).toHaveBeenCalled();
@@ -369,8 +394,9 @@ test("arriving chunks accumulate into the file size overrides and refresh the qu
 
   expect(result.current.store.fileSizeOverrides.size).toBe(0);
   await waitFor(() => {
-    expect(result.current.store.adjustedSavedRecordings)
-      .toStrictEqual([ { name: "REC_1", files: [ { name: "stream.webm", size: 0 } ] } ]);
+    expect(result.current.store.adjustedSavedRecordings).toStrictEqual([
+      { name: "REC_1", files: [{ name: "stream.webm", size: 0 }] },
+    ]);
   });
 });
 

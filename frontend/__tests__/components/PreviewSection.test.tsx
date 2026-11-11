@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { canvasVideoTrack } from "../helpers/media";
-import { useEffect } from "react";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MantineTestProvider } from "../helpers/mantine";
-import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
+import { useEffect } from "react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { PreviewSection } from "@/lib/components/PreviewSection";
+import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { ActiveRecording } from "@/lib/store/store";
+import { MantineTestProvider } from "../helpers/mantine";
+import { canvasVideoTrack } from "../helpers/media";
 import { aServerEnv } from "../helpers/serverEnv";
 
 /**
@@ -18,26 +18,26 @@ import { aServerEnv } from "../helpers/serverEnv";
  */
 
 vi.mock("@/lib/components/AudioPreview", () => ({
-  AudioPreview: () => <div data-testid="preview-audio"/>
+  AudioPreview: () => <div data-testid="preview-audio" />,
 }));
 
 interface Handles {
-  addDisplayTracks: (tracks: MediaStreamTrack[]) => void
-  addVideoTracks: (tracks: MediaStreamTrack[]) => void
-  setActiveRecording: (recording: ActiveRecording) => void
-  mainDisplay: MediaStreamTrack | undefined
-  overlay: MediaStreamTrack | undefined
+  addDisplayTracks: (tracks: MediaStreamTrack[]) => void;
+  addVideoTracks: (tracks: MediaStreamTrack[]) => void;
+  setActiveRecording: (recording: ActiveRecording) => void;
+  mainDisplay: MediaStreamTrack | undefined;
+  overlay: MediaStreamTrack | undefined;
 }
 
 let handles: Handles;
 
 /** Publishes the store's setters and current selection, so a test can drive and read it. */
 function StoreHandles() {
-  const addDisplayTracks = useAppStore(state => state.addDisplayTracks);
-  const addVideoTracks = useAppStore(state => state.addVideoTracks);
-  const setActiveRecording = useAppStore(state => state.setActiveRecording);
-  const mainDisplay = useAppStore(state => state.mainDisplay);
-  const overlay = useAppStore(state => state.overlay);
+  const addDisplayTracks = useAppStore((state) => state.addDisplayTracks);
+  const addVideoTracks = useAppStore((state) => state.addVideoTracks);
+  const setActiveRecording = useAppStore((state) => state.setActiveRecording);
+  const mainDisplay = useAppStore((state) => state.mainDisplay);
+  const overlay = useAppStore((state) => state.overlay);
 
   useEffect(() => {
     handles = { addDisplayTracks, addVideoTracks, setActiveRecording, mainDisplay, overlay };
@@ -52,10 +52,10 @@ function renderSection() {
   render(
     <MantineTestProvider>
       <AppStoreProvider serverEnv={aServerEnv()}>
-        <StoreHandles/>
-        <PreviewSection canvasWidth={64} canvasHeight={48}/>
+        <StoreHandles />
+        <PreviewSection canvasWidth={64} canvasHeight={48} />
       </AppStoreProvider>
-    </MantineTestProvider>
+    </MantineTestProvider>,
   );
 }
 
@@ -64,7 +64,7 @@ function withOneDisplay() {
   const display = canvasVideoTrack();
   tracks.push(display);
   renderSection();
-  act(() => handles.addDisplayTracks([ display ]));
+  act(() => handles.addDisplayTracks([display]));
   return display;
 }
 
@@ -73,7 +73,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for(const track of tracks) {
+  for (const track of tracks) {
     track.stop();
   }
 });
@@ -101,9 +101,9 @@ test("every control is live while idle", () => {
 });
 
 test.each([
-  [ "starting", { state: "starting", name: "GVS" } as ActiveRecording ],
-  [ "recording", RECORDING ],
-  [ "stopping", { state: "stopping", name: "GVS" } as ActiveRecording ]
+  ["starting", { state: "starting", name: "GVS" } as ActiveRecording],
+  ["recording", RECORDING],
+  ["stopping", { state: "stopping", name: "GVS" } as ActiveRecording],
 ])("controls are locked while %s", (_state, activeRecording) => {
   withOneDisplay();
   act(() => handles.setActiveRecording(activeRecording));

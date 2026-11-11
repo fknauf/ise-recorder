@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { renderToString } from "react-dom/server";
-import { hydrateRoot } from "react-dom/client";
 import { act, render, screen } from "@testing-library/react";
+import { hydrateRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { useHydrated } from "@/lib/hooks/useHydrated";
 
 /**
@@ -43,24 +43,24 @@ afterEach(() => {
 test("server rendering reports not hydrated", () => {
   // on the server there is no hydration yet by definition, and anything gated on this
   // must stay out of the HTML
-  expect(renderToString(<Probe/>)).toContain("false");
+  expect(renderToString(<Probe />)).toContain("false");
 });
 
 test("a client-only render reports hydrated straight away", () => {
-  render(<Probe/>);
+  render(<Probe />);
 
   expect(screen.getByTestId("hydrated")).toHaveTextContent("true");
 });
 
 test("hydration starts from the server value and then flips", async () => {
   const container = document.createElement("div");
-  container.innerHTML = renderToString(<Probe/>);
+  container.innerHTML = renderToString(<Probe />);
   document.body.appendChild(container);
 
   seen.length = 0;
 
   await act(async () => {
-    hydrateRoot(container, <Probe/>);
+    hydrateRoot(container, <Probe />);
   });
 
   try {
@@ -80,13 +80,13 @@ test("hydration starts from the server value and then flips", async () => {
 
 test("the value stays true once hydrated", async () => {
   const container = document.createElement("div");
-  container.innerHTML = renderToString(<Probe/>);
+  container.innerHTML = renderToString(<Probe />);
   document.body.appendChild(container);
 
   let root: ReturnType<typeof hydrateRoot>;
 
   await act(async () => {
-    root = hydrateRoot(container, <Probe/>);
+    root = hydrateRoot(container, <Probe />);
   });
 
   seen.length = 0;
@@ -94,7 +94,7 @@ test("the value stays true once hydrated", async () => {
   // a later re-render must not fall back to the server snapshot, or anything gated on
   // this would flicker away again
   await act(async () => {
-    root.render(<Probe/>);
+    root.render(<Probe />);
   });
 
   try {

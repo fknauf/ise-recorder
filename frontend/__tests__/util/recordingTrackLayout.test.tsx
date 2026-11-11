@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { wipeOpfs } from "../helpers/opfs";
-import { canvasVideoTrack } from "../helpers/media";
-import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
+import { canvasVideoTrack } from "../helpers/media";
+import { wipeOpfs } from "../helpers/opfs";
 
 /**
  * Covers how prepareRecording maps tracks onto output files.
@@ -18,7 +18,7 @@ vi.mock("@/lib/utils/serverStorage");
 const destination: RecordingDestination = {
   apiUrl: undefined,
   impeded: false,
-  getAccessToken: async () => undefined
+  getAccessToken: async () => undefined,
 };
 
 let audioContext: AudioContext;
@@ -31,13 +31,20 @@ async function filesFor(bundle: RecordingTrackBundle): Promise<string[]> {
 
   const onStarted = async (_recordingName: string, stopFunction: () => void) => {
     const recordings = await gatherRecordingsList();
-    names = recordings.flatMap(recording => recording.files.map(file => file.name)).sort();
+    names = recordings.flatMap((recording) => recording.files.map((file) => file.name)).sort();
     stopFunction();
   };
 
   await recordLecture(
-    bundle, "GVS", "lecturer@example.com", destination,
-    () => {}, onStarted, () => {}, () => {}, () => {}
+    bundle,
+    "GVS",
+    "lecturer@example.com",
+    destination,
+    () => {},
+    onStarted,
+    () => {},
+    () => {},
+    () => {},
   );
 
   return names;
@@ -69,8 +76,11 @@ async function recordersFor(bundle: RecordingTrackBundle) {
 }
 
 const emptyBundle: RecordingTrackBundle = {
-  displayTracks: [], videoTracks: [], audioTracks: [],
-  mainDisplay: undefined, overlay: undefined
+  displayTracks: [],
+  videoTracks: [],
+  audioTracks: [],
+  mainDisplay: undefined,
+  overlay: undefined,
 };
 
 beforeEach(() => {
@@ -89,14 +99,16 @@ test("the standard case pairs the main display with the first audio track", asyn
 
   // slides + speaker audio become one file, because that is the most useful partial
   // recording if anything else is lost
-  expect(await filesFor({
-    ...emptyBundle,
-    displayTracks: [ display ],
-    videoTracks: [ camera ],
-    audioTracks: [ audioTrack() ],
-    mainDisplay: display,
-    overlay: camera
-  })).toStrictEqual([ "overlay.webm", "stream.webm" ]);
+  expect(
+    await filesFor({
+      ...emptyBundle,
+      displayTracks: [display],
+      videoTracks: [camera],
+      audioTracks: [audioTrack()],
+      mainDisplay: display,
+      overlay: camera,
+    }),
+  ).toStrictEqual(["overlay.webm", "stream.webm"]);
 });
 
 test("additional audio tracks get their own files", async () => {
@@ -104,42 +116,50 @@ test("additional audio tracks get their own files", async () => {
 
   // browsers cannot record several audio tracks into one file, so only the first is
   // folded into the stream
-  expect(await filesFor({
-    ...emptyBundle,
-    displayTracks: [ display ],
-    audioTracks: [ audioTrack(), audioTrack(), audioTrack() ],
-    mainDisplay: display
-  })).toStrictEqual([ "audio-0.webm", "audio-1.webm", "stream.webm" ]);
+  expect(
+    await filesFor({
+      ...emptyBundle,
+      displayTracks: [display],
+      audioTracks: [audioTrack(), audioTrack(), audioTrack()],
+      mainDisplay: display,
+    }),
+  ).toStrictEqual(["audio-0.webm", "audio-1.webm", "stream.webm"]);
 });
 
 test("with no video at all every audio track gets its own file", async () => {
-  expect(await filesFor({
-    ...emptyBundle,
-    audioTracks: [ audioTrack(), audioTrack() ]
-  })).toStrictEqual([ "audio-0.webm", "audio-1.webm" ]);
+  expect(
+    await filesFor({
+      ...emptyBundle,
+      audioTracks: [audioTrack(), audioTrack()],
+    }),
+  ).toStrictEqual(["audio-0.webm", "audio-1.webm"]);
 });
 
 test("an unselected main display falls back to the first captured display", async () => {
   const first = canvasVideoTrack();
   const second = canvasVideoTrack();
 
-  expect(await filesFor({
-    ...emptyBundle,
-    displayTracks: [ first, second ],
-    audioTracks: [ audioTrack() ],
-    mainDisplay: undefined
-  })).toStrictEqual([ "display-0.webm", "stream.webm" ]);
+  expect(
+    await filesFor({
+      ...emptyBundle,
+      displayTracks: [first, second],
+      audioTracks: [audioTrack()],
+      mainDisplay: undefined,
+    }),
+  ).toStrictEqual(["display-0.webm", "stream.webm"]);
 });
 
 test("with no display at all the first camera becomes the main display", async () => {
   const camera = canvasVideoTrack();
 
-  expect(await filesFor({
-    ...emptyBundle,
-    videoTracks: [ camera ],
-    audioTracks: [ audioTrack() ],
-    mainDisplay: undefined
-  })).toStrictEqual([ "stream.webm" ]);
+  expect(
+    await filesFor({
+      ...emptyBundle,
+      videoTracks: [camera],
+      audioTracks: [audioTrack()],
+      mainDisplay: undefined,
+    }),
+  ).toStrictEqual(["stream.webm"]);
 });
 
 test("a lone overlay stands in as the main display rather than leave the lecture without one", async () => {
@@ -151,15 +171,15 @@ test("a lone overlay stands in as the main display rather than leave the lecture
 
   const recorded = await recordersFor({
     ...emptyBundle,
-    videoTracks: [ camera ],
-    audioTracks: [ microphone ],
+    videoTracks: [camera],
+    audioTracks: [microphone],
     mainDisplay: undefined,
-    overlay: camera
+    overlay: camera,
   });
 
-  expect(recorded.files).toStrictEqual([ "stream.webm" ]);
+  expect(recorded.files).toStrictEqual(["stream.webm"]);
   // the camera is recorded once, together with the audio, and not a second time on its own
-  expect(recorded.tracks).toStrictEqual([ new Set([ camera, microphone ]) ]);
+  expect(recorded.tracks).toStrictEqual([new Set([camera, microphone])]);
 });
 
 test("an overlay that is not among the captured tracks is not promoted either", async () => {
@@ -172,13 +192,13 @@ test("an overlay that is not among the captured tracks is not promoted either", 
 
     const recorded = await recordersFor({
       ...emptyBundle,
-      audioTracks: [ audioTrack() ],
+      audioTracks: [audioTrack()],
       mainDisplay: undefined,
-      overlay: stale
+      overlay: stale,
     });
 
-    expect(recorded.files).toStrictEqual([ "audio-0.webm" ]);
-    expect(recorded.tracks.some(tracks => tracks.has(stale))).toBe(false);
+    expect(recorded.files).toStrictEqual(["audio-0.webm"]);
+    expect(recorded.tracks.some((tracks) => tracks.has(stale))).toBe(false);
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("overlay"), stale);
   } finally {
     consoleError.mockRestore();
@@ -191,15 +211,15 @@ test("the overlay is not the fallback main display while another camera is there
 
   const recorded = await recordersFor({
     ...emptyBundle,
-    videoTracks: [ overlay, other ],
-    audioTracks: [ audioTrack() ],
+    videoTracks: [overlay, other],
+    audioTracks: [audioTrack()],
     mainDisplay: undefined,
-    overlay
+    overlay,
   });
 
-  expect(recorded.files).toStrictEqual([ "overlay.webm", "stream.webm" ]);
-  expect(recorded.tracks.find(tracks => tracks.has(other))?.size).toBe(2);
-  expect(recorded.tracks.find(tracks => tracks.has(overlay))).toStrictEqual(new Set([ overlay ]));
+  expect(recorded.files).toStrictEqual(["overlay.webm", "stream.webm"]);
+  expect(recorded.tracks.find((tracks) => tracks.has(other))?.size).toBe(2);
+  expect(recorded.tracks.find((tracks) => tracks.has(overlay))).toStrictEqual(new Set([overlay]));
 });
 
 test("a track marked as both main display and overlay is recorded as both", async () => {
@@ -209,15 +229,15 @@ test("a track marked as both main display and overlay is recorded as both", asyn
 
   const recorded = await recordersFor({
     ...emptyBundle,
-    videoTracks: [ camera ],
-    audioTracks: [ microphone ],
+    videoTracks: [camera],
+    audioTracks: [microphone],
     mainDisplay: camera,
-    overlay: camera
+    overlay: camera,
   });
 
-  expect(recorded.files).toStrictEqual([ "overlay.webm", "stream.webm" ]);
-  expect(recorded.tracks).toContainEqual(new Set([ camera, microphone ]));
-  expect(recorded.tracks).toContainEqual(new Set([ camera ]));
+  expect(recorded.files).toStrictEqual(["overlay.webm", "stream.webm"]);
+  expect(recorded.tracks).toContainEqual(new Set([camera, microphone]));
+  expect(recorded.tracks).toContainEqual(new Set([camera]));
 });
 
 test("video and display tracks beyond main and overlay get numbered files", async () => {
@@ -226,14 +246,16 @@ test("video and display tracks beyond main and overlay get numbered files", asyn
   const camera = canvasVideoTrack();
   const spareCamera = canvasVideoTrack();
 
-  expect(await filesFor({
-    ...emptyBundle,
-    displayTracks: [ display, spareDisplay ],
-    videoTracks: [ camera, spareCamera ],
-    audioTracks: [ audioTrack() ],
-    mainDisplay: display,
-    overlay: camera
-  })).toStrictEqual([ "display-0.webm", "overlay.webm", "stream.webm", "video-0.webm" ]);
+  expect(
+    await filesFor({
+      ...emptyBundle,
+      displayTracks: [display, spareDisplay],
+      videoTracks: [camera, spareCamera],
+      audioTracks: [audioTrack()],
+      mainDisplay: display,
+      overlay: camera,
+    }),
+  ).toStrictEqual(["display-0.webm", "overlay.webm", "stream.webm", "video-0.webm"]);
 });
 
 test("only the first audio track is folded into the main stream", async () => {
@@ -258,20 +280,20 @@ test("only the first audio track is folded into the main stream", async () => {
 
     await filesFor({
       ...emptyBundle,
-      displayTracks: [ display ],
-      audioTracks: [ firstAudio, secondAudio ],
-      mainDisplay: display
+      displayTracks: [display],
+      audioTracks: [firstAudio, secondAudio],
+      mainDisplay: display,
     });
 
-    const mainRecorder = recorded.find(tracks => tracks.includes(display));
+    const mainRecorder = recorded.find((tracks) => tracks.includes(display));
     expect(mainRecorder).toBeDefined();
     expect(mainRecorder).toContain(firstAudio);
     // browsers cannot record two audio tracks into one file, so the second must not
     // be bundled in with the slides
     expect(mainRecorder).not.toContain(secondAudio);
 
-    const secondAudioRecorder = recorded.find(tracks => tracks.includes(secondAudio));
-    expect(secondAudioRecorder).toStrictEqual([ secondAudio ]);
+    const secondAudioRecorder = recorded.find((tracks) => tracks.includes(secondAudio));
+    expect(secondAudioRecorder).toStrictEqual([secondAudio]);
   } finally {
     window.MediaRecorder = OriginalMediaRecorder;
   }
@@ -283,8 +305,15 @@ test("no tracks means no recording at all", async () => {
   const onFinished = vi.fn();
 
   await recordLecture(
-    emptyBundle, "GVS", "lecturer@example.com", destination,
-    onStarting, onStarted, () => {}, onFinished, () => {}
+    emptyBundle,
+    "GVS",
+    "lecturer@example.com",
+    destination,
+    onStarting,
+    onStarted,
+    () => {},
+    onFinished,
+    () => {},
   );
 
   expect(onStarting).not.toHaveBeenCalled();

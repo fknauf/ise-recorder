@@ -1,28 +1,31 @@
 "use client";
 
+import { Alert, List, Stack, Text } from "@mantine/core";
 import { WarningIcon } from "@phosphor-icons/react";
 import { useActiveRecording } from "../hooks/useActiveRecording";
 import { useAppStore } from "../hooks/useAppStore";
-import { Alert, List, Stack, Text } from "@mantine/core";
 
 export function StreamingImpededWarning() {
   const recording = useActiveRecording();
-  const unstreamedRecordings = useAppStore(state => state.unstreamedRecordings);
+  const unstreamedRecordings = useAppStore((state) => state.unstreamedRecordings);
 
-  if(unstreamedRecordings.length === 0) {
+  if (unstreamedRecordings.length === 0) {
     return null;
   }
 
   // When a lecture is being recorded and not streamed, only talk about that one because it's where
   // the user's attention needs to be.
-  if(recording.state === "recording" && unstreamedRecordings.includes(recording.name)) {
+  if (recording.state === "recording" && unstreamedRecordings.includes(recording.name)) {
     return (
-      <Alert variant="outline" color="warning" icon={<WarningIcon/>} title="Lecture is not being streamed to backend">
+      <Alert
+        variant="outline"
+        color="warning"
+        icon={<WarningIcon />}
+        title="Lecture is not being streamed to backend"
+      >
         <Stack>
-          <Text>
-            Please re-upload the recording files when the backend becomes available.
-          </Text>
-          { /* TODO: make this real
+          <Text>Please re-upload the recording files when the backend becomes available.</Text>
+          {/* TODO: make this real
             <Text>
               ISE-Recorder will attempt a re-upload when the recording concludes.
             </Text>
@@ -34,19 +37,22 @@ export function StreamingImpededWarning() {
 
   // When not recording, list everything. Now the user has use for the full list.
   return (
-    <Alert variant="outline" color="warning" icon={<WarningIcon/>} title="Recorded lectures were not streamed to backend">
+    <Alert
+      variant="outline"
+      color="warning"
+      icon={<WarningIcon />}
+      title="Recorded lectures were not streamed to backend"
+    >
       <Stack>
-        <Text>
-          The following lectures were not streamed to the backend:
-        </Text>
+        <Text>The following lectures were not streamed to the backend:</Text>
 
         <List>
-          { unstreamedRecordings.map(rec => <List.Item key={rec}>{rec}</List.Item>) }
+          {unstreamedRecordings.map((rec) => (
+            <List.Item key={rec}>{rec}</List.Item>
+          ))}
         </List>
 
-        <Text>
-          Please upload them manually once the backend is available.
-        </Text>
+        <Text>Please upload them manually once the backend is available.</Text>
       </Stack>
     </Alert>
   );

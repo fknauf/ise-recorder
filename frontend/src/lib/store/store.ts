@@ -1,49 +1,50 @@
 "use client";
 
-import { createStore } from "zustand/vanilla";
-import { persist } from "zustand/middleware";
-import { ServerEnv } from "../utils/serverEnv";
-import { gatherRecordingsList, RecordingFileList } from "../utils/browserStorage";
 import { StateCreator } from "zustand";
+import { persist } from "zustand/middleware";
+import { createStore } from "zustand/vanilla";
+import { gatherRecordingsList, RecordingFileList } from "../utils/browserStorage";
+import { ServerEnv } from "../utils/serverEnv";
 
-export type ActiveRecording = {
-  state: "idle" | "preparing"
-  name?: undefined
-} | {
-  state: "starting" | "stopping"
-  name: string
-} | {
-  state: "recording"
-  name: string
-  stop: () => void
-};
+export type ActiveRecording =
+  | {
+      state: "idle" | "preparing";
+      name?: undefined;
+    }
+  | {
+      state: "starting" | "stopping";
+      name: string;
+    }
+  | {
+      state: "recording";
+      name: string;
+      stop: () => void;
+    };
 
 export type StateUpdate<T> = T | ((old: T) => T);
 
 export const createDeviceKey = (dev: MediaDeviceInfo) =>
   JSON.stringify({ groupId: dev.groupId, deviceId: dev.deviceId } as MediaDeviceUid);
-export const parseDeviceKey = (devUid: string): MediaDeviceUid =>
-  JSON.parse(devUid);
+export const parseDeviceKey = (devUid: string): MediaDeviceUid => JSON.parse(devUid);
 
 function filterDevices(devices: MediaDeviceInfo[], kind: string) {
-  return devices
-    .filter(dev => dev.kind === kind)
-    // Filter out duplicate groupId/deviceID as seen with Lunar Lake built-in webcams on Firefox 149.
-    .reduce(
-      (acc, dev) => {
-        const [ list, seen ] = acc;
-        const key = createDeviceKey(dev);
-        return [
-          seen.has(key) ? list : [ ...list, dev ],
-          seen.add(key)
-        ] as const;
-      },
-      [[] as MediaDeviceInfo[], new Set<string>()] as const
-    )[0];
+  return (
+    devices
+      .filter((dev) => dev.kind === kind)
+      // Filter out duplicate groupId/deviceID as seen with Lunar Lake built-in webcams on Firefox 149.
+      .reduce(
+        (acc, dev) => {
+          const [list, seen] = acc;
+          const key = createDeviceKey(dev);
+          return [seen.has(key) ? list : [...list, dev], seen.add(key)] as const;
+        },
+        [[] as MediaDeviceInfo[], new Set<string>()] as const,
+      )[0]
+  );
 }
 
 function applyStateUpdate<T>(oldValue: T, update: StateUpdate<T>) {
-  if(update instanceof Function) {
+  if (update instanceof Function) {
     return update(oldValue);
   } else {
     return update;
@@ -54,251 +55,260 @@ const overrideKey = (recordingName: string, filename: string) => `${recordingNam
 
 function applyOverrides(
   savedRecordings: readonly RecordingFileList[],
-  fileSizeOverrides: Map<string, number>
+  fileSizeOverrides: Map<string, number>,
 ): readonly RecordingFileList[] {
-  return savedRecordings.map(rec => ({
+  return savedRecordings.map((rec) => ({
     ...rec,
-    files: rec.files.map(file => ({
+    files: rec.files.map((file) => ({
       ...file,
-      size: fileSizeOverrides.get(overrideKey(rec.name, file.name)) ?? file.size
-    }))
+      size: fileSizeOverrides.get(overrideKey(rec.name, file.name)) ?? file.size,
+    })),
   }));
 }
 
 // This is necessary because device ids are not unique in FF 145. See https://bugzilla.mozilla.org/show_bug.cgi?id=2001440
 export interface MediaDeviceUid {
-  groupId: string
-  deviceId: string
+  groupId: string;
+  deviceId: string;
 }
 
-export const createDeviceConstraints = (devUid: MediaDeviceUid): MediaTrackConstraints =>
-  ({
-    groupId: { exact: devUid.groupId },
-    deviceId: { exact: devUid.deviceId }
-  });
+export const createDeviceConstraints = (devUid: MediaDeviceUid): MediaTrackConstraints => ({
+  groupId: { exact: devUid.groupId },
+  deviceId: { exact: devUid.deviceId },
+});
 
 type TrackSelection = MediaStreamTrack | undefined;
 
 export interface AppStoreState {
-  serverEnv: ServerEnv
-  lectureTitle: string
-  lecturerEmail: string
-  obtainedDevicePermissions: boolean
-  videoDevices: readonly MediaDeviceInfo[]
-  audioDevices: readonly MediaDeviceInfo[]
-  displayTracks: readonly MediaStreamTrack[]
-  videoTracks: readonly MediaStreamTrack[]
-  audioTracks: readonly MediaStreamTrack[]
-  mainDisplay: MediaStreamTrack | undefined
-  overlay: MediaStreamTrack | undefined
-  activeRecording: ActiveRecording
-  fileSizeOverrides: Map<string, number>
-  savedRecordings: readonly RecordingFileList[]
-  adjustedSavedRecordings: readonly RecordingFileList[]
-  reuploadProgress: Map<string, number>
-  unstreamedRecordings: readonly string[]
-  quota: number | undefined
-  usage: number | undefined
+  serverEnv: ServerEnv;
+  lectureTitle: string;
+  lecturerEmail: string;
+  obtainedDevicePermissions: boolean;
+  videoDevices: readonly MediaDeviceInfo[];
+  audioDevices: readonly MediaDeviceInfo[];
+  displayTracks: readonly MediaStreamTrack[];
+  videoTracks: readonly MediaStreamTrack[];
+  audioTracks: readonly MediaStreamTrack[];
+  mainDisplay: MediaStreamTrack | undefined;
+  overlay: MediaStreamTrack | undefined;
+  activeRecording: ActiveRecording;
+  fileSizeOverrides: Map<string, number>;
+  savedRecordings: readonly RecordingFileList[];
+  adjustedSavedRecordings: readonly RecordingFileList[];
+  reuploadProgress: Map<string, number>;
+  unstreamedRecordings: readonly string[];
+  quota: number | undefined;
+  usage: number | undefined;
 
   // For use in async functions and event handlers, when the store value might change between
   // invocation of the hook that provides the handler and invocation of the handler. Returned
   // value must be treated as read-only.
-  selectFromStore: <T>(selector: (state: AppStoreState) => T) => T
+  selectFromStore: <T>(selector: (state: AppStoreState) => T) => T;
 
-  setLectureTitle: (lectureTitle: string) => void
-  setLecturerEmail: (lecturerEmail: string) => void
-  setObtainedDevicePermissions: () => void
-  setMediaDevices: (devices: MediaDeviceInfo[]) => void
-  addDisplayTracks: (tracks: MediaStreamTrack[]) => void
-  addVideoTracks: (tracks: MediaStreamTrack[]) => void
-  addAudioTracks: (tracks: MediaStreamTrack[]) => void
-  removeTrack: (track: MediaStreamTrack) => void
-  selectMainDisplay: (newMainDisplay: StateUpdate<TrackSelection>) => void
-  selectOverlay: (newOverlay: StateUpdate<TrackSelection>) => void
-  setActiveRecording: (newActiveRecording: StateUpdate<ActiveRecording>) => void
-  overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) => void
-  resetFileSizeOverrides: () => void
-  signalManualUploadProgress: (recordingName: string, percentage: number) => void
-  signalManualUploadFinished: (recordingName: string, completed: boolean) => void
-  markUnstreamed: (recordingName: string) => void
-  updateBrowserStorage: () => Promise<void>
-  updateQuotaInformation: () => Promise<void>
+  setLectureTitle: (lectureTitle: string) => void;
+  setLecturerEmail: (lecturerEmail: string) => void;
+  setObtainedDevicePermissions: () => void;
+  setMediaDevices: (devices: MediaDeviceInfo[]) => void;
+  addDisplayTracks: (tracks: MediaStreamTrack[]) => void;
+  addVideoTracks: (tracks: MediaStreamTrack[]) => void;
+  addAudioTracks: (tracks: MediaStreamTrack[]) => void;
+  removeTrack: (track: MediaStreamTrack) => void;
+  selectMainDisplay: (newMainDisplay: StateUpdate<TrackSelection>) => void;
+  selectOverlay: (newOverlay: StateUpdate<TrackSelection>) => void;
+  setActiveRecording: (newActiveRecording: StateUpdate<ActiveRecording>) => void;
+  overrideFileSize: (
+    recordingName: string,
+    filename: string,
+    newFileSize: StateUpdate<number>,
+  ) => void;
+  resetFileSizeOverrides: () => void;
+  signalManualUploadProgress: (recordingName: string, percentage: number) => void;
+  signalManualUploadFinished: (recordingName: string, completed: boolean) => void;
+  markUnstreamed: (recordingName: string) => void;
+  updateBrowserStorage: () => Promise<void>;
+  updateQuotaInformation: () => Promise<void>;
 }
 
-const unselectTrack = (state: AppStoreState, track: MediaStreamTrack): Partial<AppStoreState> =>
-  ({
-    mainDisplay: state.mainDisplay === track ? undefined : state.mainDisplay,
-    overlay: state.overlay === track ? undefined : state.overlay
-  });
-
-const createRawAppStore = (
-  serverEnv: ServerEnv
-): StateCreator<AppStoreState, [], [], AppStoreState> => (set, get) => ({
-  serverEnv,
-  lectureTitle: "",
-  lecturerEmail: "",
-  obtainedDevicePermissions: false,
-  videoDevices: [],
-  audioDevices: [],
-  displayTracks: [],
-  videoTracks: [],
-  audioTracks: [],
-  mainDisplay: undefined,
-  overlay: undefined,
-  activeRecording: { state: "idle" },
-  fileSizeOverrides: new Map<string, number>(),
-  savedRecordings: [],
-  adjustedSavedRecordings: [],
-  reuploadProgress: new Map<string, number>(),
-  unstreamedRecordings: [],
-  quota: undefined,
-  usage: undefined,
-
-  selectFromStore: selector => selector(get()),
-
-  setLectureTitle: lectureTitle => set({ lectureTitle }),
-  setLecturerEmail: lecturerEmail => set({ lecturerEmail }),
-  setObtainedDevicePermissions: () => set({ obtainedDevicePermissions: true }),
-
-  setMediaDevices: devs =>
-    set({
-      videoDevices: filterDevices(devs, "videoinput"),
-      audioDevices: filterDevices(devs, "audioinput")
-    }),
-
-  addDisplayTracks: tracks => {
-    for(const track of tracks) {
-      // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
-      track.onended = function (this) {
-        set(state => ({
-          ...unselectTrack(state, this),
-          displayTracks: state.displayTracks.filter(t => t !== this)
-        }));
-      };
-    }
-
-    // Usually the first/only captured screen is supposed to be the main display
-    set(state => ({
-      displayTracks: [ ...state.displayTracks, ...tracks ],
-      mainDisplay: state.mainDisplay ?? tracks[0]
-    }));
-  },
-
-  addVideoTracks: tracks => {
-    for(const track of tracks) {
-      track.onended = function (this) {
-        set(state => ({
-          ...unselectTrack(state, this),
-          videoTracks: state.videoTracks.filter(t => t !== this)
-        }));
-      };
-    }
-
-    // Usually the first camera feed is supposed to be the overlay
-    set(state => ({
-      videoTracks: [ ...state.videoTracks, ...tracks ],
-      overlay: state.overlay ?? tracks[0]
-    }));
-  },
-
-  addAudioTracks: tracks => {
-    for(const track of tracks) {
-      // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
-      track.onended = function (this) {
-        set(state => ({
-          audioTracks: state.audioTracks.filter(t => t !== this)
-        }));
-      };
-    }
-
-    set(state => ({ audioTracks: [ ...state.audioTracks, ...tracks ] }));
-  },
-
-  removeTrack: track => {
-    // Track is removed on the "ended" event. The event doesn't fire automatically when we stop the stream ourselves, so we fire it manually.
-    track.stop();
-    track.dispatchEvent(new Event("ended"));
-  },
-
-  selectMainDisplay: (newMainDisplay: StateUpdate<TrackSelection>) =>
-    set(state => ({ mainDisplay: applyStateUpdate(state.mainDisplay, newMainDisplay) })),
-  selectOverlay: (newOverlay: StateUpdate<TrackSelection>) =>
-    set(state => ({ overlay: applyStateUpdate(state.overlay, newOverlay) })),
-
-  setActiveRecording: newActiveRecording =>
-    set(state => ({ activeRecording: applyStateUpdate(state.activeRecording, newActiveRecording) })),
-
-  overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) =>
-    set(state => {
-      const key = overrideKey(recordingName, filename);
-      const oldFileSize = state.fileSizeOverrides.get(key) ?? 0;
-      const newOverrides = new Map(state.fileSizeOverrides).set(key, applyStateUpdate(oldFileSize, newFileSize));
-
-      return {
-        adjustedSavedRecordings: applyOverrides(state.savedRecordings, newOverrides),
-        fileSizeOverrides: newOverrides
-      };
-    }),
-
-  resetFileSizeOverrides: () =>
-    set(state => ({
-      fileSizeOverrides: new Map(),
-      adjustedSavedRecordings: state.savedRecordings
-    })),
-
-  signalManualUploadProgress: (recordingName: string, percentage: number) =>
-    set(state => ({
-      reuploadProgress: new Map(state.reuploadProgress).set(recordingName, percentage)
-    })),
-
-  signalManualUploadFinished: (recordingName: string, completed: boolean) =>
-    set(state => {
-      const newProgress = new Map(state.reuploadProgress);
-      newProgress.delete(recordingName);
-      return {
-        reuploadProgress: newProgress,
-        unstreamedRecordings: completed ? state.unstreamedRecordings.filter(name => name !== recordingName) : state.unstreamedRecordings
-      };
-    }),
-
-  markUnstreamed: (recordingName: string) =>
-    set(state => ({ unstreamedRecordings: [ ...state.unstreamedRecordings, recordingName ].toSorted() })),
-
-  updateQuotaInformation: async () => {
-    const { quota, usage } = await navigator.storage.estimate();
-    set({ quota, usage });
-  },
-
-  updateBrowserStorage: async () => {
-    const [ fs, recordings ] = await Promise.all([
-      navigator.storage.estimate(),
-      gatherRecordingsList()
-    ]);
-
-    const allRecordingNames = new Set(recordings.map(r => r.name));
-
-    set(state => ({
-      quota: fs.quota,
-      usage: fs.usage,
-      savedRecordings: recordings,
-      adjustedSavedRecordings: applyOverrides(recordings, state.fileSizeOverrides),
-      unstreamedRecordings: state.unstreamedRecordings.filter(name => allRecordingNames.has(name) || name === state.activeRecording.name)
-    }));
-  }
+const unselectTrack = (state: AppStoreState, track: MediaStreamTrack): Partial<AppStoreState> => ({
+  mainDisplay: state.mainDisplay === track ? undefined : state.mainDisplay,
+  overlay: state.overlay === track ? undefined : state.overlay,
 });
 
-export const createAppStore = (
-  serverEnv: ServerEnv
-) => createStore<AppStoreState>()(
-  persist(
-    createRawAppStore(serverEnv),
-    {
+const createRawAppStore =
+  (serverEnv: ServerEnv): StateCreator<AppStoreState, [], [], AppStoreState> =>
+  (set, get) => ({
+    serverEnv,
+    lectureTitle: "",
+    lecturerEmail: "",
+    obtainedDevicePermissions: false,
+    videoDevices: [],
+    audioDevices: [],
+    displayTracks: [],
+    videoTracks: [],
+    audioTracks: [],
+    mainDisplay: undefined,
+    overlay: undefined,
+    activeRecording: { state: "idle" },
+    fileSizeOverrides: new Map<string, number>(),
+    savedRecordings: [],
+    adjustedSavedRecordings: [],
+    reuploadProgress: new Map<string, number>(),
+    unstreamedRecordings: [],
+    quota: undefined,
+    usage: undefined,
+
+    selectFromStore: (selector) => selector(get()),
+
+    setLectureTitle: (lectureTitle) => set({ lectureTitle }),
+    setLecturerEmail: (lecturerEmail) => set({ lecturerEmail }),
+    setObtainedDevicePermissions: () => set({ obtainedDevicePermissions: true }),
+
+    setMediaDevices: (devs) =>
+      set({
+        videoDevices: filterDevices(devs, "videoinput"),
+        audioDevices: filterDevices(devs, "audioinput"),
+      }),
+
+    addDisplayTracks: (tracks) => {
+      for (const track of tracks) {
+        // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
+        track.onended = function (this) {
+          set((state) => ({
+            ...unselectTrack(state, this),
+            displayTracks: state.displayTracks.filter((t) => t !== this),
+          }));
+        };
+      }
+
+      // Usually the first/only captured screen is supposed to be the main display
+      set((state) => ({
+        displayTracks: [...state.displayTracks, ...tracks],
+        mainDisplay: state.mainDisplay ?? tracks[0],
+      }));
+    },
+
+    addVideoTracks: (tracks) => {
+      for (const track of tracks) {
+        track.onended = function (this) {
+          set((state) => ({
+            ...unselectTrack(state, this),
+            videoTracks: state.videoTracks.filter((t) => t !== this),
+          }));
+        };
+      }
+
+      // Usually the first camera feed is supposed to be the overlay
+      set((state) => ({
+        videoTracks: [...state.videoTracks, ...tracks],
+        overlay: state.overlay ?? tracks[0],
+      }));
+    },
+
+    addAudioTracks: (tracks) => {
+      for (const track of tracks) {
+        // Remove a track if it ends even if we weren't the ones to end it. This can happen if the user unplugs a device or revokes permissions.
+        track.onended = function (this) {
+          set((state) => ({
+            audioTracks: state.audioTracks.filter((t) => t !== this),
+          }));
+        };
+      }
+
+      set((state) => ({ audioTracks: [...state.audioTracks, ...tracks] }));
+    },
+
+    removeTrack: (track) => {
+      // Track is removed on the "ended" event. The event doesn't fire automatically when we stop the stream ourselves, so we fire it manually.
+      track.stop();
+      track.dispatchEvent(new Event("ended"));
+    },
+
+    selectMainDisplay: (newMainDisplay: StateUpdate<TrackSelection>) =>
+      set((state) => ({ mainDisplay: applyStateUpdate(state.mainDisplay, newMainDisplay) })),
+    selectOverlay: (newOverlay: StateUpdate<TrackSelection>) =>
+      set((state) => ({ overlay: applyStateUpdate(state.overlay, newOverlay) })),
+
+    setActiveRecording: (newActiveRecording) =>
+      set((state) => ({
+        activeRecording: applyStateUpdate(state.activeRecording, newActiveRecording),
+      })),
+
+    overrideFileSize: (recordingName: string, filename: string, newFileSize: StateUpdate<number>) =>
+      set((state) => {
+        const key = overrideKey(recordingName, filename);
+        const oldFileSize = state.fileSizeOverrides.get(key) ?? 0;
+        const newOverrides = new Map(state.fileSizeOverrides).set(
+          key,
+          applyStateUpdate(oldFileSize, newFileSize),
+        );
+
+        return {
+          adjustedSavedRecordings: applyOverrides(state.savedRecordings, newOverrides),
+          fileSizeOverrides: newOverrides,
+        };
+      }),
+
+    resetFileSizeOverrides: () =>
+      set((state) => ({
+        fileSizeOverrides: new Map(),
+        adjustedSavedRecordings: state.savedRecordings,
+      })),
+
+    signalManualUploadProgress: (recordingName: string, percentage: number) =>
+      set((state) => ({
+        reuploadProgress: new Map(state.reuploadProgress).set(recordingName, percentage),
+      })),
+
+    signalManualUploadFinished: (recordingName: string, completed: boolean) =>
+      set((state) => {
+        const newProgress = new Map(state.reuploadProgress);
+        newProgress.delete(recordingName);
+        return {
+          reuploadProgress: newProgress,
+          unstreamedRecordings: completed
+            ? state.unstreamedRecordings.filter((name) => name !== recordingName)
+            : state.unstreamedRecordings,
+        };
+      }),
+
+    markUnstreamed: (recordingName: string) =>
+      set((state) => ({
+        unstreamedRecordings: [...state.unstreamedRecordings, recordingName].toSorted(),
+      })),
+
+    updateQuotaInformation: async () => {
+      const { quota, usage } = await navigator.storage.estimate();
+      set({ quota, usage });
+    },
+
+    updateBrowserStorage: async () => {
+      const [fs, recordings] = await Promise.all([
+        navigator.storage.estimate(),
+        gatherRecordingsList(),
+      ]);
+
+      const allRecordingNames = new Set(recordings.map((r) => r.name));
+
+      set((state) => ({
+        quota: fs.quota,
+        usage: fs.usage,
+        savedRecordings: recordings,
+        adjustedSavedRecordings: applyOverrides(recordings, state.fileSizeOverrides),
+        unstreamedRecordings: state.unstreamedRecordings.filter(
+          (name) => allRecordingNames.has(name) || name === state.activeRecording.name,
+        ),
+      }));
+    },
+  });
+
+export const createAppStore = (serverEnv: ServerEnv) =>
+  createStore<AppStoreState>()(
+    persist(createRawAppStore(serverEnv), {
       name: "app-store",
-      partialize: state => ({
+      partialize: (state) => ({
         lectureTitle: state.lectureTitle,
         lecturerEmail: state.lecturerEmail,
-        unstreamedRecordings: state.unstreamedRecordings
-      })
-    }
-  )
-);
+        unstreamedRecordings: state.unstreamedRecordings,
+      }),
+    }),
+  );

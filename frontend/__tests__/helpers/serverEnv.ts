@@ -6,5 +6,5 @@ import type { ServerEnv } from "@/lib/utils/serverEnv";
  */
 export const aServerEnv = (overrides: Partial<ServerEnv> = {}): ServerEnv => ({
   smtpRecipientOverride: "default",
-  ...overrides
+  ...overrides,
 });

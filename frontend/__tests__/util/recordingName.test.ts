@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { wipeOpfs } from "../helpers/opfs";
+import {
+  normalizeLectureTitle,
+  RecordingDestination,
+  RecordingTrackBundle,
+  recordLecture,
+  sanitizeLectureTitle,
+} from "@/lib/utils/recording";
 import { canvasVideoTrack } from "../helpers/media";
-import { normalizeLectureTitle, RecordingDestination, RecordingTrackBundle, recordLecture, sanitizeLectureTitle } from "@/lib/utils/recording";
+import { wipeOpfs } from "../helpers/opfs";
 
 /**
  * Covers the two halves of the lecture-title rule: what the text box shows the user, and
@@ -53,18 +59,18 @@ const utf8 = new TextEncoder();
 const destination: RecordingDestination = {
   apiUrl: undefined,
   impeded: false,
-  getAccessToken: async () => undefined
+  getAccessToken: async () => undefined,
 };
 
 function singleDisplayBundle(): RecordingTrackBundle {
   const display = canvasVideoTrack();
 
   return {
-    displayTracks: [ display ],
+    displayTracks: [display],
     videoTracks: [],
     audioTracks: [],
     mainDisplay: display,
-    overlay: undefined
+    overlay: undefined,
   };
 }
 
@@ -77,13 +83,13 @@ async function nameFor(lectureTitle: string): Promise<string> {
     lectureTitle,
     "lecturer@example.com",
     destination,
-    name => {
+    (name) => {
       recordingName = name;
     },
     (_name, stopFunction) => stopFunction(),
     () => {},
     () => {},
-    () => {}
+    () => {},
   );
 
   return recordingName;
@@ -98,46 +104,68 @@ const STAMP = "2025-12-21T12.34.56.789Z";
  * that was not a letter or an ASCII digit.
  */
 const TITLES = [
-  "GVS", "", "   ", "Übung 3", "Version 1.0", "3D Modelling", "_scratch",
-  "Math 101: Limits", "Wie geht's", "\u{1F393}", ".NET", "..", "-rf", "«»",
-  "  GVS  ", "U\u0308bung", "Vorlesung\u202egnuselrov\u202c", "a\u200bb",
-  "../../etc/passwd", "机器学习（第一讲）", "数据结构、算法", "हिन्दी व्याकरण",
-  "ภาษาไทย", "한국어 강의", "Tiếng Việt", "a".repeat(400), "机".repeat(200)
+  "GVS",
+  "",
+  "   ",
+  "Übung 3",
+  "Version 1.0",
+  "3D Modelling",
+  "_scratch",
+  "Math 101: Limits",
+  "Wie geht's",
+  "\u{1F393}",
+  ".NET",
+  "..",
+  "-rf",
+  "«»",
+  "  GVS  ",
+  "U\u0308bung",
+  "Vorlesung\u202egnuselrov\u202c",
+  "a\u200bb",
+  "../../etc/passwd",
+  "机器学习（第一讲）",
+  "数据结构、算法",
+  "हिन्दी व्याकरण",
+  "ภาษาไทย",
+  "한국어 강의",
+  "Tiếng Việt",
+  "a".repeat(400),
+  "机".repeat(200),
 ];
 
 // --- what the box previews --------------------------------------------------
 
 /* eslint-disable @stylistic/no-multi-spaces -- aligned for legibility */
 test.each([
-  [ "GVS", "GVS" ],
-  [ "", "" ],
-  [ "   ", "" ],                              // trimmed away, so no different from empty
-  [ "  GVS  ", "GVS" ],
-  [ "Übung 3", "Übung_3" ],                   // spaces become separators rather than closing up
-  [ "Version 1.0", "Version_1.0" ],           // a dot is fine anywhere but the first character
-  [ "3D Modelling", "3D_Modelling" ],         // a leading digit is a legal first character
-  [ "_scratch", "_scratch" ],                 // and so is an underscore
-  [ "Math 101: Limits", "Math_101_Limits" ],
-  [ "Wie geht's", "Wie_gehts" ],
-  [ "\u{1F393}", "" ],
-  [ ".NET", "NET" ],                          // would be a hidden directory on the server
-  [ "..", "" ],
-  [ "-rf", "rf" ],                            // ffmpeg would read a leading dash as an option
-  [ "«»", "" ],
-  [ "../../etc/passwd", "etcpasswd" ]
+  ["GVS", "GVS"],
+  ["", ""],
+  ["   ", ""], // trimmed away, so no different from empty
+  ["  GVS  ", "GVS"],
+  ["Übung 3", "Übung_3"], // spaces become separators rather than closing up
+  ["Version 1.0", "Version_1.0"], // a dot is fine anywhere but the first character
+  ["3D Modelling", "3D_Modelling"], // a leading digit is a legal first character
+  ["_scratch", "_scratch"], // and so is an underscore
+  ["Math 101: Limits", "Math_101_Limits"],
+  ["Wie geht's", "Wie_gehts"],
+  ["\u{1F393}", ""],
+  [".NET", "NET"], // would be a hidden directory on the server
+  ["..", ""],
+  ["-rf", "rf"], // ffmpeg would read a leading dash as an option
+  ["«»", ""],
+  ["../../etc/passwd", "etcpasswd"],
 ])("sanitizeLectureTitle(%j) is %j", (title, expected) => {
   expect(sanitizeLectureTitle(title)).toBe(expected);
 });
 
 test.each([
-  [ "机器学习（第一讲）", "机器学习第一讲" ],       // fullwidth parens are Ps/Pe, not letters
-  [ "数据结构、算法", "数据结构算法" ],            // the ideographic comma is Po
-  [ "第1讲：绪论", "第1讲绪论" ],
-  [ "हिन्दी व्याकरण", "हिन्दी_व्याकरण" ],      // vowel signs are Mc/Mn and must survive
-  [ "ภาษาไทย", "ภาษาไทย" ],
-  [ "한국어 강의", "한국어_강의" ],
-  [ "Tiếng Việt", "Tiếng_Việt" ],
-  [ "العربية", "العربية" ]
+  ["机器学习（第一讲）", "机器学习第一讲"], // fullwidth parens are Ps/Pe, not letters
+  ["数据结构、算法", "数据结构算法"], // the ideographic comma is Po
+  ["第1讲：绪论", "第1讲绪论"],
+  ["हिन्दी व्याकरण", "हिन्दी_व्याकरण"], // vowel signs are Mc/Mn and must survive
+  ["ภาษาไทย", "ภาษาไทย"],
+  ["한국어 강의", "한국어_강의"],
+  ["Tiếng Việt", "Tiếng_Việt"],
+  ["العربية", "العربية"],
 ])("a non-Latin title keeps its own script: %j becomes %j", (title, expected) => {
   // the whole point of relaxing the rule. \p{Nd} alone used to strip Nl and No, and the
   // missing \p{M} took every Indic vowel with it -- "हिन्दी" came out as "हनद"
@@ -167,7 +195,17 @@ test("the preview is independent of the composition the keyboard happens to send
   expect(sanitizeLectureTitle(composed)).toBe(composed);
 });
 
-test.each([ "GVS", "Übung 3", "机器学习", "한국어 강의", "हिन्दी", "U\u0308bung", "  GVS  ", "", "   " ])("the box stays quiet about %j, which survives intact", title => {
+test.each([
+  "GVS",
+  "Übung 3",
+  "机器学习",
+  "한국어 강의",
+  "हिन्दी",
+  "U\u0308bung",
+  "  GVS  ",
+  "",
+  "   ",
+])("the box stays quiet about %j, which survives intact", (title) => {
   // validateLectureTitle shows a message exactly when the sanitized title differs from the
   // normalized one, so a title that only gains separators or a composition must compare
   // equal or the user is told about a change they cannot see. The decomposed entry is the
@@ -175,11 +213,11 @@ test.each([ "GVS", "Übung 3", "机器学习", "한국어 강의", "हिन्
   expect(sanitizeLectureTitle(title)).toBe(normalizeLectureTitle(title));
 });
 
-test.each([ "机器学习（第一讲）", ".NET", "-rf", "Math 101: Limits", "«»" ])(
+test.each(["机器学习（第一讲）", ".NET", "-rf", "Math 101: Limits", "«»"])(
   "the box speaks up about %j, which does not",
-  title => {
+  (title) => {
     expect(sanitizeLectureTitle(title)).not.toBe(normalizeLectureTitle(title));
-  }
+  },
 );
 
 test("an all-whitespace title is treated as no title at all", () => {
@@ -194,11 +232,11 @@ test("normalizing is idempotent", () => {
   // anything would make the message flicker on titles that are already settled
   const unstable: Record<string, { once: string; twice: string }> = {};
 
-  for(const title of TITLES) {
+  for (const title of TITLES) {
     const once = normalizeLectureTitle(title);
     const twice = normalizeLectureTitle(once);
 
-    if(once !== twice) {
+    if (once !== twice) {
       unstable[label(title)] = { once: label(once), twice: label(twice) };
     }
   }
@@ -254,14 +292,14 @@ test("the timestamp is appended after sanitizing, not put through it", async () 
 });
 
 test.each([
-  [ "Übung 3", `Übung_3_${STAMP}` ],
-  [ "  GVS  ", `GVS_${STAMP}` ],
-  [ "Version 1.0", `Version_1.0_${STAMP}` ],
-  [ ".NET", `NET_${STAMP}` ],
-  [ "-rf", `rf_${STAMP}` ],
-  [ "../../etc/passwd", `etcpasswd_${STAMP}` ],
-  [ "机器学习（第一讲）", `机器学习第一讲_${STAMP}` ],
-  [ "हिन्दी व्याकरण", `हिन्दी_व्याकरण_${STAMP}` ]
+  ["Übung 3", `Übung_3_${STAMP}`],
+  ["  GVS  ", `GVS_${STAMP}`],
+  ["Version 1.0", `Version_1.0_${STAMP}`],
+  [".NET", `NET_${STAMP}`],
+  ["-rf", `rf_${STAMP}`],
+  ["../../etc/passwd", `etcpasswd_${STAMP}`],
+  ["机器学习（第一讲）", `机器学习第一讲_${STAMP}`],
+  ["हिन्दी व्याकरण", `हिन्दी_व्याकरण_${STAMP}`],
 ])("the name derived from %j is %j", async (title, expected) => {
   expect(await nameFor(title)).toBe(expected);
 });
@@ -292,10 +330,10 @@ function label(str: string) {
 test("every derived name is one the backend accepts", async () => {
   const rejected: string[] = [];
 
-  for(const title of TITLES) {
+  for (const title of TITLES) {
     const name = await nameFor(title);
 
-    if(!BACKEND_SAFE_NAME.test(name)) {
+    if (!BACKEND_SAFE_NAME.test(name)) {
       rejected.push(`${label(title)} -> ${label(name)}`);
     }
   }
@@ -309,10 +347,10 @@ test("every derived name fits in one path component", async () => {
   // is comfortable in German can be twice over the limit in Chinese
   const oversized: string[] = [];
 
-  for(const title of TITLES) {
+  for (const title of TITLES) {
     const bytes = utf8.encode(await nameFor(title)).length;
 
-    if(bytes > NAME_MAX_BYTES) {
+    if (bytes > NAME_MAX_BYTES) {
       oversized.push(`${label(title)} -> ${bytes} bytes`);
     }
   }
@@ -325,12 +363,12 @@ test("what the box previews is what the name is built from", async () => {
   // it, and it is the one that cannot be checked by reading either side on its own
   const disagreements: Record<string, { previewed: string; derived: string }> = {};
 
-  for(const title of TITLES) {
+  for (const title of TITLES) {
     const previewed = sanitizeLectureTitle(title);
     const derived = await nameFor(title);
     const expected = previewed === "" ? STAMP : `${previewed}_${STAMP}`;
 
-    if(derived !== expected) {
+    if (derived !== expected) {
       disagreements[label(title)] = { previewed: label(previewed), derived: label(derived) };
     }
   }
@@ -341,6 +379,8 @@ test("what the box previews is what the name is built from", async () => {
 test("a title the box complains about still records", async () => {
   // validate() marks the field but does not stop the user pressing Start, so the derivation
   // has to stand on its own for every title the box merely complains about
-  expect(sanitizeLectureTitle("../../etc/passwd")).not.toBe(normalizeLectureTitle("../../etc/passwd"));
+  expect(sanitizeLectureTitle("../../etc/passwd")).not.toBe(
+    normalizeLectureTitle("../../etc/passwd"),
+  );
   expect(await nameFor("../../etc/passwd")).toBe(`etcpasswd_${STAMP}`);
 });

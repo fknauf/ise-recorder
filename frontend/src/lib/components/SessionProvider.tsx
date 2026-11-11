@@ -1,46 +1,60 @@
 "use client";
 
-import { createContext, ReactNode, useContext, useEffect, useEffectEvent, useInsertionEffect, useRef, useState, useSyncExternalStore } from "react";
-import { AuthProvider, ErrorContext, useAuth } from "react-oidc-context";
-import { User } from "oidc-client-ts";
 import { useRouter } from "next/navigation";
+import { User } from "oidc-client-ts";
+import {
+  createContext,
+  ReactNode,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useInsertionEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { AuthProvider, ErrorContext, useAuth } from "react-oidc-context";
 import { ServerEnv } from "../utils/serverEnv";
 
-export type SessionTransition =
-  "can-stream" | "cannot-stream";
+export type SessionTransition = "can-stream" | "cannot-stream";
 
 export interface AppSession {
-  authRequired: boolean
-  autoSignin: boolean
-  isAuthenticated: boolean
-  isLoading: boolean
-  isExpired: boolean | undefined
-  isStale: boolean
-  error: ErrorContext | undefined
-  userName: string | undefined
+  authRequired: boolean;
+  autoSignin: boolean;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  isExpired: boolean | undefined;
+  isStale: boolean;
+  error: ErrorContext | undefined;
+  userName: string | undefined;
 
-  getAccessToken: () => Promise<string | undefined>
-  signout: () => Promise<void>
-  interactiveSignin: () => Promise<void>
-  reauthenticate: () => Promise<void>
-  expandSession: () => Promise<SessionTransition>
+  getAccessToken: () => Promise<string | undefined>;
+  signout: () => Promise<void>;
+  interactiveSignin: () => Promise<void>;
+  reauthenticate: () => Promise<void>;
+  expandSession: () => Promise<SessionTransition>;
 }
 
 interface OidcSessionBridgeProps {
-  maxAge: number | undefined
-  autoSigninConfigured: boolean
-  children?: ReactNode
+  maxAge: number | undefined;
+  autoSigninConfigured: boolean;
+  children?: ReactNode;
 }
 
 interface SessionProviderProps {
-  serverEnv: ServerEnv
-  children: ReactNode
+  serverEnv: ServerEnv;
+  children: ReactNode;
 }
 
 const SessionContext = createContext<AppSession | null>(null);
 
 function sessionStaleAtMillis(user: User | null | undefined, maxAge: number | undefined) {
-  if(user === undefined || user === null || maxAge === undefined || user.profile.auth_time === undefined) {
+  if (
+    user === undefined ||
+    user === null ||
+    maxAge === undefined ||
+    user.profile.auth_time === undefined
+  ) {
     return undefined;
   }
 
@@ -48,55 +62,55 @@ function sessionStaleAtMillis(user: User | null | undefined, maxAge: number | un
   return staleAt > user.profile.iat * 1000 ? staleAt : 0;
 }
 
-const subscribeToStaleness = (staleAt: number | undefined) =>
-  (onChange: () => void) => {
-    if(staleAt === undefined) {
-      return () => {};
+const subscribeToStaleness = (staleAt: number | undefined) => (onChange: () => void) => {
+  if (staleAt === undefined) {
+    return () => {};
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const armTimer = () => {
+    clearTimeout(timer);
+    const remainingMillis = staleAt - Date.now();
+    if (remainingMillis > 0) {
+      const timeoutMillis = Math.min(remainingMillis, 2 ** 31 - 1);
+      timer = setTimeout(triggerFn, timeoutMillis);
     }
-
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const armTimer = () => {
-      clearTimeout(timer);
-      const remainingMillis = staleAt - Date.now();
-      if(remainingMillis > 0) {
-        const timeoutMillis = Math.min(remainingMillis, 2 ** 31 - 1);
-        timer = setTimeout(triggerFn, timeoutMillis);
-      }
-    };
-
-    const triggerFn = () => {
-      onChange();
-      armTimer();
-    };
-
-    armTimer();
-    document.addEventListener("visibilitychange", triggerFn);
-
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", triggerFn);
-    };
   };
 
-function useIsStale(
-  user: User | null | undefined,
-  maxAge: number | undefined
-) {
+  const triggerFn = () => {
+    onChange();
+    armTimer();
+  };
+
+  armTimer();
+  document.addEventListener("visibilitychange", triggerFn);
+
+  return () => {
+    clearTimeout(timer);
+    document.removeEventListener("visibilitychange", triggerFn);
+  };
+};
+
+function useIsStale(user: User | null | undefined, maxAge: number | undefined) {
   const staleAt = sessionStaleAtMillis(user, maxAge);
 
   return useSyncExternalStore(
     subscribeToStaleness(staleAt),
     () => staleAt !== undefined && Date.now() >= staleAt,
-    () => false
+    () => false,
   );
 }
 
 /**
  * The part of the OidcSessionProvider logic that needs to sit inside AuthProvider, see below
  */
-function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<OidcSessionBridgeProps>) {
-  const [ autoSignin, setAutoSignin ] = useState(autoSigninConfigured);
+function OidcSessionBridge({
+  maxAge,
+  autoSigninConfigured,
+  children,
+}: Readonly<OidcSessionBridgeProps>) {
+  const [autoSignin, setAutoSignin] = useState(autoSigninConfigured);
   const auth = useAuth();
   const authRef = useRef(auth);
   const isStale = useIsStale(auth.user, maxAge);
@@ -118,11 +132,12 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
   const doRenewIfExpired = async () => {
     const freshUser = authRef.current.user;
 
-    if(freshUser?.expired && freshUser.refresh_token !== undefined) {
+    if (freshUser?.expired && freshUser.refresh_token !== undefined) {
       // If several calls arrive here at the same time, make the later ones wait for the
       // renewal attempt the first one kicked off rather than start their own, conflicting ones.
-      if(pendingRenewal.current === undefined) {
-        pendingRenewal.current = authRef.current.signinSilent()
+      if (pendingRenewal.current === undefined) {
+        pendingRenewal.current = authRef.current
+          .signinSilent()
           .catch(() => null)
           .finally(() => {
             pendingRenewal.current = undefined;
@@ -138,7 +153,7 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
   const renewIfExpired = useEffectEvent(doRenewIfExpired);
 
   useEffect(() => {
-    if(auth.user?.expired && auth.user.refresh_token !== undefined) {
+    if (auth.user?.expired && auth.user.refresh_token !== undefined) {
       void renewIfExpired();
     }
   }, [auth.user]);
@@ -149,7 +164,7 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
     // that case we make a best effort to force-refresh.
     const freshUser = await doRenewIfExpired();
 
-    if(freshUser === null || freshUser?.expired) {
+    if (freshUser === null || freshUser?.expired) {
       return undefined;
     }
 
@@ -160,7 +175,7 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
     setAutoSignin(false);
     try {
       await authRef.current.removeUser();
-    } catch(e) {
+    } catch (e) {
       console.error("Failed to sign out", e);
     }
   };
@@ -184,17 +199,17 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
     const currentUser = authRef.current.user;
 
     // user not logged in
-    if(currentUser === null || currentUser === undefined) {
+    if (currentUser === null || currentUser === undefined) {
       return "cannot-stream";
     }
 
     // No refresh token, so force-refreshing is pointless. Refer to session expiration state.
-    if(currentUser.refresh_token === undefined) {
+    if (currentUser.refresh_token === undefined) {
       return currentUser.expired ? "cannot-stream" : "can-stream";
     }
 
     // Refresh access token, so it has as long a lifetime as we can manage.
-    if(await authRef.current.signinSilent() !== null) {
+    if ((await authRef.current.signinSilent()) !== null) {
       return "can-stream";
     }
 
@@ -202,7 +217,7 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
     console.warn("Failed to force-refresh access/refresh token, continuing with existing tokens");
 
     const freshUser = authRef.current.user;
-    if(freshUser === null || freshUser === undefined || freshUser.expired) {
+    if (freshUser === null || freshUser === undefined || freshUser.expired) {
       return "cannot-stream";
     }
 
@@ -224,7 +239,7 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
         signout,
         interactiveSignin,
         reauthenticate,
-        expandSession
+        expandSession,
       }}
     >
       {children}
@@ -236,25 +251,24 @@ function OidcSessionBridge({ maxAge, autoSigninConfigured, children }: Readonly<
  * OpenID connect session provider. Uses react-oidc-context, puts an OidcSessionBridge inside it, where
  * most of the actual work happens. This part sets up the AuthProvider and checks the server env for sanity.
  */
-function OidcSessionProvider(
-  { serverEnv, children }: Readonly<SessionProviderProps>
-) {
+function OidcSessionProvider({ serverEnv, children }: Readonly<SessionProviderProps>) {
   const router = useRouter();
 
-  if(serverEnv.oidcProviderUrl === undefined) {
-    throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_PROVIDER_URL is not set.");
+  if (serverEnv.oidcProviderUrl === undefined) {
+    throw Error(
+      "OpenID authentication is configured, but ISE_RECORD_OIDC_PROVIDER_URL is not set.",
+    );
   }
 
-  if(serverEnv.oidcClientId === undefined) {
+  if (serverEnv.oidcClientId === undefined) {
     throw Error("OpenID authentication is configured, but ISE_RECORD_OIDC_CLIENT_ID is not set.");
   }
 
-  const callbackUrl = typeof window === "undefined"
-    ? ""
-    : `${window.location.origin}/auth/callback`;
+  const callbackUrl =
+    typeof window === "undefined" ? "" : `${window.location.origin}/auth/callback`;
 
   const onSigninCallback = (user: User | undefined) => {
-    if(user !== undefined) {
+    if (user !== undefined) {
       // This corresponds to a redirect sign-in, i.e. not in popup flows or silent renewal
       router.replace("/");
     }
@@ -269,7 +283,7 @@ function OidcSessionProvider(
       automaticSilentRenew={true}
       accessTokenExpiringNotificationTimeInSeconds={120}
       max_age={serverEnv.oidcMaxAge}
-      filterProtocolClaims={[ "nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash" ]} // don't filter auth_time. Otherwise same as default.
+      filterProtocolClaims={["nbf", "jti", "nonce", "acr", "amr", "azp", "at_hash"]} // don't filter auth_time. Otherwise same as default.
       onSigninCallback={onSigninCallback}
     >
       <OidcSessionBridge
@@ -282,9 +296,7 @@ function OidcSessionProvider(
   );
 }
 
-function AnonymousSessionProvider(
-  { children }: Readonly<{ children: ReactNode }>
-) {
+function AnonymousSessionProvider({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <SessionContext.Provider
       value={{
@@ -300,7 +312,7 @@ function AnonymousSessionProvider(
         signout: async () => {},
         interactiveSignin: async () => {},
         reauthenticate: async () => {},
-        expandSession: async () => "can-stream"
+        expandSession: async () => "can-stream",
       }}
     >
       {children}
@@ -315,27 +327,21 @@ export function SessionProvider({ serverEnv, children }: Readonly<SessionProvide
   // default to disabled in frontend-only deployments, oidc otherwise
   const authBackend = serverEnv.authBackend || (serverEnv.apiUrl ? "oidc" : "disabled");
 
-  if(authBackend === "oidc") {
-    return (
-      <OidcSessionProvider serverEnv={serverEnv}>
-        {children}
-      </OidcSessionProvider>
-    );
-  } else if(authBackend === "disabled") {
-    return (
-      <AnonymousSessionProvider>
-        {children}
-      </AnonymousSessionProvider>
-    );
+  if (authBackend === "oidc") {
+    return <OidcSessionProvider serverEnv={serverEnv}>{children}</OidcSessionProvider>;
+  } else if (authBackend === "disabled") {
+    return <AnonymousSessionProvider>{children}</AnonymousSessionProvider>;
   }
 
-  throw new Error(`Invalid authentication backend "${serverEnv.authBackend}" configured, must be "oidc" or "disabled"`);
+  throw new Error(
+    `Invalid authentication backend "${serverEnv.authBackend}" configured, must be "oidc" or "disabled"`,
+  );
 }
 
 export function useAppSession() {
   const tokenSource = useContext(SessionContext);
 
-  if(tokenSource === null) {
+  if (tokenSource === null) {
     throw new Error("useAppSession must be used within SessionProvider");
   }
 

@@ -1,28 +1,41 @@
-import { expect, test, vi } from "vitest";
-import { anAppSession } from "../helpers/session";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MantineTestProvider } from "../helpers/mantine";
+import { SWRConfig } from "swr";
+import { expect, test, vi } from "vitest";
+import * as z from "zod";
 import { ServerStorageSection } from "@/lib/components/ServerStorageSection";
 import { useServerStorage } from "@/lib/hooks/useServerStorage";
-import { fetchRecordings, purgeRecording, schedulePostprocessing, ServerStorageRecording } from "@/lib/utils/serverStorage";
 import { ApiError } from "@/lib/utils/apiFetch";
 import { showError, showSuccess } from "@/lib/utils/notifications";
 import { ServerEnv } from "@/lib/utils/serverEnv";
-import { SWRConfig } from "swr";
-import * as z from "zod";
+import {
+  fetchRecordings,
+  purgeRecording,
+  schedulePostprocessing,
+  ServerStorageRecording,
+} from "@/lib/utils/serverStorage";
 import { ExpandedSection, SECTION_ID } from "../helpers/ExpandedSection";
+import { MantineTestProvider } from "../helpers/mantine";
 import { aServerEnv } from "../helpers/serverEnv";
-import { completed, downloadPath, notRenderable, rawDownloadPath, rendering, unprocessed, USER_DIGEST } from "../helpers/serverStorage";
+import {
+  completed,
+  downloadPath,
+  notRenderable,
+  rawDownloadPath,
+  rendering,
+  unprocessed,
+  USER_DIGEST,
+} from "../helpers/serverStorage";
+import { anAppSession } from "../helpers/session";
 
 vi.mock("@/lib/hooks/useServerStorage");
 // the requests are mocked, but the URL builder is kept: which href the link carries is
 // exactly what the download tests below are about
-vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
-  ...await importOriginal<typeof import("@/lib/utils/serverStorage")>(),
+vi.mock("@/lib/utils/serverStorage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/utils/serverStorage")>()),
   fetchRecordings: vi.fn(),
   schedulePostprocessing: vi.fn(),
-  purgeRecording: vi.fn()
+  purgeRecording: vi.fn(),
 }));
 vi.mock("@/lib/utils/notifications");
 
@@ -30,17 +43,17 @@ vi.mock("@/lib/utils/notifications");
 // factory keeps the store out of these tests
 const mockUseLecture = vi.fn();
 vi.mock("@/lib/hooks/useLecture", () => ({
-  useLecture: () => mockUseLecture()
+  useLecture: () => mockUseLecture(),
 }));
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockUseAppSession()
+  useAppSession: () => mockUseAppSession(),
 }));
 
 const mockServerEnv = vi.fn();
 vi.mock("@/lib/hooks/useServerEnv", () => ({
-  useServerEnv: () => mockServerEnv()
+  useServerEnv: () => mockServerEnv(),
 }));
 
 const API_URL = "https://record.example.edu";
@@ -59,22 +72,29 @@ type Listing = ServerStorageRecording[];
 const sorted = (listing: Listing) => listing.toSorted((a, b) => a.name.localeCompare(b.name));
 
 const LISTING: Listing = [
-  completed("GVS_2025", 1.25 * MiB, { downloadUrl: downloadPath("GVS_2025", "012345"), rawDownloadUrl: rawDownloadPath("GVS_2025", "012345") }),
-  completed("PSU_2026", 3.5 * MiB, { downloadUrl: downloadPath("PSU_2026", "987654"), rawDownloadUrl: rawDownloadPath("PSU_2026", "987654") })
+  completed("GVS_2025", 1.25 * MiB, {
+    downloadUrl: downloadPath("GVS_2025", "012345"),
+    rawDownloadUrl: rawDownloadPath("GVS_2025", "012345"),
+  }),
+  completed("PSU_2026", 3.5 * MiB, {
+    downloadUrl: downloadPath("PSU_2026", "987654"),
+    rawDownloadUrl: rawDownloadPath("PSU_2026", "987654"),
+  }),
 ];
 
 /** The listing with one recording gone from it, whichever kind it is. */
-const without = (listing: Listing, name: string): Listing => listing.filter(rec => rec.name !== name);
+const without = (listing: Listing, name: string): Listing =>
+  listing.filter((rec) => rec.name !== name);
 
 interface SectionOptions {
-  serverEnv?: ServerEnv
-  isAuthenticated?: boolean
-  isExpired?: boolean | undefined
+  serverEnv?: ServerEnv;
+  isAuthenticated?: boolean;
+  isExpired?: boolean | undefined;
   /** What the mocked hook reports. Left out, the listing above; undefined, nothing yet. */
-  data?: Listing | undefined
-  error?: unknown
+  data?: Listing | undefined;
+  error?: unknown;
   /** In place of data and error: run this as the hook, e.g. the real one over its cache. */
-  hook?: typeof useServerStorage
+  hook?: typeof useServerStorage;
 }
 
 function renderSection(options: SectionOptions = {}) {
@@ -83,7 +103,7 @@ function renderSection(options: SectionOptions = {}) {
     isAuthenticated = true,
     isExpired = false,
     error = undefined,
-    hook
+    hook,
   } = options;
   // told apart from the default by presence, since undefined is itself a state to render
   const data = "data" in options ? options.data : LISTING;
@@ -96,20 +116,25 @@ function renderSection(options: SectionOptions = {}) {
     lectureTitle: "",
     lecturerEmail: LECTURER_EMAIL,
     setLectureTitle: vi.fn(),
-    setLecturerEmail: vi.fn()
+    setLecturerEmail: vi.fn(),
   });
 
   // what the backend answers an accepted rerender with: the recording's new state
-  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, name) => rendering(name));
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, name) =>
+    rendering(name),
+  );
   rerender.mockResolvedValue(undefined);
   purge.mockResolvedValue(undefined);
 
-  if(hook !== undefined) {
+  if (hook !== undefined) {
     vi.mocked(useServerStorage).mockImplementation(hook);
   } else {
-    vi.mocked(useServerStorage).mockReturnValue(
-      { data, error, rerender, purge } as unknown as ReturnType<typeof useServerStorage>
-    );
+    vi.mocked(useServerStorage).mockReturnValue({
+      data,
+      error,
+      rerender,
+      purge,
+    } as unknown as ReturnType<typeof useServerStorage>);
   }
 
   // a cache per test, for the tests that run the real hook; the others never reach it
@@ -117,24 +142,25 @@ function renderSection(options: SectionOptions = {}) {
     <SWRConfig value={{ provider: () => new Map() }}>
       <MantineTestProvider>
         <ExpandedSection>
-          <ServerStorageSection id={SECTION_ID}/>
+          <ServerStorageSection id={SECTION_ID} />
         </ExpandedSection>
       </MantineTestProvider>
-    </SWRConfig>
+    </SWRConfig>,
   );
 }
 
 const cards = () => screen.queryAllByTestId("ss-card-completed");
 
 const names = (cardList: HTMLElement[]) =>
-  cardList.map(card => within(card).getByText(/_20\d\d$/).textContent);
+  cardList.map((card) => within(card).getByText(/_20\d\d$/).textContent);
 
 // A card can offer two links: the rendered video and a zip of the raw tracks. Both say
 // "download", so the raw one is found by its test id and the video is whichever link is left.
 const RAW_DATA_TESTID = "ss-btn-download-raw";
 const videoLinks = (card: HTMLElement) =>
-  within(card).queryAllByRole("link")
-    .filter(link => link.dataset.testid !== RAW_DATA_TESTID);
+  within(card)
+    .queryAllByRole("link")
+    .filter((link) => link.dataset.testid !== RAW_DATA_TESTID);
 const downloadLink = (card: HTMLElement) => {
   const links = videoLinks(card);
   expect(links).toHaveLength(1);
@@ -166,7 +192,7 @@ test("the download link carries the user, the recording and its TOTP", () => {
   // resolved against the configured backend, not rebuilt from the display name.
   expect(link).toHaveAttribute(
     "href",
-    `${API_URL}/api/downloads/${USER_DIGEST}/GVS_2025?totp=012345`
+    `${API_URL}/api/downloads/${USER_DIGEST}/GVS_2025?totp=012345`,
   );
   // without this the browser navigates away from the recorder, which may be mid-recording
   expect(link).toHaveAttribute("download");
@@ -189,13 +215,18 @@ test("a non-ASCII recording name reaches the backend percent-encoded", () => {
   // round-trip test on the Python side pins from the other end. The link has to carry the
   // encoding through untouched.
   renderSection({
-    data: [ completed("Übung_2025", MiB, { downloadUrl: `downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}?totp=111111` }) ]
+    data: [
+      completed("Übung_2025", MiB, {
+        downloadUrl: `downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}?totp=111111`,
+      }),
+    ],
   });
 
   const link = downloadLink(cards()[0]) as HTMLAnchorElement;
 
-  expect(new URL(link.href).pathname)
-    .toBe(`/api/downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}`);
+  expect(new URL(link.href).pathname).toBe(
+    `/api/downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}`,
+  );
   expect(new URL(link.href).searchParams.get("totp")).toBe("111111");
 });
 
@@ -209,13 +240,13 @@ test("an empty backend does not render the section", () => {
 
 const renderingCards = () => screen.queryAllByTestId("ss-card-rendering");
 
-const RENDERING_LISTING = sorted([ ...LISTING, rendering("ABC_2026"), rendering("XYZ_2026") ]);
+const RENDERING_LISTING = sorted([...LISTING, rendering("ABC_2026"), rendering("XYZ_2026")]);
 
 /** Every card in the section, whichever kind, in the order they appear on the page. */
 const allCards = () => screen.queryAllByTestId(/^ss-card-/);
 
 test("a recording that is still rendering gets a card that says so", () => {
-  renderSection({ data: [ rendering("ABC_2026") ] });
+  renderSection({ data: [rendering("ABC_2026")] });
 
   expect(renderingCards()).toHaveLength(1);
   expect(within(renderingCards()[0]).getByText("ABC_2026")).toBeInTheDocument();
@@ -227,16 +258,18 @@ test("a recording that is still rendering gets a card that says so", () => {
 
 test("a recording that is still rendering offers no download", () => {
   // there is no video yet, so a link to it would 404; the raw tracks are all there is
-  renderSection({ data: [ rendering("ABC_2026") ] });
+  renderSection({ data: [rendering("ABC_2026")] });
 
   expect(queryDownloadLink(renderingCards()[0])).toBeNull();
-  expect(within(renderingCards()[0]).getAllByRole("link")).toStrictEqual([ rawDataLink(renderingCards()[0]) ]);
+  expect(within(renderingCards()[0]).getAllByRole("link")).toStrictEqual([
+    rawDataLink(renderingCards()[0]),
+  ]);
 });
 
 test("a recording that is still rendering shows the controls of the others, but none of them work", () => {
   // the cards keep one layout whatever the state; a second job for a recording that is already
   // rendering would be refused, and so would pulling its chunks out from under the render
-  renderSection({ data: [ rendering("ABC_2026") ] });
+  renderSection({ data: [rendering("ABC_2026")] });
 
   expect(within(renderingCards()[0]).getByTestId("ss-btn-rerender")).toBeDisabled();
   expect(within(renderingCards()[0]).getByTestId("ss-btn-purge")).toBeDisabled();
@@ -251,16 +284,18 @@ test("the rendering cards sit among the finished ones in the order the server li
   expect(renderingCards()).toHaveLength(2);
 
   // the two kinds carry different test ids, so the order between them is the DOM's
-  expect(names(allCards())).toStrictEqual([ "ABC_2026", "GVS_2025", "PSU_2026", "XYZ_2026" ]);
+  expect(names(allCards())).toStrictEqual(["ABC_2026", "GVS_2025", "PSU_2026", "XYZ_2026"]);
   expect(allCards()[0]).toBe(renderingCards()[0]);
   expect(allCards()[3]).toBe(renderingCards()[1]);
 });
 
 test("the cards are in the server's order even where that is not by name", () => {
   // the order is the backend's to decide; the section does not sort on its own account
-  renderSection({ data: [ RENDERING_LISTING[3], RENDERING_LISTING[1], RENDERING_LISTING[0], RENDERING_LISTING[2] ] });
+  renderSection({
+    data: [RENDERING_LISTING[3], RENDERING_LISTING[1], RENDERING_LISTING[0], RENDERING_LISTING[2]],
+  });
 
-  expect(names(allCards())).toStrictEqual([ "XYZ_2026", "GVS_2025", "ABC_2026", "PSU_2026" ]);
+  expect(names(allCards())).toStrictEqual(["XYZ_2026", "GVS_2025", "ABC_2026", "PSU_2026"]);
 });
 
 test("a stale listing's rendering cards are withdrawn with the rest while the error is showing", () => {
@@ -282,7 +317,9 @@ test("a stale listing's rendering cards are withdrawn with the rest while the er
  * longer has the recording.
  */
 async function renderSectionWithCache(listing: Listing = LISTING) {
-  const actual = await vi.importActual<typeof import("@/lib/hooks/useServerStorage")>("@/lib/hooks/useServerStorage");
+  const actual = await vi.importActual<typeof import("@/lib/hooks/useServerStorage")>(
+    "@/lib/hooks/useServerStorage",
+  );
 
   vi.mocked(fetchRecordings).mockResolvedValue(listing);
   renderSection({ hook: actual.useServerStorage });
@@ -292,12 +329,13 @@ async function renderSectionWithCache(listing: Listing = LISTING) {
     vi.mocked(fetchRecordings).mockResolvedValue(without(listing, name));
   });
 
-  await waitFor(() => expect(screen.getByText("Server-Side Processed Recordings")).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText("Server-Side Processed Recordings")).toBeInTheDocument(),
+  );
 }
 
 /** From here on the listing is not answered, so whatever is on screen is what the cache holds. */
-const holdFurtherListings = () =>
-  vi.mocked(fetchRecordings).mockReturnValue(new Promise(() => {}));
+const holdFurtherListings = () => vi.mocked(fetchRecordings).mockReturnValue(new Promise(() => {}));
 
 // --- rerendering a finished recording --------------------------------------
 
@@ -310,7 +348,7 @@ test("each finished recording offers a rerender", () => {
   renderSection();
 
   expect(cards()).toHaveLength(2);
-  cards().forEach(card => expect(rerenderButton(card)).toBeEnabled());
+  cards().forEach((card) => expect(rerenderButton(card)).toBeEnabled());
 });
 
 test("a scheduled rerender is confirmed by name", async () => {
@@ -319,7 +357,9 @@ test("a scheduled rerender is confirmed by name", async () => {
   await userEvent.click(rerenderButton(cards()[1]));
 
   expect(rerender).toHaveBeenCalledExactlyOnceWith("PSU_2026");
-  await waitFor(() => expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Re-rendering scheduled for PSU_2026"));
+  await waitFor(() =>
+    expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Re-rendering scheduled for PSU_2026"),
+  );
   expect(showError).not.toHaveBeenCalled();
 });
 
@@ -333,8 +373,8 @@ test("the rerendered card stays a rendering one while the listing is fetched aga
   await userEvent.click(rerenderButton(cards()[0]));
 
   await waitFor(() => expect(showSuccess).toHaveBeenCalledOnce());
-  expect(names(renderingCards())).toStrictEqual([ "GVS_2025" ]);
-  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
+  expect(names(renderingCards())).toStrictEqual(["GVS_2025"]);
+  expect(names(cards())).toStrictEqual(["PSU_2026"]);
   expect(schedulePostprocessing).toHaveBeenCalledOnce();
 });
 
@@ -342,17 +382,19 @@ test("a refused rerender puts the card back and says why", async () => {
   await renderSectionWithCache();
   // so that nothing but the rollback can bring the card back
   holdFurtherListings();
-  vi.mocked(schedulePostprocessing).mockRejectedValue(new ApiError("HTTP 409: already rendering", "http", 409, "already rendering"));
+  vi.mocked(schedulePostprocessing).mockRejectedValue(
+    new ApiError("HTTP 409: already rendering", "http", 409, "already rendering"),
+  );
 
   await userEvent.click(rerenderButton(cards()[0]));
 
   await waitFor(() => expect(showError).toHaveBeenCalledOnce());
   expect(showError).toHaveBeenCalledWith(
     "Unable to schedule re-rendering for GVS_2025",
-    expect.objectContaining({ message: expect.stringContaining("already rendering") })
+    expect.objectContaining({ message: expect.stringContaining("already rendering") }),
   );
   expect(showSuccess).not.toHaveBeenCalled();
-  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  expect(names(cards())).toStrictEqual(["GVS_2025", "PSU_2026"]);
   expect(renderingCards()).toHaveLength(0);
   // and it can be pressed again
   expect(rerenderButton(cards()[0])).toBeEnabled();
@@ -369,14 +411,19 @@ test("a rerender that blows up unexpectedly puts the card back and says why", as
   await userEvent.click(rerenderButton(cards()[0]));
 
   await waitFor(() => expect(showError).toHaveBeenCalledOnce());
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("GVS_2025"), expect.objectContaining({ message: "boom" }));
-  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  expect(showError).toHaveBeenCalledWith(
+    expect.stringContaining("GVS_2025"),
+    expect.objectContaining({ message: "boom" }),
+  );
+  expect(names(cards())).toStrictEqual(["GVS_2025", "PSU_2026"]);
   expect(rerenderButton(cards()[0])).toBeEnabled();
 });
 
 test("a listing that fails to come back after a rerender is reported in place of the recordings", async () => {
   await renderSectionWithCache();
-  vi.mocked(fetchRecordings).mockRejectedValue(new ApiError("HTTP 503: upstream unavailable", "http", 503, "upstream unavailable"));
+  vi.mocked(fetchRecordings).mockRejectedValue(
+    new ApiError("HTTP 503: upstream unavailable", "http", 503, "upstream unavailable"),
+  );
 
   await userEvent.click(rerenderButton(cards()[0]));
 
@@ -394,9 +441,11 @@ test("a card is locked while its rerender is in flight", async () => {
 
   renderSection();
 
-  rerender.mockReturnValue(new Promise<undefined>(resolve => {
-    answer = () => resolve(undefined);
-  }));
+  rerender.mockReturnValue(
+    new Promise<undefined>((resolve) => {
+      answer = () => resolve(undefined);
+    }),
+  );
 
   await userEvent.click(rerenderButton(cards()[0]));
 
@@ -420,9 +469,12 @@ test("a card is unlocked again after a refused rerender", async () => {
 
   renderSection();
 
-  rerender.mockReturnValue(new Promise((_resolve, reject) => {
-    refuse = () => reject(new ApiError("HTTP 409: already rendering", "http", 409, "already rendering"));
-  }));
+  rerender.mockReturnValue(
+    new Promise((_resolve, reject) => {
+      refuse = () =>
+        reject(new ApiError("HTTP 409: already rendering", "http", 409, "already rendering"));
+    }),
+  );
 
   await userEvent.click(rerenderButton(cards()[0]));
   expect(purgeButton(cards()[0])).toBeDisabled();
@@ -431,17 +483,25 @@ test("a card is unlocked again after a refused rerender", async () => {
 
   await waitFor(() => expect(rerenderButton(cards()[0])).toBeEnabled());
   expect(purgeButton(cards()[0])).toBeEnabled();
-  expect(showError).toHaveBeenCalledExactlyOnceWith("Unable to schedule re-rendering for GVS_2025", expect.any(Error));
+  expect(showError).toHaveBeenCalledExactlyOnceWith(
+    "Unable to schedule re-rendering for GVS_2025",
+    expect.any(Error),
+  );
 });
 
 // --- recordings whose postprocessing never produced anything ---------------
 
 const unprocessedCards = () => screen.queryAllByTestId("ss-card-unprocessed");
 
-const UNPROCESSED_LISTING = sorted([ ...LISTING, rendering("ABC_2026"), unprocessed("OLD_2024"), unprocessed("XYZ_2025") ]);
+const UNPROCESSED_LISTING = sorted([
+  ...LISTING,
+  rendering("ABC_2026"),
+  unprocessed("OLD_2024"),
+  unprocessed("XYZ_2025"),
+]);
 
 test("a recording whose postprocessing failed gets a card that says so", () => {
-  renderSection({ data: [ unprocessed("OLD_2024") ] });
+  renderSection({ data: [unprocessed("OLD_2024")] });
 
   expect(unprocessedCards()).toHaveLength(1);
   expect(within(unprocessedCards()[0]).getByText("OLD_2024")).toBeInTheDocument();
@@ -453,10 +513,12 @@ test("a recording whose postprocessing failed gets a card that says so", () => {
 
 test("a recording whose postprocessing failed offers a rerender but no download", () => {
   // there is no video to download; rendering it again is the only way to one
-  renderSection({ data: [ unprocessed("OLD_2024") ] });
+  renderSection({ data: [unprocessed("OLD_2024")] });
 
   expect(queryDownloadLink(unprocessedCards()[0])).toBeNull();
-  expect(within(unprocessedCards()[0]).getAllByRole("link")).toStrictEqual([ rawDataLink(unprocessedCards()[0]) ]);
+  expect(within(unprocessedCards()[0]).getAllByRole("link")).toStrictEqual([
+    rawDataLink(unprocessedCards()[0]),
+  ]);
   expect(rerenderButton(unprocessedCards()[0])).toBeEnabled();
 });
 
@@ -470,12 +532,18 @@ test("a rerender of a failed recording schedules a job for it and turns the card
     { apiUrl: API_URL, getAccessToken },
     "XYZ_2025",
     LECTURER_EMAIL,
-    undefined
+    undefined,
   );
   // in the place it already had, which is where the backend lists it by name
-  await waitFor(() => expect(names(renderingCards())).toStrictEqual([ "ABC_2026", "XYZ_2025" ]));
-  expect(names(allCards())).toStrictEqual([ "ABC_2026", "GVS_2025", "OLD_2024", "PSU_2026", "XYZ_2025" ]);
-  expect(names(unprocessedCards())).toStrictEqual([ "OLD_2024" ]);
+  await waitFor(() => expect(names(renderingCards())).toStrictEqual(["ABC_2026", "XYZ_2025"]));
+  expect(names(allCards())).toStrictEqual([
+    "ABC_2026",
+    "GVS_2025",
+    "OLD_2024",
+    "PSU_2026",
+    "XYZ_2025",
+  ]);
+  expect(names(unprocessedCards())).toStrictEqual(["OLD_2024"]);
   expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Re-rendering scheduled for XYZ_2025");
 });
 
@@ -484,9 +552,11 @@ test("a failed recording's card is locked while its rerender is in flight", asyn
 
   renderSection({ data: UNPROCESSED_LISTING });
 
-  rerender.mockReturnValue(new Promise<undefined>(resolve => {
-    answer = () => resolve(undefined);
-  }));
+  rerender.mockReturnValue(
+    new Promise<undefined>((resolve) => {
+      answer = () => resolve(undefined);
+    }),
+  );
 
   await userEvent.click(rerenderButton(unprocessedCards()[0]));
 
@@ -512,7 +582,13 @@ test("the failed cards sit among the others in the order the server lists them",
   expect(within(unprocessedCards()[1]).getByText("XYZ_2025")).toBeInTheDocument();
 
   // not gathered at the end: each is where its name puts it in the backend's listing
-  expect(names(allCards())).toStrictEqual([ "ABC_2026", "GVS_2025", "OLD_2024", "PSU_2026", "XYZ_2025" ]);
+  expect(names(allCards())).toStrictEqual([
+    "ABC_2026",
+    "GVS_2025",
+    "OLD_2024",
+    "PSU_2026",
+    "XYZ_2025",
+  ]);
   expect(allCards()[2]).toBe(unprocessedCards()[0]);
   expect(allCards()[4]).toBe(unprocessedCards()[1]);
 });
@@ -544,14 +620,14 @@ async function askToPurge(card: HTMLElement) {
 test("finished and failed recordings offer a purge, rendering ones do not", () => {
   renderSection({ data: UNPROCESSED_LISTING });
 
-  cards().forEach(card => expect(purgeButton(card)).toBeEnabled());
-  unprocessedCards().forEach(card => expect(purgeButton(card)).toBeEnabled());
+  cards().forEach((card) => expect(purgeButton(card)).toBeEnabled());
+  unprocessedCards().forEach((card) => expect(purgeButton(card)).toBeEnabled());
   // deleting it would pull the chunks out from under the render; the backend refuses too
   expect(purgeButton(renderingCards()[0])).toBeDisabled();
 });
 
 test("pressing the disabled purge of a rendering recording asks nothing and sends nothing", async () => {
-  renderSection({ data: [ rendering("ABC_2026") ] });
+  renderSection({ data: [rendering("ABC_2026")] });
 
   await userEvent.click(purgeButton(renderingCards()[0]));
 
@@ -609,7 +685,10 @@ test("confirming purges that one recording, says so and closes the dialog", asyn
   await askToPurge(cards()[1]);
   await userEvent.click(confirmButton());
 
-  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith({ apiUrl: API_URL, getAccessToken }, "PSU_2026");
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(
+    { apiUrl: API_URL, getAccessToken },
+    "PSU_2026",
+  );
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Purged PSU_2026");
   expect(showError).not.toHaveBeenCalled();
@@ -621,7 +700,10 @@ test("a failed recording can be purged the same way", async () => {
   await askToPurge(unprocessedCards()[0]);
   await userEvent.click(confirmButton());
 
-  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith({ apiUrl: API_URL, getAccessToken }, "OLD_2024");
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(
+    { apiUrl: API_URL, getAccessToken },
+    "OLD_2024",
+  );
 });
 
 test("the dialog closes as soon as the purge is confirmed", async () => {
@@ -645,12 +727,14 @@ test("a purge that succeeds after the dialog closed still says so", async () => 
 
   await renderSectionWithCache();
 
-  vi.mocked(purgeRecording).mockReturnValue(new Promise(resolve => {
-    done = () => {
-      vi.mocked(fetchRecordings).mockResolvedValue(without(LISTING, "GVS_2025"));
-      resolve();
-    };
-  }));
+  vi.mocked(purgeRecording).mockReturnValue(
+    new Promise((resolve) => {
+      done = () => {
+        vi.mocked(fetchRecordings).mockResolvedValue(without(LISTING, "GVS_2025"));
+        resolve();
+      };
+    }),
+  );
 
   await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
@@ -659,29 +743,38 @@ test("a purge that succeeds after the dialog closed still says so", async () => 
   done();
 
   await waitFor(() => expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Purged GVS_2025"));
-  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
+  expect(names(cards())).toStrictEqual(["PSU_2026"]);
 });
 
 test("a purge that is refused after the dialog closed puts the card back and says why", async () => {
   let refuse: () => void = () => {};
-  const refusal = new ApiError("HTTP 409: GVS_2025 is currently being rendered.", "http", 409, "GVS_2025 is currently being rendered.");
+  const refusal = new ApiError(
+    "HTTP 409: GVS_2025 is currently being rendered.",
+    "http",
+    409,
+    "GVS_2025 is currently being rendered.",
+  );
 
   await renderSectionWithCache();
   holdFurtherListings();
 
-  vi.mocked(purgeRecording).mockReturnValue(new Promise((_resolve, reject) => {
-    refuse = () => reject(refusal);
-  }));
+  vi.mocked(purgeRecording).mockReturnValue(
+    new Promise((_resolve, reject) => {
+      refuse = () => reject(refusal);
+    }),
+  );
 
   await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(names(cards())).toStrictEqual([ "PSU_2026" ]);
+  expect(names(cards())).toStrictEqual(["PSU_2026"]);
 
   refuse();
 
-  await waitFor(() => expect(showError).toHaveBeenCalledExactlyOnceWith("Failed to purge GVS_2025", refusal));
-  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  await waitFor(() =>
+    expect(showError).toHaveBeenCalledExactlyOnceWith("Failed to purge GVS_2025", refusal),
+  );
+  expect(names(cards())).toStrictEqual(["GVS_2025", "PSU_2026"]);
   expect(showSuccess).not.toHaveBeenCalled();
 });
 
@@ -693,13 +786,16 @@ test("another recording can be purged while the first purge is still in flight",
 
   await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
-  await waitFor(() => expect(names(cards())).toStrictEqual([ "PSU_2026" ]));
+  await waitFor(() => expect(names(cards())).toStrictEqual(["PSU_2026"]));
 
   await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
 
   await waitFor(() => expect(cards()).toHaveLength(0));
-  expect(vi.mocked(purgeRecording).mock.calls.map(([ , name ]) => name)).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  expect(vi.mocked(purgeRecording).mock.calls.map(([, name]) => name)).toStrictEqual([
+    "GVS_2025",
+    "PSU_2026",
+  ]);
 });
 
 test("a rerender while a purge is in flight does not bring the purged card back", async () => {
@@ -713,7 +809,7 @@ test("a rerender while a purge is in flight does not bring the purged card back"
 
   await askToPurge(cards()[0]);
   await userEvent.click(confirmButton());
-  await waitFor(() => expect(names(cards())).toStrictEqual([ "PSU_2026" ]));
+  await waitFor(() => expect(names(cards())).toStrictEqual(["PSU_2026"]));
 
   await userEvent.click(rerenderButton(cards()[0]));
 
@@ -729,7 +825,7 @@ test("a rerender while a purge is in flight does not bring the purged card back"
 const notRenderableCards = () => screen.queryAllByTestId("ss-card-nonrenderable");
 
 test("a recording that cannot be rendered gets a card that says so", () => {
-  renderSection({ data: sorted([ ...LISTING, notRenderable("AUD_2026") ]) });
+  renderSection({ data: sorted([...LISTING, notRenderable("AUD_2026")]) });
 
   expect(notRenderableCards()).toHaveLength(1);
   expect(within(notRenderableCards()[0]).getByText("AUD_2026")).toBeInTheDocument();
@@ -737,13 +833,13 @@ test("a recording that cannot be rendered gets a card that says so", () => {
   // counted as none of the other kinds, and in the place the server lists it
   expect(renderingCards()).toHaveLength(0);
   expect(unprocessedCards()).toHaveLength(0);
-  expect(names(allCards())).toStrictEqual([ "AUD_2026", "GVS_2025", "PSU_2026" ]);
+  expect(names(allCards())).toStrictEqual(["AUD_2026", "GVS_2025", "PSU_2026"]);
   expect(allCards()[0]).toBe(notRenderableCards()[0]);
 });
 
 test("a recording that cannot be rendered offers no rerender and no download", () => {
   // a rerender could only ever be refused, and there is no video to download
-  renderSection({ data: [ notRenderable("AUD_2026") ] });
+  renderSection({ data: [notRenderable("AUD_2026")] });
 
   const card = notRenderableCards()[0];
 
@@ -753,7 +849,7 @@ test("a recording that cannot be rendered offers no rerender and no download", (
 });
 
 test("pressing the disabled rerender of a recording that cannot be rendered schedules nothing", async () => {
-  renderSection({ data: [ notRenderable("AUD_2026") ] });
+  renderSection({ data: [notRenderable("AUD_2026")] });
 
   await userEvent.click(rerenderButton(notRenderableCards()[0]));
 
@@ -761,7 +857,7 @@ test("pressing the disabled rerender of a recording that cannot be rendered sche
 });
 
 test("a recording that cannot be rendered asks before it is purged", async () => {
-  renderSection({ data: [ notRenderable("AUD_2026") ] });
+  renderSection({ data: [notRenderable("AUD_2026")] });
 
   await askToPurge(notRenderableCards()[0]);
 
@@ -775,15 +871,18 @@ test("a recording that cannot be rendered asks before it is purged", async () =>
 });
 
 test("a recording that cannot be rendered is purged once confirmed", async () => {
-  await renderSectionWithCache(sorted([ ...LISTING, notRenderable("AUD_2026") ]));
+  await renderSectionWithCache(sorted([...LISTING, notRenderable("AUD_2026")]));
 
   await askToPurge(notRenderableCards()[0]);
   await userEvent.click(confirmButton());
 
-  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith({ apiUrl: API_URL, getAccessToken }, "AUD_2026");
+  expect(purgeRecording).toHaveBeenCalledExactlyOnceWith(
+    { apiUrl: API_URL, getAccessToken },
+    "AUD_2026",
+  );
   await waitFor(() => expect(showSuccess).toHaveBeenCalledExactlyOnceWith("Purged AUD_2026"));
   expect(notRenderableCards()).toHaveLength(0);
-  expect(names(cards())).toStrictEqual([ "GVS_2025", "PSU_2026" ]);
+  expect(names(cards())).toStrictEqual(["GVS_2025", "PSU_2026"]);
 });
 
 // --- the raw tracks ---------------------------------------------------------
@@ -796,58 +895,75 @@ const everyKind = [
   {
     kind: "a finished recording",
     testid: "ss-card-completed",
-    make: (name: string, rawDownloadUrl: string | null) => completed(name, MiB, { rawDownloadUrl })
+    make: (name: string, rawDownloadUrl: string | null) => completed(name, MiB, { rawDownloadUrl }),
   },
   { kind: "a recording that is still rendering", testid: "ss-card-rendering", make: rendering },
-  { kind: "a recording whose postprocessing failed", testid: "ss-card-unprocessed", make: unprocessed },
-  { kind: "a recording that cannot be rendered", testid: "ss-card-nonrenderable", make: notRenderable }
+  {
+    kind: "a recording whose postprocessing failed",
+    testid: "ss-card-unprocessed",
+    make: unprocessed,
+  },
+  {
+    kind: "a recording that cannot be rendered",
+    testid: "ss-card-nonrenderable",
+    make: notRenderable,
+  },
 ];
 
-test.each(everyKind)("$kind offers its raw tracks from the link the backend handed out", ({ testid, make }) => {
-  renderSection({ data: [ make("Übung_2025", rawDownloadPath("Übung_2025", "424242")) ] });
+test.each(everyKind)(
+  "$kind offers its raw tracks from the link the backend handed out",
+  ({ testid, make }) => {
+    renderSection({ data: [make("Übung_2025", rawDownloadPath("Übung_2025", "424242"))] });
 
-  const link = rawDataLink(screen.getByTestId(testid));
+    const link = rawDataLink(screen.getByTestId(testid));
 
-  // resolved against the configured backend like the video's link, with the name's encoding
-  // carried through untouched
-  expect(link).toHaveAttribute(
-    "href",
-    `${API_URL}/api/downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}/raw?totp=424242`
-  );
-  expect(link).toHaveAttribute("download");
-});
+    // resolved against the configured backend like the video's link, with the name's encoding
+    // carried through untouched
+    expect(link).toHaveAttribute(
+      "href",
+      `${API_URL}/api/downloads/${USER_DIGEST}/${encodeURIComponent("Übung_2025")}/raw?totp=424242`,
+    );
+    expect(link).toHaveAttribute("download");
+  },
+);
 
 test.each(everyKind)("the raw tracks of $kind open in a tab of their own", ({ testid, make }) => {
   // for the same reason as the video: a lapsed TOTP is answered with a JSON error, which must
   // not replace the recorder
-  renderSection({ data: [ make("GVS_2025", rawDownloadPath("GVS_2025")) ] });
+  renderSection({ data: [make("GVS_2025", rawDownloadPath("GVS_2025"))] });
 
   expect(rawDataLink(screen.getByTestId(testid))).toHaveAttribute("target", "_blank");
 });
 
-test.each(everyKind)("$kind offers no raw tracks when the backend hands out no link for them", ({ testid, make }) => {
-  // what a backend without authentication answers: there is no user directory to link to,
-  // and a link built from nothing would lead nowhere
-  renderSection({ data: [ make("GVS_2025", null) ] });
+test.each(everyKind)(
+  "$kind offers no raw tracks when the backend hands out no link for them",
+  ({ testid, make }) => {
+    // what a backend without authentication answers: there is no user directory to link to,
+    // and a link built from nothing would lead nowhere
+    renderSection({ data: [make("GVS_2025", null)] });
 
-  expect(screen.getByTestId(testid)).toBeInTheDocument();
-  expect(queryRawDataLink(screen.getByTestId(testid))).toBeNull();
-});
+    expect(screen.getByTestId(testid)).toBeInTheDocument();
+    expect(queryRawDataLink(screen.getByTestId(testid))).toBeNull();
+  },
+);
 
 test("a finished recording without a raw data link still offers its video", () => {
-  renderSection({ data: [ completed("GVS_2025", MiB, { rawDownloadUrl: null }) ] });
+  renderSection({ data: [completed("GVS_2025", MiB, { rawDownloadUrl: null })] });
 
-  expect(downloadLink(cards()[0])).toHaveAttribute("href", `${API_URL}/api/${downloadPath("GVS_2025")}`);
+  expect(downloadLink(cards()[0])).toHaveAttribute(
+    "href",
+    `${API_URL}/api/${downloadPath("GVS_2025")}`,
+  );
   expect(within(cards()[0]).getAllByRole("link")).toHaveLength(1);
 });
 
 test("a finished recording without a video link offers only its raw tracks", () => {
   // the listing allows for it, though a backend that lists recordings at all always has a
   // video link to hand out
-  renderSection({ data: [ completed("GVS_2025", MiB, { downloadUrl: null }) ] });
+  renderSection({ data: [completed("GVS_2025", MiB, { downloadUrl: null })] });
 
   expect(queryDownloadLink(cards()[0])).toBeNull();
-  expect(within(cards()[0]).getAllByRole("link")).toStrictEqual([ rawDataLink(cards()[0]) ]);
+  expect(within(cards()[0]).getAllByRole("link")).toStrictEqual([rawDataLink(cards()[0])]);
   // still finished: it can be rendered again or purged like any other
   expect(rerenderButton(cards()[0])).toBeEnabled();
   expect(purgeButton(cards()[0])).toBeEnabled();
@@ -888,11 +1004,15 @@ test("an expired session is offered no downloads", () => {
 // what turns that into something on screen.
 
 test("a failed listing is reported in place of the recordings", () => {
-  renderSection({ error: new ApiError("HTTP 503: upstream unavailable", "http", 503, "upstream unavailable") });
+  renderSection({
+    error: new ApiError("HTTP 503: upstream unavailable", "http", 503, "upstream unavailable"),
+  });
 
   const alert = screen.getByRole("alert");
 
-  expect(within(alert).getByText(/Error fetching list of processed recordings/)).toBeInTheDocument();
+  expect(
+    within(alert).getByText(/Error fetching list of processed recordings/),
+  ).toBeInTheDocument();
   // the message carries the status and the server's own explanation, which is the
   // difference between "try again later" and "tell the admin"
   expect(within(alert).getByText(/HTTP 503: upstream unavailable/)).toBeInTheDocument();
@@ -919,8 +1039,10 @@ test("a backend that sent nonsense is reported in words rather than as a JSON du
   // ApiError it arrives wrapped in takes that message over. It is an Error, so an
   // instanceof check alone would put that straight on screen.
   const schema = z.array(z.object({ name: z.string(), size: z.number() }));
-  const issues = schema.safeParse([ { name: "GVS_2025", size: "1024" } ]).error;
-  const error = new ApiError(issues?.message ?? "", "invalid-response", 200, undefined, { cause: issues });
+  const issues = schema.safeParse([{ name: "GVS_2025", size: "1024" }]).error;
+  const error = new ApiError(issues?.message ?? "", "invalid-response", 200, undefined, {
+    cause: issues,
+  });
 
   renderSection({ error });
 

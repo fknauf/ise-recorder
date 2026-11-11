@@ -4,9 +4,9 @@ import { Card } from "@mantine/core";
 import { ReactNode } from "react";
 
 export interface AudioPreviewProps {
-  track: MediaStreamTrack
-  width: number
-  height: number
+  track: MediaStreamTrack;
+  width: number;
+  height: number;
 }
 
 /**
@@ -15,11 +15,9 @@ export interface AudioPreviewProps {
  * This is mostly meant to give visual feedback that the microphone is working and
  * whether its volume setting is okay.
  */
-export function AudioPreview(
-  { track, width, height }: Readonly<AudioPreviewProps>
-): ReactNode {
+export function AudioPreview({ track, width, height }: Readonly<AudioPreviewProps>): ReactNode {
   const attachRenderLoop = (canvas: HTMLCanvasElement | null) => {
-    if(canvas === null) {
+    if (canvas === null) {
       return;
     }
 
@@ -40,7 +38,7 @@ export function AudioPreview(
     const renderFunction = () => {
       const ctx = canvas.getContext("2d");
 
-      if(ctx === null) {
+      if (ctx === null) {
         return;
       }
 
@@ -48,18 +46,20 @@ export function AudioPreview(
       audioAnalyzer.getByteTimeDomainData(timeData);
 
       const space = canvas.width / freqData.length;
-      const isClipping = timeData.some(v => v <= 5 || v >= 250);
+      const isClipping = timeData.some((v) => v <= 5 || v >= 250);
 
       // paint spectrum as a histogram. Use the warning color iff audio is clipping.
       ctx.lineWidth = Math.ceil(space);
-      ctx.strokeStyle = computedStyle.getPropertyValue(isClipping ? "--mantine-color-warning-text" : "--mantine-color-text");
+      ctx.strokeStyle = computedStyle.getPropertyValue(
+        isClipping ? "--mantine-color-warning-text" : "--mantine-color-text",
+      );
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      for(const [ i, value ] of freqData.entries()) {
+      for (const [i, value] of freqData.entries()) {
         ctx.beginPath();
         ctx.moveTo(space * i, canvas.height);
-        ctx.lineTo(space * i, canvas.height - value * canvas.height / 255);
+        ctx.lineTo(space * i, canvas.height - (value * canvas.height) / 255);
         ctx.stroke();
       }
     };

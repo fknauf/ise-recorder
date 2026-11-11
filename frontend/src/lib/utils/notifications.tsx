@@ -5,18 +5,18 @@ import { WarningOctagonIcon, CheckIcon, InfoIcon } from "@phosphor-icons/react";
 
 const defaultNotification: Partial<NotificationData> = {
   autoClose: 5000,
-  withBorder: true
+  withBorder: true,
 };
 
 export function showError(description: string, err?: unknown) {
   const common: Partial<NotificationData> = {
     ...defaultNotification,
     color: "error",
-    icon: <WarningOctagonIcon/>,
-    title: "Error"
+    icon: <WarningOctagonIcon />,
+    title: "Error",
   };
 
-  if(err !== undefined) {
+  if (err !== undefined) {
     const message = err instanceof Error ? err.message : "unknown error";
 
     console.log(description, err);
@@ -30,9 +30,9 @@ export function showSuccess(message: string) {
   notifications.show({
     ...defaultNotification,
     color: "success",
-    icon: <CheckIcon/>,
+    icon: <CheckIcon />,
     title: "Success",
-    message
+    message,
   });
 }
 
@@ -40,8 +40,8 @@ export function showMessage(message: string) {
   notifications.show({
     ...defaultNotification,
     color: "neutral",
-    icon: <InfoIcon/>,
+    icon: <InfoIcon />,
     title: "Notice",
-    message
+    message,
   });
 }

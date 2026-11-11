@@ -18,5 +18,5 @@ export const anAppSession = (overrides: Partial<AppSession> = {}): AppSession =>
   interactiveSignin: async () => {},
   reauthenticate: async () => {},
   expandSession: async () => "can-stream",
-  ...overrides
+  ...overrides,
 });

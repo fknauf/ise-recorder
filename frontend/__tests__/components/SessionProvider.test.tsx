@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { ReactNode, useLayoutEffect } from "react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SessionProvider, useAppSession } from "@/lib/components/SessionProvider";
 import { ServerEnv } from "@/lib/utils/serverEnv";
 import { aServerEnv } from "../helpers/serverEnv";
@@ -25,48 +25,54 @@ import { aServerEnv } from "../helpers/serverEnv";
  */
 const oidc = vi.hoisted(() => {
   interface FakeProfile {
-    iat: number
-    auth_time?: number
-    preferred_username?: string
-    name?: string
-    email?: string
+    iat: number;
+    auth_time?: number;
+    preferred_username?: string;
+    name?: string;
+    email?: string;
   }
 
   interface FakeUser {
-    access_token: string
-    refresh_token?: string
-    expired: boolean
-    profile: FakeProfile
+    access_token: string;
+    refresh_token?: string;
+    expired: boolean;
+    profile: FakeProfile;
   }
 
   interface FakeError extends Error {
-    source: string
+    source: string;
   }
 
   interface AuthState {
-    user: FakeUser | null | undefined
-    isLoading: boolean
-    isAuthenticated: boolean
-    error: FakeError | undefined
+    user: FakeUser | null | undefined;
+    isLoading: boolean;
+    isAuthenticated: boolean;
+    error: FakeError | undefined;
   }
 
   // what AuthProvider starts out with, before it has read the user store
-  const initialState = (): AuthState => ({ user: undefined, isLoading: true, isAuthenticated: false, error: undefined });
+  const initialState = (): AuthState => ({
+    user: undefined,
+    isLoading: true,
+    isAuthenticated: false,
+    error: undefined,
+  });
 
   let state = initialState();
   const listeners = new Set<() => void>();
 
   const setState = (update: Partial<AuthState>) => {
     state = { ...state, ...update };
-    listeners.forEach(listener => listener());
+    listeners.forEach((listener) => listener());
   };
 
-  const loadUser = (user: FakeUser | null) => setState({
-    user,
-    isLoading: false,
-    isAuthenticated: user !== null && !user.expired,
-    error: undefined
-  });
+  const loadUser = (user: FakeUser | null) =>
+    setState({
+      user,
+      isLoading: false,
+      isAuthenticated: user !== null && !user.expired,
+      error: undefined,
+    });
 
   /** What the next sign-in of each kind does: sign this user in, fail with this error, or neither. */
   const outcome = {
@@ -74,7 +80,7 @@ const oidc = vi.hoisted(() => {
     signinPopup: null as FakeUser | Error | null,
     /** Hold signinSilent open until this settles, so callers can pile up behind it. */
     signinSilentGate: null as Promise<void> | null,
-    removeUser: null as Error | null
+    removeUser: null as Error | null,
   };
 
   // How the library wraps each sign-in method: loading while it runs, the new user on success,
@@ -82,18 +88,18 @@ const oidc = vi.hoisted(() => {
   const navigator = (source: "signinSilent" | "signinPopup") => async () => {
     setState({ isLoading: true });
 
-    if(source === "signinSilent" && outcome.signinSilentGate !== null) {
+    if (source === "signinSilent" && outcome.signinSilentGate !== null) {
       await outcome.signinSilentGate;
     }
 
     const result = outcome[source];
 
-    if(result instanceof Error) {
+    if (result instanceof Error) {
       setState({ isLoading: false, error: Object.assign(result, { source }) });
       return null;
     }
 
-    if(result === null) {
+    if (result === null) {
       setState({ isLoading: false });
       return null;
     }
@@ -106,12 +112,12 @@ const oidc = vi.hoisted(() => {
     signinSilent: vi.fn(navigator("signinSilent")),
     signinPopup: vi.fn(navigator("signinPopup")),
     removeUser: vi.fn(async () => {
-      if(outcome.removeUser !== null) {
+      if (outcome.removeUser !== null) {
         throw outcome.removeUser;
       }
 
       setState({ user: undefined, isAuthenticated: false });
-    })
+    }),
   };
 
   /** Every set of props AuthProvider was rendered with, latest last. */
@@ -125,7 +131,7 @@ const oidc = vi.hoisted(() => {
     outcome.signinSilentGate = null;
     outcome.removeUser = null;
     providerProps.length = 0;
-    Object.values(methods).forEach(method => method.mockClear());
+    Object.values(methods).forEach((method) => method.mockClear());
   };
 
   return {
@@ -139,7 +145,7 @@ const oidc = vi.hoisted(() => {
     outcome,
     methods,
     providerProps,
-    reset
+    reset,
   };
 });
 
@@ -154,8 +160,8 @@ vi.mock("react-oidc-context", async () => {
     useAuth: () => {
       const state = React.useSyncExternalStore(oidc.subscribe, oidc.getState);
       // one object per state, as the library's context value is
-      return React.useMemo(() => ({ ...state, ...oidc.methods }), [ state ]);
-    }
+      return React.useMemo(() => ({ ...state, ...oidc.methods }), [state]);
+    },
   };
 });
 
@@ -163,7 +169,7 @@ vi.mock("react-oidc-context", async () => {
 // replace, so a test can see where the provider navigated.
 const router = vi.hoisted(() => ({ replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => router
+  useRouter: () => router,
 }));
 
 const MAX_AGE_SECONDS = 25200;
@@ -173,7 +179,7 @@ const authenticatedEnv = aServerEnv({
   oidcProviderUrl: "http://keycloak.localhost:8080/realms/ise",
   oidcClientId: "ise-recorder",
   oidcMaxAge: MAX_AGE_SECONDS,
-  oidcAutoSignin: false
+  oidcAutoSignin: false,
 });
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -182,14 +188,14 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 const userAged = (
   ageSeconds: number,
   overrides: Partial<{
-    access_token: string
-    refresh_token: string
-    expired: boolean
-    iat: number
-    preferred_username: string
-    name: string
-    email: string
-  }> = {}
+    access_token: string;
+    refresh_token: string;
+    expired: boolean;
+    iat: number;
+    preferred_username: string;
+    name: string;
+    email: string;
+  }> = {},
 ) => ({
   access_token: overrides.access_token ?? "current-token",
   refresh_token: overrides.refresh_token,
@@ -199,17 +205,16 @@ const userAged = (
     iat: overrides.iat ?? nowSeconds(),
     preferred_username: overrides.preferred_username,
     name: overrides.name,
-    email: overrides.email
-  }
+    email: overrides.email,
+  },
 });
 
 function providerWrapper(env: Partial<ServerEnv>) {
   const serverEnv = aServerEnv(env);
 
-  const Wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
-    <SessionProvider serverEnv={serverEnv}>
-      {children}
-    </SessionProvider>;
+  const Wrapper = ({ children }: Readonly<{ children: ReactNode }>) => (
+    <SessionProvider serverEnv={serverEnv}>{children}</SessionProvider>
+  );
 
   Wrapper.displayName = "SessionProviderTestWrapper";
   return Wrapper;
@@ -226,7 +231,10 @@ const settle = () => act(async () => {});
  * Flushed inside act() rather than waited for, because waitFor() runs on timers, and the
  * staleness tests below install a fake clock before mounting.
  */
-async function renderAppSession(serverEnv: Partial<ServerEnv>, stored: ReturnType<typeof userAged> | null = null) {
+async function renderAppSession(
+  serverEnv: Partial<ServerEnv>,
+  stored: ReturnType<typeof userAged> | null = null,
+) {
   const rendered = renderHook(useAppSession, { wrapper: providerWrapper(serverEnv) });
 
   await act(async () => {
@@ -238,9 +246,10 @@ async function renderAppSession(serverEnv: Partial<ServerEnv>, stored: ReturnTyp
 }
 
 /** A user signs in or is renewed while the page is open. */
-const signIn = (user: ReturnType<typeof userAged>) => act(async () => {
-  oidc.loadUser(user);
-});
+const signIn = (user: ReturnType<typeof userAged>) =>
+  act(async () => {
+    oidc.loadUser(user);
+  });
 
 /** The props AuthProvider was last rendered with. */
 const authProviderProps = () => {
@@ -265,8 +274,9 @@ test("useAppSession refuses to work outside a provider", () => {
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
-    expect(() => renderHook(() => useAppSession()))
-      .toThrow("useAppSession must be used within SessionProvider");
+    expect(() => renderHook(() => useAppSession())).toThrow(
+      "useAppSession must be used within SessionProvider",
+    );
   } finally {
     consoleError.mockRestore();
   }
@@ -284,7 +294,9 @@ function expectRenderToFail(serverEnv: Partial<ServerEnv>) {
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
-    expect(() => renderHook(() => useAppSession(), { wrapper: providerWrapper(serverEnv) })).toThrow();
+    expect(() =>
+      renderHook(() => useAppSession(), { wrapper: providerWrapper(serverEnv) }),
+    ).toThrow();
   } finally {
     consoleError.mockRestore();
   }
@@ -292,7 +304,7 @@ function expectRenderToFail(serverEnv: Partial<ServerEnv>) {
 
 const PROVIDER = {
   oidcProviderUrl: "http://keycloak.localhost:8080/realms/ise",
-  oidcClientId: "ise-recorder"
+  oidcClientId: "ise-recorder",
 };
 
 async function expectAnonymous(serverEnv: Partial<ServerEnv>) {
@@ -337,15 +349,22 @@ test("authentication can be turned on for a deployment without a backend", async
 
 test("an empty auth setting falls back to the default", async () => {
   // ISE_RECORD_AUTH= with nothing after it, as the backend reads it too
-  await expectAuthenticationRequired({ apiUrl: "http://localhost:5000", authBackend: "", ...PROVIDER });
+  await expectAuthenticationRequired({
+    apiUrl: "http://localhost:5000",
+    authBackend: "",
+    ...PROVIDER,
+  });
   cleanup();
   oidc.reset();
   await expectAnonymous({ authBackend: "" });
 });
 
-test.each([ "none", "off", "OIDC", "Disabled" ])("an unknown auth setting (%s) does not render", value => {
-  expectRenderToFail({ apiUrl: "http://localhost:5000", authBackend: value, ...PROVIDER });
-});
+test.each(["none", "off", "OIDC", "Disabled"])(
+  "an unknown auth setting (%s) does not render",
+  (value) => {
+    expectRenderToFail({ apiUrl: "http://localhost:5000", authBackend: value, ...PROVIDER });
+  },
+);
 
 test("OpenID without a provider URL does not render", () => {
   expectRenderToFail({ authBackend: "oidc", oidcClientId: "ise-recorder" });
@@ -356,7 +375,10 @@ test("OpenID without a client ID does not render", () => {
 });
 
 test("an anonymous deployment never reports a stale or failed session", async () => {
-  const { result } = await renderAppSession({ apiUrl: "http://localhost:5000", authBackend: "disabled" });
+  const { result } = await renderAppSession({
+    apiUrl: "http://localhost:5000",
+    authBackend: "disabled",
+  });
 
   // the banners key off these, and there is no session here to go stale or fail
   expect(result.current.isStale).toBe(false);
@@ -378,7 +400,7 @@ test("AuthProvider is configured from the server environment", async () => {
     redirect_uri: `${window.location.origin}/auth/callback`,
     scope: "openid profile email",
     automaticSilentRenew: true,
-    max_age: MAX_AGE_SECONDS
+    max_age: MAX_AGE_SECONDS,
   });
 });
 
@@ -417,7 +439,10 @@ test("nobody signed in is reported as unauthenticated", async () => {
 });
 
 test("the user name comes from the profile, with fallbacks for providers that send less", async () => {
-  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { preferred_username: "dozent", name: "Dr. Dozent" }));
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { preferred_username: "dozent", name: "Dr. Dozent" }),
+  );
   expect(result.current.userName).toBe("dozent");
 
   await signIn(userAged(60, { name: "Dr. Dozent", email: "dozent@example.edu" }));
@@ -434,7 +459,10 @@ test("the loading state and errors are passed through as the library reports the
   const { result } = await renderAppSession(authenticatedEnv, userAged(60));
 
   await act(async () => {
-    oidc.setState({ isLoading: true, error: Object.assign(new Error("provider unreachable"), { source: "renewSilent" }) });
+    oidc.setState({
+      isLoading: true,
+      error: Object.assign(new Error("provider unreachable"), { source: "renewSilent" }),
+    });
   });
 
   expect(result.current.isLoading).toBe(true);
@@ -444,7 +472,10 @@ test("the loading state and errors are passed through as the library reports the
 // --- getAccessToken --------------------------------------------------------
 
 test("getAccessToken returns the token of a signed-in user", async () => {
-  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { access_token: "current-token", refresh_token: "refresh" }));
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { access_token: "current-token", refresh_token: "refresh" }),
+  );
 
   expect(await result.current.getAccessToken()).toBe("current-token");
   // a token that is still good is handed out as it is, refresh token or not
@@ -483,8 +514,13 @@ async function accessTokenFrom(getAccessToken: () => Promise<string | undefined>
 test("getAccessToken renews an expired token with the refresh token", async () => {
   // signed in while the page is open, so the renewal on load is not what does it
   const { result } = await renderAppSession(authenticatedEnv);
-  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
-  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  await signIn(
+    userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }),
+  );
+  oidc.outcome.signinSilent = userAged(0, {
+    access_token: "renewed-token",
+    refresh_token: "refresh",
+  });
   oidc.methods.signinSilent.mockClear();
 
   expect(await accessTokenFrom(result.current.getAccessToken)).toBe("renewed-token");
@@ -497,34 +533,42 @@ test("concurrent requests for a token share one renewal", async () => {
   // every track uploads its own chunks, so several of these arrive at once when the token
   // runs out; each starting its own refresh would at best waste requests, and at worst
   // trip refresh token rotation into failing all but one of them
-  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh" }));
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { refresh_token: "refresh" }),
+  );
 
   // captured the way a recording captures it, and called alongside the current one: the
   // renewal in flight has to be shared across renders, not only within one
   const capturedGetAccessToken = result.current.getAccessToken;
 
   let releaseRenewal: () => void = () => {};
-  oidc.outcome.signinSilentGate = new Promise(resolve => {
+  oidc.outcome.signinSilentGate = new Promise((resolve) => {
     releaseRenewal = resolve;
   });
-  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
-  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
+  oidc.outcome.signinSilent = userAged(0, {
+    access_token: "renewed-token",
+    refresh_token: "refresh",
+  });
+  await signIn(
+    userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }),
+  );
 
   let tokens: (string | undefined)[] = [];
   await act(async () => {
     const pending = Promise.all([
       capturedGetAccessToken(),
       result.current.getAccessToken(),
-      result.current.getAccessToken()
+      result.current.getAccessToken(),
     ]);
 
     // let all three reach the renewal before it completes
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     releaseRenewal();
     tokens = await pending;
   });
 
-  expect(tokens).toStrictEqual([ "renewed-token", "renewed-token", "renewed-token" ]);
+  expect(tokens).toStrictEqual(["renewed-token", "renewed-token", "renewed-token"]);
   // the renewal the page itself started when the expired user arrived is the same one
   expect(oidc.methods.signinSilent).toHaveBeenCalledOnce();
 });
@@ -534,7 +578,9 @@ test("a failed renewal yields no token rather than rejecting", async () => {
   // stuck in its busy state
   const { result } = await renderAppSession(authenticatedEnv);
   oidc.outcome.signinSilent = new Error("refresh token rejected");
-  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
+  await signIn(
+    userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }),
+  );
 
   // the expired token is not handed out as a fallback: the backend would only refuse it
   expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
@@ -545,11 +591,16 @@ test("a failed renewal does not keep later requests from trying again", async ()
   // failed refresh would stand in for every renewal after it, for the rest of the lecture
   const { result } = await renderAppSession(authenticatedEnv);
   oidc.outcome.signinSilent = new Error("provider unreachable");
-  await signIn(userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }));
+  await signIn(
+    userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }),
+  );
 
   expect(await accessTokenFrom(result.current.getAccessToken)).toBeUndefined();
 
-  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  oidc.outcome.signinSilent = userAged(0, {
+    access_token: "renewed-token",
+    refresh_token: "refresh",
+  });
   expect(await accessTokenFrom(result.current.getAccessToken)).toBe("renewed-token");
 });
 
@@ -559,7 +610,10 @@ test("a failed renewal does not keep later requests from trying again", async ()
 // function has to read the *current* user rather than the one that was in scope when the
 // recording started, or uploads start failing with 401 partway through the lecture.
 test("a getAccessToken captured at the start of a recording follows later renewals", async () => {
-  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { access_token: "first-token" }));
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { access_token: "first-token" }),
+  );
   const capturedGetAccessToken = result.current.getAccessToken;
 
   await signIn(userAged(0, { access_token: "renewed-token" }));
@@ -578,21 +632,21 @@ test("a token asked for in the commit that signs the user in is the new user's",
     const { getAccessToken } = useAppSession();
 
     useLayoutEffect(() => {
-      void getAccessToken().then(token => tokens.push(token));
-    }, [ getAccessToken ]);
+      void getAccessToken().then((token) => tokens.push(token));
+    }, [getAccessToken]);
 
     return null;
   }
 
   function MountsOnSignIn() {
     const { isAuthenticated } = useAppSession();
-    return isAuthenticated ? <AsksOnMount/> : null;
+    return isAuthenticated ? <AsksOnMount /> : null;
   }
 
   render(
     <SessionProvider serverEnv={authenticatedEnv}>
-      <MountsOnSignIn/>
-    </SessionProvider>
+      <MountsOnSignIn />
+    </SessionProvider>,
   );
 
   await act(async () => {
@@ -611,11 +665,14 @@ test("a token asked for in the commit that signs the user in is the new user's",
 // token may well still work, so the page tries it once by itself.
 
 test("a user whose token ran out before the page loaded is renewed without anyone asking", async () => {
-  oidc.outcome.signinSilent = userAged(0, { access_token: "renewed-token", refresh_token: "refresh" });
+  oidc.outcome.signinSilent = userAged(0, {
+    access_token: "renewed-token",
+    refresh_token: "refresh",
+  });
 
   const { result } = await renderAppSession(
     authenticatedEnv,
-    userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true })
+    userAged(60, { access_token: "stale-token", refresh_token: "refresh", expired: true }),
   );
 
   expect(oidc.methods.signinSilent).toHaveBeenCalledOnce();
@@ -633,12 +690,14 @@ test("a renewal on load that fails is not tried again on every change of the ses
 
   const { result } = await renderAppSession(
     authenticatedEnv,
-    userAged(60, { refresh_token: "refresh", expired: true })
+    userAged(60, { refresh_token: "refresh", expired: true }),
   );
 
   // the session changes again once the failed attempt is well over
   await act(async () => {
-    oidc.setState({ error: Object.assign(new Error("provider unreachable"), { source: "renewSilent" }) });
+    oidc.setState({
+      error: Object.assign(new Error("provider unreachable"), { source: "renewSilent" }),
+    });
   });
   await settle();
 
@@ -647,9 +706,9 @@ test("a renewal on load that fails is not tried again on every change of the ses
 });
 
 test.each([
-  [ "nobody is signed in", null ],
-  [ "the token is still good", userAged(60, { refresh_token: "refresh" }) ],
-  [ "there is no refresh token to renew with", userAged(60, { expired: true }) ]
+  ["nobody is signed in", null],
+  ["the token is still good", userAged(60, { refresh_token: "refresh" })],
+  ["there is no refresh token to renew with", userAged(60, { expired: true })],
 ])("nothing is renewed on load when %s", async (_label, stored) => {
   await renderAppSession(authenticatedEnv, stored);
 
@@ -686,8 +745,14 @@ test("an expired session without a refresh token cannot stream", async () => {
 });
 
 test("a session with a refresh token is refreshed before the recording starts", async () => {
-  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh" }));
-  oidc.outcome.signinSilent = userAged(0, { access_token: "fresh-token", refresh_token: "refresh" });
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { refresh_token: "refresh" }),
+  );
+  oidc.outcome.signinSilent = userAged(0, {
+    access_token: "fresh-token",
+    refresh_token: "refresh",
+  });
 
   let transition;
   await act(async () => {
@@ -703,7 +768,10 @@ test("a failed refresh with a token that still works streams on that token", asy
   const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   try {
-    const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh" }));
+    const { result } = await renderAppSession(
+      authenticatedEnv,
+      userAged(60, { refresh_token: "refresh" }),
+    );
     oidc.outcome.signinSilent = new Error("token endpoint hiccup");
 
     let transition;
@@ -722,7 +790,10 @@ test("a failed refresh on a dead token means the recording cannot stream", async
 
   try {
     oidc.outcome.signinSilent = new Error("refresh token rejected");
-    const { result } = await renderAppSession(authenticatedEnv, userAged(60, { refresh_token: "refresh", expired: true }));
+    const { result } = await renderAppSession(
+      authenticatedEnv,
+      userAged(60, { refresh_token: "refresh", expired: true }),
+    );
 
     let transition;
     await act(async () => {
@@ -738,7 +809,10 @@ test("a failed refresh on a dead token means the recording cannot stream", async
 test("a stale session does not open a sign-in popup when the recording starts", async () => {
   // by design: the stale banner offers to reauthenticate, and a popup at the press of the
   // record button would only get between the lecturer and the lecture
-  const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS + 600, { refresh_token: "refresh" }));
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(MAX_AGE_SECONDS + 600, { refresh_token: "refresh" }),
+  );
   oidc.outcome.signinSilent = userAged(MAX_AGE_SECONDS + 600, { refresh_token: "refresh" });
 
   let transition;
@@ -761,7 +835,7 @@ test("an interactive sign-in is an ordinary popup sign-in", async () => {
   expect(result.current.isAuthenticated).toBe(true);
   expect(await result.current.getAccessToken()).toBe("signed-in");
 
-  const [ args ] = oidc.methods.signinPopup.mock.calls[0] as unknown as [ Record<string, unknown> ];
+  const [args] = oidc.methods.signinPopup.mock.calls[0] as unknown as [Record<string, unknown>];
   // without it the library never notices a closed popup, and the session stays in its
   // loading state for good
   expect(args).toMatchObject({ popupAbortOnClose: true });
@@ -778,7 +852,9 @@ test("reauthenticate forces a fresh authentication rather than reusing the SSO s
 
   // max_age: 0 is what makes the provider ask again instead of silently confirming the
   // session that is already there
-  expect(oidc.methods.signinPopup).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ max_age: 0, popupAbortOnClose: true }));
+  expect(oidc.methods.signinPopup).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ max_age: 0, popupAbortOnClose: true }),
+  );
   expect(await result.current.getAccessToken()).toBe("reauthenticated");
   expect(result.current.isStale).toBe(false);
 });
@@ -803,7 +879,10 @@ test("auto sign-in is not offered when the deployment does not configure it", as
 });
 
 test("signing out drops the session and stops signing back in", async () => {
-  const { result } = await renderAppSession({ ...authenticatedEnv, oidcAutoSignin: true }, userAged(60));
+  const { result } = await renderAppSession(
+    { ...authenticatedEnv, oidcAutoSignin: true },
+    userAged(60),
+  );
 
   await act(() => result.current.signout());
 
@@ -820,7 +899,10 @@ test("a sign-out whose user store refuses still stops signing back in", async ()
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
-    const { result } = await renderAppSession({ ...authenticatedEnv, oidcAutoSignin: true }, userAged(60));
+    const { result } = await renderAppSession(
+      { ...authenticatedEnv, oidcAutoSignin: true },
+      userAged(60),
+    );
     oidc.outcome.removeUser = new Error("session storage unavailable");
 
     await act(async () => {
@@ -857,11 +939,14 @@ test("a session loaded with the page turns stale exactly when it ages out", asyn
   // The case that went unnoticed after a reload: the stored user reaches the page through
   // the library's state alone, with no userLoaded event, and nothing but the user arriving
   // there may be needed to arm the deadline.
-  vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
 
   try {
     const remainingSeconds = 120;
-    const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS - remainingSeconds));
+    const { result } = await renderAppSession(
+      authenticatedEnv,
+      userAged(MAX_AGE_SECONDS - remainingSeconds),
+    );
     expect(result.current.isStale).toBe(false);
 
     // one second short of the deadline, nothing has changed
@@ -884,7 +969,7 @@ test("staleness is looked at again when the tab comes back", async () => {
   // A background tab throttles its timers, or does not run them at all while the laptop
   // sleeps. The clock moves past the deadline here without the timer firing; coming back
   // to the tab has to be enough to notice.
-  vi.useFakeTimers({ toFake: [ "Date" ] });
+  vi.useFakeTimers({ toFake: ["Date"] });
 
   try {
     const { result } = await renderAppSession(authenticatedEnv, userAged(MAX_AGE_SECONDS - 60));
@@ -926,16 +1011,27 @@ test("the token's own issue time wins when the local clock lags behind the provi
   // Wall clock says the session is a minute old, but the provider issued the current token
   // far later than our clock believes. Trusting the wall clock would mean starting a lecture
   // on a session that is really long past max_age, so the more pessimistic of the two wins.
-  const { result } = await renderAppSession(authenticatedEnv, userAged(60, { iat: nowSeconds() + 10 * MAX_AGE_SECONDS }));
+  const { result } = await renderAppSession(
+    authenticatedEnv,
+    userAged(60, { iat: nowSeconds() + 10 * MAX_AGE_SECONDS }),
+  );
 
   expect(result.current.isStale).toBe(true);
 });
 
 test.each([
-  [ "the deployment configures no max_age", { ...authenticatedEnv, oidcMaxAge: undefined }, userAged(10 * MAX_AGE_SECONDS) ],
-  [ "the provider sends no auth_time", authenticatedEnv, { ...userAged(10 * MAX_AGE_SECONDS), profile: { iat: nowSeconds() } } ]
+  [
+    "the deployment configures no max_age",
+    { ...authenticatedEnv, oidcMaxAge: undefined },
+    userAged(10 * MAX_AGE_SECONDS),
+  ],
+  [
+    "the provider sends no auth_time",
+    authenticatedEnv,
+    { ...userAged(10 * MAX_AGE_SECONDS), profile: { iat: nowSeconds() } },
+  ],
 ])("a session never turns stale when %s", async (_label, serverEnv, stored) => {
-  vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
 
   try {
     const { result } = await renderAppSession(serverEnv, stored as ReturnType<typeof userAged>);

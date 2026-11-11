@@ -1,37 +1,42 @@
-import { ReactNode } from "react";
 import { Accordion, Card, Group, Stack, Text } from "@mantine/core";
+import { ReactNode } from "react";
 
 interface RecordingCardProps {
-  title: string
-  testid?: string
-  children: ReactNode
+  title: string;
+  testid?: string;
+  children: ReactNode;
 }
 
 interface RecordingCardSectionProps {
-  id: string
-  title: string
-  icon?: ReactNode
-  children: ReactNode
+  id: string;
+  title: string;
+  icon?: ReactNode;
+  children: ReactNode;
 }
 
-export const RecordingCard = ({ title, testid, children }: Readonly<RecordingCardProps>) =>
+export const RecordingCard = ({ title, testid, children }: Readonly<RecordingCardProps>) => (
   <Card withBorder data-testid={testid} shadow="sm" padding="sm">
     <Stack align="center" h="100%">
       <Text>{title}</Text>
       <Stack w="100%" h="100%" justify="space-between" align="stretch">
-        { children }
+        {children}
       </Stack>
     </Stack>
-  </Card>;
+  </Card>
+);
 
-export const RecordingCardSection = ({ id, title, icon, children }: Readonly<RecordingCardSectionProps>) =>
+export const RecordingCardSection = ({
+  id,
+  title,
+  icon,
+  children,
+}: Readonly<RecordingCardSectionProps>) => (
   <Accordion.Item value={id}>
-    <Accordion.Control icon={icon}>
-      {title}
-    </Accordion.Control>
+    <Accordion.Control icon={icon}>{title}</Accordion.Control>
     <Accordion.Panel>
       <Group wrap="wrap" align="stretch">
         {children}
       </Group>
     </Accordion.Panel>
-  </Accordion.Item>;
+  </Accordion.Item>
+);

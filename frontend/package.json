@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "oxlint",
+    "fmt": "oxfmt",
     "typecheck": "tsc --noEmit",
     "smoke": "next build && node scripts/ssr-smoke.mjs",
     "smoke:dev": "node scripts/ssr-smoke.mjs --dev",
@@ -21,6 +22,7 @@
     "glob": "^14.0.4",
     "next": "^16.4.6",
     "oidc-client-ts": "^3.5.0",
+    "oxfmt": "^0.78.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-oidc-context": "^3.3.1",
@@ -32,7 +34,6 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
-    "@stylistic/eslint-plugin": "^5.10.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

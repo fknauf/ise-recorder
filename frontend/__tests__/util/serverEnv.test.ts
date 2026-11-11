@@ -23,7 +23,7 @@ const ENV_KEYS = [
   "ISE_RECORD_OIDC_MAX_AGE",
   "ISE_RECORD_OIDC_AUTO_SIGNIN",
   "ISE_RECORD_SHOW_VERSION",
-  "ISE_RECORD_SMTP_RECIPIENT_OVERRIDE"
+  "ISE_RECORD_SMTP_RECIPIENT_OVERRIDE",
 ] as const;
 
 let moduleCounter = 0;
@@ -33,8 +33,10 @@ async function freshModule() {
   return import(/* @vite-ignore */ `../../src/lib/utils/serverEnv.ts?bust=${++moduleCounter}`);
 }
 
-async function envFor(vars: Partial<Record<(typeof ENV_KEYS)[number], string>>): Promise<ServerEnv> {
-  for(const key of ENV_KEYS) {
+async function envFor(
+  vars: Partial<Record<(typeof ENV_KEYS)[number], string>>,
+): Promise<ServerEnv> {
+  for (const key of ENV_KEYS) {
     delete process.env[key];
   }
 
@@ -54,7 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   consoleError.mockRestore();
 
-  for(const key of ENV_KEYS) {
+  for (const key of ENV_KEYS) {
     delete process.env[key];
   }
 });
@@ -62,30 +64,36 @@ afterEach(() => {
 // --- accepted URLs ---------------------------------------------------------
 
 test("a plain http backend URL is accepted", async () => {
-  expect((await envFor({ ISE_RECORD_API_URL: "http://localhost:8000" })).apiUrl)
-    .toBe("http://localhost:8000/");
+  expect((await envFor({ ISE_RECORD_API_URL: "http://localhost:8000" })).apiUrl).toBe(
+    "http://localhost:8000/",
+  );
 });
 
 test("https and a path are accepted", async () => {
-  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api" })).apiUrl)
-    .toBe("https://recorder.example.com/api/");
+  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api" })).apiUrl).toBe(
+    "https://recorder.example.com/api/",
+  );
 });
 
 test("the URL always ends in exactly one slash, so API paths resolve beneath it", async () => {
   // API paths are resolved relative to the URL. Without the slash, "api/recordings" against
   // https://recorder.example.com/prefix would replace "prefix" instead of going beneath it
-  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/prefix" })).apiUrl)
-    .toBe("https://recorder.example.com/prefix/");
-  expect((await envFor({ ISE_RECORD_API_URL: "http://localhost:8000/" })).apiUrl)
-    .toBe("http://localhost:8000/");
-  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api//" })).apiUrl)
-    .toBe("https://recorder.example.com/api/");
+  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/prefix" })).apiUrl).toBe(
+    "https://recorder.example.com/prefix/",
+  );
+  expect((await envFor({ ISE_RECORD_API_URL: "http://localhost:8000/" })).apiUrl).toBe(
+    "http://localhost:8000/",
+  );
+  expect((await envFor({ ISE_RECORD_API_URL: "https://recorder.example.com/api//" })).apiUrl).toBe(
+    "https://recorder.example.com/api/",
+  );
 });
 
 test("a hostname without a TLD is accepted, for intranet deployments", async () => {
   // require_tld is off deliberately: localhost and short intranet names must work
-  expect((await envFor({ ISE_RECORD_API_URL: "http://ise-recorder:8000" })).apiUrl)
-    .toBe("http://ise-recorder:8000/");
+  expect((await envFor({ ISE_RECORD_API_URL: "http://ise-recorder:8000" })).apiUrl).toBe(
+    "http://ise-recorder:8000/",
+  );
 });
 
 // --- rejected URLs ---------------------------------------------------------
@@ -105,24 +113,24 @@ test("a non-http protocol is rejected", async () => {
 });
 
 test("embedded credentials are rejected, so they cannot leak to the client", async () => {
-  expect((await envFor({ ISE_RECORD_API_URL: "http://user:secret@example.com" })).apiUrl)
-    .toBeUndefined();
+  expect(
+    (await envFor({ ISE_RECORD_API_URL: "http://user:secret@example.com" })).apiUrl,
+  ).toBeUndefined();
 });
 
 test("query components and fragments are rejected", async () => {
-  expect((await envFor({ ISE_RECORD_API_URL: "http://example.com/api?token=abc" })).apiUrl)
-    .toBeUndefined();
-  expect((await envFor({ ISE_RECORD_API_URL: "http://example.com/api#frag" })).apiUrl)
-    .toBeUndefined();
+  expect(
+    (await envFor({ ISE_RECORD_API_URL: "http://example.com/api?token=abc" })).apiUrl,
+  ).toBeUndefined();
+  expect(
+    (await envFor({ ISE_RECORD_API_URL: "http://example.com/api#frag" })).apiUrl,
+  ).toBeUndefined();
 });
 
 test("a rejected API URL is reported to the admin", async () => {
   await envFor({ ISE_RECORD_API_URL: "not a url" });
 
-  expect(consoleError).toHaveBeenCalledWith(
-    expect.stringContaining("API_URL"),
-    "not a url"
-  );
+  expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("API_URL"), "not a url");
 });
 
 test("the OpenID provider URL is passed through unvalidated", async () => {
@@ -143,7 +151,7 @@ test("the OIDC settings are passed through", async () => {
   const env = await envFor({
     ISE_RECORD_OIDC_PROVIDER_URL: "http://keycloak.localhost:8080/realms/ise",
     ISE_RECORD_OIDC_CLIENT_ID: "ise-recorder",
-    ISE_RECORD_OIDC_MAX_AGE: "25200"
+    ISE_RECORD_OIDC_MAX_AGE: "25200",
   });
 
   expect(env.oidcProviderUrl).toBe("http://keycloak.localhost:8080/realms/ise");
@@ -169,21 +177,18 @@ test("automatic sign-in is off unless it is asked for", async () => {
   expect((await envFor({})).oidcAutoSignin).toBe(false);
 });
 
-
 test("automatic sign-in is on when it is asked for", async () => {
   expect((await envFor({ ISE_RECORD_OIDC_AUTO_SIGNIN: "true" })).oidcAutoSignin).toBe(true);
 });
 
-
-test.each([ "TRUE", "True", "1", "yes", "on", "" ])(
+test.each(["TRUE", "True", "1", "yes", "on", ""])(
   "%s does not turn automatic sign-in on",
   async (value: string) => {
     // Matches ISE_RECORD_SHOW_VERSION: an exact "true" and nothing else. Recorded because
     // the failure is silent -- the admin gets no redirect and no complaint about the typo.
     expect((await envFor({ ISE_RECORD_OIDC_AUTO_SIGNIN: value })).oidcAutoSignin).toBe(false);
-  }
+  },
 );
-
 
 test("an empty or unset max age stays undefined rather than becoming NaN", async () => {
   expect((await envFor({})).oidcMaxAge).toBeUndefined();
@@ -215,10 +220,7 @@ test("a duration suffix is rejected rather than silently truncated", async () =>
   // the motivating case: "29d" must not quietly become 29 seconds
   expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "29d" })).oidcMaxAge).toBeUndefined();
 
-  expect(consoleError).toHaveBeenCalledWith(
-    expect.stringContaining("max_age"),
-    "29d"
-  );
+  expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("max_age"), "29d");
 });
 
 test("a fractional value is rejected", async () => {
@@ -239,8 +241,7 @@ test("zero and negative values are rejected", async () => {
 });
 
 test("a non-numeric value is rejected", async () => {
-  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "seven hours" })).oidcMaxAge)
-    .toBeUndefined();
+  expect((await envFor({ ISE_RECORD_OIDC_MAX_AGE: "seven hours" })).oidcMaxAge).toBeUndefined();
 });
 
 test("a rejected max age disables staleness checking rather than failing the boot", async () => {
@@ -248,7 +249,7 @@ test("a rejected max age disables staleness checking rather than failing the boo
   // running, so the console message is the only signal the admin gets
   const env = await envFor({
     ISE_RECORD_OIDC_PROVIDER_URL: "http://keycloak.localhost:8080/realms/ise",
-    ISE_RECORD_OIDC_MAX_AGE: "29d"
+    ISE_RECORD_OIDC_MAX_AGE: "29d",
   });
 
   expect(env.oidcProviderUrl).toBe("http://keycloak.localhost:8080/realms/ise");
@@ -277,17 +278,16 @@ test("the environment is read once and then cached", async () => {
   expect(second).toBe(first);
 });
 
-
 // --- whether the lecturer can name a report address -------------------------
 //
 // The backend decides where reports go (ISE_RECORD_SMTP_RECIPIENT_SOURCES there); this only says
 // whether the frontend offers a field for an address of the lecturer's choosing.
 
 test.each([
-  [ "unset", undefined ],
-  [ "empty", "" ],
-  [ "default", "default" ],
-  [ "padded", " default " ]
+  ["unset", undefined],
+  ["empty", ""],
+  ["default", "default"],
+  ["padded", " default "],
 ])("the address field is offered unless switched off -- %s", async (_label, value) => {
   const vars = value === undefined ? {} : { ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: value };
 
@@ -295,8 +295,10 @@ test.each([
 });
 
 test("the address field can be switched off", async () => {
-  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: "disabled" })).smtpRecipientOverride)
-    .toBe("disabled");
-  expect((await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: " disabled " })).smtpRecipientOverride)
-    .toBe("disabled");
+  expect(
+    (await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: "disabled" })).smtpRecipientOverride,
+  ).toBe("disabled");
+  expect(
+    (await envFor({ ISE_RECORD_SMTP_RECIPIENT_OVERRIDE: " disabled " })).smtpRecipientOverride,
+  ).toBe("disabled");
 });

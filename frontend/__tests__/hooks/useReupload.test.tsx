@@ -1,14 +1,14 @@
-import { beforeEach, expect, test, vi } from "vitest";
-import { appStoreWrapper } from "../helpers/appStore";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
+import { beforeEach, expect, test, vi } from "vitest";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
-import { useReupload } from "@/lib/hooks/useReupload";
 import { useLecture } from "@/lib/hooks/useLecture";
-import { gatherRecordingsList, getAllRecordingTracks } from "@/lib/utils/browserStorage";
-import { schedulePostprocessing, uploadFile } from "@/lib/utils/serverStorage";
+import { useReupload } from "@/lib/hooks/useReupload";
 import { ApiError } from "@/lib/utils/apiFetch";
+import { gatherRecordingsList, getAllRecordingTracks } from "@/lib/utils/browserStorage";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
+import { schedulePostprocessing, uploadFile } from "@/lib/utils/serverStorage";
+import { appStoreWrapper } from "../helpers/appStore";
 import { aServerEnv } from "../helpers/serverEnv";
 import { notRenderable, rendering } from "../helpers/serverStorage";
 
@@ -26,16 +26,19 @@ vi.mock("@/lib/utils/notifications");
 
 const getAccessToken = async () => "test-token";
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => ({ getAccessToken })
+  useAppSession: () => ({ getAccessToken }),
 }));
 
 // the refresh goes through the SWR cache, which is useServerStorage.test.tsx's business
 const refreshServerStorage = vi.fn();
 vi.mock("@/lib/hooks/useServerStorage", () => ({
-  useRefreshServerStorage: () => refreshServerStorage
+  useRefreshServerStorage: () => refreshServerStorage,
 }));
 
-const trackOf = (trackName: string) => ({ trackName, file: new File([ trackName ], `${trackName}.webm`) });
+const trackOf = (trackName: string) => ({
+  trackName,
+  file: new File([trackName], `${trackName}.webm`),
+});
 
 beforeEach(() => {
   // the store persists part of itself, the list of unstreamed recordings among it
@@ -55,15 +58,18 @@ beforeEach(() => {
  * it makes arrives outside act.
  */
 async function renderReupload(recordingName = "GVS_2025") {
-  const rendered = renderHook(() => ({
-    upload: useReupload(recordingName),
-    neighbour: useReupload("PSU_2026"),
-    lecture: useLecture(),
-    progress: useAppStore(state => state.reuploadProgress),
-    unstreamed: useAppStore(state => state.unstreamedRecordings),
-    markUnstreamed: useAppStore(state => state.markUnstreamed),
-    store: useAppStore(state => state)
-  }), { wrapper });
+  const rendered = renderHook(
+    () => ({
+      upload: useReupload(recordingName),
+      neighbour: useReupload("PSU_2026"),
+      lecture: useLecture(),
+      progress: useAppStore((state) => state.reuploadProgress),
+      unstreamed: useAppStore((state) => state.unstreamedRecordings),
+      markUnstreamed: useAppStore((state) => state.markUnstreamed),
+      store: useAppStore((state) => state),
+    }),
+    { wrapper },
+  );
 
   // the quota is one of the things the look at browser storage fills in
   await waitFor(() => expect(rendered.result.current.store.quota).toBeDefined());
@@ -76,28 +82,49 @@ const destination = expect.objectContaining({ apiUrl: "http://localhost:5000/", 
 
 const failed = new ApiError("HTTP 507: disk full", "http", 507, "disk full");
 // not worth trying again: the backend has looked for the recording and not found it
-const refused = new ApiError("HTTP 404: Recording GVS_2025-reupload does not exist", "http", 404, "Recording GVS_2025-reupload does not exist");
+const refused = new ApiError(
+  "HTTP 404: Recording GVS_2025-reupload does not exist",
+  "http",
+  404,
+  "Recording GVS_2025-reupload does not exist",
+);
 
 test("every track goes up under a name of its own, then the job is scheduled", async () => {
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("overlay"), trackOf("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("overlay"), trackOf("stream")]);
   const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
   expect(getAllRecordingTracks).toHaveBeenCalledExactlyOnceWith("GVS_2025");
-  expect(vi.mocked(uploadFile).mock.calls.map(([ , file, recording, track ]) => [ recording, track, (file as File).name ])).toStrictEqual([
-    [ "GVS_2025-reupload", "overlay", "overlay.webm" ],
-    [ "GVS_2025-reupload", "stream", "stream.webm" ]
+  expect(
+    vi
+      .mocked(uploadFile)
+      .mock.calls.map(([, file, recording, track]) => [recording, track, (file as File).name]),
+  ).toStrictEqual([
+    ["GVS_2025-reupload", "overlay", "overlay.webm"],
+    ["GVS_2025-reupload", "stream", "stream.webm"],
   ]);
-  expect(uploadFile).toHaveBeenCalledWith(destination, expect.anything(), expect.anything(), expect.anything(), expect.anything(), expect.any(Function));
+  expect(uploadFile).toHaveBeenCalledWith(
+    destination,
+    expect.anything(),
+    expect.anything(),
+    expect.anything(),
+    expect.anything(),
+    expect.any(Function),
+  );
   // the report goes to whoever is in the lecture form now; the backend keeps no record of
   // the original recipient
-  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-reupload", "lecturer@example.edu", undefined);
+  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(
+    destination,
+    "GVS_2025-reupload",
+    "lecturer@example.edu",
+    undefined,
+  );
   expect(refreshServerStorage).toHaveBeenCalledOnce();
 });
 
 test("a scheduled job is confirmed to the user", async () => {
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("stream")]);
   const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
@@ -109,7 +136,7 @@ test("a scheduled job is confirmed to the user", async () => {
 test("a job the backend refused is reported with what it said", async () => {
   // the tracks are all up by now, so this is a matter of re-rendering rather than uploading
   // again -- but the lecturer has to know that nothing is rendering yet
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("stream")]);
   vi.mocked(schedulePostprocessing).mockRejectedValue(refused);
   const { result } = await renderReupload();
 
@@ -128,19 +155,28 @@ test("a recording without a main display goes up whole and ends with a job reque
   // Microphone and camera without slides: no "stream" track to render a video from, so the
   // backend starts no render. The job request still tells it the upload is over, so the raw
   // data is listed straight away.
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0"), trackOf("overlay") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("audio-0"), trackOf("overlay")]);
   vi.mocked(schedulePostprocessing).mockResolvedValue(notRenderable("GVS_2025-reupload"));
   const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
-  expect(vi.mocked(uploadFile).mock.calls.map(([ , , recording, track ]) => [ recording, track ])).toStrictEqual([
-    [ "GVS_2025-reupload", "audio-0" ],
-    [ "GVS_2025-reupload", "overlay" ]
+  expect(
+    vi.mocked(uploadFile).mock.calls.map(([, , recording, track]) => [recording, track]),
+  ).toStrictEqual([
+    ["GVS_2025-reupload", "audio-0"],
+    ["GVS_2025-reupload", "overlay"],
   ]);
-  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(destination, "GVS_2025-reupload", "lecturer@example.edu", undefined);
+  expect(schedulePostprocessing).toHaveBeenCalledExactlyOnceWith(
+    destination,
+    "GVS_2025-reupload",
+    "lecturer@example.edu",
+    undefined,
+  );
   // the upload is what there was to do, and it worked; no render is promised
-  expect(showSuccess).toHaveBeenCalledExactlyOnceWith(expect.not.stringContaining("postprocessing"));
+  expect(showSuccess).toHaveBeenCalledExactlyOnceWith(
+    expect.not.stringContaining("postprocessing"),
+  );
   expect(showMessage).not.toHaveBeenCalled();
   expect(showError).not.toHaveBeenCalled();
   expect(result.current.upload.isUploading).toBe(false);
@@ -150,7 +186,7 @@ test("a recording without a main display goes up whole and ends with a job reque
 test("a job request that fails for a passing reason is tried again", async () => {
   // a backend in the middle of a restart answers 503 for a moment, and with every track up
   // already it is worth waiting out rather than sending the lecturer off to re-render
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("stream")]);
   vi.mocked(schedulePostprocessing).mockRejectedValueOnce(new ApiError("HTTP 503", "http", 503));
   const { result } = await renderReupload();
 
@@ -179,7 +215,7 @@ test("a job request that fails for a passing reason is tried again", async () =>
 test("the job is only scheduled once every track is up", async () => {
   // a job that started early would render whatever had arrived so far
   const order: string[] = [];
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("overlay"), trackOf("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("overlay"), trackOf("stream")]);
   vi.mocked(uploadFile).mockImplementation(async (_d, _f, _r, track) => {
     order.push(`upload ${track}`);
   });
@@ -191,7 +227,7 @@ test("the job is only scheduled once every track is up", async () => {
 
   await act(() => result.current.upload.reupload());
 
-  expect(order).toStrictEqual([ "upload overlay", "upload stream", "schedule" ]);
+  expect(order).toStrictEqual(["upload overlay", "upload stream", "schedule"]);
 });
 
 test("a recording that is not being uploaded says so", async () => {
@@ -203,10 +239,12 @@ test("a recording that is not being uploaded says so", async () => {
 
 test("the recording is marked as uploading for exactly as long as the upload runs", async () => {
   let finishUpload: () => void = () => {};
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
-  vi.mocked(uploadFile).mockReturnValue(new Promise<void>(resolve => {
-    finishUpload = resolve;
-  }));
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("stream")]);
+  vi.mocked(uploadFile).mockReturnValue(
+    new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    }),
+  );
   const { result } = await renderReupload();
 
   let running: Promise<void> = Promise.resolve();
@@ -218,7 +256,7 @@ test("the recording is marked as uploading for exactly as long as the upload run
   // and at zero before the first chunk is through, so the card changes at once
   await waitFor(() => expect(result.current.upload.isUploading).toBe(true));
   expect(result.current.upload.progress).toBe(0);
-  expect(result.current.progress).toStrictEqual(new Map([ [ "GVS_2025", 0 ] ]));
+  expect(result.current.progress).toStrictEqual(new Map([["GVS_2025", 0]]));
   // the recording next to it is not caught up in it
   expect(result.current.neighbour.isUploading).toBe(false);
 
@@ -234,14 +272,20 @@ test("the recording is marked as uploading for exactly as long as the upload run
 
 test("a failed track stops the upload before anything is scheduled", async () => {
   // the tracks after it would only make a partial recording look complete
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0"), trackOf("overlay"), trackOf("stream") ]);
-  vi.mocked(uploadFile).mockResolvedValueOnce(undefined)
-    .mockRejectedValueOnce(failed);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([
+    trackOf("audio-0"),
+    trackOf("overlay"),
+    trackOf("stream"),
+  ]);
+  vi.mocked(uploadFile).mockResolvedValueOnce(undefined).mockRejectedValueOnce(failed);
   const { result } = await renderReupload();
 
   await act(() => result.current.upload.reupload());
 
-  expect(vi.mocked(uploadFile).mock.calls.map(([ , , , track ]) => track)).toStrictEqual([ "audio-0", "overlay" ]);
+  expect(vi.mocked(uploadFile).mock.calls.map(([, , , track]) => track)).toStrictEqual([
+    "audio-0",
+    "overlay",
+  ]);
   expect(schedulePostprocessing).not.toHaveBeenCalled();
   // which track, and what the server said about it -- showError puts the error's message
   // after the description
@@ -266,15 +310,17 @@ test("a recording without any tracks says so instead of doing nothing", async ()
 test("a re-upload without a backend to send it to does not start", async () => {
   // the card offers no upload button then; this is the hook not relying on that alone
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const { result } = renderHook(() => ({
-    upload: useReupload("GVS_2025"),
-    quota: useAppStore(state => state.quota)
-  }), {
-    wrapper: ({ children }: Readonly<{ children: ReactNode }>) =>
-      <AppStoreProvider serverEnv={aServerEnv()}>
-        {children}
-      </AppStoreProvider>
-  });
+  const { result } = renderHook(
+    () => ({
+      upload: useReupload("GVS_2025"),
+      quota: useAppStore((state) => state.quota),
+    }),
+    {
+      wrapper: ({ children }: Readonly<{ children: ReactNode }>) => (
+        <AppStoreProvider serverEnv={aServerEnv()}>{children}</AppStoreProvider>
+      ),
+    },
+  );
   await waitFor(() => expect(result.current.quota).toBeDefined());
 
   await act(() => result.current.upload.reupload());
@@ -296,7 +342,10 @@ test("an upload that blows up is reported and gives the button back", async () =
 
   await act(() => result.current.upload.reupload());
 
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("GVS_2025-reupload"), expect.any(Error));
+  expect(showError).toHaveBeenCalledWith(
+    expect.stringContaining("GVS_2025-reupload"),
+    expect.any(Error),
+  );
   expect(uploadFile).not.toHaveBeenCalled();
   expect(result.current.upload.isUploading).toBe(false);
   expect(refreshServerStorage).toHaveBeenCalledOnce();
@@ -305,11 +354,14 @@ test("an upload that blows up is reported and gives the button back", async () =
 
 test("progress is the share of all tracks' bytes that has arrived", async () => {
   // counted across tracks rather than per track, so it does not start over at each one
-  const sized = (trackName: string, size: number) => ({ trackName, file: new File([ new Uint8Array(size) ], `${trackName}.webm`) });
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ sized("overlay", 100), sized("stream", 300) ]);
+  const sized = (trackName: string, size: number) => ({
+    trackName,
+    file: new File([new Uint8Array(size)], `${trackName}.webm`),
+  });
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([sized("overlay", 100), sized("stream", 300)]);
 
   const gates: (() => void)[] = [];
-  const gate = () => new Promise<void>(resolve => gates.push(resolve));
+  const gate = () => new Promise<void>((resolve) => gates.push(resolve));
 
   vi.mocked(uploadFile)
     .mockImplementationOnce(async (_d, file, _r, _t, _p, signalProgress) => {
@@ -344,23 +396,26 @@ test("progress is the share of all tracks' bytes that has arrived", async () => 
 test("a recording whose files are all empty goes up without its progress becoming NaN", async () => {
   // nothing to divide by; a NaN would reach the progress circle as its value
   const empty = (trackName: string) => ({ trackName, file: new File([], `${trackName}.webm`) });
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ empty("overlay"), empty("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([empty("overlay"), empty("stream")]);
 
   const seen: (number | undefined)[] = [];
   vi.mocked(uploadFile).mockImplementation(async (_d, file, _r, _t, _p, signalProgress) => {
     signalProgress?.(file.size);
   });
 
-  const { result } = renderHook(() => {
-    const hook = useReupload("GVS_2025");
-    seen.push(hook.progress);
-    return hook;
-  }, { wrapper });
+  const { result } = renderHook(
+    () => {
+      const hook = useReupload("GVS_2025");
+      seen.push(hook.progress);
+      return hook;
+    },
+    { wrapper },
+  );
 
   await act(() => result.current.reupload());
 
-  expect(seen.filter(progress => progress !== undefined).length).toBeGreaterThan(0);
-  expect(seen.every(progress => progress === undefined || Number.isFinite(progress))).toBe(true);
+  expect(seen.filter((progress) => progress !== undefined).length).toBeGreaterThan(0);
+  expect(seen.every((progress) => progress === undefined || Number.isFinite(progress))).toBe(true);
   expect(schedulePostprocessing).toHaveBeenCalledOnce();
 });
 
@@ -378,35 +433,34 @@ test("a recording whose files are all empty goes up without its progress becomin
 async function renderWithUnstreamed(...names: string[]) {
   vi.mocked(gatherRecordingsList).mockResolvedValue([
     { name: "GVS_2025", files: [] },
-    { name: "PSU_2026", files: [] }
+    { name: "PSU_2026", files: [] },
   ]);
   const rendered = await renderReupload();
   await act(() => rendered.result.current.store.updateBrowserStorage());
 
-  act(() => names.forEach(name => rendered.result.current.markUnstreamed(name)));
+  act(() => names.forEach((name) => rendered.result.current.markUnstreamed(name)));
 
   return rendered;
 }
 
 test("a re-upload that gets every track up takes the recording off the list", async () => {
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("overlay"), trackOf("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("overlay"), trackOf("stream")]);
   const { result } = await renderWithUnstreamed("GVS_2025", "PSU_2026");
 
   await act(() => result.current.upload.reupload());
 
   // only the recording that was re-uploaded; the one next to it still needs it
-  expect(result.current.unstreamed).toStrictEqual([ "PSU_2026" ]);
+  expect(result.current.unstreamed).toStrictEqual(["PSU_2026"]);
 });
 
 test("a re-upload that fails part way leaves the recording on the list", async () => {
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("overlay"), trackOf("stream") ]);
-  vi.mocked(uploadFile).mockResolvedValueOnce(undefined)
-    .mockRejectedValueOnce(failed);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("overlay"), trackOf("stream")]);
+  vi.mocked(uploadFile).mockResolvedValueOnce(undefined).mockRejectedValueOnce(failed);
   const { result } = await renderWithUnstreamed("GVS_2025");
 
   await act(() => result.current.upload.reupload());
 
-  expect(result.current.unstreamed).toStrictEqual([ "GVS_2025" ]);
+  expect(result.current.unstreamed).toStrictEqual(["GVS_2025"]);
 });
 
 test("a re-upload that blows up leaves the recording on the list", async () => {
@@ -416,24 +470,24 @@ test("a re-upload that blows up leaves the recording on the list", async () => {
 
   await act(() => result.current.upload.reupload());
 
-  expect(result.current.unstreamed).toStrictEqual([ "GVS_2025" ]);
+  expect(result.current.unstreamed).toStrictEqual(["GVS_2025"]);
   error.mockRestore();
 });
 
 test("a re-upload without a main display still takes the recording off the list", async () => {
   // every track is on the server, which is all there is to do for it: a render was never on
   // offer, so re-uploading it would only get the same result again
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("audio-0") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("audio-0")]);
   vi.mocked(schedulePostprocessing).mockResolvedValue(notRenderable("GVS_2025-reupload"));
   const { result } = await renderWithUnstreamed("GVS_2025", "PSU_2026");
 
   await act(() => result.current.upload.reupload());
 
-  expect(result.current.unstreamed).toStrictEqual([ "PSU_2026" ]);
+  expect(result.current.unstreamed).toStrictEqual(["PSU_2026"]);
 });
 
 test("a re-upload whose job request fails still takes the recording off the list", async () => {
-  vi.mocked(getAllRecordingTracks).mockResolvedValue([ trackOf("stream") ]);
+  vi.mocked(getAllRecordingTracks).mockResolvedValue([trackOf("stream")]);
   vi.mocked(schedulePostprocessing).mockRejectedValue(refused);
   const { result } = await renderWithUnstreamed("GVS_2025");
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { canvasVideoTrack, makeDevice } from "../helpers/media";
 import { createAppStore } from "@/lib/store/store";
 import { gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
+import { canvasVideoTrack, makeDevice } from "../helpers/media";
 import { aServerEnv } from "../helpers/serverEnv";
 
 vi.mock("@/lib/utils/browserStorage");
@@ -33,13 +33,17 @@ test("store splits media devices into video and audio", () => {
     makeDevice("m1", "g1", "audioinput", "Mic 1"),
     makeDevice("m1", "g2", "audioinput", "Mic 1"),
     makeDevice("m3", "g3", "audioinput", "Mic 3"),
-    makeDevice("s1", "g4", "audiooutput", "Speaker") // should be filtered out
+    makeDevice("s1", "g4", "audiooutput", "Speaker"), // should be filtered out
   ];
 
   store.getState().setMediaDevices(devices);
 
-  expect(store.getState().videoDevices).toStrictEqual(devices.filter(dev => dev.kind === "videoinput"));
-  expect(store.getState().audioDevices).toStrictEqual(devices.filter(dev => dev.kind === "audioinput"));
+  expect(store.getState().videoDevices).toStrictEqual(
+    devices.filter((dev) => dev.kind === "videoinput"),
+  );
+  expect(store.getState().audioDevices).toStrictEqual(
+    devices.filter((dev) => dev.kind === "audioinput"),
+  );
 });
 
 test("store filters out duplicate devices", () => {
@@ -51,7 +55,7 @@ test("store filters out duplicate devices", () => {
     makeDevice("dev1", "g1", "videoinput", "Cam Integrated C"),
     makeDevice("dev1", "g1", "videoinput", "Cam Integrated I"),
     makeDevice("dev1", "g1", "audioinput", "Mic Integrated M"),
-    makeDevice("dev1", "g1", "audioinput", "Mic Integrated N")
+    makeDevice("dev1", "g1", "audioinput", "Mic Integrated N"),
   ];
 
   store.getState().setMediaDevices(devices);
@@ -63,7 +67,7 @@ test("store filters out duplicate devices", () => {
 test("a display track leaves the store when it ends", async () => {
   const store = createAppStore(aServerEnv());
 
-  const tracks = [ canvasVideoTrack(384, 216) ];
+  const tracks = [canvasVideoTrack(384, 216)];
 
   store.getState().addDisplayTracks(tracks);
 
@@ -86,7 +90,7 @@ test("a display track leaves the store when it ends", async () => {
 test("a video track leaves the store when it ends", async () => {
   const store = createAppStore(aServerEnv());
 
-  const tracks = [ canvasVideoTrack(384, 216) ];
+  const tracks = [canvasVideoTrack(384, 216)];
 
   store.getState().addVideoTracks(tracks);
 
@@ -132,7 +136,7 @@ test("removeTrack stops the track and takes it out of the store", async () => {
   // a track we stop ourselves fires no ended event, so removeTrack has to deliver one
   const store = createAppStore(aServerEnv());
 
-  const tracks = [ canvasVideoTrack(384, 216) ];
+  const tracks = [canvasVideoTrack(384, 216)];
 
   store.getState().addVideoTracks(tracks);
   store.getState().removeTrack(tracks[0]);
@@ -145,22 +149,22 @@ test("removeTrack stops the track and takes it out of the store", async () => {
 test("selectMainDisplay accepts values and reducers", async () => {
   const store = createAppStore(aServerEnv());
 
-  const tracks = [ canvasVideoTrack(384, 216) ];
+  const tracks = [canvasVideoTrack(384, 216)];
 
   store.getState().selectMainDisplay(tracks[0]);
   expect(store.getState().mainDisplay).toBe(tracks[0]);
-  store.getState().selectMainDisplay(old => (old === tracks[0] ? undefined : tracks[0]));
+  store.getState().selectMainDisplay((old) => (old === tracks[0] ? undefined : tracks[0]));
   expect(store.getState().mainDisplay).toBeUndefined();
 });
 
 test("selectOverlay accepts values and reducers", async () => {
   const store = createAppStore(aServerEnv());
 
-  const tracks = [ canvasVideoTrack(384, 216) ];
+  const tracks = [canvasVideoTrack(384, 216)];
 
   store.getState().selectOverlay(tracks[0]);
   expect(store.getState().overlay).toBe(tracks[0]);
-  store.getState().selectOverlay(old => (old === tracks[0] ? undefined : tracks[0]));
+  store.getState().selectOverlay((old) => (old === tracks[0] ? undefined : tracks[0]));
   expect(store.getState().overlay).toBeUndefined();
 });
 
@@ -172,15 +176,15 @@ test("setActiveRecording accepts values and reducers", async () => {
 
   const stopFn = () => {};
 
-  store.getState().setActiveRecording(old =>
-    ({
-      name: old.name ?? "",
-      state: "recording",
-      stop: stopFn
-    })
-  );
+  store.getState().setActiveRecording((old) => ({
+    name: old.name ?? "",
+    state: "recording",
+    stop: stopFn,
+  }));
   expect(store.getState().activeRecording).toStrictEqual({
-    name: "FOO", state: "recording", stop: stopFn
+    name: "FOO",
+    state: "recording",
+    stop: stopFn,
   });
 });
 
@@ -191,7 +195,7 @@ test("updateQuotaInformation reads browser storage quota", async () => {
 
   navigator.storage.estimate = vi.fn().mockResolvedValue({
     quota: 10 * GiB,
-    usage: 2 * GiB
+    usage: 2 * GiB,
   });
 
   await store.getState().updateQuotaInformation();
@@ -207,7 +211,7 @@ test("updateBrowserStorage respects file overrides", async () => {
   const GiB = 2 ** 30;
   navigator.storage.estimate = vi.fn().mockResolvedValue({
     quota: 10 * GiB,
-    usage: 2 * GiB
+    usage: 2 * GiB,
   });
 
   const makeFileState = (
@@ -215,23 +219,23 @@ test("updateBrowserStorage respects file overrides", async () => {
     barOverlaySize: number,
     fooStreamSize: number = 0,
     fooOverlaySize: number = 0,
-    fooAudio0Size: number = 0
+    fooAudio0Size: number = 0,
   ): RecordingFileList[] => [
     {
       name: "BAR",
       files: [
         { name: "stream.webm", size: barStreamSize },
-        { name: "overlay.webm", size: barOverlaySize }
-      ]
+        { name: "overlay.webm", size: barOverlaySize },
+      ],
     },
     {
       name: "FOO",
       files: [
         { name: "stream.webm", size: fooStreamSize },
         { name: "overlay.webm", size: fooOverlaySize },
-        { name: "audio-0.webm", size: fooAudio0Size }
-      ]
-    }
+        { name: "audio-0.webm", size: fooAudio0Size },
+      ],
+    },
   ];
 
   vi.mocked(gatherRecordingsList).mockResolvedValue(makeFileState(1234, 9001));
@@ -251,13 +255,17 @@ test("updateBrowserStorage respects file overrides", async () => {
 
   expect(store.getState().fileSizeOverrides.size).toBe(3);
   expect(store.getState().savedRecordings).toStrictEqual(makeFileState(1234, 9001));
-  expect(store.getState().adjustedSavedRecordings).toStrictEqual(makeFileState(1234, 9001, 23, 42, 1337));
+  expect(store.getState().adjustedSavedRecordings).toStrictEqual(
+    makeFileState(1234, 9001, 23, 42, 1337),
+  );
 
   vi.mocked(gatherRecordingsList).mockResolvedValue(makeFileState(2468, 9002));
   await store.getState().updateBrowserStorage();
 
   expect(store.getState().savedRecordings).toStrictEqual(makeFileState(2468, 9002));
-  expect(store.getState().adjustedSavedRecordings).toStrictEqual(makeFileState(2468, 9002, 23, 42, 1337));
+  expect(store.getState().adjustedSavedRecordings).toStrictEqual(
+    makeFileState(2468, 9002, 23, 42, 1337),
+  );
 });
 
 // --- recordings that were not streamed ---------------------------------------
@@ -266,7 +274,7 @@ test("updateBrowserStorage respects file overrides", async () => {
 // bookkeeping underneath.
 
 const saved = (...names: string[]) =>
-  vi.mocked(gatherRecordingsList).mockResolvedValue(names.map(name => ({ name, files: [] })));
+  vi.mocked(gatherRecordingsList).mockResolvedValue(names.map((name) => ({ name, files: [] })));
 
 test("a recording marked as not streamed stays listed while it is saved in the browser", async () => {
   const store = createAppStore(aServerEnv());
@@ -277,7 +285,7 @@ test("a recording marked as not streamed stays listed while it is saved in the b
   store.getState().markUnstreamed("GVS_1");
   await store.getState().updateBrowserStorage();
 
-  expect([ ...store.getState().unstreamedRecordings ].sort()).toStrictEqual([ "GVS_1", "GVS_2" ]);
+  expect([...store.getState().unstreamedRecordings].sort()).toStrictEqual(["GVS_1", "GVS_2"]);
 });
 
 test("a recording deleted from the browser is dropped from the list", async () => {
@@ -290,7 +298,7 @@ test("a recording deleted from the browser is dropped from the list", async () =
   store.getState().markUnstreamed("GVS_2");
   await store.getState().updateBrowserStorage();
 
-  expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_2" ]);
+  expect(store.getState().unstreamedRecordings).toStrictEqual(["GVS_2"]);
 });
 
 test("the recording being made is not dropped before its files exist", async () => {
@@ -304,7 +312,7 @@ test("the recording being made is not dropped before its files exist", async () 
   store.getState().markUnstreamed("LIVE");
   await store.getState().updateBrowserStorage();
 
-  expect(store.getState().unstreamedRecordings).toStrictEqual([ "LIVE" ]);
+  expect(store.getState().unstreamedRecordings).toStrictEqual(["LIVE"]);
 });
 
 test("a re-upload that did not complete leaves the recording listed", () => {
@@ -314,7 +322,7 @@ test("a re-upload that did not complete leaves the recording listed", () => {
   store.getState().signalManualUploadProgress("GVS_1", 50);
   store.getState().signalManualUploadFinished("GVS_1", false);
 
-  expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_1" ]);
+  expect(store.getState().unstreamedRecordings).toStrictEqual(["GVS_1"]);
   // the upload itself is over either way, so the card gets its buttons back
   expect(store.getState().reuploadProgress.has("GVS_1")).toBe(false);
 });
@@ -326,7 +334,7 @@ test("a successful re-upload takes only its own recording off the list", () => {
   store.getState().markUnstreamed("GVS_2");
   store.getState().signalManualUploadFinished("GVS_1", true);
 
-  expect(store.getState().unstreamedRecordings).toStrictEqual([ "GVS_2" ]);
+  expect(store.getState().unstreamedRecordings).toStrictEqual(["GVS_2"]);
 });
 
 test("the list of recordings that were not streamed is persisted", () => {
@@ -334,5 +342,5 @@ test("the list of recordings that were not streamed is persisted", () => {
 
   store.getState().markUnstreamed("GVS_1");
 
-  expect(createAppStore(aServerEnv()).getState().unstreamedRecordings).toStrictEqual([ "GVS_1" ]);
+  expect(createAppStore(aServerEnv()).getState().unstreamedRecordings).toStrictEqual(["GVS_1"]);
 });

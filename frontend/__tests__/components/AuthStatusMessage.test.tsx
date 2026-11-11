@@ -1,57 +1,58 @@
-import { expect, test, vi } from "vitest";
-import { anAppSession } from "../helpers/session";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MantineTestProvider } from "../helpers/mantine";
-import { AppStoreProvider } from "@/lib/hooks/useAppStore";
-import type { AppSession } from "@/lib/components/SessionProvider";
+import { expect, test, vi } from "vitest";
 import { AuthStatusMessage } from "@/lib/components/AuthStatusMessage";
+import type { AppSession } from "@/lib/components/SessionProvider";
+import { AppStoreProvider } from "@/lib/hooks/useAppStore";
+import { MantineTestProvider } from "../helpers/mantine";
 import { aServerEnv } from "../helpers/serverEnv";
+import { anAppSession } from "../helpers/session";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockUseAppSession()
+  useAppSession: () => mockUseAppSession(),
 }));
 
 /**
  * An error the way react-oidc-context reports one: an Error that also says which of its
  * methods it came from. A failed popup sign-in unless the test says otherwise.
  */
-const authError = (message: string, source = "signinPopup") => Object.assign(new Error(message), { source });
+const authError = (message: string, source = "signinPopup") =>
+  Object.assign(new Error(message), { source });
 
 const DEFAULT_SERVER_ENV = aServerEnv({
-  apiUrl: "https://record.example.edu/api"
+  apiUrl: "https://record.example.edu/api",
 });
 
-function renderMessage(
-  {
-    authRequired = true,
-    serverEnv = DEFAULT_SERVER_ENV,
-    isAuthenticated = false,
-    isLoading = false,
-    isStale = false,
-    error = undefined as ReturnType<typeof authError> | undefined,
-    interactiveSignin = vi.fn(async () => {}),
-    reauthenticate = vi.fn(async () => {})
-  } = {}
-) {
-  mockUseAppSession.mockReturnValue(anAppSession({
-    authRequired,
-    isAuthenticated,
-    isLoading,
-    isStale,
-    // react-oidc-context's ErrorContext, of which the component reads the message and source
-    error: error as AppSession["error"],
-    interactiveSignin,
-    reauthenticate
-  }));
+function renderMessage({
+  authRequired = true,
+  serverEnv = DEFAULT_SERVER_ENV,
+  isAuthenticated = false,
+  isLoading = false,
+  isStale = false,
+  error = undefined as ReturnType<typeof authError> | undefined,
+  interactiveSignin = vi.fn(async () => {}),
+  reauthenticate = vi.fn(async () => {}),
+} = {}) {
+  mockUseAppSession.mockReturnValue(
+    anAppSession({
+      authRequired,
+      isAuthenticated,
+      isLoading,
+      isStale,
+      // react-oidc-context's ErrorContext, of which the component reads the message and source
+      error: error as AppSession["error"],
+      interactiveSignin,
+      reauthenticate,
+    }),
+  );
 
   render(
     <MantineTestProvider>
       <AppStoreProvider serverEnv={serverEnv}>
-        <AuthStatusMessage/>
+        <AuthStatusMessage />
       </AppStoreProvider>
-    </MantineTestProvider>
+    </MantineTestProvider>,
   );
 
   return { interactiveSignin, reauthenticate };
@@ -65,7 +66,7 @@ test("an anonymous deployment shows nothing, whatever the session says", () => {
     authRequired: false,
     isAuthenticated: false,
     isLoading: false,
-    error: authError("boom")
+    error: authError("boom"),
   });
 
   expect(screen.queryByRole("alert")).toBeNull();
@@ -77,7 +78,7 @@ test("an anonymous deployment shows nothing, whatever the session says", () => {
 test("a healthy session shows no banner", () => {
   renderMessage({
     isAuthenticated: true,
-    isLoading: false
+    isLoading: false,
   });
 
   expect(screen.queryByText(/Stale/i)).toBeNull();
@@ -88,7 +89,7 @@ test("a stale session warns and offers reauthentication", async () => {
   const { reauthenticate } = renderMessage({
     isAuthenticated: true,
     isLoading: false,
-    isStale: true
+    isStale: true,
   });
 
   expect(screen.getByText("Session is Stale")).toBeInTheDocument();
@@ -111,12 +112,11 @@ test("a failed sign-in with no message still says something", () => {
   renderMessage({
     isAuthenticated: false,
     isLoading: false,
-    error: authError("")
+    error: authError(""),
   });
 
   expect(screen.getByText(/Unknown Error/)).toBeInTheDocument();
 });
-
 
 test("merely not being signed in is offered a way in rather than reported as a failure", async () => {
   const { interactiveSignin } = renderMessage();
@@ -131,11 +131,11 @@ test("merely not being signed in is offered a way in rather than reported as a f
 });
 
 test.each([
-  [ "signed out", { isAuthenticated: false, isLoading: false } ],
-  [ "signing in", { isAuthenticated: false, isLoading: true } ],
-  [ "failed to sign in", { isAuthenticated: false, isLoading: false, error: authError("boom") } ],
-  [ "signed in", { isAuthenticated: true, isLoading: false } ],
-  [ "stale", { isAuthenticated: true, isLoading: false, isStale: true }]
+  ["signed out", { isAuthenticated: false, isLoading: false }],
+  ["signing in", { isAuthenticated: false, isLoading: true }],
+  ["failed to sign in", { isAuthenticated: false, isLoading: false, error: authError("boom") }],
+  ["signed in", { isAuthenticated: true, isLoading: false }],
+  ["stale", { isAuthenticated: true, isLoading: false, isStale: true }],
 ])("a deployment with no backend says nothing at all -- %s", (_label, authState) => {
   renderMessage({ serverEnv: aServerEnv(), ...authState });
 
@@ -185,7 +185,6 @@ test("a sign-in that has not happened yet outranks a stale flag left in the stor
   expect(screen.queryByText(/Stale/i)).toBeNull();
 });
 
-
 test("a retry in flight is shown as loading rather than as the error being retried", () => {
   renderMessage({ isAuthenticated: false, isLoading: true, error: authError("invalid_client") });
 
@@ -193,12 +192,11 @@ test("a retry in flight is shown as loading rather than as the error being retri
   expect(screen.queryByText(/invalid_client/)).toBeNull();
 });
 
-
 test("the retry button on the error banner starts an interactive login", async () => {
   const { interactiveSignin } = renderMessage({
     isAuthenticated: false,
     isLoading: false,
-    error: authError("invalid_client")
+    error: authError("invalid_client"),
   });
 
   await userEvent.click(screen.getByRole("button", { name: /Retry authentication/i }));

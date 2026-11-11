@@ -1,11 +1,15 @@
-import { expect, test, vi } from "vitest";
-import { appStoreWrapper } from "../helpers/appStore";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
+import { expect, test, vi } from "vitest";
 import { useAppStore } from "@/lib/hooks/useAppStore";
 import { useBrowserStorage } from "@/lib/hooks/useBrowserStorage";
-import { useEffect } from "react";
+import {
+  deleteRecording,
+  gatherRecordingsList,
+  RecordingFileList,
+} from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
-import { deleteRecording, gatherRecordingsList, RecordingFileList } from "@/lib/utils/browserStorage";
+import { appStoreWrapper } from "../helpers/appStore";
 
 const wrapper = appStoreWrapper();
 
@@ -15,23 +19,23 @@ const mockRecordings: RecordingFileList[] = [
     files: [
       {
         name: "stream.webm",
-        size: 1.23 * 2 ** 20
-      }
-    ]
+        size: 1.23 * 2 ** 20,
+      },
+    ],
   },
   {
     name: "BAR",
     files: [
       {
         name: "stream.webm",
-        size: undefined
+        size: undefined,
       },
       {
         name: "overlay.webm",
-        size: undefined
-      }
-    ]
-  }
+        size: undefined,
+      },
+    ],
+  },
 ];
 
 vi.mock("@/lib/utils/browserStorage");
@@ -44,7 +48,7 @@ test("the provider gathers browser storage at first render", async () => {
   vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
   navigator.storage.estimate = vi.fn().mockImplementation(async () => ({
     quota: 10 * 2 ** 30,
-    usage: 1234
+    usage: 1234,
   }));
 
   const renderResult = renderHook(() => useBrowserStorage(), { wrapper });
@@ -63,10 +67,17 @@ test("browser storage is gathered once however many components read it", async (
   vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
   navigator.storage.estimate = vi.fn().mockResolvedValue({ quota: 10 * 2 ** 30, usage: 1234 });
 
-  const renderResult = renderHook(() => [ useBrowserStorage(), useBrowserStorage(), useBrowserStorage() ], { wrapper });
+  const renderResult = renderHook(
+    () => [useBrowserStorage(), useBrowserStorage(), useBrowserStorage()],
+    { wrapper },
+  );
 
   await waitFor(() => {
-    expect(renderResult.result.current.map(storage => storage.savedRecordings)).toStrictEqual([ mockRecordings, mockRecordings, mockRecordings ]);
+    expect(renderResult.result.current.map((storage) => storage.savedRecordings)).toStrictEqual([
+      mockRecordings,
+      mockRecordings,
+      mockRecordings,
+    ]);
   });
   expect(gatherRecordingsList).toHaveBeenCalledOnce();
 });
@@ -75,35 +86,37 @@ test("useBrowserStorage reacts to file size overrides", async () => {
   vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
   navigator.storage.estimate = vi.fn().mockImplementation(async () => ({
     quota: 10 * 2 ** 30,
-    usage: 1234
+    usage: 1234,
   }));
 
-  const renderResult = renderHook(() => {
-    const overrideFileSize = useAppStore(state => state.overrideFileSize);
+  const renderResult = renderHook(
+    () => {
+      const overrideFileSize = useAppStore((state) => state.overrideFileSize);
 
-    useEffect(() => {
-      overrideFileSize("FOO", "stream.webm", 42);
-    }, [ overrideFileSize ]);
+      useEffect(() => {
+        overrideFileSize("FOO", "stream.webm", 42);
+      }, [overrideFileSize]);
 
-    return useBrowserStorage();
-  }, { wrapper });
+      return useBrowserStorage();
+    },
+    { wrapper },
+  );
 
   await waitFor(() => {
-    const adjustedMockRecordings = mockRecordings.map(rec => (
+    const adjustedMockRecordings = mockRecordings.map((rec) =>
       rec.name === "FOO"
         ? {
             ...rec,
-            files: rec.files.map(file => (
-              file.name === "stream.webm" ? { ...file, size: 42 } : file
-            ))
+            files: rec.files.map((file) =>
+              file.name === "stream.webm" ? { ...file, size: 42 } : file,
+            ),
           }
-        : rec
-    ));
+        : rec,
+    );
 
     expect(renderResult.result.current.savedRecordings).toStrictEqual(adjustedMockRecordings);
   });
 });
-
 
 test("removing a recording deletes it from the browser and lists what is left", async () => {
   vi.mocked(gatherRecordingsList).mockResolvedValue(mockRecordings);
@@ -121,7 +134,7 @@ test("removing a recording deletes it from the browser and lists what is left", 
   await act(() => result.current.removeSavedRecording("FOO"));
 
   expect(deleteRecording).toHaveBeenCalledExactlyOnceWith("FOO");
-  expect(result.current.savedRecordings.map(recording => recording.name)).toStrictEqual([ "BAR" ]);
+  expect(result.current.savedRecordings.map((recording) => recording.name)).toStrictEqual(["BAR"]);
 });
 
 test("the app store refuses to work outside its provider", () => {
@@ -129,7 +142,9 @@ test("the app store refuses to work outside its provider", () => {
   // silently show nothing the rest of the page does
   vi.spyOn(console, "error").mockImplementation(() => {});
 
-  expect(() => renderHook(() => useAppStore(state => state.lectureTitle))).toThrow(/AppStoreProvider/);
+  expect(() => renderHook(() => useAppStore((state) => state.lectureTitle))).toThrow(
+    /AppStoreProvider/,
+  );
 });
 
 test("a browser storage that cannot be read when the page loads is reported", async () => {

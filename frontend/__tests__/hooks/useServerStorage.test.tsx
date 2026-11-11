@@ -1,30 +1,37 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { anAppSession } from "../helpers/session";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { useServerStorage, useRefreshServerStorage } from "@/lib/hooks/useServerStorage";
-import { useAppSession } from "@/lib/components/SessionProvider";
-import { ServerStorageRecording } from "@/lib/utils/serverStorage";
-import { ApiError } from "@/lib/utils/apiFetch";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import * as z from "zod";
+import { useAppSession } from "@/lib/components/SessionProvider";
+import { useServerStorage, useRefreshServerStorage } from "@/lib/hooks/useServerStorage";
+import { ApiError } from "@/lib/utils/apiFetch";
+import { ServerStorageRecording } from "@/lib/utils/serverStorage";
 import { aServerEnv } from "../helpers/serverEnv";
-import { completed, downloadPath, notRenderable, rawDownloadPath, rendering, unprocessed } from "../helpers/serverStorage";
+import {
+  completed,
+  downloadPath,
+  notRenderable,
+  rawDownloadPath,
+  rendering,
+  unprocessed,
+} from "../helpers/serverStorage";
+import { anAppSession } from "../helpers/session";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockUseAppSession()
+  useAppSession: () => mockUseAppSession(),
 }));
 
 const mockServerEnv = vi.fn();
 vi.mock("@/lib/hooks/useServerEnv", () => ({
-  useServerEnv: () => mockServerEnv()
+  useServerEnv: () => mockServerEnv(),
 }));
 
 // a rerender reports to whoever is in the lecture form, which lives in the app store; a
 // factory keeps the store out of these tests
 vi.mock("@/lib/hooks/useLecture", () => ({
-  useLecture: () => ({ lecturerEmail: LECTURER_EMAIL })
+  useLecture: () => ({ lecturerEmail: LECTURER_EMAIL }),
 }));
 
 const API_URL = "https://record.example.edu";
@@ -32,17 +39,23 @@ const LECTURER_EMAIL = "lecturer@example.edu";
 
 type AppSession = ReturnType<typeof useAppSession>;
 
-const session = (getAccessToken: AppSession["getAccessToken"], isAuthenticated = true): AppSession =>
-  anAppSession({ getAccessToken, isAuthenticated });
+const session = (
+  getAccessToken: AppSession["getAccessToken"],
+  isAuthenticated = true,
+): AppSession => anAppSession({ getAccessToken, isAuthenticated });
 
 /** The backend lists every recording in one array, whatever state it is in, sorted by name. */
-const sorted = (listing: ServerStorageRecording[]) => listing.toSorted((a, b) => a.name.localeCompare(b.name));
+const sorted = (listing: ServerStorageRecording[]) =>
+  listing.toSorted((a, b) => a.name.localeCompare(b.name));
 
 const LISTING: ServerStorageRecording[] = [
   rendering("ABC_2026"),
   completed("GVS_2025", 1024),
-  completed("PSU_2026", 2048, { downloadUrl: downloadPath("PSU_2026", "987654"), rawDownloadUrl: rawDownloadPath("PSU_2026", "987654") }),
-  unprocessed("XYZ_2024")
+  completed("PSU_2026", 2048, {
+    downloadUrl: downloadPath("PSU_2026", "987654"),
+    rawDownloadUrl: rawDownloadPath("PSU_2026", "987654"),
+  }),
+  unprocessed("XYZ_2024"),
 ];
 
 /**
@@ -50,7 +63,7 @@ const LISTING: ServerStorageRecording[] = [
  * with the raw data link it already had: the raw tracks stay downloadable while it renders.
  */
 const asRendering = (listing: ServerStorageRecording[], name: string): ServerStorageRecording[] =>
-  listing.map(rec => (rec.name === name ? rendering(name, rec.rawDownloadUrl) : rec));
+  listing.map((rec) => (rec.name === name ? rendering(name, rec.rawDownloadUrl) : rec));
 
 /**
  * SWR keeps one cache per provider, and it is global by default -- a listing fetched in
@@ -62,22 +75,19 @@ const asRendering = (listing: ServerStorageRecording[], name: string): ServerSto
  * is React state, and React warns about the update otherwise.
  */
 function swrWrapper() {
-  const Wrapper = ({ children }: Readonly<{ children: ReactNode }>) =>
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-      {children}
-    </SWRConfig>;
+  const Wrapper = ({ children }: Readonly<{ children: ReactNode }>) => (
+    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
+  );
 
   Wrapper.displayName = "SwrTestWrapper";
   return Wrapper;
 }
 
-function renderServerStorageRecordings(
-  {
-    serverEnv = aServerEnv({ apiUrl: API_URL }),
-    getAccessToken = (async () => "test-token") as AppSession["getAccessToken"],
-    isAuthenticated = true
-  } = {}
-) {
+function renderServerStorageRecordings({
+  serverEnv = aServerEnv({ apiUrl: API_URL }),
+  getAccessToken = (async () => "test-token") as AppSession["getAccessToken"],
+  isAuthenticated = true,
+} = {}) {
   mockServerEnv.mockReturnValue(serverEnv);
   mockUseAppSession.mockReturnValue(session(getAccessToken, isAuthenticated));
 
@@ -183,11 +193,11 @@ test("a signed-in session that yields no token is a failure rather than an empty
   // nothing to send. An empty listing would tell the lecturer they have no recordings.
   // The request goes out without credentials, and the backend's refusal of it -- what
   // FastAPI's bearer scheme answers -- is what makes it a failure.
-  fetchMock.mockImplementation(async (request: Request) => (
+  fetchMock.mockImplementation(async (request: Request) =>
     request.headers.has("Authorization")
       ? jsonResponse(LISTING)
-      : jsonResponse({ detail: "Not authenticated" }, 401)
-  ));
+      : jsonResponse({ detail: "Not authenticated" }, 401),
+  );
 
   const { result } = renderServerStorageRecordings({ getAccessToken: async () => undefined });
 
@@ -201,7 +211,8 @@ test("a signed-in session that yields no token is a failure rather than an empty
 test("a fresh token is requested for every poll rather than captured once", async () => {
   // the listing refreshes on an interval for as long as the page is open, which outlives
   // any single access token
-  const getAccessToken = vi.fn()
+  const getAccessToken = vi
+    .fn()
     .mockResolvedValueOnce("first-token")
     .mockResolvedValue("second-token");
 
@@ -264,10 +275,13 @@ test("a rejected listing surfaces the status and the server's explanation", asyn
 test("a body that is not JSON is left out rather than put on screen", async () => {
   // a gateway between the browser and the backend answers in HTML, not in FastAPI's
   // shape. The status alone is the useful part; the page would fill the alert.
-  respondWith(() => new Response(
-    "<!doctype html><html><head><title>502 Bad Gateway</title></head><body><h1>502</h1></body></html>",
-    { status: 502, headers: { "Content-Type": "text/html" } }
-  ));
+  respondWith(
+    () =>
+      new Response(
+        "<!doctype html><html><head><title>502 Bad Gateway</title></head><body><h1>502</h1></body></html>",
+        { status: 502, headers: { "Content-Type": "text/html" } },
+      ),
+  );
 
   const { result } = renderServerStorageRecordings();
 
@@ -296,7 +310,7 @@ test("a JSON body with no string detail is left out rather than stringified", as
 test("a malformed listing is a failure rather than something to render", async () => {
   // size as a string is what a backend change would most plausibly produce, and it would
   // otherwise reach the MiB formatter as NaN
-  respondWith(() => jsonResponse([ { ...completed("x", 1024), size: "1024" } ]));
+  respondWith(() => jsonResponse([{ ...completed("x", 1024), size: "1024" }]));
 
   const { result } = renderServerStorageRecordings();
 
@@ -380,13 +394,13 @@ test("a refresh fetches the listing again without waiting for the poll", async (
   mockServerEnv.mockReturnValue(aServerEnv({ apiUrl: API_URL }));
   mockUseAppSession.mockReturnValue(session(async () => "test-token"));
 
-  const after = sorted([ ...LISTING, rendering("NEW_2026") ]);
+  const after = sorted([...LISTING, rendering("NEW_2026")]);
 
   respondWith(() => jsonResponse(LISTING));
 
   const { result } = renderHook(
     () => ({ listing: useServerStorage(), refresh: useRefreshServerStorage() }),
-    { wrapper: swrWrapper() }
+    { wrapper: swrWrapper() },
   );
 
   await waitFor(() => expect(result.current.listing.data).toEqual(LISTING));
@@ -434,15 +448,17 @@ test("a refresh from outside the listing's cache does not reach it", async () =>
  * of a purge and the render request of a rerender. One that is left out is never answered, so
  * whatever is on screen meanwhile is what the cache holds.
  */
-function backend(
-  { listing, purge, job }: Partial<Record<"listing" | "purge" | "job", () => Response>>
-) {
+function backend({
+  listing,
+  purge,
+  job,
+}: Partial<Record<"listing" | "purge" | "job", () => Response>>) {
   fetchMock.mockImplementation(async (request: Request) => {
     let make = listing;
 
-    if(request.method === "DELETE") {
+    if (request.method === "DELETE") {
       make = purge;
-    } else if(request.method === "POST" && request.url.endsWith("/render")) {
+    } else if (request.method === "POST" && request.url.endsWith("/render")) {
       make = job;
     }
 
@@ -451,7 +467,9 @@ function backend(
 }
 
 const requestsOf = (method: string) =>
-  fetchMock.mock.calls.map(([ request ]) => request as Request).filter(request => request.method === method);
+  fetchMock.mock.calls
+    .map(([request]) => request as Request)
+    .filter((request) => request.method === method);
 
 /** What the backend answers a purge with: nothing. */
 const purged = () => new Response(null, { status: 204 });
@@ -469,7 +487,7 @@ async function renderWithListing(listing = LISTING) {
   return rendered;
 }
 
-const names = (listing: ServerStorageRecording[] | undefined) => listing?.map(rec => rec.name);
+const names = (listing: ServerStorageRecording[] | undefined) => listing?.map((rec) => rec.name);
 
 test("a purge sends the DELETE for that recording", async () => {
   const { result } = await renderWithListing();
@@ -480,7 +498,7 @@ test("a purge sends the DELETE for that recording", async () => {
     await result.current.purge("PSU_2026");
   });
 
-  const [ request ] = requestsOf("DELETE");
+  const [request] = requestsOf("DELETE");
 
   expect(request.url).toBe(`${API_URL}/api/recordings/PSU_2026`);
   expect(request.headers.get("Authorization")).toBe("Bearer test-token");
@@ -496,9 +514,11 @@ test("a purged recording leaves the listing before the backend has answered", as
     void result.current.purge("PSU_2026");
   });
 
-  await waitFor(() => expect(names(result.current.data)).toStrictEqual([ "ABC_2026", "GVS_2025", "XYZ_2024" ]));
+  await waitFor(() =>
+    expect(names(result.current.data)).toStrictEqual(["ABC_2026", "GVS_2025", "XYZ_2024"]),
+  );
   // the others are filtered by name too, and lose nothing that is not called that
-  expect(result.current.data).toStrictEqual(LISTING.filter(rec => rec.name !== "PSU_2026"));
+  expect(result.current.data).toStrictEqual(LISTING.filter((rec) => rec.name !== "PSU_2026"));
 });
 
 test("a purged recording leaves the listing whichever kind it is", async () => {
@@ -510,7 +530,9 @@ test("a purged recording leaves the listing whichever kind it is", async () => {
     void result.current.purge("XYZ_2024");
   });
 
-  await waitFor(() => expect(names(result.current.data)).toStrictEqual([ "ABC_2026", "GVS_2025", "PSU_2026" ]));
+  await waitFor(() =>
+    expect(names(result.current.data)).toStrictEqual(["ABC_2026", "GVS_2025", "PSU_2026"]),
+  );
   expect(result.current.data).toStrictEqual(LISTING.slice(0, 3));
 });
 
@@ -519,7 +541,10 @@ test("a purge fetches the listing again rather than trusting its own guess", asy
   // meantime only comes along with the listing fetched after it
   const { result } = await renderWithListing();
 
-  const after = sorted([ ...LISTING.filter(rec => rec.name !== "PSU_2026"), rendering("NEW_2026") ]);
+  const after = sorted([
+    ...LISTING.filter((rec) => rec.name !== "PSU_2026"),
+    rendering("NEW_2026"),
+  ]);
 
   backend({ listing: () => jsonResponse(after), purge: purged });
 
@@ -550,14 +575,17 @@ test("a purged recording stays gone while the listing is fetched again", async (
   // give the held listing every chance to make a difference before checking that none did
   await act(async () => {});
   expect(requestsOf("GET")).toHaveLength(2);
-  expect(names(result.current.data)).toStrictEqual([ "ABC_2026", "GVS_2025", "XYZ_2024" ]);
+  expect(names(result.current.data)).toStrictEqual(["ABC_2026", "GVS_2025", "XYZ_2024"]);
 });
 
 test("a refused purge puts the recording back and throws the server's explanation", async () => {
   const { result } = await renderWithListing();
 
   // the listing is held from here on, so nothing but the rollback can bring it back
-  backend({ purge: () => jsonResponse({ detail: "Recording PSU_2026 is in use and currently not purgeable" }, 409) });
+  backend({
+    purge: () =>
+      jsonResponse({ detail: "Recording PSU_2026 is in use and currently not purgeable" }, 409),
+  });
 
   let failure: unknown;
 
@@ -566,7 +594,9 @@ test("a refused purge puts the recording back and throws the server's explanatio
   });
 
   expect(failure).toBeInstanceOf(ApiError);
-  expect((failure as ApiError).message).toContain("Recording PSU_2026 is in use and currently not purgeable");
+  expect((failure as ApiError).message).toContain(
+    "Recording PSU_2026 is in use and currently not purgeable",
+  );
   expect(result.current.data).toEqual(LISTING);
   // the listing is fetched again after a refusal as well, but that one is held: what is on
   // screen is the rollback to the listing from before the purge
@@ -598,7 +628,7 @@ test("a rerender schedules a job for that recording with the form's recipient", 
     await result.current.rerender("PSU_2026");
   });
 
-  const [ request ] = requestsOf("POST");
+  const [request] = requestsOf("POST");
 
   expect(request.url).toBe(`${API_URL}/api/recordings/PSU_2026/render`);
   // the recipient is whatever the lecture form holds now, not whoever got the first
@@ -636,7 +666,11 @@ test("a rerendered recording shows as rendering before the backend has answered"
 });
 
 test("a failed recording that is rerendered shows as rendering the same way", async () => {
-  const listing = sorted([ ...LISTING.filter(rec => rec.state === "completed"), rendering("XYZ_2026"), unprocessed("OLD_2024") ]);
+  const listing = sorted([
+    ...LISTING.filter((rec) => rec.state === "completed"),
+    rendering("XYZ_2026"),
+    unprocessed("OLD_2024"),
+  ]);
   const { result } = await renderWithListing(listing);
 
   backend({});
@@ -646,13 +680,15 @@ test("a failed recording that is rerendered shows as rendering the same way", as
   });
 
   await waitFor(() => expect(result.current.data).toStrictEqual(asRendering(listing, "OLD_2024")));
-  expect(result.current.data?.filter(rec => rec.state === "unprocessed")).toStrictEqual([]);
+  expect(result.current.data?.filter((rec) => rec.state === "unprocessed")).toStrictEqual([]);
 });
 
 test("a rerendered recording keeps the raw data link it had", async () => {
   // the raw tracks do not go anywhere while the video is rendered, and the link the backend
   // handed out for them still works -- the card offers it in the meantime too
-  const listing = [ completed("GVS_2025", 1024, { rawDownloadUrl: rawDownloadPath("GVS_2025", "424242") }) ];
+  const listing = [
+    completed("GVS_2025", 1024, { rawDownloadUrl: rawDownloadPath("GVS_2025", "424242") }),
+  ];
   const { result } = await renderWithListing(listing);
 
   backend({});
@@ -661,12 +697,16 @@ test("a rerendered recording keeps the raw data link it had", async () => {
     void result.current.rerender("GVS_2025");
   });
 
-  await waitFor(() => expect(result.current.data).toStrictEqual([ rendering("GVS_2025", rawDownloadPath("GVS_2025", "424242")) ]));
+  await waitFor(() =>
+    expect(result.current.data).toStrictEqual([
+      rendering("GVS_2025", rawDownloadPath("GVS_2025", "424242")),
+    ]),
+  );
 });
 
 test("a rerendered recording without a raw data link stays without one", async () => {
   // a backend without authentication has none to hand out, and the guess must not make one up
-  const listing = [ unprocessed("OLD_2024", null), notRenderable("AUD_2026", null) ];
+  const listing = [unprocessed("OLD_2024", null), notRenderable("AUD_2026", null)];
   const { result } = await renderWithListing(listing);
 
   backend({});
@@ -675,7 +715,12 @@ test("a rerendered recording without a raw data link stays without one", async (
     void result.current.rerender("OLD_2024");
   });
 
-  await waitFor(() => expect(result.current.data).toStrictEqual([ rendering("OLD_2024", null), notRenderable("AUD_2026", null) ]));
+  await waitFor(() =>
+    expect(result.current.data).toStrictEqual([
+      rendering("OLD_2024", null),
+      notRenderable("AUD_2026", null),
+    ]),
+  );
 });
 
 test("an accepted rerender fetches the listing again rather than trusting its own guess", async () => {
@@ -683,7 +728,10 @@ test("an accepted rerender fetches the listing again rather than trusting its ow
   // only until the listing is back
   const { result } = await renderWithListing();
 
-  const after = asRendering(LISTING.filter(rec => rec.state !== "unprocessed"), "PSU_2026");
+  const after = asRendering(
+    LISTING.filter((rec) => rec.state !== "unprocessed"),
+    "PSU_2026",
+  );
 
   backend({ listing: () => jsonResponse(after), job: accepted("PSU_2026") });
 
@@ -719,7 +767,10 @@ test("a refused rerender still fetches the listing again", async () => {
 
   const after = asRendering(LISTING, "PSU_2026");
 
-  backend({ listing: () => jsonResponse(after), job: () => jsonResponse({ detail: "Recording PSU_2026 is already rendering" }, 409) });
+  backend({
+    listing: () => jsonResponse(after),
+    job: () => jsonResponse({ detail: "Recording PSU_2026 is already rendering" }, 409),
+  });
 
   await act(async () => {
     await result.current.rerender("PSU_2026")?.catch(() => null);

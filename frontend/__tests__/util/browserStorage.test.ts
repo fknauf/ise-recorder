@@ -1,8 +1,13 @@
-
-import { deleteRecording, downloadFile, gatherRecordingsList, getAllRecordingTracks, openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { expect, test, afterEach, vi } from "vitest";
-import { wipeOpfs } from "../helpers/opfs";
 import { commands } from "vitest/browser";
+import {
+  deleteRecording,
+  downloadFile,
+  gatherRecordingsList,
+  getAllRecordingTracks,
+  openRecordingFileStream,
+} from "@/lib/utils/browserStorage";
+import { wipeOpfs } from "../helpers/opfs";
 
 afterEach(async () => {
   await wipeOpfs();
@@ -18,7 +23,7 @@ test("creating a recording track works", async () => {
   const fooDir = await recDir.getDirectoryHandle("FOO_1234");
   const files = await Array.fromAsync(fooDir.keys());
 
-  expect(files).toStrictEqual([ "stream.webm" ]);
+  expect(files).toStrictEqual(["stream.webm"]);
 });
 
 test("gathering the recordings list works", async () => {
@@ -42,23 +47,23 @@ test("gathering the recordings list works", async () => {
       files: [
         {
           name: "stream.webm",
-          size: 2
-        }
-      ]
+          size: 2,
+        },
+      ],
     },
     {
       name: "FOO",
       files: [
         {
           name: "overlay.webm",
-          size: 3
+          size: 3,
         },
         {
           name: "stream.webm",
-          size: 4
-        }
-      ]
-    }
+          size: 4,
+        },
+      ],
+    },
   ]);
 });
 
@@ -84,9 +89,9 @@ test("file download works", async () => {
   await fooStream.write("1234");
   await fooStream.close();
 
-  const [ download ] = await Promise.all([
+  const [download] = await Promise.all([
     commands.listenForFileDownload(),
-    downloadFile("FOO", "stream.webm")
+    downloadFile("FOO", "stream.webm"),
   ]);
 
   expect(download.suggestedFilename).toBe("stream.webm");
@@ -116,8 +121,12 @@ test("a recording's tracks are its webm files, named after them", async () => {
 
   const tracks = await getAllRecordingTracks("FOO");
 
-  expect(tracks.map(track => track.trackName)).toStrictEqual([ "audio-0", "overlay", "stream" ]);
-  expect(await Promise.all(tracks.map(track => track.file.text()))).toStrictEqual([ "second microphone", "camera", "main" ]);
+  expect(tracks.map((track) => track.trackName)).toStrictEqual(["audio-0", "overlay", "stream"]);
+  expect(await Promise.all(tracks.map((track) => track.file.text()))).toStrictEqual([
+    "second microphone",
+    "camera",
+    "main",
+  ]);
 });
 
 test("Chromium's swap files are left out of the recordings list", async () => {
@@ -128,7 +137,7 @@ test("Chromium's swap files are left out of the recordings list", async () => {
 
   const recordings = await gatherRecordingsList();
 
-  expect(recordings).toStrictEqual([ { name: "FOO", files: [ { name: "stream.webm", size: 4 } ] } ]);
+  expect(recordings).toStrictEqual([{ name: "FOO", files: [{ name: "stream.webm", size: 4 }] }]);
 });
 
 test("an entry whose size cannot be read is listed without one rather than failing the list", async () => {
@@ -142,7 +151,10 @@ test("an entry whose size cannot be read is listed without one rather than faili
   expect(recordings).toStrictEqual([
     {
       name: "FOO",
-      files: [ { name: "not-a-file", size: undefined }, { name: "stream.webm", size: 4 } ]
-    }
+      files: [
+        { name: "not-a-file", size: undefined },
+        { name: "stream.webm", size: 4 },
+      ],
+    },
   ]);
 });

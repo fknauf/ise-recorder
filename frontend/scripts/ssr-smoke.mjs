@@ -41,7 +41,7 @@ const USE_DEV = process.argv.includes("--dev");
 const DEPLOYMENTS = [
   {
     name: "unauthenticated",
-    env: { ISE_RECORD_API_URL: "http://localhost:8000", ISE_RECORD_AUTH: "disabled" }
+    env: { ISE_RECORD_API_URL: "http://localhost:8000", ISE_RECORD_AUTH: "disabled" },
   },
   {
     name: "openid-connect",
@@ -49,21 +49,22 @@ const DEPLOYMENTS = [
       ISE_RECORD_API_URL: "http://localhost:8000",
       ISE_RECORD_OIDC_PROVIDER_URL: "http://keycloak.invalid/realms/ise",
       ISE_RECORD_OIDC_CLIENT_ID: "ise-recorder",
-      ISE_RECORD_OIDC_MAX_AGE: "25200"
-    }
-  }
+      ISE_RECORD_OIDC_MAX_AGE: "25200",
+    },
+  },
 ];
 
 /** Split a CSP header into directive -> sources, so nothing depends on ordering. */
 function parseCsp(header) {
   return new Map(
-    header.split(";")
-      .map(directive => directive.trim())
-      .filter(directive => directive.length > 0)
-      .map(directive => {
-        const [ name, ...sources ] = directive.split(/\s+/);
-        return [ name, sources ];
-      })
+    header
+      .split(";")
+      .map((directive) => directive.trim())
+      .filter((directive) => directive.length > 0)
+      .map((directive) => {
+        const [name, ...sources] = directive.split(/\s+/);
+        return [name, sources];
+      }),
   );
 }
 
@@ -72,15 +73,20 @@ const CHECKS = [
     path: "/",
     // Proves the component tree actually rendered on the server rather than the page
     // falling back to an empty client-only shell.
-    mustContain: [ "Start Recording" ]
+    mustContain: ["Start Recording"],
   },
   {
     path: "/auth/callback",
-    mustContain: []
-  }
+    mustContain: [],
+  },
 ];
 
-const ERROR_MARKERS = [ "window is not defined", "ReferenceError", "TypeError", "Internal Server Error" ];
+const ERROR_MARKERS = [
+  "window is not defined",
+  "ReferenceError",
+  "TypeError",
+  "Internal Server Error",
+];
 
 const CONTROL_TAG = /<(button|input|select|textarea|fieldset|optgroup|option)\b[^>]*>/gi;
 // A preceding space is what keeps this off data-disabled and aria-disabled, which react-spectrum
@@ -108,37 +114,37 @@ const DISABLED_ATTR = /\sdisabled(?=[\s=>/])/i;
  * record the exception rather than delete the check.
  */
 function findServerDisabledControls(html) {
-  return [ ...html.matchAll(CONTROL_TAG) ]
-    .map(match => match[0])
-    .filter(tag => DISABLED_ATTR.test(tag));
+  return [...html.matchAll(CONTROL_TAG)]
+    .map((match) => match[0])
+    .filter((tag) => DISABLED_ATTR.test(tag));
 }
 
 function startServer(env, port) {
   const args = USE_DEV
-    ? [ "next", "dev", "--port", String(port) ]
-    : [ "next", "start", "--port", String(port) ];
+    ? ["next", "dev", "--port", String(port)]
+    : ["next", "start", "--port", String(port)];
 
   // detached so the whole process group can be killed: signalling npx alone leaves the
   // actual Next server holding the port, and the next deployment then either fails to
   // bind or -- worse -- gets checked against the previous deployment's environment.
   const server = spawn("npx", args, {
     env: { ...process.env, ...env },
-    stdio: [ "ignore", "pipe", "pipe" ],
-    detached: true
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
   });
 
   const output = [];
-  server.stdout.on("data", d => output.push(String(d)));
-  server.stderr.on("data", d => output.push(String(d)));
+  server.stdout.on("data", (d) => output.push(String(d)));
+  server.stderr.on("data", (d) => output.push(String(d)));
 
   return { server, output };
 }
 
 async function waitForReady(base, { anyStatus = false } = {}) {
-  for(let attempt = 0; attempt < 120; ++attempt) {
+  for (let attempt = 0; attempt < 120; ++attempt) {
     try {
       const response = await fetch(base, { signal: AbortSignal.timeout(2000) });
-      if(anyStatus || response.status < 500) {
+      if (anyStatus || response.status < 500) {
         return true;
       }
     } catch {
@@ -155,57 +161,65 @@ async function checkDeployment({ name, env }, port) {
   const { server, output } = startServer(env, port);
 
   try {
-    if(!await waitForReady(base)) {
+    if (!(await waitForReady(base))) {
       failures.push(`${name}: server never became ready\n${output.join("").slice(-600)}`);
       return failures;
     }
 
-    for(const { path, mustContain } of CHECKS) {
+    for (const { path, mustContain } of CHECKS) {
       let response;
       let html;
 
       try {
         response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(15000) });
         html = await response.text();
-      } catch(e) {
+      } catch (e) {
         failures.push(`${name} ${path}: request failed: ${String(e).slice(0, 120)}`);
         continue;
       }
 
-      if(response.status !== 200) {
+      if (response.status !== 200) {
         failures.push(`${name} ${path}: expected 200, got ${response.status}`);
       }
 
-      for(const needle of mustContain) {
-        if(!html.includes(needle)) {
-          failures.push(`${name} ${path}: server-rendered HTML is missing ${JSON.stringify(needle)} ` +
-            "-- the page most likely threw during SSR and fell back to a client-only shell");
+      for (const needle of mustContain) {
+        if (!html.includes(needle)) {
+          failures.push(
+            `${name} ${path}: server-rendered HTML is missing ${JSON.stringify(needle)} ` +
+              "-- the page most likely threw during SSR and fell back to a client-only shell",
+          );
         }
       }
 
-      for(const marker of ERROR_MARKERS) {
-        if(html.includes(marker)) {
+      for (const marker of ERROR_MARKERS) {
+        if (html.includes(marker)) {
           failures.push(`${name} ${path}: server-rendered HTML contains ${JSON.stringify(marker)}`);
         }
       }
 
-      for(const tag of findServerDisabledControls(html)) {
-        failures.push(`${name} ${path}: control is server-rendered as disabled, which Firefox ` +
-          "un-disables on a soft reload and React then refuses to patch up: " +
-          `${tag.length > 200 ? `${tag.slice(0, 200)}...` : tag}`);
+      for (const tag of findServerDisabledControls(html)) {
+        failures.push(
+          `${name} ${path}: control is server-rendered as disabled, which Firefox ` +
+            "un-disables on a soft reload and React then refuses to patch up: " +
+            `${tag.length > 200 ? `${tag.slice(0, 200)}...` : tag}`,
+        );
       }
 
-      console.log(`  ${failures.length ? "✗" : "✓"} ${name} ${path} (${response.status}, ${html.length} bytes)`);
+      console.log(
+        `  ${failures.length ? "✗" : "✓"} ${name} ${path} (${response.status}, ${html.length} bytes)`,
+      );
     }
 
-    failures.push(...await checkContentSecurityPolicy(name, env, base));
-    failures.push(...await checkOpenerPolicy(name, base));
+    failures.push(...(await checkContentSecurityPolicy(name, env, base)));
+    failures.push(...(await checkOpenerPolicy(name, base)));
 
     // A page can render fine and still have logged an SSR error that React recovered from.
     const logged = output.join("");
-    for(const marker of ERROR_MARKERS) {
-      if(logged.includes(marker)) {
-        failures.push(`${name}: server log contains ${JSON.stringify(marker)}\n${logged.slice(-600)}`);
+    for (const marker of ERROR_MARKERS) {
+      if (logged.includes(marker)) {
+        failures.push(
+          `${name}: server log contains ${JSON.stringify(marker)}\n${logged.slice(-600)}`,
+        );
         break;
       }
     }
@@ -225,20 +239,20 @@ async function checkDeployment({ name, env }, port) {
 /** The CSP proxy.ts attaches to every response. */
 async function checkContentSecurityPolicy(name, env, base) {
   const failures = [];
-  const note = message => failures.push(`${name} csp: ${message}`);
+  const note = (message) => failures.push(`${name} csp: ${message}`);
 
   let first;
 
   try {
     first = await fetch(base, { signal: AbortSignal.timeout(15000) });
-  } catch(e) {
+  } catch (e) {
     note(`request failed: ${String(e).slice(0, 120)}`);
     return failures;
   }
 
   const header = first.headers.get("content-security-policy");
 
-  if(header === null) {
+  if (header === null) {
     note("no Content-Security-Policy header on the response");
     return failures;
   }
@@ -248,66 +262,80 @@ async function checkContentSecurityPolicy(name, env, base) {
   const scriptSrc = csp.get("script-src") ?? [];
 
   // the app must be allowed to reach its own backend, or every upload is blocked
-  if(env.ISE_RECORD_API_URL !== undefined &&
-    !connectSrc.some(source => source.startsWith(env.ISE_RECORD_API_URL))) {
+  if (
+    env.ISE_RECORD_API_URL !== undefined &&
+    !connectSrc.some((source) => source.startsWith(env.ISE_RECORD_API_URL))
+  ) {
     note(`connect-src does not admit the configured API URL: ${connectSrc.join(" ")}`);
   }
 
   // only the provider's origin belongs here, not the realm path
-  if(env.ISE_RECORD_OIDC_PROVIDER_URL === undefined) {
-    if(connectSrc.some(source => source.includes("keycloak"))) {
+  if (env.ISE_RECORD_OIDC_PROVIDER_URL === undefined) {
+    if (connectSrc.some((source) => source.includes("keycloak"))) {
       note(`connect-src admits an OpenID provider that is not configured: ${connectSrc.join(" ")}`);
     }
   } else {
     const { origin, href } = new URL(env.ISE_RECORD_OIDC_PROVIDER_URL);
 
-    if(!connectSrc.includes(origin)) {
-      note(`connect-src does not admit the OpenID provider origin ${origin}: ${connectSrc.join(" ")}`);
+    if (!connectSrc.includes(origin)) {
+      note(
+        `connect-src does not admit the OpenID provider origin ${origin}: ${connectSrc.join(" ")}`,
+      );
     }
 
-    if(connectSrc.includes(href) || connectSrc.some(source => source.includes("/realms/"))) {
-      note(`connect-src carries the provider path rather than just its origin: ${connectSrc.join(" ")}`);
+    if (connectSrc.includes(href) || connectSrc.some((source) => source.includes("/realms/"))) {
+      note(
+        `connect-src carries the provider path rather than just its origin: ${connectSrc.join(" ")}`,
+      );
     }
   }
 
   // silent renew loads the provider's authorize endpoint in an iframe, so the provider has to
   // be allowed in one -- and nothing else from outside
   const frameSrc = csp.get("frame-src") ?? [];
-  const expectedFrames = env.ISE_RECORD_OIDC_PROVIDER_URL === undefined
-    ? [ "'self'" ]
-    : [ "'self'", new URL(env.ISE_RECORD_OIDC_PROVIDER_URL).origin ];
-  if(frameSrc.toSorted().join(" ") !== expectedFrames.toSorted().join(" ")) {
-    note(`frame-src should be ${expectedFrames.join(" ")}, got: ${frameSrc.join(" ") || "(absent)"}`);
+  const expectedFrames =
+    env.ISE_RECORD_OIDC_PROVIDER_URL === undefined
+      ? ["'self'"]
+      : ["'self'", new URL(env.ISE_RECORD_OIDC_PROVIDER_URL).origin];
+  if (frameSrc.toSorted().join(" ") !== expectedFrames.toSorted().join(" ")) {
+    note(
+      `frame-src should be ${expectedFrames.join(" ")}, got: ${frameSrc.join(" ") || "(absent)"}`,
+    );
   }
 
   // Without a provider to embed, nothing cross-origin needs to load, so the page isolates
   // itself. With one, require-corp would block the provider's pages in the silent-renew
   // iframe, which send no Cross-Origin-Resource-Policy.
   const embedderPolicy = first.headers.get("cross-origin-embedder-policy");
-  if(env.ISE_RECORD_OIDC_PROVIDER_URL === undefined && embedderPolicy !== "require-corp") {
-    note(`Cross-Origin-Embedder-Policy should be require-corp without a provider, got: ${embedderPolicy ?? "(absent)"}`);
+  if (env.ISE_RECORD_OIDC_PROVIDER_URL === undefined && embedderPolicy !== "require-corp") {
+    note(
+      `Cross-Origin-Embedder-Policy should be require-corp without a provider, got: ${embedderPolicy ?? "(absent)"}`,
+    );
   }
-  if(env.ISE_RECORD_OIDC_PROVIDER_URL !== undefined && embedderPolicy !== null) {
-    note(`Cross-Origin-Embedder-Policy would keep the provider out of the silent-renew iframe: ${embedderPolicy}`);
+  if (env.ISE_RECORD_OIDC_PROVIDER_URL !== undefined && embedderPolicy !== null) {
+    note(
+      `Cross-Origin-Embedder-Policy would keep the provider out of the silent-renew iframe: ${embedderPolicy}`,
+    );
   }
 
   // silent renew redirects back into an iframe on our own origin
   const frameAncestors = (csp.get("frame-ancestors") ?? []).join(" ");
-  if(frameAncestors !== "'self'") {
+  if (frameAncestors !== "'self'") {
     note(`frame-ancestors should be 'self', got: ${frameAncestors || "(absent)"}`);
   }
 
-  const nonces = scriptSrc.filter(source => source.startsWith("'nonce-"));
-  if(nonces.length !== 1) {
+  const nonces = scriptSrc.filter((source) => source.startsWith("'nonce-"));
+  if (nonces.length !== 1) {
     note(`script-src should carry exactly one nonce, got: ${scriptSrc.join(" ")}`);
   }
 
   // a reused nonce is no better than no nonce
   const second = await fetch(base, { signal: AbortSignal.timeout(15000) });
-  const secondNonces = (parseCsp(second.headers.get("content-security-policy") ?? "")
-    .get("script-src") ?? []).filter(source => source.startsWith("'nonce-"));
+  const secondNonces = (
+    parseCsp(second.headers.get("content-security-policy") ?? "").get("script-src") ?? []
+  ).filter((source) => source.startsWith("'nonce-"));
 
-  if(nonces[0] !== undefined && nonces[0] === secondNonces[0]) {
+  if (nonces[0] !== undefined && nonces[0] === secondNonces[0]) {
     note(`the same nonce was reused across two requests: ${nonces[0]}`);
   }
 
@@ -315,17 +343,17 @@ async function checkContentSecurityPolicy(name, env, base) {
   // http:// URL to https://, which an http-only LAN deployment does not answer, so every
   // upload would fail. Behind a TLS-terminating proxy the app itself still sees plain http,
   // so the proxy's X-Forwarded-Proto is what says the page was served over https.
-  if(csp.has("upgrade-insecure-requests")) {
+  if (csp.has("upgrade-insecure-requests")) {
     note("upgrade-insecure-requests is set on a page served over plain http");
   }
 
   const forwarded = await fetch(base, {
     headers: { "X-Forwarded-Proto": "https" },
-    signal: AbortSignal.timeout(15000)
+    signal: AbortSignal.timeout(15000),
   });
   const forwardedCsp = parseCsp(forwarded.headers.get("content-security-policy") ?? "");
 
-  if(!forwardedCsp.has("upgrade-insecure-requests")) {
+  if (!forwardedCsp.has("upgrade-insecure-requests")) {
     note("upgrade-insecure-requests is missing on a page served over https behind a proxy");
   }
 
@@ -344,7 +372,7 @@ async function checkContentSecurityPolicy(name, env, base) {
  */
 async function checkOpenerPolicy(name, base) {
   const failures = [];
-  const note = message => failures.push(`${name} coop: ${message}`);
+  const note = (message) => failures.push(`${name} coop: ${message}`);
 
   const EXPECTED = "same-origin-allow-popups";
   const expectations = [
@@ -353,24 +381,26 @@ async function checkOpenerPolicy(name, base) {
     { path: "/auth/callbacks", coop: EXPECTED },
     // how the popup actually arrives: with the provider's response in the query
     { path: "/auth/callback?code=abc&state=xyz", coop: null },
-    { path: "/auth/callback?error=access_denied&state=xyz", coop: null }
+    { path: "/auth/callback?error=access_denied&state=xyz", coop: null },
   ];
 
-  for(const { path, coop } of expectations) {
+  for (const { path, coop } of expectations) {
     let response;
 
     try {
       response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(15000) });
-    } catch(e) {
+    } catch (e) {
       note(`${path}: request failed: ${String(e).slice(0, 120)}`);
       continue;
     }
 
     const actual = response.headers.get("cross-origin-opener-policy");
 
-    if(actual !== coop) {
-      note(`${path}: expected ${coop === null ? "no opener policy" : JSON.stringify(coop)}, ` +
-        `got ${actual === null ? "none" : JSON.stringify(actual)}`);
+    if (actual !== coop) {
+      note(
+        `${path}: expected ${coop === null ? "no opener policy" : JSON.stringify(coop)}, ` +
+          `got ${actual === null ? "none" : JSON.stringify(actual)}`,
+      );
     }
   }
 
@@ -392,7 +422,7 @@ async function checkRefusesToServe({ name, env }, port) {
   const { server, output } = startServer(env, port);
 
   try {
-    if(!await waitForReady(base, { anyStatus: true })) {
+    if (!(await waitForReady(base, { anyStatus: true }))) {
       failures.push(`${name}: server never answered\n${output.join("").slice(-600)}`);
       return failures;
     }
@@ -400,12 +430,14 @@ async function checkRefusesToServe({ name, env }, port) {
     const response = await fetch(base, { signal: AbortSignal.timeout(15000) });
     const html = await response.text();
 
-    if(response.status < 500) {
+    if (response.status < 500) {
       failures.push(`${name} /: expected the page to fail, got ${response.status}`);
     }
 
-    if(html.includes("Start Recording")) {
-      failures.push(`${name} /: the recorder rendered on a deployment without authentication configured`);
+    if (html.includes("Start Recording")) {
+      failures.push(
+        `${name} /: the recorder rendered on a deployment without authentication configured`,
+      );
     }
 
     console.log(`  ${failures.length ? "✗" : "✓"} ${name} / refused (${response.status})`);
@@ -424,21 +456,21 @@ async function checkRefusesToServe({ name, env }, port) {
 
 const MISCONFIGURED = {
   name: "backend without authentication configured",
-  env: { ISE_RECORD_API_URL: "http://localhost:8000" }
+  env: { ISE_RECORD_API_URL: "http://localhost:8000" },
 };
 
 console.log(`SSR smoke test (${USE_DEV ? "next dev" : "next start"}, from port ${BASE_PORT})`);
 
 const failures = [];
 // a port per deployment, so a lingering server can never be mistaken for the next one
-for(const [ index, deployment ] of DEPLOYMENTS.entries()) {
-  failures.push(...await checkDeployment(deployment, BASE_PORT + index));
+for (const [index, deployment] of DEPLOYMENTS.entries()) {
+  failures.push(...(await checkDeployment(deployment, BASE_PORT + index)));
 }
-failures.push(...await checkRefusesToServe(MISCONFIGURED, BASE_PORT + DEPLOYMENTS.length));
+failures.push(...(await checkRefusesToServe(MISCONFIGURED, BASE_PORT + DEPLOYMENTS.length)));
 
-if(failures.length > 0) {
+if (failures.length > 0) {
   console.error("\nSSR smoke test FAILED:");
-  for(const failure of failures) {
+  for (const failure of failures) {
     console.error(`  - ${failure}`);
   }
   process.exit(1);

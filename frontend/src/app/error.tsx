@@ -1,13 +1,13 @@
 "use client";
 
 import { Alert, Group } from "@mantine/core";
-import { useEffect } from "react";
 import { WarningOctagonIcon } from "@phosphor-icons/react";
+import { useEffect } from "react";
 
 export default function ErrorPage({
-  error
+  error,
 }: Readonly<{
-  error: Error & { digest?: string }
+  error: Error & { digest?: string };
 }>) {
   useEffect(() => {
     console.error(error);
@@ -15,7 +15,7 @@ export default function ErrorPage({
 
   return (
     <Group justify="center">
-      <Alert variant="light" color="error" title="Unexpected Error" icon={<WarningOctagonIcon/>}>
+      <Alert variant="light" color="error" title="Unexpected Error" icon={<WarningOctagonIcon />}>
         {error.message}
       </Alert>
     </Group>

@@ -1,8 +1,8 @@
 "use client";
 
+import { ApiDestination, withRetries, RetryPolicy, defaultRetryPolicy } from "./apiFetch";
 import { openRecordingFileStream } from "./browserStorage";
 import { showError, showMessage, showSuccess } from "./notifications";
-import { ApiDestination, withRetries, RetryPolicy, defaultRetryPolicy } from "./apiFetch";
 import { schedulePostprocessing, uploadChunk } from "./serverStorage";
 import { graphemeAwareTruncateToBytes } from "./stringAux";
 
@@ -13,8 +13,8 @@ import { graphemeAwareTruncateToBytes } from "./stringAux";
 // The backend could handle it, but no one wants to have directories like that.
 
 /* eslint-disable @stylistic/no-multi-spaces -- aligned for legibility */
-const unsafeNameCharacters =  /[^\p{L}\p{N}\p{M}._-]+/gu;
-const unsafeNameStart      = /^[^\p{L}\p{N}_]+/u;
+const unsafeNameCharacters = /[^\p{L}\p{N}\p{M}._-]+/gu;
+const unsafeNameStart = /^[^\p{L}\p{N}_]+/u;
 /* eslint-enable @stylistic/no-multi-spaces */
 
 export const normalizeLectureTitle = (lectureTitle: string) =>
@@ -24,32 +24,31 @@ export const normalizeLectureTitle = (lectureTitle: string) =>
     .replace(/\p{Zs}/gu, "_");
 
 export function sanitizeLectureTitle(lectureTitle: string) {
-  const sanitizedLongTitle =
-    normalizeLectureTitle(lectureTitle)
-      .replaceAll(unsafeNameCharacters, "")
-      .replace(unsafeNameStart, "");
+  const sanitizedLongTitle = normalizeLectureTitle(lectureTitle)
+    .replaceAll(unsafeNameCharacters, "")
+    .replace(unsafeNameStart, "");
 
   return graphemeAwareTruncateToBytes(sanitizedLongTitle, 192);
 }
 
 export type RecordingDestination = Omit<ApiDestination, "apiUrl"> & {
-  apiUrl: string | undefined
-  impeded: boolean
+  apiUrl: string | undefined;
+  impeded: boolean;
 };
 
 export interface RecordingTrackBundle {
-  displayTracks: readonly MediaStreamTrack[]
-  videoTracks: readonly MediaStreamTrack[]
-  audioTracks: readonly MediaStreamTrack[]
-  mainDisplay: MediaStreamTrack | undefined
-  overlay: MediaStreamTrack | undefined
+  displayTracks: readonly MediaStreamTrack[];
+  videoTracks: readonly MediaStreamTrack[];
+  audioTracks: readonly MediaStreamTrack[];
+  mainDisplay: MediaStreamTrack | undefined;
+  overlay: MediaStreamTrack | undefined;
 }
 
 interface RecordingTask {
-  trackTitle: string
-  stop: () => void
-  start: () => void
-  finished: Promise<void>
+  trackTitle: string;
+  stop: () => void;
+  start: () => void;
+  finished: Promise<void>;
 }
 
 // Our chunk handler has a quasi-synchronous part (writing to OPFS) and a fully asynchronous
@@ -58,15 +57,19 @@ interface RecordingTask {
 // but Javascript quirks make it difficult to get those from an async function. So we do it
 // with a Promise<RecordingBackgroundTask> instead.
 interface RecordingBackgroundTask {
-  promise: Promise<void>
+  promise: Promise<void>;
 }
 
 function prepareTrackRecording(
   tracks: MediaStreamTrack[],
   trackTitle: string,
   options: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkNum: number) => Promise<RecordingBackgroundTask>,
-  onTrackFinished: (trackTitle: string) => Promise<void>
+  onChunkAvailable: (
+    chunk: Blob,
+    trackTitle: string,
+    chunkNum: number,
+  ) => Promise<RecordingBackgroundTask>,
+  onTrackFinished: (trackTitle: string) => Promise<void>,
 ): RecordingTask {
   const chunkMillis = 5000;
   const recordedStream = new MediaStream(tracks);
@@ -88,27 +91,28 @@ function prepareTrackRecording(
   // is the least involved way I came up with.
   const chunkQueue: Blob[] = [];
   let chunkSignalResolve: (finished: boolean) => void;
-  let chunkSignalPromise = new Promise<boolean>(resolve => chunkSignalResolve = resolve);
+  let chunkSignalPromise = new Promise<boolean>((resolve) => (chunkSignalResolve = resolve));
 
-  newRecorder.ondataavailable = event => {
+  newRecorder.ondataavailable = (event) => {
     chunkQueue.push(event.data);
     chunkSignalResolve(false);
-    chunkSignalPromise = new Promise<boolean>(resolve => chunkSignalResolve = resolve);
+    chunkSignalPromise = new Promise<boolean>((resolve) => (chunkSignalResolve = resolve));
   };
   newRecorder.onstop = () => chunkSignalResolve(true);
-  newRecorder.onerror = event => showError(`Recording of track ${trackTitle} failed unexpectedly: ${event.message}`);
+  newRecorder.onerror = (event) =>
+    showError(`Recording of track ${trackTitle} failed unexpectedly: ${event.message}`);
 
   const processChunks = async () => {
     let finished = false;
     let chunkNum = 0;
     const chunkPromises: RecordingBackgroundTask[] = [];
 
-    while(!finished) {
+    while (!finished) {
       finished = await chunkSignalPromise;
 
-      while(chunkQueue.length > 0) {
+      while (chunkQueue.length > 0) {
         const chunk = chunkQueue.shift();
-        if(chunk) {
+        if (chunk) {
           // Wait for the quasi-synchronous part to conclude before processing the
           // next chunk, to avoid concurrent writes on the OPFS
           chunkPromises.push(await onChunkAvailable(chunk, trackTitle, chunkNum));
@@ -121,7 +125,7 @@ function prepareTrackRecording(
 
     // Wait for the fully asynchronous parts (the uploads to the server) to finish
     // before scheduling the postprocessing job.
-    await Promise.allSettled(chunkPromises.map(job => job.promise));
+    await Promise.allSettled(chunkPromises.map((job) => job.promise));
   };
 
   const finishedPromise = processChunks();
@@ -131,13 +135,13 @@ function prepareTrackRecording(
     start: () => {
       try {
         newRecorder.start(chunkMillis);
-      } catch(e) {
+      } catch (e) {
         chunkSignalResolve(true);
         showError(`Failed to start recording track ${trackTitle}`, e);
       }
     },
     stop: () => newRecorder.stop(),
-    finished: finishedPromise
+    finished: finishedPromise,
   };
 }
 
@@ -155,19 +159,25 @@ function prepareRecording(
   { displayTracks, videoTracks, audioTracks, mainDisplay, overlay }: RecordingTrackBundle,
   videoOptions: MediaRecorderOptions,
   audioOptions: MediaRecorderOptions,
-  onChunkAvailable: (chunk: Blob, trackTitle: string, chunkIndex: number) => Promise<RecordingBackgroundTask>,
-  onTrackFinished: (trackTitle: string) => Promise<void>
+  onChunkAvailable: (
+    chunk: Blob,
+    trackTitle: string,
+    chunkIndex: number,
+  ) => Promise<RecordingBackgroundTask>,
+  onTrackFinished: (trackTitle: string) => Promise<void>,
 ) {
   const jobs: RecordingTask[] = [];
 
-  if(displayTracks.length > 0 || videoTracks.length > 0 || audioTracks.length > 0) {
-    const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, videoOptions, onChunkAvailable, onTrackFinished);
-    const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) => prepareTrackRecording(tracks, trackTitle, audioOptions, onChunkAvailable, onTrackFinished);
+  if (displayTracks.length > 0 || videoTracks.length > 0 || audioTracks.length > 0) {
+    const prepareVideo = (tracks: MediaStreamTrack[], trackTitle: string) =>
+      prepareTrackRecording(tracks, trackTitle, videoOptions, onChunkAvailable, onTrackFinished);
+    const prepareAudio = (tracks: MediaStreamTrack[], trackTitle: string) =>
+      prepareTrackRecording(tracks, trackTitle, audioOptions, onChunkAvailable, onTrackFinished);
 
     // If there's no bug in the rest of the program, this check should not be necessary, but I've janked the
     // mainDisplay/overlay resetting mechanic on stream removal before. So this is a useful canary.
     const isSaneVideoStream = (track: MediaStreamTrack, label: string) => {
-      if(displayTracks.includes(track) || videoTracks.includes(track)) {
+      if (displayTracks.includes(track) || videoTracks.includes(track)) {
         return true;
       }
 
@@ -180,18 +190,20 @@ function prepareRecording(
     // really is the only one available.
     const mainDisplayCandidates = [
       mainDisplay !== undefined && isSaneVideoStream(mainDisplay, "main") ? mainDisplay : undefined,
-      displayTracks.find(t => t !== overlay),
-      videoTracks.find(t => t !== overlay),
-      overlay !== undefined && isSaneVideoStream(overlay, "overlay") ? overlay : undefined
+      displayTracks.find((t) => t !== overlay),
+      videoTracks.find((t) => t !== overlay),
+      overlay !== undefined && isSaneVideoStream(overlay, "overlay") ? overlay : undefined,
     ];
-    const effectiveMainDisplay = mainDisplayCandidates.find(candidate => candidate !== undefined);
+    const effectiveMainDisplay = mainDisplayCandidates.find((candidate) => candidate !== undefined);
 
-    if(effectiveMainDisplay !== undefined) {
+    if (effectiveMainDisplay !== undefined) {
       // attach first audio stream to main display if available, record the rest into individual files.
       // This is because at time of writing MediaRecorder on FF and Chrome does not support multiple
       // audio tracks (nor multiple video tracks, for that matter).
-      jobs.push(prepareVideo([ effectiveMainDisplay, ...audioTracks.slice(0, 1) ], "stream"));
-      jobs.push(...audioTracks.slice(1).map((track, index) => prepareAudio([track], `audio-${index}`)));
+      jobs.push(prepareVideo([effectiveMainDisplay, ...audioTracks.slice(0, 1)], "stream"));
+      jobs.push(
+        ...audioTracks.slice(1).map((track, index) => prepareAudio([track], `audio-${index}`)),
+      );
     } else {
       // if no video streams are available, record each audio track into its own file
       jobs.push(...audioTracks.map((track, index) => prepareAudio([track], `audio-${index}`)));
@@ -200,18 +212,25 @@ function prepareRecording(
     // If there's an overlay and it wasn't promoted to main display because there was no main display,
     // add it here. If overlay is explicitly marked both main and overlay, render the overlay on top
     // of itself.
-    if(
+    if (
       overlay !== undefined &&
       isSaneVideoStream(overlay, "overlay") &&
       (effectiveMainDisplay !== overlay || mainDisplay === overlay)
     ) {
-      jobs.push(prepareVideo([ overlay ], "overlay"));
+      jobs.push(prepareVideo([overlay], "overlay"));
     }
 
     // If there are more video tracks than main and overlay, record each into its own file for manual postprocessing.
-    const notYetHandled = (track: MediaStreamTrack) => track !== effectiveMainDisplay && track !== overlay;
-    jobs.push(...videoTracks.filter(notYetHandled).map((track, i) => prepareVideo([track], `video-${i}`)));
-    jobs.push(...displayTracks.filter(notYetHandled).map((track, i) => prepareVideo([track], `display-${i}`)));
+    const notYetHandled = (track: MediaStreamTrack) =>
+      track !== effectiveMainDisplay && track !== overlay;
+    jobs.push(
+      ...videoTracks.filter(notYetHandled).map((track, i) => prepareVideo([track], `video-${i}`)),
+    );
+    jobs.push(
+      ...displayTracks
+        .filter(notYetHandled)
+        .map((track, i) => prepareVideo([track], `display-${i}`)),
+    );
   }
 
   return jobs;
@@ -233,9 +252,13 @@ export async function recordLecture(
   destination: RecordingDestination,
   onStarting: (recordingName: string) => Promise<void> | void,
   onStarted: (recordingName: string, stopFunction: () => void) => Promise<void> | void,
-  onChunkWritten: (recordingName: string, filename: string, chunkSize: number) => Promise<void> | void,
+  onChunkWritten: (
+    recordingName: string,
+    filename: string,
+    chunkSize: number,
+  ) => Promise<void> | void,
   onFinished: (recordingName: string) => Promise<void> | void,
-  onStreamingFailed: (recordingName: string) => void
+  onStreamingFailed: (recordingName: string) => void,
 ) {
   const sanitizedTitle = sanitizeLectureTitle(lectureTitle);
   const lecturePrefix = sanitizedTitle !== "" ? `${sanitizedTitle}_` : "";
@@ -252,9 +275,11 @@ export async function recordLecture(
   const streams = new Map<string, FileSystemWritableFileStream>();
   const streamingAbort = new AbortController();
 
-  streamingAbort.signal.addEventListener("abort", () => onStreamingFailed(recordingName), { once: true });
+  streamingAbort.signal.addEventListener("abort", () => onStreamingFailed(recordingName), {
+    once: true,
+  });
 
-  if(destination.impeded) {
+  if (destination.impeded) {
     streamingAbort.abort("impeded");
   }
 
@@ -266,14 +291,14 @@ export async function recordLecture(
     ...defaultRetryPolicy,
     retries: 6,
     initialWaitMillis: 2000,
-    abortSignal: streamingAbort.signal
+    abortSignal: streamingAbort.signal,
   };
 
   const postRetryPolicy: RetryPolicy = {
     ...defaultRetryPolicy,
     retries: 3,
     initialWaitMillis: 1000,
-    abortSignal: streamingAbort.signal
+    abortSignal: streamingAbort.signal,
   };
 
   let stopTimer: ReturnType<typeof setTimeout> | undefined;
@@ -283,29 +308,47 @@ export async function recordLecture(
   const rearmStopTimer = () => {
     clearTimeout(stopTimer);
 
-    if(!streamingAbort.signal.aborted) {
+    if (!streamingAbort.signal.aborted) {
       stopTimer = setTimeout(() => streamingAbort.abort("stop"), 10000);
     }
   };
 
-  const onChunkAvailable = async (chunk: Blob, trackTitle: string, chunkIndex: number): Promise<RecordingBackgroundTask> => {
+  const onChunkAvailable = async (
+    chunk: Blob,
+    trackTitle: string,
+    chunkIndex: number,
+  ): Promise<RecordingBackgroundTask> => {
     const doUploadChunk = async () => {
-      if(apiDest === undefined || streamingAbort.signal.aborted) {
+      if (apiDest === undefined || streamingAbort.signal.aborted) {
         return;
       }
 
       try {
-        await withRetries(() => uploadChunk(apiDest, chunk, recordingName, trackTitle, chunkIndex, chunkRetryPolicy.abortSignal), chunkRetryPolicy);
-        if(stopTimer !== undefined) {
+        await withRetries(
+          () =>
+            uploadChunk(
+              apiDest,
+              chunk,
+              recordingName,
+              trackTitle,
+              chunkIndex,
+              chunkRetryPolicy.abortSignal,
+            ),
+          chunkRetryPolicy,
+        );
+        if (stopTimer !== undefined) {
           // User has already clicked "stop recording", and uploads are slow and succeeding. So reset
           // the stop timer whenever a chunk succeeds because that means we're not timing out. It's
           // just going at a relaxed pace.
           rearmStopTimer();
         }
-      } catch(e) {
-        if(!streamingAbort.signal.aborted) {
+      } catch (e) {
+        if (!streamingAbort.signal.aborted) {
           streamingAbort.abort("chunk");
-          showError(`Streaming aborted: failed to upload chunk ${chunkIndex} of track ${trackTitle}`, e);
+          showError(
+            `Streaming aborted: failed to upload chunk ${chunkIndex} of track ${trackTitle}`,
+            e,
+          );
         }
       }
     };
@@ -318,11 +361,11 @@ export async function recordLecture(
     const filename = formatFilename(trackTitle);
     const stream = streams.get(filename);
 
-    if(stream !== undefined) {
+    if (stream !== undefined) {
       try {
         await stream.write(chunk);
         await onChunkWritten(recordingName, filename, chunk.size);
-      } catch(e) {
+      } catch (e) {
         // If this happens, it's probably because the browser quota is exhausted.
         showError(`Could not write to ${filename}`, e);
         streams.delete(filename);
@@ -337,32 +380,38 @@ export async function recordLecture(
     const filename = formatFilename(trackTitle);
     const stream = streams.get(filename);
 
-    if(stream !== undefined) {
+    if (stream !== undefined) {
       streams.delete(filename);
       await stream.close().catch(() => null);
     }
   };
 
-  const jobs = prepareRecording(trackBundle, videoOptions, audioOptions, onChunkAvailable, onTrackFinished);
+  const jobs = prepareRecording(
+    trackBundle,
+    videoOptions,
+    audioOptions,
+    onChunkAvailable,
+    onTrackFinished,
+  );
 
   const stopJobs = () => {
-    for(const job of jobs) {
+    for (const job of jobs) {
       try {
         job.stop();
-      } catch(e) {
+      } catch (e) {
         console.warn("Failed to stop recording job", e);
       }
     }
 
-    if(destination.apiUrl !== undefined) {
+    if (destination.apiUrl !== undefined) {
       rearmStopTimer();
     }
   };
 
-  if(jobs.length > 0) {
+  if (jobs.length > 0) {
     await onStarting(recordingName);
     try {
-      for(const job of jobs) {
+      for (const job of jobs) {
         const filename = formatFilename(job.trackTitle);
         const outputStream = await openRecordingFileStream(recordingName, filename);
         streams.set(filename, outputStream);
@@ -372,30 +421,41 @@ export async function recordLecture(
 
       await onStarted(recordingName, stopJobs);
 
-      await Promise.allSettled(jobs.map(job => job.finished));
+      await Promise.allSettled(jobs.map((job) => job.finished));
       clearTimeout(stopTimer);
 
-      if(apiDest !== undefined) {
+      if (apiDest !== undefined) {
         try {
-          const response = await withRetries(() => schedulePostprocessing(apiDest, recordingName, lecturerEmail, postRetryPolicy.abortSignal), postRetryPolicy);
+          const response = await withRetries(
+            () =>
+              schedulePostprocessing(
+                apiDest,
+                recordingName,
+                lecturerEmail,
+                postRetryPolicy.abortSignal,
+              ),
+            postRetryPolicy,
+          );
 
-          if(response.state === "rendering") {
+          if (response.state === "rendering") {
             showSuccess(`Scheduled postprocessing for recording "${recordingName}"`);
           } else {
             // audio-only recording: the schedule-call only marked the recording as no-longer-streaming;
             // actual post-processing is not possible.
             showSuccess("Finished uploading.");
           }
-        } catch(e) {
-          if(streamingAbort.signal.aborted) {
+        } catch (e) {
+          if (streamingAbort.signal.aborted) {
             showMessage("Post-processing could not be scheduled because streaming was impeded.");
           } else {
             const message = e instanceof Error ? e.message : "unknown error";
-            showError(`Failed to schedule postprocessing: ${message}. The recording was streamed to backend and will be available for re-rendering soon.`);
+            showError(
+              `Failed to schedule postprocessing: ${message}. The recording was streamed to backend and will be available for re-rendering soon.`,
+            );
           }
         }
       }
-    } catch(e) {
+    } catch (e) {
       stopJobs();
       throw e;
     } finally {
@@ -403,7 +463,7 @@ export async function recordLecture(
       stopTimer = undefined;
       // streams should normally be empty here because onTrackFinished closed, but just in case
       // something slipped through, close all remaining open streams.
-      await Promise.allSettled(streams.values().map(stream => stream.close()));
+      await Promise.allSettled(streams.values().map((stream) => stream.close()));
       await onFinished(recordingName);
     }
   }

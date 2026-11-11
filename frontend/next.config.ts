@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   output: "standalone",
   reactCompiler: {
-    panicThreshold: "all_errors"
+    panicThreshold: "all_errors",
   },
   async headers() {
     return [
@@ -13,22 +13,23 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Permissions-Policy",
-            value: "camera=self, microphone=self, display-capture=self, autoplay=self, payment=(), geolocation=(), clipboard-read=(), clipboard-write=()"
+            value:
+              "camera=self, microphone=self, display-capture=self, autoplay=self, payment=(), geolocation=(), clipboard-read=(), clipboard-write=()",
           },
           {
             key: "X-Content-Type-Options",
-            value: "nosniff"
+            value: "nosniff",
           },
           {
             key: "Referrer-Policy",
-            value: "same-origin"
+            value: "same-origin",
           },
           {
             key: "Cross-Origin-Resource-Policy",
-            value: "same-origin"
-          }
-        ]
-      }
+            value: "same-origin",
+          },
+        ],
+      },
     ];
   },
   experimental: {
@@ -37,9 +38,9 @@ const nextConfig: NextConfig = {
       "@mantine/hooks",
       "@mantine/modals",
       "@mantine/notifications",
-      "@mantine/store"
-    ]
-  }
+      "@mantine/store",
+    ],
+  },
 };
 
 export default nextConfig;

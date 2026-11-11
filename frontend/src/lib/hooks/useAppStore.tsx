@@ -1,10 +1,10 @@
 "use client";
 
-import { StoreApi, useStore } from "zustand";
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
+import { StoreApi, useStore } from "zustand";
 import { AppStoreState, createAppStore } from "../store/store";
-import { ServerEnv } from "../utils/serverEnv";
 import { showError } from "../utils/notifications";
+import { ServerEnv } from "../utils/serverEnv";
 
 // See https://zustand.docs.pmnd.rs/guides/nextjs for why this is the way it is.
 // Long story short: This prevents the Zustand store from being created on the server side during SSR.
@@ -12,32 +12,28 @@ import { showError } from "../utils/notifications";
 export const AppStoreContext = createContext<StoreApi<AppStoreState> | undefined>(undefined);
 
 interface AppStoreProviderProps {
-  serverEnv: ServerEnv
-  children?: ReactNode
+  serverEnv: ServerEnv;
+  children?: ReactNode;
 }
 
 export function AppStoreProvider({ serverEnv, children }: Readonly<AppStoreProviderProps>) {
-  const [ store ] = useState(() => createAppStore(serverEnv));
+  const [store] = useState(() => createAppStore(serverEnv));
 
   useEffect(() => {
     // gather browser storage info on first client-side render
-    store.getState().updateBrowserStorage()
-      .catch(e => showError("Failed to retrieve browser-local storage information", e));
-  }, [ store ]);
+    store
+      .getState()
+      .updateBrowserStorage()
+      .catch((e) => showError("Failed to retrieve browser-local storage information", e));
+  }, [store]);
 
-  return (
-    <AppStoreContext.Provider value={store}>
-      {children}
-    </AppStoreContext.Provider>
-  );
+  return <AppStoreContext.Provider value={store}>{children}</AppStoreContext.Provider>;
 }
 
-export function useAppStore<T>(
-  selector: (store: AppStoreState) => T
-) {
+export function useAppStore<T>(selector: (store: AppStoreState) => T) {
   const appStoreContext = useContext(AppStoreContext);
 
-  if(appStoreContext === undefined) {
+  if (appStoreContext === undefined) {
     throw new Error("useAppStore must be used within AppStoreProvider");
   }
 

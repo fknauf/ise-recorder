@@ -1,18 +1,19 @@
 "use client";
 
-import { createTheme, DefaultMantineColor, MantineColorsTuple, MantineProvider, virtualColor } from "@mantine/core";
+import {
+  createTheme,
+  DefaultMantineColor,
+  MantineColorsTuple,
+  MantineProvider,
+  virtualColor,
+} from "@mantine/core";
 
 declare module "@mantine/core" {
   export interface MantineThemeColorsOverride {
     colors: Record<
-      "error" |
-      "warning" |
-      "success" |
-      "info" |
-      "neutral" |
-      DefaultMantineColor,
+      "error" | "warning" | "success" | "info" | "neutral" | DefaultMantineColor,
       MantineColorsTuple
-    >
+    >;
   }
 }
 
@@ -26,7 +27,7 @@ const mainColor: MantineColorsTuple = [
   "#5c69ac",
   "#4c5897",
   "#424e88",
-  "#36437a"
+  "#36437a",
 ];
 
 const theme = createTheme({
@@ -36,32 +37,38 @@ const theme = createTheme({
     error: virtualColor({
       name: "error",
       light: "red",
-      dark: "red"
+      dark: "red",
     }),
     warning: virtualColor({
       name: "warning",
       light: "orange",
-      dark: "orange"
+      dark: "orange",
     }),
     success: virtualColor({
       name: "success",
       light: "green",
-      dark: "green"
+      dark: "green",
     }),
     info: virtualColor({
       name: "info",
       light: "blue",
-      dark: "blue"
+      dark: "blue",
     }),
     neutral: virtualColor({
       name: "neutral",
       light: "gray",
-      dark: "gray"
-    })
-  }
+      dark: "gray",
+    }),
+  },
 });
 
-export function ThemeProvider({ nonce, children }: { nonce: string | undefined; children: React.ReactNode }) {
+export function ThemeProvider({
+  nonce,
+  children,
+}: {
+  nonce: string | undefined;
+  children: React.ReactNode;
+}) {
   const getNonce = nonce !== undefined ? () => nonce : undefined;
 
   return (

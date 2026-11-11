@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { canvasVideoTrack } from "../helpers/media";
-import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
+import { ApiError } from "@/lib/utils/apiFetch";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { uploadChunk } from "@/lib/utils/serverStorage";
-import { ApiError } from "@/lib/utils/apiFetch";
+import { canvasVideoTrack } from "../helpers/media";
 import { notRenderable, rendering } from "../helpers/serverStorage";
 
 /**
@@ -22,9 +22,9 @@ import { notRenderable, rendering } from "../helpers/serverStorage";
  * requested shows up as a fetch.
  */
 
-vi.mock("@/lib/utils/serverStorage", async importOriginal => ({
-  ...await importOriginal<typeof import("@/lib/utils/serverStorage")>(),
-  uploadChunk: vi.fn()
+vi.mock("@/lib/utils/serverStorage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/utils/serverStorage")>()),
+  uploadChunk: vi.fn(),
 }));
 vi.mock("@/lib/utils/browserStorage");
 vi.mock("@/lib/utils/notifications");
@@ -32,12 +32,12 @@ vi.mock("@/lib/utils/notifications");
 // Captured before any test installs a fake clock: the fake recorder and the polling below
 // run on the real event loop whatever the stop timer's clock is doing.
 const realSetTimeout = globalThis.setTimeout;
-const nextTask = () => new Promise(resolve => realSetTimeout(resolve, 0));
+const nextTask = () => new Promise((resolve) => realSetTimeout(resolve, 0));
 
 /** Yield to the real event loop until `condition` holds. */
 async function until(condition: () => boolean) {
-  for(let guard = 0; !condition(); ++guard) {
-    if(guard > 500) {
+  for (let guard = 0; !condition(); ++guard) {
+    if (guard > 500) {
       throw new Error("condition never became true");
     }
     await nextTask();
@@ -62,7 +62,7 @@ class FakeMediaRecorder {
   }
 
   stop() {
-    if(this.state === "inactive") {
+    if (this.state === "inactive") {
       return;
     }
 
@@ -82,14 +82,18 @@ class FakeMediaRecorder {
   }
 
   private emitNow() {
-    this.ondataavailable?.({ data: new Blob([ new Uint8Array(100) ]) } as BlobEvent);
+    this.ondataavailable?.({ data: new Blob([new Uint8Array(100)]) } as BlobEvent);
   }
 }
 
 const OriginalMediaRecorder = window.MediaRecorder;
 
 const API = "http://record.example.com";
-const backend: RecordingDestination = { apiUrl: API, impeded: false, getAccessToken: async () => "test-token" };
+const backend: RecordingDestination = {
+  apiUrl: API,
+  impeded: false,
+  getAccessToken: async () => "test-token",
+};
 
 /**
  * How the server answers a chunk: "ok" stores it; "failed" is an error that retrying will not
@@ -100,10 +104,10 @@ type UploadAnswer = "ok" | "failed" | "flaky";
 
 /** One attempt at a chunk upload that has been handed to the (fake) network. */
 interface PendingUpload {
-  track: string
-  index: number
-  signal: AbortSignal | undefined
-  answer: (answer: UploadAnswer) => void
+  track: string;
+  index: number;
+  signal: AbortSignal | undefined;
+  answer: (answer: UploadAnswer) => void;
 }
 
 let uploads: PendingUpload[];
@@ -113,43 +117,46 @@ let uploads: PendingUpload[];
 function fakeUploads() {
   uploads = [];
 
-  vi.mocked(uploadChunk).mockImplementation((_destination, _chunk, _recording, track, index, signal) =>
-    new Promise((resolve, reject) => {
-      const answer = (answer: UploadAnswer) => {
-        if(answer === "ok") {
-          resolve();
-        } else if(answer === "failed") {
-          reject(new ApiError("HTTP 400: chunk rejected", "http", 400, "chunk rejected"));
-        } else {
-          reject(new ApiError("HTTP 503", "http", 503));
+  vi.mocked(uploadChunk).mockImplementation(
+    (_destination, _chunk, _recording, track, index, signal) =>
+      new Promise((resolve, reject) => {
+        const answer = (answer: UploadAnswer) => {
+          if (answer === "ok") {
+            resolve();
+          } else if (answer === "failed") {
+            reject(new ApiError("HTTP 400: chunk rejected", "http", 400, "chunk rejected"));
+          } else {
+            reject(new ApiError("HTTP 503", "http", 503));
+          }
+        };
+
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
         }
-      };
 
-      if(signal?.aborted) {
-        reject(signal.reason);
-        return;
-      }
-
-      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-      uploads.push({ track, index, signal, answer });
-    }));
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        uploads.push({ track, index, signal, answer });
+      }),
+  );
 }
 
 const attemptsAt = (track: string, index: number) =>
-  uploads.filter(u => u.track === track && u.index === index).length;
+  uploads.filter((u) => u.track === track && u.index === index).length;
 
 /** The latest attempt at uploading one chunk, once it has been handed over. */
 async function upload(track: string, index: number) {
   await until(() => attemptsAt(track, index) > 0);
-  return uploads.findLast(u => u.track === track && u.index === index)!;
+  return uploads.findLast((u) => u.track === track && u.index === index)!;
 }
 
 const uploadsSent = () => vi.mocked(uploadChunk).mock.calls.length;
 
-const requestUrl = (input: RequestInfo | URL) => (input instanceof Request ? input.url : String(input));
+const requestUrl = (input: RequestInfo | URL) =>
+  input instanceof Request ? input.url : String(input);
 
 const jobRequests = () =>
-  vi.mocked(window.fetch).mock.calls.filter(([ input ]) => requestUrl(input).endsWith("/render"));
+  vi.mocked(window.fetch).mock.calls.filter(([input]) => requestUrl(input).endsWith("/render"));
 
 /** What the backend says when it has taken on a job. */
 const jobAccepted = () => Response.json(rendering("GVS"), { status: 202 });
@@ -166,12 +173,16 @@ let closedStreams: Set<string>;
  * when the session could not be renewed.
  */
 async function startRecording(destinationOrImpeded: RecordingDestination | "impeded" = backend) {
-  const destination = destinationOrImpeded === "impeded" ? { ...backend, impeded: true } : destinationOrImpeded;
+  const destination =
+    destinationOrImpeded === "impeded" ? { ...backend, impeded: true } : destinationOrImpeded;
   const display = canvasVideoTrack();
   const camera = canvasVideoTrack();
   const bundle: RecordingTrackBundle = {
-    displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
-    mainDisplay: display, overlay: camera
+    displayTracks: [display],
+    videoTracks: [camera],
+    audioTracks: [],
+    mainDisplay: display,
+    overlay: camera,
   };
 
   const onStreamingFailed = vi.fn();
@@ -179,11 +190,14 @@ async function startRecording(destinationOrImpeded: RecordingDestination | "impe
   let recordingName = "";
   let stop = () => {};
   let markStarted: () => void = () => {};
-  const started = new Promise<void>(resolve => markStarted = resolve);
+  const started = new Promise<void>((resolve) => (markStarted = resolve));
 
   const done = recordLecture(
-    bundle, "GVS", "lecturer@example.com", destination,
-    name => {
+    bundle,
+    "GVS",
+    "lecturer@example.com",
+    destination,
+    (name) => {
       recordingName = name;
     },
     (_name, stopFunction) => {
@@ -192,13 +206,13 @@ async function startRecording(destinationOrImpeded: RecordingDestination | "impe
     },
     () => {},
     onFinished,
-    onStreamingFailed
+    onStreamingFailed,
   );
 
   await started;
 
   const recorderOf = (track: MediaStreamTrack) =>
-    FakeMediaRecorder.instances.find(recorder => recorder.stream.getTracks().includes(track))!;
+    FakeMediaRecorder.instances.find((recorder) => recorder.stream.getTracks().includes(track))!;
 
   return {
     done,
@@ -207,7 +221,7 @@ async function startRecording(destinationOrImpeded: RecordingDestination | "impe
     overlay: recorderOf(camera),
     onStreamingFailed,
     onFinished,
-    recordingName: () => recordingName
+    recordingName: () => recordingName,
   };
 }
 
@@ -231,9 +245,9 @@ beforeEach(() => {
       // everything recordLecture still has to do afterwards would be done before it, unless
       // recordLecture waits for it.
       close: vi.fn(async () => {
-        await new Promise(resolve => realSetTimeout(resolve, 50));
+        await new Promise((resolve) => realSetTimeout(resolve, 50));
         closedInThisTest.add(filename);
-      })
+      }),
     } as unknown as FileSystemWritableFileStream;
 
     streams.set(filename, stream);
@@ -419,8 +433,11 @@ test("a recording with a chunk missing on the server is not sent for postprocess
 
 test("a job request that fails does not mark a fully streamed recording for re-upload", async () => {
   // every chunk is on the server, so re-rendering is the fix, not re-uploading
-  window.fetch = vi.fn().mockImplementation(async () =>
-    Response.json({ detail: "Recording does not exist" }, { status: 400 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ detail: "Recording does not exist" }, { status: 400 }),
+    );
 
   const rec = await startRecording();
 
@@ -453,8 +470,11 @@ test("an accepted job request is confirmed with the recording's name", async () 
 });
 
 test("a refused job request says why and that the recording can still be rerendered", async () => {
-  window.fetch = vi.fn().mockImplementation(async () =>
-    Response.json({ detail: "Recording does not exist" }, { status: 400 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ detail: "Recording does not exist" }, { status: 400 }),
+    );
 
   const rec = await startRecording();
 
@@ -482,7 +502,9 @@ test("a recording with a chunk missing says no job was requested, without a seco
   rec.stop();
   await rec.done;
 
-  expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("could not be scheduled"));
+  expect(showMessage).toHaveBeenCalledExactlyOnceWith(
+    expect.stringContaining("could not be scheduled"),
+  );
   expect(showError).toHaveBeenCalledOnce();
   expect(showSuccess).not.toHaveBeenCalled();
 });
@@ -493,13 +515,19 @@ test("a recording that could not stream from the start says no job was requested
   rec.stop();
   await rec.done;
 
-  expect(showMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("could not be scheduled"));
+  expect(showMessage).toHaveBeenCalledExactlyOnceWith(
+    expect.stringContaining("could not be scheduled"),
+  );
   expect(showSuccess).not.toHaveBeenCalled();
 });
 
 test("a frontend-only deployment does not claim a job was scheduled", async () => {
   // there is no backend to have accepted one, so a confirmation would be a false one
-  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
+  const rec = await startRecording({
+    apiUrl: undefined,
+    impeded: false,
+    getAccessToken: async () => undefined,
+  });
 
   rec.stop();
   await rec.done;
@@ -517,7 +545,9 @@ test("a frontend-only deployment does not claim a job was scheduled", async () =
 // listing at once rather than after the backend's grace period.
 
 test("an audio-only recording streams its chunks and ends with a job request", async () => {
-  window.fetch = vi.fn().mockImplementation(async () => Response.json(notRenderable("GVS"), { status: 202 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () => Response.json(notRenderable("GVS"), { status: 202 }));
   const audioContext = new AudioContext();
 
   try {
@@ -525,17 +555,27 @@ test("an audio-only recording streams its chunks and ends with a job request", a
     const onStreamingFailed = vi.fn();
     let stop = () => {};
     let markStarted: () => void = () => {};
-    const started = new Promise<void>(resolve => markStarted = resolve);
+    const started = new Promise<void>((resolve) => (markStarted = resolve));
 
     const done = recordLecture(
-      { displayTracks: [], videoTracks: [], audioTracks: [ microphone ], mainDisplay: undefined, overlay: undefined },
-      "GVS", "lecturer@example.com", backend,
+      {
+        displayTracks: [],
+        videoTracks: [],
+        audioTracks: [microphone],
+        mainDisplay: undefined,
+        overlay: undefined,
+      },
+      "GVS",
+      "lecturer@example.com",
+      backend,
       () => {},
       (_name, stopFunction) => {
         stop = stopFunction;
         markStarted();
       },
-      () => {}, () => {}, onStreamingFailed
+      () => {},
+      () => {},
+      onStreamingFailed,
     );
 
     await started;
@@ -550,7 +590,9 @@ test("an audio-only recording streams its chunks and ends with a job request", a
     expect(uploadsSent()).toBe(2);
     expect(jobRequests()).toHaveLength(1);
     // the upload is what there was to do, and it worked; no render is promised
-    expect(showSuccess).toHaveBeenCalledExactlyOnceWith(expect.not.stringContaining("postprocessing"));
+    expect(showSuccess).toHaveBeenCalledExactlyOnceWith(
+      expect.not.stringContaining("postprocessing"),
+    );
     expect(showMessage).not.toHaveBeenCalled();
     expect(showError).not.toHaveBeenCalled();
     // every chunk arrived, so there is nothing to re-upload either
@@ -580,7 +622,11 @@ test("a recording that cannot stream from the start sends nothing and is marked"
 
 test("a frontend-only deployment is not marked for re-upload", async () => {
   // no backend is not the same as no stream: there is nowhere to re-upload to either
-  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
+  const rec = await startRecording({
+    apiUrl: undefined,
+    impeded: false,
+    getAccessToken: async () => undefined,
+  });
 
   await rec.stream.emit();
   rec.stop();
@@ -616,18 +662,22 @@ test("storage is refreshed only once the local files are saved", async () => {
   // close that was started but not awaited shows: onFinished reads the file sizes from the
   // browser and then drops the live size estimates, and a file that is still being
   // committed reads as empty.
-  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
+  const rec = await startRecording({
+    apiUrl: undefined,
+    impeded: false,
+    getAccessToken: async () => undefined,
+  });
 
   let savedWhenFinished: string[] = [];
   rec.onFinished.mockImplementation(() => {
-    savedWhenFinished = [ ...closedStreams ].sort();
+    savedWhenFinished = [...closedStreams].sort();
   });
 
   await rec.stream.emit();
   rec.stop();
   await rec.done;
 
-  expect(savedWhenFinished).toStrictEqual([ "overlay.webm", "stream.webm" ]);
+  expect(savedWhenFinished).toStrictEqual(["overlay.webm", "stream.webm"]);
 });
 
 // --- giving up at the end of the lecture -----------------------------------
@@ -640,7 +690,7 @@ test("storage is refreshed only once the local files are saved", async () => {
 // These do not pin the grace period itself, only that there is one: none of them gives up
 // within five seconds of progress, and all of them within two minutes without.
 
-const useStopClock = () => vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout" ] });
+const useStopClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
 test("uploads still unanswered after stop are given up on after a grace period", async () => {
   useStopClock();
@@ -672,13 +722,20 @@ test("a frontend-only deployment is not given up on however long stopping takes"
   useStopClock();
 
   let finishSaving: () => void = () => {};
-  const saved = new Promise<void>(resolve => finishSaving = resolve);
-  vi.mocked(openRecordingFileStream).mockImplementation(async () => ({
-    write: vi.fn(async () => {}),
-    close: vi.fn(() => saved)
-  }) as unknown as FileSystemWritableFileStream);
+  const saved = new Promise<void>((resolve) => (finishSaving = resolve));
+  vi.mocked(openRecordingFileStream).mockImplementation(
+    async () =>
+      ({
+        write: vi.fn(async () => {}),
+        close: vi.fn(() => saved),
+      }) as unknown as FileSystemWritableFileStream,
+  );
 
-  const rec = await startRecording({ apiUrl: undefined, impeded: false, getAccessToken: async () => undefined });
+  const rec = await startRecording({
+    apiUrl: undefined,
+    impeded: false,
+    getAccessToken: async () => undefined,
+  });
 
   await rec.stream.emit();
   rec.stop();
@@ -701,7 +758,7 @@ test("uploads that keep arriving after stop are not given up on", async () => {
   const rec = await startRecording();
 
   const BACKLOG = 36;
-  for(let i = 0; i < BACKLOG; ++i) {
+  for (let i = 0; i < BACKLOG; ++i) {
     await rec.stream.emit();
   }
   await upload("stream", BACKLOG - 1);
@@ -711,7 +768,7 @@ test("uploads that keep arriving after stop are not given up on", async () => {
   await upload("stream", BACKLOG);
 
   // one chunk every five seconds: three minutes in all, well past any sane grace period
-  for(let i = 0; i <= BACKLOG; ++i) {
+  for (let i = 0; i <= BACKLOG; ++i) {
     await vi.advanceTimersByTimeAsync(5000);
     (await upload("stream", i)).answer("ok");
   }
@@ -750,12 +807,14 @@ test("the grace period does not cut off the job request", async () => {
 
   let answerJob: (response: Response) => void = () => {};
   let jobSignal: AbortSignal | undefined;
-  window.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
-    new Promise<Response>((resolve, reject) => {
-      jobSignal = input instanceof Request ? input.signal : init?.signal ?? undefined;
-      jobSignal?.addEventListener("abort", () => reject(jobSignal?.reason), { once: true });
-      answerJob = resolve;
-    }));
+  window.fetch = vi.fn().mockImplementation(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((resolve, reject) => {
+        jobSignal = input instanceof Request ? input.signal : (init?.signal ?? undefined);
+        jobSignal?.addEventListener("abort", () => reject(jobSignal?.reason), { once: true });
+        answerJob = resolve;
+      }),
+  );
 
   const rec = await startRecording();
 
@@ -779,17 +838,37 @@ test("a recording that failed to start is not marked for re-upload later", async
   useStopClock();
   const onStreamingFailed = vi.fn();
   vi.mocked(openRecordingFileStream)
-    .mockImplementationOnce(async () => ({ write: vi.fn(async () => {}), close: vi.fn(async () => {}) }) as unknown as FileSystemWritableFileStream)
+    .mockImplementationOnce(
+      async () =>
+        ({
+          write: vi.fn(async () => {}),
+          close: vi.fn(async () => {}),
+        }) as unknown as FileSystemWritableFileStream,
+    )
     .mockRejectedValueOnce(new Error("no space left"));
 
   const display = canvasVideoTrack();
   const camera = canvasVideoTrack();
 
-  await expect(recordLecture(
-    { displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [], mainDisplay: display, overlay: camera },
-    "GVS", "lecturer@example.com", backend,
-    () => {}, () => {}, () => {}, () => {}, onStreamingFailed
-  )).rejects.toThrow();
+  await expect(
+    recordLecture(
+      {
+        displayTracks: [display],
+        videoTracks: [camera],
+        audioTracks: [],
+        mainDisplay: display,
+        overlay: camera,
+      },
+      "GVS",
+      "lecturer@example.com",
+      backend,
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      onStreamingFailed,
+    ),
+  ).rejects.toThrow();
 
   await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
 
@@ -803,17 +882,37 @@ test("an upload that arrives after a failed start does not restart the grace per
   useStopClock();
   const onStreamingFailed = vi.fn();
   vi.mocked(openRecordingFileStream)
-    .mockImplementationOnce(async () => ({ write: vi.fn(async () => {}), close: vi.fn(async () => {}) }) as unknown as FileSystemWritableFileStream)
+    .mockImplementationOnce(
+      async () =>
+        ({
+          write: vi.fn(async () => {}),
+          close: vi.fn(async () => {}),
+        }) as unknown as FileSystemWritableFileStream,
+    )
     .mockRejectedValueOnce(new Error("no space left"));
 
   const display = canvasVideoTrack();
   const camera = canvasVideoTrack();
 
-  await expect(recordLecture(
-    { displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [], mainDisplay: display, overlay: camera },
-    "GVS", "lecturer@example.com", backend,
-    () => {}, () => {}, () => {}, () => {}, onStreamingFailed
-  )).rejects.toThrow();
+  await expect(
+    recordLecture(
+      {
+        displayTracks: [display],
+        videoTracks: [camera],
+        audioTracks: [],
+        mainDisplay: display,
+        overlay: camera,
+      },
+      "GVS",
+      "lecturer@example.com",
+      backend,
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      onStreamingFailed,
+    ),
+  ).rejects.toThrow();
 
   (await upload("stream", 0)).answer("ok");
   await vi.advanceTimersByTimeAsync(2 * 60 * 1000);

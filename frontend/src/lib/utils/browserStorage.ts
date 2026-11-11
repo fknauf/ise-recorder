@@ -12,13 +12,13 @@
  */
 
 export interface RecordingFileInfo {
-  name: string
-  size?: number
+  name: string;
+  size?: number;
 }
 
 export interface RecordingFileList {
-  name: string
-  files: RecordingFileInfo[]
+  name: string;
+  files: RecordingFileInfo[];
 }
 
 async function getRecordingsDirectory() {
@@ -31,27 +31,29 @@ async function getRecordingDirectory(name: string, options?: FileSystemGetDirect
   return await recordingsDir.getDirectoryHandle(name, options);
 }
 
-async function getRecordingFile(recordingName: string, filename: string, options?: FileSystemGetFileOptions) {
+async function getRecordingFile(
+  recordingName: string,
+  filename: string,
+  options?: FileSystemGetFileOptions,
+) {
   const recordingDir = await getRecordingDirectory(recordingName, { create: options?.create });
   return await recordingDir.getFileHandle(filename, options);
 }
 
 export interface RecordingTrackBlob {
-  trackName: string
-  file: File
+  trackName: string;
+  file: File;
 }
 
 export async function getAllRecordingTracks(recordingName: string) {
   const dir = await getRecordingDirectory(recordingName);
   const allFilenames = await Array.fromAsync(dir.keys());
-  const filenames = allFilenames.filter(name => name.endsWith(".webm")).sort();
+  const filenames = allFilenames.filter((name) => name.endsWith(".webm")).sort();
 
-  const openTrack = async (fname: string): Promise<RecordingTrackBlob> => (
-    {
-      trackName: fname.replace(/\.webm$/, ""),
-      file: await dir.getFileHandle(fname).then(h => h.getFile())
-    }
-  );
+  const openTrack = async (fname: string): Promise<RecordingTrackBlob> => ({
+    trackName: fname.replace(/\.webm$/, ""),
+    file: await dir.getFileHandle(fname).then((h) => h.getFile()),
+  });
 
   return await Array.fromAsync(filenames.map(openTrack));
 }
@@ -65,7 +67,7 @@ async function getFileSize(dir: FileSystemDirectoryHandle, filename: string) {
     const fileHandle = await dir.getFileHandle(filename);
     const file = await fileHandle.getFile();
     return file.size;
-  } catch(e) {
+  } catch (e) {
     console.warn("Unable to get file size for", filename, e);
   }
 
@@ -83,12 +85,13 @@ export async function gatherRecordingsList() {
     const dir = await recordingsDir.getDirectoryHandle(recordingName);
     const allFilenames = await Array.fromAsync(dir.keys());
     // Filter Chromium's .crswap temp files from the list, since we don't want to show them to the user.
-    const filenames = allFilenames.filter(name => !name.endsWith(".crswap")).sort();
+    const filenames = allFilenames.filter((name) => !name.endsWith(".crswap")).sort();
 
-    const getFileInfo = async (filename: string) => <RecordingFileInfo>({
-      name: filename,
-      size: await getFileSize(dir, filename)
-    });
+    const getFileInfo = async (filename: string) =>
+      <RecordingFileInfo>{
+        name: filename,
+        size: await getFileSize(dir, filename),
+      };
     const fileInfos = await Promise.all(filenames.map(getFileInfo));
 
     return { name: recordingName, files: fileInfos };

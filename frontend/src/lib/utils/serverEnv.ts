@@ -1,18 +1,17 @@
 import "server-only";
-
 import { connection } from "next/server";
-import isURL, { IsURLOptions } from "validator/es/lib/isURL";
 import isInt from "validator/es/lib/isInt";
+import isURL, { IsURLOptions } from "validator/es/lib/isURL";
 import pkg from "../../../package.json" with { type: "json" };
 
 type SmtpRecipientOption = "default" | "disabled";
 
 function validateRecipient(envRecipient: string | undefined): SmtpRecipientOption {
-  if(envRecipient === undefined || ["", "default"].includes(envRecipient.trim())) {
+  if (envRecipient === undefined || ["", "default"].includes(envRecipient.trim())) {
     return "default";
   }
 
-  if(envRecipient.trim() === "disabled") {
+  if (envRecipient.trim() === "disabled") {
     return "disabled";
   }
 
@@ -21,20 +20,20 @@ function validateRecipient(envRecipient: string | undefined): SmtpRecipientOptio
 }
 
 function validateApiUrl(url: string | undefined): string | undefined {
-  if(url === undefined || url === "") {
+  if (url === undefined || url === "") {
     return undefined;
   }
 
   const urlOptions: IsURLOptions = {
-    protocols: [ "http", "https" ],
+    protocols: ["http", "https"],
     require_protocol: true,
     require_tld: false, // allow localhost and enable intranet deployments
     allow_fragments: false,
     allow_query_components: false,
-    disallow_auth: true // prevent credentials leakage
+    disallow_auth: true, // prevent credentials leakage
   };
 
-  if(isURL(url, urlOptions)) {
+  if (isURL(url, urlOptions)) {
     // make sure apiUrl is always a directory URL, so relative paths resolve correctly.
     return url.replace(/\/*$/, "/");
   } else {
@@ -44,11 +43,11 @@ function validateApiUrl(url: string | undefined): string | undefined {
 }
 
 function validateMaxAge(envMaxAge: string | undefined): number | undefined {
-  if(envMaxAge === undefined || envMaxAge === "") {
+  if (envMaxAge === undefined || envMaxAge === "") {
     return undefined;
   }
 
-  if(isInt(envMaxAge.trim(), { min: 1 })) {
+  if (isInt(envMaxAge.trim(), { min: 1 })) {
     return parseInt(envMaxAge);
   }
 
@@ -57,14 +56,14 @@ function validateMaxAge(envMaxAge: string | undefined): number | undefined {
 }
 
 export interface ServerEnv {
-  version?: string
-  apiUrl?: string
-  smtpRecipientOverride: SmtpRecipientOption
-  authBackend?: string
-  oidcProviderUrl?: string
-  oidcClientId?: string
-  oidcMaxAge?: number
-  oidcAutoSignin?: boolean
+  version?: string;
+  apiUrl?: string;
+  smtpRecipientOverride: SmtpRecipientOption;
+  authBackend?: string;
+  oidcProviderUrl?: string;
+  oidcClientId?: string;
+  oidcMaxAge?: number;
+  oidcAutoSignin?: boolean;
 }
 
 let runtimeEnvironment: ServerEnv | undefined;
@@ -74,7 +73,7 @@ export async function getServerEnv(): Promise<ServerEnv> {
   // so that the runtime environment is used rather than the build environment.
   await connection();
 
-  if(runtimeEnvironment === undefined) {
+  if (runtimeEnvironment === undefined) {
     runtimeEnvironment = {
       version: process.env.ISE_RECORD_SHOW_VERSION === "true" ? pkg.version : undefined,
       apiUrl: validateApiUrl(process.env.ISE_RECORD_API_URL),
@@ -83,7 +82,7 @@ export async function getServerEnv(): Promise<ServerEnv> {
       oidcProviderUrl: process.env.ISE_RECORD_OIDC_PROVIDER_URL,
       oidcClientId: process.env.ISE_RECORD_OIDC_CLIENT_ID,
       oidcMaxAge: validateMaxAge(process.env.ISE_RECORD_OIDC_MAX_AGE),
-      oidcAutoSignin: process.env.ISE_RECORD_OIDC_AUTO_SIGNIN === "true"
+      oidcAutoSignin: process.env.ISE_RECORD_OIDC_AUTO_SIGNIN === "true",
     };
   }
 

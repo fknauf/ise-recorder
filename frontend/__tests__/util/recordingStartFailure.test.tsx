@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { canvasVideoTrack } from "../helpers/media";
-import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { openRecordingFileStream } from "@/lib/utils/browserStorage";
 import { showError } from "@/lib/utils/notifications";
+import { RecordingDestination, RecordingTrackBundle, recordLecture } from "@/lib/utils/recording";
 import { schedulePostprocessing, uploadChunk } from "@/lib/utils/serverStorage";
+import { canvasVideoTrack } from "../helpers/media";
 import { rendering } from "../helpers/serverStorage";
 
 /**
@@ -24,13 +24,13 @@ vi.mock("@/lib/utils/notifications");
 const destination: RecordingDestination = {
   apiUrl: undefined,
   impeded: false,
-  getAccessToken: async () => undefined
+  getAccessToken: async () => undefined,
 };
 
 // for the tests about what is handed on to the backend once the recording ends
 const backendDestination: RecordingDestination = {
   ...destination,
-  apiUrl: "https://backend.example.edu"
+  apiUrl: "https://backend.example.edu",
 };
 
 // Output streams by file name, so a test can check that every one of them was closed.
@@ -45,11 +45,11 @@ function refuseToStart(...refused: MediaStreamTrack[]) {
 
     constructor(stream: MediaStream, options?: MediaRecorderOptions) {
       super(stream, options);
-      this.#refuses = stream.getTracks().some(track => refused.includes(track));
+      this.#refuses = stream.getTracks().some((track) => refused.includes(track));
     }
 
     start(timeslice?: number) {
-      if(this.#refuses) {
+      if (this.#refuses) {
         throw new DOMException("cannot record this track", "NotSupportedError");
       }
 
@@ -61,8 +61,8 @@ function refuseToStart(...refused: MediaStreamTrack[]) {
 }
 
 interface Outcome {
-  writtenFiles: string[]
-  finished: boolean
+  writtenFiles: string[];
+  finished: boolean;
 }
 
 /**
@@ -71,16 +71,19 @@ interface Outcome {
  */
 async function recordBriefly(
   bundle: RecordingTrackBundle,
-  to: RecordingDestination = destination
+  to: RecordingDestination = destination,
 ): Promise<Outcome> {
   const writtenFiles = new Set<string>();
   let finished = false;
 
   await recordLecture(
-    bundle, "GVS", "lecturer@example.com", to,
+    bundle,
+    "GVS",
+    "lecturer@example.com",
+    to,
     () => {},
     async (_name, stop) => {
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 300));
       stop();
     },
     (_name, filename) => {
@@ -89,22 +92,24 @@ async function recordBriefly(
     () => {
       finished = true;
     },
-    () => {}
+    () => {},
   );
 
-  return { writtenFiles: [ ...writtenFiles ].sort(), finished };
+  return { writtenFiles: [...writtenFiles].sort(), finished };
 }
 
 beforeEach(() => {
   // stand-ins for a backend that accepts everything
   vi.mocked(uploadChunk).mockResolvedValue();
-  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) => rendering(recording));
+  vi.mocked(schedulePostprocessing).mockImplementation(async (_destination, recording) =>
+    rendering(recording),
+  );
 
   streams = new Map();
   vi.mocked(openRecordingFileStream).mockImplementation(async (_recording, filename) => {
     const stream = {
       write: vi.fn(async () => {}),
-      close: vi.fn(async () => {})
+      close: vi.fn(async () => {}),
     } as unknown as FileSystemWritableFileStream;
 
     streams.set(filename, stream);
@@ -124,10 +129,16 @@ test("a track that cannot start does not hold up the end of the recording", asyn
   const camera = canvasVideoTrack();
   refuseToStart(camera);
 
-  const outcome = await recordBriefly({
-    displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
-    mainDisplay: display, overlay: camera
-  }, backendDestination);
+  const outcome = await recordBriefly(
+    {
+      displayTracks: [display],
+      videoTracks: [camera],
+      audioTracks: [],
+      mainDisplay: display,
+      overlay: camera,
+    },
+    backendDestination,
+  );
 
   expect(outcome.finished).toBe(true);
   // the rest of the recording is still handed on for postprocessing
@@ -140,11 +151,14 @@ test("the tracks that did start are still recorded", async () => {
   refuseToStart(camera);
 
   const outcome = await recordBriefly({
-    displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
-    mainDisplay: display, overlay: camera
+    displayTracks: [display],
+    videoTracks: [camera],
+    audioTracks: [],
+    mainDisplay: display,
+    overlay: camera,
   });
 
-  expect(outcome.writtenFiles).toStrictEqual([ "stream.webm" ]);
+  expect(outcome.writtenFiles).toStrictEqual(["stream.webm"]);
 }, 5000);
 
 test("the user is told which track could not be recorded", async () => {
@@ -154,12 +168,18 @@ test("the user is told which track could not be recorded", async () => {
   refuseToStart(camera);
 
   await recordBriefly({
-    displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
-    mainDisplay: display, overlay: camera
+    displayTracks: [display],
+    videoTracks: [camera],
+    audioTracks: [],
+    mainDisplay: display,
+    overlay: camera,
   });
 
   expect(showError).toHaveBeenCalledOnce();
-  expect(showError).toHaveBeenCalledWith(expect.stringContaining("overlay"), expect.any(DOMException));
+  expect(showError).toHaveBeenCalledWith(
+    expect.stringContaining("overlay"),
+    expect.any(DOMException),
+  );
 }, 5000);
 
 test("the file opened for a track that cannot start is closed with the others", async () => {
@@ -168,12 +188,15 @@ test("the file opened for a track that cannot start is closed with the others", 
   refuseToStart(camera);
 
   await recordBriefly({
-    displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
-    mainDisplay: display, overlay: camera
+    displayTracks: [display],
+    videoTracks: [camera],
+    audioTracks: [],
+    mainDisplay: display,
+    overlay: camera,
   });
 
-  expect([ ...streams.keys() ].sort()).toStrictEqual([ "overlay.webm", "stream.webm" ]);
-  for(const stream of streams.values()) {
+  expect([...streams.keys()].sort()).toStrictEqual(["overlay.webm", "stream.webm"]);
+  for (const stream of streams.values()) {
     expect(stream.close).toHaveBeenCalled();
   }
 }, 5000);
@@ -184,8 +207,11 @@ test("a recording in which no track starts still comes to an end", async () => {
   refuseToStart(display, camera);
 
   const outcome = await recordBriefly({
-    displayTracks: [ display ], videoTracks: [ camera ], audioTracks: [],
-    mainDisplay: display, overlay: camera
+    displayTracks: [display],
+    videoTracks: [camera],
+    audioTracks: [],
+    mainDisplay: display,
+    overlay: camera,
   });
 
   expect(outcome.finished).toBe(true);

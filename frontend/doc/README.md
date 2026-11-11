@@ -43,40 +43,40 @@ User --_> UC7
 ### UC1: Record Lecture
 
 1. System displays the main page.
-    - Alternative: System redirects user to the configured OpenID-Connect login page, user logs in, system then displays the main page.
+   - Alternative: System redirects user to the configured OpenID-Connect login page, user logs in, system then displays the main page.
 2. User inputs lecture title and postprocessing-completion notification email
-    - Alternative: Title and email are remembered from previous use
-    - Alternative: No postprocessing backend is configured, notification email input field is not shown
-    - Alternative: System is configured to only pull notification e-mail addresses from oidc, notification email input field is not shown
+   - Alternative: Title and email are remembered from previous use
+   - Alternative: No postprocessing backend is configured, notification email input field is not shown
+   - Alternative: System is configured to only pull notification e-mail addresses from oidc, notification email input field is not shown
 3. User adds the slide stream
-    - User clicks the "Add Slides" button
-    - The system shows a dialog in which the user can select a window or screen to capture.
-    - User selects an input source
-    - The system shows a preview for the selected stream. If no main display is selected yet, the stream is selected as main display.
+   - User clicks the "Add Slides" button
+   - The system shows a dialog in which the user can select a window or screen to capture.
+   - User selects an input source
+   - The system shows a preview for the selected stream. If no main display is selected yet, the stream is selected as main display.
 4. User adds the overlay stream
-    - User clicks either "Add Video" or "Add Audio"
-    - Browser asks permission to access media devices. This allows selecting a camera and microphone.
-    - Both the selected camera and microphone are added as streams and shown as previews. If no overlay is selected yet, the camera stream is selected as overlay.
+   - User clicks either "Add Video" or "Add Audio"
+   - Browser asks permission to access media devices. This allows selecting a camera and microphone.
+   - Both the selected camera and microphone are added as streams and shown as previews. If no overlay is selected yet, the camera stream is selected as overlay.
 5. User adds another microphone
-    - User clicks "Add Audio"
-    - System shows a drop down menu listing the available microphones
-    - User selects the desired microphone
-    - System shows the stream from the microphone alongside the other previews (as audio spectrum)
+   - User clicks "Add Audio"
+   - System shows a drop down menu listing the available microphones
+   - User selects the desired microphone
+   - System shows the stream from the microphone alongside the other previews (as audio spectrum)
 6. User records a lecture
-    - User clicks "Start Recording"
-    - System relabels the "Start Recording" button to "Stop Recording"
-    - System disables lecture title, notification email input boxes, add slides/video/audio buttons, main/overlay selection toggles, and remove buttons under previews
-    - System shows a new recording with disabled download/remove buttons that has files "stream.webm", "overlay.webm", and "audio-0.webm" with size 0
-    - While the user lectures, system shows the new recording in the saved-recordings section with disabled download and remove buttons. Size estimates are updated frequently. Media are streamed to postprocessing backend.
-    - Browser space runs low, quota warning is shown.
-    - User clicks on the "remove" button of an old recording.
-    - System cleans up the old recording and removes the deleted recording and quota warning from the UI.
-    - User clicks "Stop Recording"
-    - System relabels "Stop Recording" to "Start Recording", re-enables controls, enables the Download and Remove buttons on the new recording, and schedules a postprocessing job for the new recording with the backend.
-    - The recording appears in the list of server-side recordings as an indicator that it is currently rendering
+   - User clicks "Start Recording"
+   - System relabels the "Start Recording" button to "Stop Recording"
+   - System disables lecture title, notification email input boxes, add slides/video/audio buttons, main/overlay selection toggles, and remove buttons under previews
+   - System shows a new recording with disabled download/remove buttons that has files "stream.webm", "overlay.webm", and "audio-0.webm" with size 0
+   - While the user lectures, system shows the new recording in the saved-recordings section with disabled download and remove buttons. Size estimates are updated frequently. Media are streamed to postprocessing backend.
+   - Browser space runs low, quota warning is shown.
+   - User clicks on the "remove" button of an old recording.
+   - System cleans up the old recording and removes the deleted recording and quota warning from the UI.
+   - User clicks "Stop Recording"
+   - System relabels "Stop Recording" to "Start Recording", re-enables controls, enables the Download and Remove buttons on the new recording, and schedules a postprocessing job for the new recording with the backend.
+   - The recording appears in the list of server-side recordings as an indicator that it is currently rendering
 7. System finishes post-processing
-    - After post-processing is finished, system sends a confirmation e-mail
-    - In the frontend, the new recording appears with buttons "download", "re-render" and "purge."
+   - After post-processing is finished, system sends a confirmation e-mail
+   - In the frontend, the new recording appears with buttons "download", "re-render" and "purge."
 
 ### UC2: Download raw recording
 
@@ -89,9 +89,9 @@ User --_> UC7
 - System displays quota warning and a list of recordings under the main UI
 - User clicks "Remove" button on a recording
 - System cleans up the space and removes the recording and quota warning from the UI
-    - Alternative: The recording is unstreamed. System asks for confirmation of the removal
-    - User confirms
-    - System cleans up as in the main line
+  - Alternative: The recording is unstreamed. System asks for confirmation of the removal
+  - User confirms
+  - System cleans up as in the main line
 
 ### UC4: Download processed recording
 
@@ -144,10 +144,10 @@ User --_> UC7
 - Admin configures the use of his OpenID backend (see section below)
 - System asks user to authenticate upon first access
 - System displays a message warning the user that the session is about to expire and offering to reauthenticate when the session is past max_age
-    - max_age should be configured so that session length - max_age > max expected recording length
+  - max_age should be configured so that session length - max_age > max expected recording length
 - System shows the notification email address input field, streams to postprocessing and schedules postprocessing jobs upon completion
-    - Alternative: Admin leaves `ISE_RECORD_API_URL` empty. Notification email address input field is not shown, streaming not attempted, and postprocessing not scheduled.
-    - Alternative: Admin configures `ISE_RECORD_SMTP_RECIPIENT_OVERRIDE=disabled`. Notification email address input field is not shown, postprocessing request is sent without a recipient address.
+  - Alternative: Admin leaves `ISE_RECORD_API_URL` empty. Notification email address input field is not shown, streaming not attempted, and postprocessing not scheduled.
+  - Alternative: Admin configures `ISE_RECORD_SMTP_RECIPIENT_OVERRIDE=disabled`. Notification email address input field is not shown, postprocessing request is sent without a recipient address.
 
 ## Architecture
 
@@ -175,13 +175,13 @@ folder `src`, the tests in folder `__tests__`.
 
 The code consists of the following main subsystems:
 
-| Subsystem | Function | Path |
-| - | - | - |
-| The Application Store | State management | `src/lib/store` |
-| Views | Display and user interaction | `src/app`, `src/lib/components` |
-| Hooks | State access and action logic | `src/lib/hooks` |
-| Utility functions | Application logic not concerned with UI updates | `src/lib/utils` |
-| HTTP response | Dynamic HTTP response headers: Content Security Policy, COOP, and COEP | `src/proxy.ts` |
+| Subsystem             | Function                                                               | Path                            |
+| --------------------- | ---------------------------------------------------------------------- | ------------------------------- |
+| The Application Store | State management                                                       | `src/lib/store`                 |
+| Views                 | Display and user interaction                                           | `src/app`, `src/lib/components` |
+| Hooks                 | State access and action logic                                          | `src/lib/hooks`                 |
+| Utility functions     | Application logic not concerned with UI updates                        | `src/lib/utils`                 |
+| HTTP response         | Dynamic HTTP response headers: Content Security Policy, COOP, and COEP | `src/proxy.ts`                  |
 
 ## Application State (Store)
 
@@ -263,22 +263,22 @@ classDiagram
 
 The state broadly covers the following tasks:
 
-| State component | Content/Purpose |
-| - | - |
-| `serverEnv` | URL of the postprocessing backend server (if any), version number for display (if configured) |
-| `lectureTitle` | used to name recordings |
-| `lecturerEmail` | to send a notification after postprocessing |
-| `obtainedDevicePermissions` | whether the app has previously obtained permission from the browser to enumerate (and capture) media devices |
-| `videoDevices`, `audioDevices` | list of media devices. Displayed during media source selection and used to capture video and audio tracks |
-| `displayTracks`, `videoTracks`, `audioTracks` | Lists of display capture, camera, and microphone tracks added by the user. Displayed as previews, captured during recording |
-| `mainDisplay`, `overlay` | Tracks selected as main display and overlay (if any). Used to determine recording track names and set roles for postprocessing |
-| `activeRecording` | whether the app is currently recording, the name of the recording, a `stop` function to end recording |
-| `fileSizeOverrides` | amount of data recorded in the active recording, which is not yet committed to the browser OPFS and so doesn't appear in `savedRecordings` |
-| `savedRecordings` | list of finished recordings as present in the OPFS, i.e. without adjustments from `fileSizeOverrides` |
-| `adjustedSavedRecordings` | `savedRecordings` with adjustments from `fileSizeOverrides`. Displayed in the UI. |
-| `usage`, `quota` | displayed in the quota warning, and determines if that warning is shown |
-| `reuploadProgress` | Progress percentages of currently re-uploading recordings |
-| `unstreamedRecordings` | List of recordings that are known to not have been streamed to backend yet. Determines whether a user is asked for confirmation before deleting a recording. |
+| State component                               | Content/Purpose                                                                                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `serverEnv`                                   | URL of the postprocessing backend server (if any), version number for display (if configured)                                                                |
+| `lectureTitle`                                | used to name recordings                                                                                                                                      |
+| `lecturerEmail`                               | to send a notification after postprocessing                                                                                                                  |
+| `obtainedDevicePermissions`                   | whether the app has previously obtained permission from the browser to enumerate (and capture) media devices                                                 |
+| `videoDevices`, `audioDevices`                | list of media devices. Displayed during media source selection and used to capture video and audio tracks                                                    |
+| `displayTracks`, `videoTracks`, `audioTracks` | Lists of display capture, camera, and microphone tracks added by the user. Displayed as previews, captured during recording                                  |
+| `mainDisplay`, `overlay`                      | Tracks selected as main display and overlay (if any). Used to determine recording track names and set roles for postprocessing                               |
+| `activeRecording`                             | whether the app is currently recording, the name of the recording, a `stop` function to end recording                                                        |
+| `fileSizeOverrides`                           | amount of data recorded in the active recording, which is not yet committed to the browser OPFS and so doesn't appear in `savedRecordings`                   |
+| `savedRecordings`                             | list of finished recordings as present in the OPFS, i.e. without adjustments from `fileSizeOverrides`                                                        |
+| `adjustedSavedRecordings`                     | `savedRecordings` with adjustments from `fileSizeOverrides`. Displayed in the UI.                                                                            |
+| `usage`, `quota`                              | displayed in the quota warning, and determines if that warning is shown                                                                                      |
+| `reuploadProgress`                            | Progress percentages of currently re-uploading recordings                                                                                                    |
+| `unstreamedRecordings`                        | List of recordings that are known to not have been streamed to backend yet. Determines whether a user is asked for confirmation before deleting a recording. |
 
 The state is modified through a number of supplied mutation functions that guarantee state consistency. In particular:
 
@@ -300,18 +300,18 @@ saved_recordings["BrowserStorageSection"]:3
 processed_recordings["ServerStorageSection"]:3
 ```
 
-| View | Function |
-| - | - |
-| `RecorderControls` | Top-of-page recording controls: Buttons to add streams, start/stop recording, input fields to configure lecture title and notification email, user menu (if configured with auth) |
-| `GithubLink` | Link to this project's github page |
-| `QuotaWarning` | Shown when in-browser space for recordings runs low |
-| `AuthStatusMessage` | Shown when the authentication session is loading, stale, or an error occurred |
-| `StreamingImpededWarning` | Shown when a recording is active that cannot be streamed to backend or when there are known unstreamed recordings |
-| `PreviewSection` | Shows configured tracks to the user; user can configure main and overlay tracks or remove unwanted tracks |
-| `VideoPreview` | Preview of a configured video or screen capture stream, with controls to select main and overlay streams |
-| `AudioPreview` | Displays the spectrum of the captured audio stream, so the user can easily identify whether the captured device is actually capturing sound. |
-| `BrowserStorageSection` | Shows the list of finished, browser-local raw recordings; recordings can be downloaded, deleted, or uploaded to backend |
-| `ServerStorageSection` | Shows the list of server-side, processed recordings for download/rerender/purge, status indicators for currently rendering recordings, and recordings whose postprocessing failed for rerender/purge |
+| View                      | Function                                                                                                                                                                                             |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RecorderControls`        | Top-of-page recording controls: Buttons to add streams, start/stop recording, input fields to configure lecture title and notification email, user menu (if configured with auth)                    |
+| `GithubLink`              | Link to this project's github page                                                                                                                                                                   |
+| `QuotaWarning`            | Shown when in-browser space for recordings runs low                                                                                                                                                  |
+| `AuthStatusMessage`       | Shown when the authentication session is loading, stale, or an error occurred                                                                                                                        |
+| `StreamingImpededWarning` | Shown when a recording is active that cannot be streamed to backend or when there are known unstreamed recordings                                                                                    |
+| `PreviewSection`          | Shows configured tracks to the user; user can configure main and overlay tracks or remove unwanted tracks                                                                                            |
+| `VideoPreview`            | Preview of a configured video or screen capture stream, with controls to select main and overlay streams                                                                                             |
+| `AudioPreview`            | Displays the spectrum of the captured audio stream, so the user can easily identify whether the captured device is actually capturing sound.                                                         |
+| `BrowserStorageSection`   | Shows the list of finished, browser-local raw recordings; recordings can be downloaded, deleted, or uploaded to backend                                                                              |
+| `ServerStorageSection`    | Shows the list of server-side, processed recordings for download/rerender/purge, status indicators for currently rendering recordings, and recordings whose postprocessing failed for rerender/purge |
 
 Views are exclusively focused on displaying data and triggering actions. Both the displayed data and the trigger action functions
 are obtained from hooks, so the views themselves are quite thin.
@@ -330,35 +330,35 @@ provides it with a number of callback functions that specify how the UI is to be
 occur, e.g. the size of the active recording is updated as chunks of data roll in. Thus the actual recording logic is cleanly
 separated from UI updates, and that's largely the purpose of the hook/utility split.
 
-| Hook | Purpose |
-| - | - |
-| `useAppSession` | provides functions concerning the authentication state, e.g. current access token retrieval, sign-out, sign-in, session headroom expansion, along with the information whether authentication is required at all. |
-| `useActiveRecording` | provides info whether a recording is active and details about the active recording |
-| `useBrowserStorage` | provides information about the browser's OPFS, i.e. saved recordings and quota information, and an action to delete a recording |
-| `useHydrated` | determines whether the frontend is hydrating (and needs to match SSR values exactly) or already running normally |
-| `useLecture` | provides the configured lecture title, notification email address (unless disabled) and a flag stating whether the notification email is enabled in the frontend |
-| `useMediaDevices` | provides the list of audio and video devices and actions to refresh that list and open media tracks from a device |
-| `useMediaTracks` | provides the list of open tracks, which of those are selected as main and overlay, and actions to select main and overlay track or close a track. These actions will only work when the application is not recording. |
-| `useServerStorage` | Fetches the list of server-side processed recordings along with information needed to download them, as well as mutation functions to refresh the list and to purge a recording or schedule a rerender. |
-| `useRefreshServerStorage` | Function to refresh the list of processed recordings, for use in event handlers |
-| `useReupload` | Function for re-upload of browser-local raw recordings to backend |
-| `useServerEnv` | provides the server-side configuration (no actions) |
-| `useStartStopRecording` | action functions to start and stop recording |
+| Hook                      | Purpose                                                                                                                                                                                                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useAppSession`           | provides functions concerning the authentication state, e.g. current access token retrieval, sign-out, sign-in, session headroom expansion, along with the information whether authentication is required at all.     |
+| `useActiveRecording`      | provides info whether a recording is active and details about the active recording                                                                                                                                    |
+| `useBrowserStorage`       | provides information about the browser's OPFS, i.e. saved recordings and quota information, and an action to delete a recording                                                                                       |
+| `useHydrated`             | determines whether the frontend is hydrating (and needs to match SSR values exactly) or already running normally                                                                                                      |
+| `useLecture`              | provides the configured lecture title, notification email address (unless disabled) and a flag stating whether the notification email is enabled in the frontend                                                      |
+| `useMediaDevices`         | provides the list of audio and video devices and actions to refresh that list and open media tracks from a device                                                                                                     |
+| `useMediaTracks`          | provides the list of open tracks, which of those are selected as main and overlay, and actions to select main and overlay track or close a track. These actions will only work when the application is not recording. |
+| `useServerStorage`        | Fetches the list of server-side processed recordings along with information needed to download them, as well as mutation functions to refresh the list and to purge a recording or schedule a rerender.               |
+| `useRefreshServerStorage` | Function to refresh the list of processed recordings, for use in event handlers                                                                                                                                       |
+| `useReupload`             | Function for re-upload of browser-local raw recordings to backend                                                                                                                                                     |
+| `useServerEnv`            | provides the server-side configuration (no actions)                                                                                                                                                                   |
+| `useStartStopRecording`   | action functions to start and stop recording                                                                                                                                                                          |
 
 ## Utilities
 
 The Utilities contain the application logic beyond UI updates and free UI functions that don't touch the application store. These
 fall into the following subsystems:
 
-| Utility | Purpose |
-| - | - |
-| `apiFetch` | Sending abortable HTTP requests with authentication and retries |
-| `browserStorage` | save, query, delete, and download recordings in the browser-local file system |
-| `notifications` | show warning and error messages to the user |
-| `recording` | recording logic; determines recording ID and track names, starts recording the configured tracks, stores the recording in the browser and optionally streams it to a backend server, where it also optionally schedules postprocessing when the recording ends. |
-| `serverEnv` | Definition, validation and wiring of the server environment into the nextjs framework |
-| `serverStorage` | functions to stream chunks of media to the backend server (if configured in the server env), obtain information about server-side recordings and mutate them (i.e., purge, re-render, or re-upload) |
-| `stringAux` | Grapheme-aware string truncation, used for recording name sanitation |
+| Utility          | Purpose                                                                                                                                                                                                                                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiFetch`       | Sending abortable HTTP requests with authentication and retries                                                                                                                                                                                                 |
+| `browserStorage` | save, query, delete, and download recordings in the browser-local file system                                                                                                                                                                                   |
+| `notifications`  | show warning and error messages to the user                                                                                                                                                                                                                     |
+| `recording`      | recording logic; determines recording ID and track names, starts recording the configured tracks, stores the recording in the browser and optionally streams it to a backend server, where it also optionally schedules postprocessing when the recording ends. |
+| `serverEnv`      | Definition, validation and wiring of the server environment into the nextjs framework                                                                                                                                                                           |
+| `serverStorage`  | functions to stream chunks of media to the backend server (if configured in the server env), obtain information about server-side recordings and mutate them (i.e., purge, re-render, or re-upload)                                                             |
+| `stringAux`      | Grapheme-aware string truncation, used for recording name sanitation                                                                                                                                                                                            |
 
 The `recording` utility is the heart of the application logic and the most complex piece of machinery in the project, so read the comments
 there when you're working on it. There is some complexity here wrt ensuring that chunks of media are not dropped, processed in the

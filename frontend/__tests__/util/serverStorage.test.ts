@@ -1,20 +1,36 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { downloadHref, fetchRecordings, purgeRecording, schedulePostprocessing, uploadChunk, uploadFile } from "@/lib/utils/serverStorage";
-import { ApiDestination, ApiError, defaultRetryPolicy, RetryPolicy, withRetries } from "@/lib/utils/apiFetch";
-import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
 import * as z from "zod";
+import {
+  ApiDestination,
+  ApiError,
+  defaultRetryPolicy,
+  RetryPolicy,
+  withRetries,
+} from "@/lib/utils/apiFetch";
+import { showError, showMessage, showSuccess } from "@/lib/utils/notifications";
+import {
+  downloadHref,
+  fetchRecordings,
+  purgeRecording,
+  schedulePostprocessing,
+  uploadChunk,
+  uploadFile,
+} from "@/lib/utils/serverStorage";
 
 vi.mock("@/lib/utils/notifications");
 
 const accessToken = async () => "test-token";
 const noAccessToken = async () => undefined;
 
-const useRetryClock = () => vi.useFakeTimers({ toFake: [ "setTimeout", "clearTimeout", "Date" ] });
+const useRetryClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
 
 // for the tests that are not about retrying: fail on the first refusal, without waiting
 const noRetries: RetryPolicy = { ...defaultRetryPolicy, retries: 0, initialWaitMillis: 0 };
 
-const retrying = (overrides: Partial<RetryPolicy>): RetryPolicy => ({ ...defaultRetryPolicy, ...overrides });
+const retrying = (overrides: Partial<RetryPolicy>): RetryPolicy => ({
+  ...defaultRetryPolicy,
+  ...overrides,
+});
 
 // Captured before any test installs a fake clock, so we can still yield to the real
 // event loop while one is installed.
@@ -34,22 +50,22 @@ const realSetTimeout = globalThis.setTimeout;
 async function settleRetries<T>(pending: Promise<T>): Promise<T> {
   let settled = false;
   const tracked = pending.then(
-    value => {
+    (value) => {
       settled = true;
       return value;
     },
-    error => {
+    (error) => {
       settled = true;
       throw error;
-    }
+    },
   );
 
   // a rejection is the caller's to assert on once this returns, not an unhandled one while
   // the loop is still running
   tracked.catch(() => {});
 
-  for(let guard = 0; !settled && guard < 100; ++guard) {
-    await new Promise(resolve => realSetTimeout(resolve, 0));
+  for (let guard = 0; !settled && guard < 100; ++guard) {
+    await new Promise((resolve) => realSetTimeout(resolve, 0));
     await vi.runAllTimersAsync();
   }
 
@@ -60,18 +76,19 @@ async function settleRetries<T>(pending: Promise<T>): Promise<T> {
 const fetchedRequest = (n = 0) => vi.mocked(window.fetch).mock.calls[n][0] as Request;
 
 /** What a call rejected with, for the assertions toThrow() cannot make. */
-const rejectionOf = (pending: Promise<unknown>) => pending.then(
-  () => {
-    throw new Error("expected the call to fail");
-  },
-  (e: unknown) => e
-);
+const rejectionOf = (pending: Promise<unknown>) =>
+  pending.then(
+    () => {
+      throw new Error("expected the call to fail");
+    },
+    (e: unknown) => e,
+  );
 
 const API = "http://record.example.com/";
 
 const destination: ApiDestination = {
   apiUrl: API,
-  getAccessToken: accessToken
+  getAccessToken: accessToken,
 };
 
 afterEach(() => {
@@ -84,11 +101,13 @@ const chunkUrl = (recording: string, track: string, index: number) =>
   `${API}api/recordings/${recording}/tracks/${track}/chunks/${index}`;
 
 test("sending chunk to server", async () => {
-  const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
+  const chunk = new Blob(["Hello, world."], { type: "text/plain" });
 
   window.fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
 
-  await expect(uploadChunk(destination, chunk, "FOO", "stream.webm", 42, undefined)).resolves.toBeUndefined();
+  await expect(
+    uploadChunk(destination, chunk, "FOO", "stream.webm", 42, undefined),
+  ).resolves.toBeUndefined();
 
   const request = fetchedRequest();
 
@@ -103,19 +122,22 @@ test("recording and track names are percent-encoded into the chunk path", async 
   // each is one path segment, so a slash in either must not start another
   window.fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
 
-  await uploadChunk(destination, new Blob([ "x" ]), "Übung_2025", "audio/0", 7, undefined);
+  await uploadChunk(destination, new Blob(["x"]), "Übung_2025", "audio/0", 7, undefined);
 
-  expect(fetchedRequest().url).toBe(chunkUrl(encodeURIComponent("Übung_2025"), encodeURIComponent("audio/0"), 7));
+  expect(fetchedRequest().url).toBe(
+    chunkUrl(encodeURIComponent("Übung_2025"), encodeURIComponent("audio/0"), 7),
+  );
 });
 
 test("sending chunk to flaky server", async () => {
   // how a live recording sends its chunks: the same chunk again, until one arrives
   useRetryClock();
 
-  const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
+  const chunk = new Blob(["Hello, world."], { type: "text/plain" });
   const fetchRequests: Request[] = [];
 
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementation(async (request: Request): Promise<Response> => {
       fetchRequests.push(request);
       return new Response(null, { status: 204 });
@@ -125,13 +147,16 @@ test("sending chunk to flaky server", async () => {
       throw new TypeError("Failed to fetch");
     });
 
-  const pending = withRetries(() => uploadChunk(destination, chunk, "FOO", "stream.webm", 42, undefined), retrying({ retries: 10, initialWaitMillis: 50 }));
+  const pending = withRetries(
+    () => uploadChunk(destination, chunk, "FOO", "stream.webm", 42, undefined),
+    retrying({ retries: 10, initialWaitMillis: 50 }),
+  );
 
   await expect(settleRetries(pending)).resolves.toBeUndefined();
 
   expect(fetchRequests.length).toBe(2);
 
-  for(const req of fetchRequests) {
+  for (const req of fetchRequests) {
     expect(req.url).toBe(chunkUrl("FOO", "stream.webm", 42));
     expect(req.method).toBe("PUT");
     expect(await req.text()).toStrictEqual(await chunk.text());
@@ -141,17 +166,19 @@ test("sending chunk to flaky server", async () => {
 test("sending chunk to broken server", async () => {
   useRetryClock();
 
-  const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
+  const chunk = new Blob(["Hello, world."], { type: "text/plain" });
   const fetchRequests: Request[] = [];
 
-  window.fetch = vi.fn()
-    .mockImplementation(async (request: Request): Promise<Response> => {
-      fetchRequests.push(request);
-      return Response.json("", { status: 503 });
-    });
+  window.fetch = vi.fn().mockImplementation(async (request: Request): Promise<Response> => {
+    fetchRequests.push(request);
+    return Response.json("", { status: 503 });
+  });
 
   const before = Date.now();
-  const pending = withRetries(() => uploadChunk(destination, chunk, "FOO", "stream.webm", 42, undefined), retrying({ retries: 3, initialWaitMillis: 50 }));
+  const pending = withRetries(
+    () => uploadChunk(destination, chunk, "FOO", "stream.webm", 42, undefined),
+    retrying({ retries: 3, initialWaitMillis: 50 }),
+  );
 
   const error = await settleRetries(rejectionOf(pending));
 
@@ -168,7 +195,7 @@ test("sending chunk to broken server", async () => {
   expect(fetchRequests.length).toBe(4);
   expect(elapsed).toBe(350);
 
-  for(const req of fetchRequests) {
+  for (const req of fetchRequests) {
     expect(req.url).toBe(chunkUrl("FOO", "stream.webm", 42));
     expect(req.method).toBe("PUT");
     expect(await req.text()).toStrictEqual(await chunk.text());
@@ -177,10 +204,15 @@ test("sending chunk to broken server", async () => {
 
 test("a chunk rejected by the backend fails with the server's explanation", async () => {
   // what the backend answers once a lecture has outrun the chunk numbering
-  window.fetch = vi.fn().mockImplementation(async () =>
-    Response.json({ detail: "Lecture has been going on too long." }, { status: 422 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ detail: "Lecture has been going on too long." }, { status: 422 }),
+    );
 
-  const error = await rejectionOf(uploadChunk(destination, new Blob([ "x" ]), "FOO", "stream.webm", 42, undefined));
+  const error = await rejectionOf(
+    uploadChunk(destination, new Blob(["x"]), "FOO", "stream.webm", 42, undefined),
+  );
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).status).toBe(422);
@@ -188,11 +220,18 @@ test("a chunk rejected by the backend fails with the server's explanation", asyn
 });
 
 test("chunk upload is unauthenticated if no access token is available", async () => {
-  const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
+  const chunk = new Blob(["Hello, world."], { type: "text/plain" });
 
   window.fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
 
-  await uploadChunk({ ...destination, getAccessToken: noAccessToken }, chunk, "FOO", "stream.webm", 42, undefined);
+  await uploadChunk(
+    { ...destination, getAccessToken: noAccessToken },
+    chunk,
+    "FOO",
+    "stream.webm",
+    42,
+    undefined,
+  );
 
   expect(fetchedRequest().headers.has("Authorization")).toBe(false);
 });
@@ -200,7 +239,7 @@ test("chunk upload is unauthenticated if no access token is available", async ()
 test("chunk upload requests a fresh access token for every attempt", async () => {
   useRetryClock();
 
-  const chunk = new Blob([ "Hello, world." ], { type: "text/plain" });
+  const chunk = new Blob(["Hello, world."], { type: "text/plain" });
   const fetchRequests: Request[] = [];
 
   // A recording outlives its access token, so a retry must not reuse the token that
@@ -209,7 +248,8 @@ test("chunk upload requests a fresh access token for every attempt", async () =>
   let issuedTokens = 0;
   const rotatingAccessToken = async () => `test-token-${++issuedTokens}`;
 
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementation(async (request: Request): Promise<Response> => {
       fetchRequests.push(request);
       return new Response(null, { status: 204 });
@@ -220,8 +260,16 @@ test("chunk upload requests a fresh access token for every attempt", async () =>
     });
 
   const pending = withRetries(
-    () => uploadChunk({ apiUrl: API, getAccessToken: rotatingAccessToken }, chunk, "FOO", "stream.webm", 42, undefined),
-    retrying({ retries: 10, initialWaitMillis: 50 })
+    () =>
+      uploadChunk(
+        { apiUrl: API, getAccessToken: rotatingAccessToken },
+        chunk,
+        "FOO",
+        "stream.webm",
+        42,
+        undefined,
+      ),
+    retrying({ retries: 10, initialWaitMillis: 50 }),
   );
 
   await settleRetries(pending);
@@ -237,19 +285,30 @@ test("an upload on an aborted signal sends nothing", async () => {
   window.fetch = vi.fn();
 
   // the abort's reason rather than an ApiError, so the caller can tell it from a failure
-  expect(await rejectionOf(uploadChunk(destination, new Blob([ "x" ]), "FOO", "stream", 0, aborted.signal))).toBe("chunk");
+  expect(
+    await rejectionOf(
+      uploadChunk(destination, new Blob(["x"]), "FOO", "stream", 0, aborted.signal),
+    ),
+  ).toBe("chunk");
   expect(window.fetch).not.toHaveBeenCalled();
 });
 
 test.each([
-  [ "with", accessToken ],
-  [ "without", noAccessToken ]
+  ["with", accessToken],
+  ["without", noAccessToken],
 ])("the abort signal reaches the chunk request %s an access token", async (_, getAccessToken) => {
   // an anonymous backend deployment has no token, and its requests must be cancellable too
   const controller = new AbortController();
   window.fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
 
-  await uploadChunk({ apiUrl: API, getAccessToken }, new Blob([ "x" ]), "FOO", "stream", 0, controller.signal);
+  await uploadChunk(
+    { apiUrl: API, getAccessToken },
+    new Blob(["x"]),
+    "FOO",
+    "stream",
+    0,
+    controller.signal,
+  );
 
   // the Request follows the signal it was built with rather than being that signal
   const request = fetchedRequest();
@@ -261,7 +320,11 @@ test.each([
 // --- scheduling postprocessing -----------------------------------------------
 
 // with the link to the raw tracks, which can be downloaded while the job is running
-const ACCEPTED_JOB = { state: "rendering", name: "FOO", rawDownloadUrl: "downloads/8f14e45fceea167a/FOO/raw?totp=0123456789" };
+const ACCEPTED_JOB = {
+  state: "rendering",
+  name: "FOO",
+  rawDownloadUrl: "downloads/8f14e45fceea167a/FOO/raw?totp=0123456789",
+};
 
 const acceptingServer = () =>
   vi.fn().mockImplementation(async () => Response.json(ACCEPTED_JOB, { status: 202 }));
@@ -292,11 +355,17 @@ test("schedule postprocessing without a recipient sends none", async () => {
 });
 
 test("the recording to postprocess is percent-encoded into the path", async () => {
-  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, name: "Übung_2025" }, { status: 202 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ ...ACCEPTED_JOB, name: "Übung_2025" }, { status: 202 }),
+    );
 
   await schedulePostprocessing(destination, "Übung_2025", undefined, undefined);
 
-  expect(fetchedRequest().url).toBe(`${API}api/recordings/${encodeURIComponent("Übung_2025")}/render`);
+  expect(fetchedRequest().url).toBe(
+    `${API}api/recordings/${encodeURIComponent("Übung_2025")}/render`,
+  );
 });
 
 test("schedule postprocessing to flaky server", async () => {
@@ -304,7 +373,8 @@ test("schedule postprocessing to flaky server", async () => {
 
   const fetchRequests: Request[] = [];
 
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementation(async (request: Request): Promise<Response> => {
       fetchRequests.push(request);
       return Response.json(ACCEPTED_JOB, { status: 202 });
@@ -316,14 +386,14 @@ test("schedule postprocessing to flaky server", async () => {
 
   const pending = withRetries(
     () => schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
-    retrying({ retries: 5, initialWaitMillis: 50 })
+    retrying({ retries: 5, initialWaitMillis: 50 }),
   );
 
   await expect(settleRetries(pending)).resolves.toStrictEqual(ACCEPTED_JOB);
 
   expect(fetchRequests.length).toBe(2);
 
-  for(const req of fetchRequests) {
+  for (const req of fetchRequests) {
     expect(req.url).toBe(`${API}api/recordings/FOO/render`);
     expect(req.method).toBe("POST");
     expect(req.headers.get("Content-Type")).toBe("application/json");
@@ -337,16 +407,15 @@ test("schedule postprocessing to broken server", async () => {
 
   const fetchRequests: Request[] = [];
 
-  window.fetch = vi.fn()
-    .mockImplementation(async (request: Request): Promise<Response> => {
-      fetchRequests.push(request);
-      throw new TypeError("Failed to fetch");
-    });
+  window.fetch = vi.fn().mockImplementation(async (request: Request): Promise<Response> => {
+    fetchRequests.push(request);
+    throw new TypeError("Failed to fetch");
+  });
 
   const before = Date.now();
   const pending = withRetries(
     () => schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
-    retrying({ retries: 3, initialWaitMillis: 50 })
+    retrying({ retries: 3, initialWaitMillis: 50 }),
   );
 
   const error = await settleRetries(rejectionOf(pending));
@@ -360,7 +429,7 @@ test("schedule postprocessing to broken server", async () => {
   // the caller says so: a live recording and the Rerender button have different advice
   expect(vi.mocked(showError)).not.toHaveBeenCalled();
 
-  for(const req of fetchRequests) {
+  for (const req of fetchRequests) {
     expect(req.url).toBe(`${API}api/recordings/FOO/render`);
     expect(req.method).toBe("POST");
     expect(await req.json()).toStrictEqual({ recipient: "lecturer@example.com" });
@@ -376,7 +445,9 @@ test("schedule postprocessing reports an accepted job", async () => {
   window.fetch = acceptingServer();
 
   // the recording as it stands now, for the listing to show without fetching it again
-  await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined)).resolves.toStrictEqual(ACCEPTED_JOB);
+  await expect(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
+  ).resolves.toStrictEqual(ACCEPTED_JOB);
   expect(vi.mocked(showSuccess)).not.toHaveBeenCalled();
   expect(vi.mocked(showMessage)).not.toHaveBeenCalled();
   expect(vi.mocked(showError)).not.toHaveBeenCalled();
@@ -384,10 +455,15 @@ test("schedule postprocessing reports an accepted job", async () => {
 
 test("schedule postprocessing reports a refused job", async () => {
   // what the backend answers for a recording that does not exist
-  window.fetch = vi.fn().mockImplementation(async () =>
-    Response.json({ detail: "Recording FOO does not exist" }, { status: 404 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ detail: "Recording FOO does not exist" }, { status: 404 }),
+    );
 
-  const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined));
+  const error = await rejectionOf(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
+  );
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).status).toBe(404);
@@ -400,7 +476,9 @@ test("an accepted job the backend does not describe is an invalid response", asy
   // a backend from before the API was reshaped accepted a job with an empty body
   window.fetch = vi.fn().mockImplementation(async () => Response.json("", { status: 202 }));
 
-  const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined));
+  const error = await rejectionOf(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
+  );
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).kind).toBe("invalid-response");
@@ -413,13 +491,21 @@ test("a job for a recording the backend cannot render reports it as such", async
   const answer = { ...ACCEPTED_JOB, state: "not-renderable" };
   window.fetch = vi.fn().mockImplementation(async () => Response.json(answer, { status: 202 }));
 
-  await expect(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined)).resolves.toStrictEqual(answer);
+  await expect(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
+  ).resolves.toStrictEqual(answer);
 });
 
 test("an accepted job in a state the backend does not know is an invalid response", async () => {
-  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, state: "streaming" }, { status: 202 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ ...ACCEPTED_JOB, state: "streaming" }, { status: 202 }),
+    );
 
-  const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined));
+  const error = await rejectionOf(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
+  );
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).kind).toBe("invalid-response");
@@ -428,37 +514,53 @@ test("an accepted job in a state the backend does not know is an invalid respons
 
 test("a job accepted by a backend without authentication has no raw data link", async () => {
   // with no user directory to put in the path, there is no link to hand out
-  window.fetch = vi.fn().mockImplementation(async () => Response.json({ ...ACCEPTED_JOB, rawDownloadUrl: null }, { status: 202 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ ...ACCEPTED_JOB, rawDownloadUrl: null }, { status: 202 }),
+    );
 
-  await expect(schedulePostprocessing(destination, "FOO", undefined, undefined))
-    .resolves.toStrictEqual({ ...ACCEPTED_JOB, rawDownloadUrl: null });
+  await expect(
+    schedulePostprocessing(destination, "FOO", undefined, undefined),
+  ).resolves.toStrictEqual({ ...ACCEPTED_JOB, rawDownloadUrl: null });
 });
 
 test("an accepted job that leaves out its raw data link is an invalid response", async () => {
   // null is how the backend says there is none; a missing field means it speaks another version
   const { rawDownloadUrl: _, ...withoutRawLink } = ACCEPTED_JOB;
-  window.fetch = vi.fn().mockImplementation(async () => Response.json(withoutRawLink, { status: 202 }));
+  window.fetch = vi
+    .fn()
+    .mockImplementation(async () => Response.json(withoutRawLink, { status: 202 }));
 
-  const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined));
+  const error = await rejectionOf(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
+  );
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).kind).toBe("invalid-response");
   expect((error as ApiError).cause).toBeInstanceOf(z.ZodError);
 });
 
-test.each([ 400, 404, 409, 422 ])("postprocessing rejected with %i is not retried", async status => {
-  useRetryClock();
+test.each([400, 404, 409, 422])(
+  "postprocessing rejected with %i is not retried",
+  async (status) => {
+    useRetryClock();
 
-  window.fetch = vi.fn().mockImplementation(async () => Response.json("", { status }));
+    window.fetch = vi.fn().mockImplementation(async () => Response.json("", { status }));
 
-  const error = await settleRetries(rejectionOf(withRetries(
-    () => schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
-    retrying({ retries: 3, initialWaitMillis: 50 })
-  )));
+    const error = await settleRetries(
+      rejectionOf(
+        withRetries(
+          () => schedulePostprocessing(destination, "FOO", "lecturer@example.com", undefined),
+          retrying({ retries: 3, initialWaitMillis: 50 }),
+        ),
+      ),
+    );
 
-  expect(window.fetch).toHaveBeenCalledOnce();
-  expect((error as ApiError).status).toBe(status);
-});
+    expect(window.fetch).toHaveBeenCalledOnce();
+    expect((error as ApiError).status).toBe(status);
+  },
+);
 
 test("schedule postprocessing after aborted streaming sends nothing and reports the abort", async () => {
   // A recording whose chunks did not all arrive: rendering it would produce a video with a
@@ -468,7 +570,9 @@ test("schedule postprocessing after aborted streaming sends nothing and reports 
 
   window.fetch = vi.fn();
 
-  const error = await rejectionOf(schedulePostprocessing(destination, "FOO", "lecturer@example.com", aborted.signal));
+  const error = await rejectionOf(
+    schedulePostprocessing(destination, "FOO", "lecturer@example.com", aborted.signal),
+  );
 
   // told apart from a failure: the lecturer is not to be told the backend refused anything
   expect(error).toBe("chunk");
@@ -482,7 +586,12 @@ test("schedule postprocessing after aborted streaming sends nothing and reports 
 test("postprocessing request is unauthenticated if no access token is available", async () => {
   window.fetch = acceptingServer();
 
-  await schedulePostprocessing({ ...destination, getAccessToken: noAccessToken }, "FOO", "lecturer@example.com", undefined);
+  await schedulePostprocessing(
+    { ...destination, getAccessToken: noAccessToken },
+    "FOO",
+    "lecturer@example.com",
+    undefined,
+  );
 
   expect(fetchedRequest().headers.has("Authorization")).toBe(false);
   expect(fetchedRequest().headers.get("Content-Type")).toBe("application/json");
@@ -496,7 +605,8 @@ test("postprocessing request requests a fresh access token for every attempt", a
   let issuedTokens = 0;
   const rotatingAccessToken = async () => `test-token-${++issuedTokens}`;
 
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementation(async (request: Request): Promise<Response> => {
       fetchRequests.push(request);
       return Response.json(ACCEPTED_JOB, { status: 202 });
@@ -507,8 +617,14 @@ test("postprocessing request requests a fresh access token for every attempt", a
     });
 
   const pending = withRetries(
-    () => schedulePostprocessing({ apiUrl: API, getAccessToken: rotatingAccessToken }, "FOO", "lecturer@example.com", undefined),
-    retrying({ retries: 5, initialWaitMillis: 50 })
+    () =>
+      schedulePostprocessing(
+        { apiUrl: API, getAccessToken: rotatingAccessToken },
+        "FOO",
+        "lecturer@example.com",
+        undefined,
+      ),
+    retrying({ retries: 5, initialWaitMillis: 50 }),
   );
 
   await settleRetries(pending);
@@ -527,13 +643,27 @@ test("postprocessing request requests a fresh access token for every attempt", a
 
 const LISTING = [
   {
-    state: "completed", name: "PSU_2026", size: 2048,
+    state: "completed",
+    name: "PSU_2026",
+    size: 2048,
     downloadUrl: "downloads/8f14e45fceea167a/PSU_2026?totp=9876543210",
-    rawDownloadUrl: "downloads/8f14e45fceea167a/PSU_2026/raw?totp=9876543210"
+    rawDownloadUrl: "downloads/8f14e45fceea167a/PSU_2026/raw?totp=9876543210",
   },
-  { state: "rendering", name: "ABC_2026", rawDownloadUrl: "downloads/8f14e45fceea167a/ABC_2026/raw?totp=1234567890" },
-  { state: "unprocessed", name: "GVS_2025", rawDownloadUrl: "downloads/8f14e45fceea167a/GVS_2025/raw?totp=5555555555" },
-  { state: "not-renderable", name: "XYZ_2024", rawDownloadUrl: "downloads/8f14e45fceea167a/XYZ_2024/raw?totp=7777777777" }
+  {
+    state: "rendering",
+    name: "ABC_2026",
+    rawDownloadUrl: "downloads/8f14e45fceea167a/ABC_2026/raw?totp=1234567890",
+  },
+  {
+    state: "unprocessed",
+    name: "GVS_2025",
+    rawDownloadUrl: "downloads/8f14e45fceea167a/GVS_2025/raw?totp=5555555555",
+  },
+  {
+    state: "not-renderable",
+    name: "XYZ_2024",
+    rawDownloadUrl: "downloads/8f14e45fceea167a/XYZ_2024/raw?totp=7777777777",
+  },
 ];
 
 test("the listing is fetched with one authenticated GET", async () => {
@@ -562,7 +692,7 @@ test("a listing from a backend without authentication has no raw data links", as
   const anonymous = [
     { state: "rendering", name: "ABC_2026", rawDownloadUrl: null },
     { state: "unprocessed", name: "GVS_2025", rawDownloadUrl: null },
-    { state: "not-renderable", name: "XYZ_2024", rawDownloadUrl: null }
+    { state: "not-renderable", name: "XYZ_2024", rawDownloadUrl: null },
   ];
   window.fetch = vi.fn().mockResolvedValue(Response.json(anonymous));
 
@@ -577,21 +707,55 @@ test("a listing with nothing in it is an empty array", async () => {
 
 test.each([
   // what a backend not updated alongside the frontend answers
-  [ "in the shape of the old /api/completed", { user: "u", recordings: [ { name: "x", size: 1024, totp: "1" } ] } ],
-  [ "in the shape from before the API was reshaped", { user: "8f14e45fceea167a", completed: [], rendering: [], unprocessed: [] } ],
+  [
+    "in the shape of the old /api/completed",
+    { user: "u", recordings: [{ name: "x", size: 1024, totp: "1" }] },
+  ],
+  [
+    "in the shape from before the API was reshaped",
+    { user: "8f14e45fceea167a", completed: [], rendering: [], unprocessed: [] },
+  ],
   // the URL, TOTP included, is the whole of what the download link is built from; null would
   // say there is none, a missing one that the backend speaks another version
-  [ "with a completed recording that leaves out its download link", [ { state: "completed", name: "PSU_2026", size: 2048, rawDownloadUrl: null } ] ],
+  [
+    "with a completed recording that leaves out its download link",
+    [{ state: "completed", name: "PSU_2026", size: 2048, rawDownloadUrl: null }],
+  ],
   // the state is what picks the card, and there is none to pick for this one
-  [ "with a recording in a state the frontend does not know", [ { state: "archived", name: "PSU_2026", rawDownloadUrl: null } ] ],
+  [
+    "with a recording in a state the frontend does not know",
+    [{ state: "archived", name: "PSU_2026", rawDownloadUrl: null }],
+  ],
   // the name is what the Rerender button posts back as the job's recording
-  [ "with an unprocessed recording without a name", [ { state: "unprocessed", rawDownloadUrl: null } ] ],
-  [ "with a rendering recording without a name", [ { state: "rendering", rawDownloadUrl: null } ] ],
+  [
+    "with an unprocessed recording without a name",
+    [{ state: "unprocessed", rawDownloadUrl: null }],
+  ],
+  ["with a rendering recording without a name", [{ state: "rendering", rawDownloadUrl: null }]],
   // the same goes for the raw data link: null where there is none, but never left out
-  [ "with a completed recording that leaves out its raw data link", [ { state: "completed", name: "PSU_2026", size: 2048, downloadUrl: "downloads/u/PSU_2026?totp=1" } ] ],
-  [ "with a rendering recording that leaves out its raw data link", [ { state: "rendering", name: "ABC_2026" } ] ],
-  [ "with an unprocessed recording that leaves out its raw data link", [ { state: "unprocessed", name: "GVS_2025" } ] ],
-  [ "with a recording that cannot be rendered and leaves out its raw data link", [ { state: "not-renderable", name: "XYZ_2024" } ] ]
+  [
+    "with a completed recording that leaves out its raw data link",
+    [
+      {
+        state: "completed",
+        name: "PSU_2026",
+        size: 2048,
+        downloadUrl: "downloads/u/PSU_2026?totp=1",
+      },
+    ],
+  ],
+  [
+    "with a rendering recording that leaves out its raw data link",
+    [{ state: "rendering", name: "ABC_2026" }],
+  ],
+  [
+    "with an unprocessed recording that leaves out its raw data link",
+    [{ state: "unprocessed", name: "GVS_2025" }],
+  ],
+  [
+    "with a recording that cannot be rendered and leaves out its raw data link",
+    [{ state: "not-renderable", name: "XYZ_2024" }],
+  ],
 ])("a listing %s is an invalid response", async (_, listing) => {
   // the section tells the lecturer the backend speaks a different version, rather than
   // showing a listing it cannot make sense of
@@ -606,8 +770,9 @@ test.each([
 
 test("a refused listing fails with the server's explanation", async () => {
   // what a backend deployed without authentication answers
-  window.fetch = vi.fn().mockResolvedValue(
-    Response.json({ detail: "Authentication not configured" }, { status: 403 }));
+  window.fetch = vi
+    .fn()
+    .mockResolvedValue(Response.json({ detail: "Authentication not configured" }, { status: 403 }));
 
   const error = await rejectionOf(fetchRecordings(destination));
 
@@ -659,9 +824,13 @@ test("a successful purge resolves with nothing", async () => {
 
 test("a purge without an access token is left to the backend to refuse", async () => {
   // anonymous deployments have no token at all, so whether one is needed is the backend's call
-  window.fetch = vi.fn().mockResolvedValue(Response.json({ detail: "Not authenticated" }, { status: 401 }));
+  window.fetch = vi
+    .fn()
+    .mockResolvedValue(Response.json({ detail: "Not authenticated" }, { status: 401 }));
 
-  const error = await rejectionOf(purgeRecording({ ...destination, getAccessToken: noAccessToken }, "GVS_2025"));
+  const error = await rejectionOf(
+    purgeRecording({ ...destination, getAccessToken: noAccessToken }, "GVS_2025"),
+  );
 
   expect(fetchedRequest().headers.has("Authorization")).toBe(false);
   expect(error).toBeInstanceOf(ApiError);
@@ -671,24 +840,38 @@ test("a purge without an access token is left to the backend to refuse", async (
 
 test("a refused purge fails with the server's explanation", async () => {
   // a 409 means the listing was stale -- the recording started rendering in the meantime
-  window.fetch = vi.fn().mockResolvedValue(
-    Response.json({ detail: "Recording GVS_2025 is in use and currently not purgeable" }, { status: 409 })
-  );
+  window.fetch = vi
+    .fn()
+    .mockResolvedValue(
+      Response.json(
+        { detail: "Recording GVS_2025 is in use and currently not purgeable" },
+        { status: 409 },
+      ),
+    );
 
   const error = await rejectionOf(purgeRecording(destination, "GVS_2025"));
 
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).status).toBe(409);
-  expect((error as ApiError).detail).toBe("Recording GVS_2025 is in use and currently not purgeable");
-  expect((error as ApiError).message).toBe("HTTP 409: Recording GVS_2025 is in use and currently not purgeable");
+  expect((error as ApiError).detail).toBe(
+    "Recording GVS_2025 is in use and currently not purgeable",
+  );
+  expect((error as ApiError).message).toBe(
+    "HTTP 409: Recording GVS_2025 is in use and currently not purgeable",
+  );
   expect(showError).not.toHaveBeenCalled();
 });
 
 test("a refusal whose detail is not a string is not stringified", async () => {
   // FastAPI answers a validation failure with an array of issue objects
-  window.fetch = vi.fn().mockResolvedValue(
-    Response.json({ detail: [ { loc: [ "path", "recording" ], msg: "String should match pattern" } ] }, { status: 422 })
-  );
+  window.fetch = vi
+    .fn()
+    .mockResolvedValue(
+      Response.json(
+        { detail: [{ loc: ["path", "recording"], msg: "String should match pattern" }] },
+        { status: 422 },
+      ),
+    );
 
   const error = await rejectionOf(purgeRecording(destination, "GVS_2025"));
 
@@ -731,20 +914,23 @@ test("a backend that cannot be reached fails the purge with fetch's own error", 
 test("the download URL is the backend's download path below the API", () => {
   const encodedName = encodeURIComponent("Übung_2025");
 
-  expect(downloadHref(API, `downloads/8f14e45f/${encodedName}?totp=0123456789`))
-    .toBe(`${API}api/downloads/8f14e45f/${encodedName}?totp=0123456789`);
+  expect(downloadHref(API, `downloads/8f14e45f/${encodedName}?totp=0123456789`)).toBe(
+    `${API}api/downloads/8f14e45f/${encodedName}?totp=0123456789`,
+  );
 });
 
 test("the recording name in the download URL is not encoded a second time", () => {
   // %C3%9C turning into %25C3%259C would ask the backend for a recording that does not exist
-  expect(downloadHref(API, "downloads/8f14e45f/%C3%9Cbung_2025?totp=0123456789"))
-    .not.toContain("%25");
+  expect(downloadHref(API, "downloads/8f14e45f/%C3%9Cbung_2025?totp=0123456789")).not.toContain(
+    "%25",
+  );
 });
 
 test("the download URL keeps a path prefix of the API URL", () => {
   // a backend behind a reverse proxy, under a path of its own
-  expect(downloadHref("https://example.com/ise/", "downloads/8f14e45f/PSU_2026?totp=0123456789"))
-    .toBe("https://example.com/ise/api/downloads/8f14e45f/PSU_2026?totp=0123456789");
+  expect(
+    downloadHref("https://example.com/ise/", "downloads/8f14e45f/PSU_2026?totp=0123456789"),
+  ).toBe("https://example.com/ise/api/downloads/8f14e45f/PSU_2026?totp=0123456789");
 });
 
 test("the raw data URL of a non-ASCII recording keeps its path prefix and its encoding", () => {
@@ -752,8 +938,12 @@ test("the raw data URL of a non-ASCII recording keeps its path prefix and its en
   // the path rather than at its end, and must still come out as the backend wrote it
   const encodedName = encodeURIComponent("Übung_2025");
 
-  expect(downloadHref("https://example.com/ise/", `downloads/8f14e45f/${encodedName}/raw?totp=0123456789`))
-    .toBe(`https://example.com/ise/api/downloads/8f14e45f/${encodedName}/raw?totp=0123456789`);
+  expect(
+    downloadHref(
+      "https://example.com/ise/",
+      `downloads/8f14e45f/${encodedName}/raw?totp=0123456789`,
+    ),
+  ).toBe(`https://example.com/ise/api/downloads/8f14e45f/${encodedName}/raw?totp=0123456789`);
 });
 
 // --- uploading a whole file in chunks --------------------------------------
@@ -769,31 +959,33 @@ const CHUNK_PATH = /^\/api\/recordings\/([^/]+)\/tracks\/([^/]+)\/chunks\/(\d+)$
 
 /** Every chunk request fetch() received, with what the backend reads from its path. */
 async function sentChunks() {
-  return Promise.all(vi.mocked(window.fetch).mock.calls.map(async ([ input ]) => {
-    const request = input as Request;
-    const url = new URL(request.url);
-    const [ , recording, track, index ] = url.pathname.match(CHUNK_PATH) ?? [];
+  return Promise.all(
+    vi.mocked(window.fetch).mock.calls.map(async ([input]) => {
+      const request = input as Request;
+      const url = new URL(request.url);
+      const [, recording, track, index] = url.pathname.match(CHUNK_PATH) ?? [];
 
-    return {
-      url: request.url,
-      origin: url.origin,
-      method: request.method,
-      recording: decodeURIComponent(recording),
-      track: decodeURIComponent(track),
-      index: Number(index),
-      bytes: new Uint8Array(await request.arrayBuffer())
-    };
-  }));
+      return {
+        url: request.url,
+        origin: url.origin,
+        method: request.method,
+        recording: decodeURIComponent(recording),
+        track: decodeURIComponent(track),
+        index: Number(index),
+        bytes: new Uint8Array(await request.arrayBuffer()),
+      };
+    }),
+  );
 }
 
 function fileOf(size: number) {
   // a byte pattern that does not repeat at the chunk size, so a chunk sent twice or out of
   // order would not add up to the same bytes by accident
   const bytes = new Uint8Array(size);
-  for(let i = 0; i < size; ++i) {
+  for (let i = 0; i < size; ++i) {
     bytes[i] = (i * 7 + (i >> 12)) & 0xff;
   }
-  return { bytes, blob: new Blob([ bytes ]) };
+  return { bytes, blob: new Blob([bytes]) };
 }
 
 const uploaded = () => vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
@@ -802,19 +994,27 @@ test("a file larger than a chunk goes up as numbered chunks that add up to it", 
   window.fetch = uploaded();
   const { bytes, blob } = fileOf(2 * CHUNK + 12345);
 
-  await expect(uploadFile(destination, blob, "GVS_2025-manual", "stream", noRetries)).resolves.toBeUndefined();
+  await expect(
+    uploadFile(destination, blob, "GVS_2025-manual", "stream", noRetries),
+  ).resolves.toBeUndefined();
 
   const chunks = await sentChunks();
 
-  expect(chunks.map(c => c.index)).toStrictEqual([ 0, 1, 2 ]);
-  expect(chunks.map(c => c.bytes.length)).toStrictEqual([ CHUNK, CHUNK, 12345 ]);
-  expect(chunks.every(c =>
-    `${c.origin}/` === API && c.method === "PUT" && c.recording === "GVS_2025-manual" && c.track === "stream"
-  )).toBe(true);
+  expect(chunks.map((c) => c.index)).toStrictEqual([0, 1, 2]);
+  expect(chunks.map((c) => c.bytes.length)).toStrictEqual([CHUNK, CHUNK, 12345]);
+  expect(
+    chunks.every(
+      (c) =>
+        `${c.origin}/` === API &&
+        c.method === "PUT" &&
+        c.recording === "GVS_2025-manual" &&
+        c.track === "stream",
+    ),
+  ).toBe(true);
 
   const joined = new Uint8Array(bytes.length);
   let offset = 0;
-  for(const c of chunks) {
+  for (const c of chunks) {
     joined.set(c.bytes, offset);
     offset += c.bytes.length;
   }
@@ -828,7 +1028,7 @@ test("a file of exactly whole chunks gets no empty chunk at the end", async () =
 
   await uploadFile(destination, fileOf(2 * CHUNK).blob, "GVS_2025-manual", "stream", noRetries);
 
-  expect((await sentChunks()).map(c => c.bytes.length)).toStrictEqual([ CHUNK, CHUNK ]);
+  expect((await sentChunks()).map((c) => c.bytes.length)).toStrictEqual([CHUNK, CHUNK]);
 });
 
 test("a file smaller than a chunk goes up as chunk 0", async () => {
@@ -836,7 +1036,7 @@ test("a file smaller than a chunk goes up as chunk 0", async () => {
 
   await uploadFile(destination, fileOf(1000).blob, "GVS_2025-manual", "overlay", noRetries);
 
-  expect((await sentChunks()).map(c => [ c.index, c.bytes.length ])).toStrictEqual([ [ 0, 1000 ] ]);
+  expect((await sentChunks()).map((c) => [c.index, c.bytes.length])).toStrictEqual([[0, 1000]]);
 });
 
 test("the names of a file's recording and track are percent-encoded into the chunk path", async () => {
@@ -844,57 +1044,81 @@ test("the names of a file's recording and track are percent-encoded into the chu
 
   await uploadFile(destination, fileOf(1000).blob, "Übung_2025-manual", "audio/0", noRetries);
 
-  expect((await sentChunks()).map(c => c.url))
-    .toStrictEqual([ chunkUrl(encodeURIComponent("Übung_2025-manual"), encodeURIComponent("audio/0"), 0) ]);
+  expect((await sentChunks()).map((c) => c.url)).toStrictEqual([
+    chunkUrl(encodeURIComponent("Übung_2025-manual"), encodeURIComponent("audio/0"), 0),
+  ]);
 });
 
 test("an empty file sends nothing and counts as uploaded", async () => {
   window.fetch = vi.fn();
 
-  await expect(uploadFile(destination, new Blob([]), "GVS_2025-manual", "audio-0", noRetries)).resolves.toBeUndefined();
+  await expect(
+    uploadFile(destination, new Blob([]), "GVS_2025-manual", "audio-0", noRetries),
+  ).resolves.toBeUndefined();
 
   expect(window.fetch).not.toHaveBeenCalled();
 });
 
 test("the upload stops at the first chunk that fails", async () => {
   // the rest would only land behind a gap, which the backend treats as the end of the track
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementationOnce(async () => new Response(null, { status: 204 }))
     .mockImplementation(async () => Response.json({ detail: "disk full" }, { status: 507 }));
 
-  const error = await rejectionOf(uploadFile(destination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", noRetries));
+  const error = await rejectionOf(
+    uploadFile(destination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", noRetries),
+  );
 
   expect(error).toBeInstanceOf(ApiError);
   // the server's explanation travels with the error, for the caller to show
   expect((error as ApiError).detail).toBe("disk full");
-  expect((await sentChunks()).map(c => c.index)).toStrictEqual([ 0, 1 ]);
+  expect((await sentChunks()).map((c) => c.index)).toStrictEqual([0, 1]);
 });
 
 test("progress is signalled with the size of every chunk that arrived", async () => {
   window.fetch = uploaded();
   const signalProgress = vi.fn();
 
-  await uploadFile(destination, fileOf(2 * CHUNK + 12345).blob, "GVS_2025-manual", "stream", noRetries, signalProgress);
+  await uploadFile(
+    destination,
+    fileOf(2 * CHUNK + 12345).blob,
+    "GVS_2025-manual",
+    "stream",
+    noRetries,
+    signalProgress,
+  );
 
   // byte counts rather than a percentage: the caller adds them up across tracks
-  expect(signalProgress.mock.calls).toStrictEqual([ [ CHUNK ], [ CHUNK ], [ 12345 ] ]);
+  expect(signalProgress.mock.calls).toStrictEqual([[CHUNK], [CHUNK], [12345]]);
 });
 
 test("a chunk that failed is not counted as progress", async () => {
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementationOnce(async () => new Response(null, { status: 204 }))
     .mockImplementation(async () => Response.json({ detail: "disk full" }, { status: 507 }));
   const signalProgress = vi.fn();
 
-  await rejectionOf(uploadFile(destination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", noRetries, signalProgress));
+  await rejectionOf(
+    uploadFile(
+      destination,
+      fileOf(3 * CHUNK).blob,
+      "GVS_2025-manual",
+      "stream",
+      noRetries,
+      signalProgress,
+    ),
+  );
 
-  expect(signalProgress.mock.calls).toStrictEqual([ [ CHUNK ] ]);
+  expect(signalProgress.mock.calls).toStrictEqual([[CHUNK]]);
 });
 
 test("a chunk is retried by the file's retry policy", async () => {
   useRetryClock();
 
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementationOnce(async () => Response.json("", { status: 503 }))
     .mockImplementationOnce(async () => {
       throw new TypeError("Failed to fetch");
@@ -902,36 +1126,61 @@ test("a chunk is retried by the file's retry policy", async () => {
     .mockImplementation(async () => new Response(null, { status: 204 }));
 
   const before = Date.now();
-  await expect(settleRetries(uploadFile(destination, fileOf(1000).blob, "GVS_2025-manual", "stream", retrying({ retries: 2, initialWaitMillis: 50 }))))
-    .resolves.toBeUndefined();
+  await expect(
+    settleRetries(
+      uploadFile(
+        destination,
+        fileOf(1000).blob,
+        "GVS_2025-manual",
+        "stream",
+        retrying({ retries: 2, initialWaitMillis: 50 }),
+      ),
+    ),
+  ).resolves.toBeUndefined();
 
   // the same chunk three times, backing off 50 + 100
-  expect((await sentChunks()).map(c => c.index)).toStrictEqual([ 0, 0, 0 ]);
+  expect((await sentChunks()).map((c) => c.index)).toStrictEqual([0, 0, 0]);
   expect(Date.now() - before).toBe(150);
 });
 
 test("retries of a chunk are not counted twice", async () => {
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementationOnce(async () => Response.json({}, { status: 503 }))
     .mockImplementation(async () => new Response(null, { status: 204 }));
   const signalProgress = vi.fn();
 
-  await expect(uploadFile(destination, fileOf(1000).blob, "GVS_2025-manual", "stream", retrying({ retries: 1, initialWaitMillis: 0 }), signalProgress)).resolves.toBeUndefined();
+  await expect(
+    uploadFile(
+      destination,
+      fileOf(1000).blob,
+      "GVS_2025-manual",
+      "stream",
+      retrying({ retries: 1, initialWaitMillis: 0 }),
+      signalProgress,
+    ),
+  ).resolves.toBeUndefined();
 
   expect(window.fetch).toHaveBeenCalledTimes(2);
-  expect(signalProgress.mock.calls).toStrictEqual([ [ 1000 ] ]);
+  expect(signalProgress.mock.calls).toStrictEqual([[1000]]);
 });
 
 test("an aborted upload of a file stops at the chunk it was on", async () => {
   const controller = new AbortController();
-  window.fetch = vi.fn()
+  window.fetch = vi
+    .fn()
     .mockImplementationOnce(async () => {
       controller.abort("chunk");
       return new Response(null, { status: 204 });
     })
     .mockImplementation(async () => new Response(null, { status: 204 }));
 
-  const error = await rejectionOf(uploadFile(destination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", { ...noRetries, abortSignal: controller.signal }));
+  const error = await rejectionOf(
+    uploadFile(destination, fileOf(3 * CHUNK).blob, "GVS_2025-manual", "stream", {
+      ...noRetries,
+      abortSignal: controller.signal,
+    }),
+  );
 
   expect(error).toBe("chunk");
   expect(window.fetch).toHaveBeenCalledOnce();

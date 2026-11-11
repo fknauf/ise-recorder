@@ -1,13 +1,13 @@
-import { expect, test, vi } from "vitest";
-import { anAppSession } from "../helpers/session";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MantineTestProvider } from "../helpers/mantine";
+import { expect, test, vi } from "vitest";
 import { UserMenu } from "@/lib/components/UserMenu";
+import { MantineTestProvider } from "../helpers/mantine";
+import { anAppSession } from "../helpers/session";
 
 const mockUseAppSession = vi.fn();
 vi.mock("@/lib/components/SessionProvider", () => ({
-  useAppSession: () => mockUseAppSession()
+  useAppSession: () => mockUseAppSession(),
 }));
 
 /**
@@ -16,22 +16,22 @@ vi.mock("@/lib/components/SessionProvider", () => ({
  * The mocks are built here rather than in a beforeEach so that each test gets fresh ones
  * regardless of when the suite-wide mockReset runs.
  */
-async function renderMenu(
-  {
-    isAuthenticated = false,
-    userName = undefined as string | undefined
-  } = {}
-) {
+async function renderMenu({
+  isAuthenticated = false,
+  userName = undefined as string | undefined,
+} = {}) {
   const interactiveSignin = vi.fn(async () => {});
   const reauthenticate = vi.fn(async () => {});
   const signout = vi.fn(async () => {});
 
-  mockUseAppSession.mockReturnValue(anAppSession({ isAuthenticated, userName, signout, interactiveSignin, reauthenticate }));
+  mockUseAppSession.mockReturnValue(
+    anAppSession({ isAuthenticated, userName, signout, interactiveSignin, reauthenticate }),
+  );
 
   render(
     <MantineTestProvider>
-      <UserMenu/>
-    </MantineTestProvider>
+      <UserMenu />
+    </MantineTestProvider>,
   );
 
   await userEvent.click(screen.getByRole("button", { name: "User menu" }));

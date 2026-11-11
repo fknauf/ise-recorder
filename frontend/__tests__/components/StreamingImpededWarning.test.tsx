@@ -1,13 +1,13 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { renderToString } from "react-dom/server";
+import { ReactNode, useEffect } from "react";
 import { hydrateRoot, Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 import { AppStoreProvider, useAppStore } from "@/lib/hooks/useAppStore";
 import { ActiveRecording, AppStoreState } from "@/lib/store/store";
-import { ReactNode, useEffect } from "react";
-import { MantineTestProvider } from "../helpers/mantine";
-import { StreamingImpededWarning } from "@/lib/components/StreamingImpededWarning";
 import { gatherRecordingsList } from "@/lib/utils/browserStorage";
+import { MantineTestProvider } from "../helpers/mantine";
 import { aServerEnv } from "../helpers/serverEnv";
 
 // The store only keeps unstreamed recordings that are still saved in the browser, so the
@@ -22,31 +22,31 @@ let store: AppStoreState;
  * effect, and doing it in the render body is a lint error.
  */
 function StoreHandle() {
-  const state = useAppStore(s => s);
+  const state = useAppStore((s) => s);
 
   useEffect(() => {
     store = state;
-  }, [ state ]);
+  }, [state]);
 
   return null;
 }
 
-const recording = (name: string): ActiveRecording =>
-  ({ state: "recording", name, stop: () => {} });
+const recording = (name: string): ActiveRecording => ({ state: "recording", name, stop: () => {} });
 
-const providers = (children: ReactNode) =>
+const providers = (children: ReactNode) => (
   <MantineTestProvider>
     <AppStoreProvider serverEnv={aServerEnv({ apiUrl: "http://localhost:8000" })}>
-      <StoreHandle/>
+      <StoreHandle />
       {children}
     </AppStoreProvider>
-  </MantineTestProvider>;
+  </MantineTestProvider>
+);
 
 /** Render the warning with these recordings saved in the browser, once storage has been looked at. */
 async function renderWarning(saved: string[]) {
-  vi.mocked(gatherRecordingsList).mockResolvedValue(saved.map(name => ({ name, files: [] })));
+  vi.mocked(gatherRecordingsList).mockResolvedValue(saved.map((name) => ({ name, files: [] })));
 
-  render(providers(<StreamingImpededWarning/>));
+  render(providers(<StreamingImpededWarning />));
 
   await act(() => store.updateBrowserStorage());
 }
@@ -62,13 +62,13 @@ afterEach(() => {
 });
 
 test("nothing is shown while every recording made it to the backend", async () => {
-  await renderWarning([ "GVS_1" ]);
+  await renderWarning(["GVS_1"]);
 
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("recordings that were not streamed are listed by name", async () => {
-  await renderWarning([ "GVS_1", "GVS_2", "PSU_3" ]);
+  await renderWarning(["GVS_1", "GVS_2", "PSU_3"]);
 
   act(() => {
     store.markUnstreamed("PSU_3");
@@ -84,7 +84,7 @@ test("recordings that were not streamed are listed by name", async () => {
 test("a lecture that is not being streamed gets the warning to itself", async () => {
   // the lecturer is mid-lecture; older recordings to re-upload are not what needs their
   // attention right now
-  await renderWarning([ "OLD_1", "LIVE" ]);
+  await renderWarning(["OLD_1", "LIVE"]);
 
   act(() => {
     store.markUnstreamed("OLD_1");
@@ -97,7 +97,7 @@ test("a lecture that is not being streamed gets the warning to itself", async ()
 });
 
 test("older recordings are still listed while a lecture streams fine", async () => {
-  await renderWarning([ "OLD_1", "LIVE" ]);
+  await renderWarning(["OLD_1", "LIVE"]);
 
   act(() => {
     store.markUnstreamed("OLD_1");
@@ -108,7 +108,7 @@ test("older recordings are still listed while a lecture streams fine", async () 
 });
 
 test("a re-uploaded recording drops off the list", async () => {
-  await renderWarning([ "GVS_1", "GVS_2" ]);
+  await renderWarning(["GVS_1", "GVS_2"]);
 
   act(() => {
     store.markUnstreamed("GVS_1");
@@ -123,17 +123,17 @@ test("a re-uploaded recording drops off the list", async () => {
 test("the list survives a reload", async () => {
   // A lecture whose stream broke off is typically followed by closing the laptop; the
   // re-upload happens later, from wherever there is a network.
-  await renderWarning([ "GVS_1" ]);
+  await renderWarning(["GVS_1"]);
   act(() => store.markUnstreamed("GVS_1"));
   cleanup();
 
-  await renderWarning([ "GVS_1" ]);
+  await renderWarning(["GVS_1"]);
 
   expect(screen.getByRole("alert")).toHaveTextContent("GVS_1");
 });
 
 test("a persisted recording that has since been deleted from the browser is not listed", async () => {
-  await renderWarning([ "GVS_1", "GVS_2" ]);
+  await renderWarning(["GVS_1", "GVS_2"]);
   act(() => {
     store.markUnstreamed("GVS_1");
     store.markUnstreamed("GVS_2");
@@ -141,7 +141,7 @@ test("a persisted recording that has since been deleted from the browser is not 
   cleanup();
 
   // deleted in the meantime, from this page or another tab
-  await renderWarning([ "GVS_2" ]);
+  await renderWarning(["GVS_2"]);
 
   expect(screen.getByRole("alert")).not.toHaveTextContent("GVS_1");
   expect(screen.getByRole("alert")).toHaveTextContent("GVS_2");
@@ -152,20 +152,23 @@ test("a persisted list shows up without upsetting hydration", async () => {
   // store has it from the moment it is created. The first render in the browser still has
   // to match the server's HTML -- or React throws it away and renders the page from
   // scratch -- and the list has to appear right after.
-  vi.mocked(gatherRecordingsList).mockResolvedValue([ { name: "GVS_1", files: [] } ]);
+  vi.mocked(gatherRecordingsList).mockResolvedValue([{ name: "GVS_1", files: [] }]);
 
   // rendered the way the server does: with nothing persisted
   const container = document.createElement("div");
   document.body.appendChild(container);
-  container.innerHTML = renderToString(providers(<StreamingImpededWarning/>));
+  container.innerHTML = renderToString(providers(<StreamingImpededWarning />));
 
-  localStorage.setItem("app-store", JSON.stringify({ state: { unstreamedRecordings: [ "GVS_1" ] }, version: 0 }));
+  localStorage.setItem(
+    "app-store",
+    JSON.stringify({ state: { unstreamedRecordings: ["GVS_1"] }, version: 0 }),
+  );
 
   const mismatches: unknown[] = [];
   let root: Root | undefined;
   await act(async () => {
-    root = hydrateRoot(container, providers(<StreamingImpededWarning/>), {
-      onRecoverableError: error => mismatches.push(error)
+    root = hydrateRoot(container, providers(<StreamingImpededWarning />), {
+      onRecoverableError: (error) => mismatches.push(error),
     });
   });
 
