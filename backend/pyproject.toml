@@ -20,7 +20,7 @@ dependencies = [
 [dependency-groups]
 test = [
     "pytest~=9.2",
-    "pytest-asyncio~=1.4",
+    "pytest-asyncio~=1.5",
     "pytest-mock~=3.17",
 ]
 
