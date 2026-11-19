@@ -10,7 +10,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from ise_record.core.postprocess import Result, ResultReason
-import rerender  # pyright: ignore[reportMissingTypeStubs]
+import ise_record.rerender  # pyright: ignore[reportMissingTypeStubs]
 
 
 @pytest.mark.asyncio
@@ -19,11 +19,11 @@ async def test_rerender(mocker: MockerFixture):
 
     mocker.patch("sys.argv", ["./rerender.py", "foo"])
     mock_postprocess = mocker.patch(
-        "rerender.postprocess_recording", autospec=True, return_value=expected_result
+        "ise_record.rerender.postprocess_recording", autospec=True, return_value=expected_result
     )
     mock_basic_config = mocker.patch("logging.basicConfig")
 
-    await rerender.main()
+    await ise_record.rerender.main()
 
     mock_basic_config.assert_called_once_with(level="INFO")
     mock_postprocess.assert_called_once_with(Path("foo"))
@@ -35,11 +35,11 @@ async def test_rerender_loglevel(mocker: MockerFixture):
 
     mocker.patch("sys.argv", ["./rerender.py", "--log-level", "DEBUG", "foo"])
     mock_postprocess = mocker.patch(
-        "rerender.postprocess_recording", autospec=True, return_value=expected_result
+        "ise_record.rerender.postprocess_recording", autospec=True, return_value=expected_result
     )
     mock_basic_config = mocker.patch("logging.basicConfig")
 
-    await rerender.main()
+    await ise_record.rerender.main()
 
     mock_basic_config.assert_called_once_with(level="DEBUG")
     mock_postprocess.assert_called_once_with(Path("foo"))

@@ -30,6 +30,8 @@ async def main():
     result = await postprocess_recording(argv.recording_directory)
     print(f"Result: {result.reason.name}, output = {result.output_file}")
 
+def run():
+    asyncio.run(main())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run()

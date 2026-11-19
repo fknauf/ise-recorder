@@ -4,18 +4,21 @@ version = "1.2.0"
 requires-python = "~=3.14"
 
 dependencies = [
-    "aiorwlock~=1.5",
+    "aiorwlock~=1.6",
     "aiosmtplib~=5.1",
     "anyio~=4.16",
-    "email-validator~=2.3",
-    "fastapi~=0.162",
+    "email-validator~=2.4",
+    "fastapi~=0.165",
     "httpx2~=2.16",
     "pathvalidate~=3.3",
     "pydantic-settings~=2.16",
     "PyJWT[crypto]~=2.15",
-    "PyOTP~=2.10",
+    "PyOTP~=2.12",
     "uvicorn~=0.54",
 ]
+
+[project.scripts]
+ise-rerender = "ise_record.rerender:run"
 
 [dependency-groups]
 test = [

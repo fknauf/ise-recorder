@@ -1,18 +1,25 @@
-FROM python:3.14-alpine
+FROM python:3.15-alpine
 
-RUN apk --no-cache upgrade && apk add --no-cache ffmpeg
+WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_NO_WARN_SCRIPT_LOCATION=1
+    PIP_NO_CACHE_DIR=1
 
-WORKDIR /app
-COPY pyproject.toml ./
-# Install dependencies separately into an image layer of their own,
-# so that they don't get re-fetched every time the image is built.
-RUN mkdir data && chown 1000:1000 data && pip install .
-COPY src ./
+RUN apk --no-cache upgrade && apk add --no-cache ffmpeg
+RUN --mount=type=tmpfs,target=/tmp/build \
+    --mount=type=bind,source=pyproject.toml,target=/tmp/build/pyproject.toml \
+    pip install --only-deps /tmp/build
+
+RUN --mount=type=tmpfs,target=/tmp/build \
+    --mount=type=bind,source=pyproject.toml,target=/tmp/build/pyproject.toml \
+    --mount=type=bind,source=src,target=/tmp/build/src,rw \
+    pip install --no-deps /tmp/build && \
+    pip uninstall -y pip
+
+COPY src/run_server.sh /app/
+RUN ln -s /usr/local/bin/ise-rerender /app/rerender.py
+RUN mkdir data && chown 1000:1000 data
 
 USER 1000:1000
 ENTRYPOINT [ "/app/run_server.sh" ]
