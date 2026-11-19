@@ -4,7 +4,8 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 RUN apk --no-cache upgrade && apk add --no-cache ffmpeg
 RUN --mount=type=tmpfs,target=/tmp/build \
@@ -17,9 +18,10 @@ RUN --mount=type=tmpfs,target=/tmp/build \
     pip install --no-deps /tmp/build && \
     pip uninstall -y pip
 
-COPY src/run_server.sh /app/
-RUN ln -s /usr/local/bin/ise-rerender /app/rerender.py
-RUN mkdir data && chown 1000:1000 data
+COPY src/run_server.sh .
+RUN mkdir data && \
+    chown 1000:1000 data && \
+    ln -s /usr/local/bin/ise-rerender rerender.py
 
 USER 1000:1000
 ENTRYPOINT [ "/app/run_server.sh" ]
