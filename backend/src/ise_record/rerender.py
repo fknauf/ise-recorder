@@ -30,8 +30,12 @@ async def main():
     result = await postprocess_recording(argv.recording_directory)
     print(f"Result: {result.reason.name}, output = {result.output_file}")
 
+
 def run():
+    """Synchronous entrypoint"""
+
     asyncio.run(main())
+
 
 if __name__ == "__main__":
     run()
