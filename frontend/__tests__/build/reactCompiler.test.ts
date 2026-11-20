@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { transformSync } from "@babel/core";
+import { type OxcError, transformSync } from "oxc-transform-react";
 import { expect, test } from "vitest";
 import {
   isCompilableSource,
+  REACT_COMPILER,
   reactCompilerOptions,
   SOURCE_ROOT,
 } from "../../scripts/reactCompiler.mjs";
@@ -17,8 +18,13 @@ import {
  * shows up as a performance regression nobody can trace. This turns that silence into a
  * failing test naming the function and the reason.
  *
+ * The build does not do this job: next's Rust compiler ignores panicThreshold, so a
+ * function it declines builds green even in CI. The oxlint react rules report the same
+ * diagnostics, but only for the rules the lint config switches on.
+ *
  * It runs in the "build" project, which is node rather than browser: it needs a
- * filesystem and babel, and it reads the sources as text rather than importing them.
+ * filesystem and the native compiler binding, and it reads the sources as text rather
+ * than importing them.
  */
 
 interface Bail {
@@ -35,6 +41,9 @@ interface Bail {
  */
 const KNOWN_BAILS: Record<string, string> = {};
 
+/** A function body opting out of the compiler. The compiler skips these without a word. */
+const OPT_OUT_DIRECTIVE = /^\s*["']use no (?:memo|forget)["']/gm;
+
 function sourceFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
@@ -49,50 +58,60 @@ function sourceFiles(dir: string, found: string[] = []): string[] {
   return found;
 }
 
-/** Compile every source file, recording what the compiler accepted and what it refused. */
+/** Run the compiler with every recoverable diagnostic -- bail-outs included -- reported. */
+function compile(path: string, source: string) {
+  return transformSync(path, source, {
+    ...reactCompilerOptions(path),
+    reactCompiler: { ...REACT_COMPILER, reportDiagnostics: true },
+  });
+}
+
+function lineOf(source: string, offset: number): number {
+  return source.slice(0, offset).split("\n").length;
+}
+
+/**
+ * The codeframe carries the position as `,-[file:line:col]` and the compiler's error
+ * category as `react-compiler(Category)`. A diagnostic without a category is not from the
+ * compiler at all -- a parse error, which next build would fail on too.
+ */
+function toBail(file: string, error: OxcError): Bail {
+  const frame = error.codeframe ?? "";
+  const line = /:(\d+):\d+\]/.exec(frame)?.[1];
+  const category = /react-compiler\((\w+)\)/.exec(frame)?.[1] ?? "Parse";
+
+  return {
+    file,
+    line: line === undefined ? undefined : Number(line),
+    reason: `${category}: ${error.message}`,
+  };
+}
+
+/** Compile every source file, recording which files it compiled and what it refused. */
 function auditSourceTree(): { compiled: string[]; bails: Bail[] } {
   const compiled: string[] = [];
   const bails: Bail[] = [];
 
   for (const path of sourceFiles(SOURCE_ROOT)) {
     const file = relative(SOURCE_ROOT, path);
+    const source = readFileSync(path, "utf8");
+    const result = compile(path, source);
 
-    transformSync(readFileSync(path, "utf8"), {
-      ...reactCompilerOptions(path),
-      plugins: [
-        [
-          "babel-plugin-react-compiler",
-          {
-            environment: { enableNameAnonymousFunctions: false },
-            logger: {
-              logEvent: (
-                _filename: string | null,
-                event: {
-                  kind: string;
-                  fnLoc?: { start?: { line: number } } | null;
-                  fnName?: string | null;
-                  detail?: { reason?: string; description?: string };
-                },
-              ) => {
-                if (event.kind === "CompileSuccess") {
-                  compiled.push(`${file}:${event.fnName ?? "(anonymous)"}`);
-                } else if (
-                  event.kind === "CompileError" ||
-                  event.kind === "CompileSkip" ||
-                  event.kind === "PipelineError"
-                ) {
-                  bails.push({
-                    file,
-                    line: event.fnLoc?.start?.line,
-                    reason: event.detail?.reason ?? event.detail?.description ?? event.kind,
-                  });
-                }
-              },
-            },
-          },
-        ],
-      ],
-    });
+    // the compiler's runtime is imported once per file that has at least one memoised
+    // function; files of plain helpers legitimately go without
+    if (result.code.includes("react/compiler-runtime")) {
+      compiled.push(file);
+    }
+
+    bails.push(...result.errors.map((error) => toBail(file, error)));
+
+    for (const match of source.matchAll(OPT_OUT_DIRECTIVE)) {
+      bails.push({
+        file,
+        line: lineOf(source, match.index),
+        reason: `OptOut: ${match[0].trim()} directive`,
+      });
+    }
   }
 
   return { compiled, bails };
@@ -106,6 +125,20 @@ test("the audit actually ran the compiler", () => {
   // guards against the audit silently passing because it compiled nothing at all, which
   // would make every other assertion here vacuous
   expect(compiled.length).toBeGreaterThan(10);
+});
+
+test("the audit sees bail-outs when there are some", () => {
+  // the other half of the guard above: with diagnostics no longer reported -- an option
+  // renamed, a default flipped -- "nothing refused" would pass on a broken audit too
+  const path = join(SOURCE_ROOT, "__audit_canary__.tsx");
+  const result = compile(
+    path,
+    "export function Canary({ s }: { s: string }) {\n  return <div>{eval(s)}</div>;\n}\n",
+  );
+
+  expect(result.errors.map((error) => toBail("canary", error))).toStrictEqual([
+    { file: "canary", line: 2, reason: "UnsupportedSyntax: The 'eval' function is not supported" },
+  ]);
 });
 
 test("every component and hook in src is compiled", () => {

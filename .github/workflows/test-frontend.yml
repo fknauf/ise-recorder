@@ -31,7 +31,6 @@ jobs:
         npx playwright install firefox
 
     - name: Run linter
-      continue-on-error: true
       working-directory: ${{ github.workspace }}/frontend
       run: |
         npm run lint

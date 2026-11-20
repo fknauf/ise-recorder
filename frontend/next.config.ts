@@ -3,9 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   output: "standalone",
-  reactCompiler: {
-    panicThreshold: "all_errors",
-  },
+  reactCompiler: true,
   async headers() {
     return [
       {
@@ -40,6 +38,7 @@ const nextConfig: NextConfig = {
       "@mantine/notifications",
       "@mantine/store",
     ],
+    turbopackRustReactCompiler: true,
   },
 };
 

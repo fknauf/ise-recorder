@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
-import { transformAsync } from "@babel/core";
 import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
+import { transformSync } from "oxc-transform-react";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 import { listenForFileDownload } from "./__tests__/command-download.mjs";
@@ -15,35 +15,40 @@ import { isCompilableSource, reactCompilerOptions } from "./scripts/reactCompile
  * with the build about which callbacks keep their identity across a render -- which is
  * how a redundant useCallback in AudioPreview came to look load-bearing.
  *
- * @vitejs/plugin-react can do this via `compiler: true`, but that runs oxc's experimental
- * Rust port rather than the babel plugin Next uses. The two disagree: babel declines to
- * compile useMediaDevices and oxc compiles it. Running babel here keeps the test pipeline
- * and the build pipeline on the same implementation, and drops a dependency whose version
- * is pinned to plugin-react's by an optional peer range that npm only warns about.
+ * next runs the Rust port of the compiler; this runs oxc's build of that port (see
+ * scripts/reactCompiler.mts). Not babel: the babel plugin is a different implementation
+ * and disagrees with the Rust port -- it bails on optional chaining inside try/catch,
+ * which the Rust port compiles.
  *
- * enforce: "pre" so this sees the original TypeScript, before esbuild strips the types --
- * the compiler needs the JSX intact. Types are left in place for esbuild to remove
- * afterwards; only the compiler transform runs here.
+ * @vitejs/plugin-react's `compiler: true` would run the same package, but a plugin of our
+ * own shares its options with the audit in __tests__/build, so the two cannot drift apart.
+ *
+ * enforce: "pre" so this sees the original source, before vite's own transform -- the
+ * compiler needs the JSX intact. It strips the types itself and leaves JSX for vite.
  */
 function reactCompiler(): Plugin {
   return {
     name: "react-compiler",
     enforce: "pre",
-    async transform(code, id) {
+    transform(code, id) {
       const file = id.split("?")[0];
 
       if (!isCompilableSource(file)) {
         return null;
       }
 
-      const result = await transformAsync(code, {
+      const result = transformSync(file, code, {
         ...reactCompilerOptions(file),
-        sourceMaps: true,
+        sourcemap: true,
       });
 
-      return result?.code === undefined || result.code === null
-        ? null
-        : { code: result.code, map: result.map };
+      if (result.fatal) {
+        throw new Error(
+          `React Compiler failed on ${file}:\n${result.errors.map((e) => e.codeframe ?? e.message).join("\n")}`,
+        );
+      }
+
+      return { code: result.code, map: result.map };
     },
   };
 }
@@ -112,8 +117,9 @@ export default defineConfig({
         },
       },
       {
-        // checks about the build itself, which need node: a filesystem and babel. No
-        // plugins inherited, so the sources are read as text rather than transformed.
+        // checks about the build itself, which need node: a filesystem and the native
+        // compiler binding. No plugins inherited, so the sources are read as text rather
+        // than transformed.
         test: {
           name: "build",
           environment: "node",

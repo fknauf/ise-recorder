@@ -10,4 +10,15 @@ export default defineConfig({
   categories: {
     correctness: "error",
   },
+
+  rules: {
+    "react/capitalized-calls": "error",
+    "react/invariant": "error",
+    "react/hooks": "error",
+    "react/memo-dependencies": "error",
+    "react/rule-suppression": "error",
+    "react/syntax": "error",
+    "react/todo": "error",
+    "react/unsupported-syntax": "error",
+  },
 });
