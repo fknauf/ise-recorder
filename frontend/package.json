@@ -14,10 +14,10 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@mantine/core": "^9.8.1",
-    "@mantine/hooks": "^9.8.1",
-    "@mantine/modals": "^9.8.1",
-    "@mantine/notifications": "^9.8.1",
+    "@mantine/core": "^9.8.2",
+    "@mantine/hooks": "^9.8.2",
+    "@mantine/modals": "^9.8.2",
+    "@mantine/notifications": "^9.8.2",
     "@phosphor-icons/react": "^2.1.10",
     "glob": "^14.0.6",
     "next": "^16.4.6",
